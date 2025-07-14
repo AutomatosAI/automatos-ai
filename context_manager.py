@@ -2,19 +2,19 @@ from huggingface_hub import InferenceClient
 import psycopg2
 import logging
 import os
-import os
-from dotenv import load_dotenv
-load_dotenv()  # Loads .env if present
+from dotenv import load_dotenv  # Add this import
+
+load_dotenv()  # Load .env vars explicitly
 
 logging.basicConfig(level=logging.INFO)
 
 class ContextManager:
     def __init__(self):
-        self.client = InferenceClient(model="sentence-transformers/all-MiniLM-L6-v2", token=os.getenv("HUGGINGFACE_API_KEY"))
+        self.client = InferenceClient(model="sentence-transformers/all-MiniLM-L6-v2", token=os.getenv("HUGGINGFACE_TOKEN"))
         self.conn = psycopg2.connect(
-            dbname=os.getenv("POSTGRES_DB", "xplaincrypto"),
-            user=os.getenv("POSTGRES_USER", "xplaincrypto"),
-            password=os.getenv("POSTGRES_PASSWORD", "xplaincrypto_pwd"),
+            dbname=os.getenv("POSTGRES_DB"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD"),
             host="db"  # Docker service name
         )
         self.cur = self.conn.cursor()
