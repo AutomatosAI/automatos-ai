@@ -3,10 +3,10 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict, Dict, Any
 import os
 import requests
-from context_manager import ContextManager  # Import for RAG
-import os
+from context_manager import ContextManager
 from dotenv import load_dotenv
-load_dotenv()  # Loads .env if present
+
+load_dotenv()
 
 class State(TypedDict):
     input_task: Dict
@@ -17,8 +17,8 @@ class State(TypedDict):
 class Orchestrator:
     def __init__(self):
         self.graph = StateGraph(state_schema=State)
-        self.mcp_url = os.getenv("MCP_URL", "https://mcp.xplaincrypto.ai/execute")  # Domain for prod
-        self.api_key = os.getenv("API_KEY", "your_secure_key")  # For auth
+        self.mcp_url = os.getenv("MCP_URL", "https://mcp.xplaincrypto.ai/execute")
+        self.api_key = os.getenv("API_KEY")
 
     def decompose_task(self, task: Dict) -> Dict:
         return {
@@ -37,7 +37,7 @@ class Orchestrator:
             return f"Tool error: {str(e)}"
 
     def deploy_tool(self, cmd: str) -> str:
-        return self.cursor_tool(f"ssh root@your-droplet-ip '{cmd}'")  # Customize IP/user
+        return self.cursor_tool(cmd)
 
     def context_node(self, state: State) -> Dict[str, Any]:
         cm = ContextManager()
@@ -47,21 +47,27 @@ class Orchestrator:
         return state
 
     def dev_node(self, state: State) -> Dict[str, Any]:
-        cmd = "ls -la"  # Example; replace with "cursor --generate code.py"
-        result = self.cursor_tool(cmd)
+        github_url = state['input_task'].get('github_url', '')
+        token = os.getenv('GITHUB_TOKEN', '')
+        clone_cmd = f"git clone https://{token}@{github_url.replace('https://', '')} /app/project"
+        self.cursor_tool(clone_cmd)
+        # Basic mock build (replace with DeepAgent later)
+        build_cmd = "echo 'Mock code generated for task' >> /app/project/main.py"
+        result = self.cursor_tool(build_cmd)
         return {"current_result": state["current_result"] + result, "test_fail": False}
 
     def tester_node(self, state: State) -> Dict[str, Any]:
         for attempt in range(3):
-            cmd = "echo 'Testing attempt'"  # e.g., "pytest"
-            result = self.cursor_tool(cmd)
+            test_cmd = "python /app/project/tests.py"  # Assume tests.py exists
+            result = self.cursor_tool(test_cmd)
             state["current_result"] += f" Attempt {attempt+1}: {result}"
             if "failed" not in result.lower():
                 return {"test_fail": False}
         return {"test_fail": True}
 
     def deployer_node(self, state: State) -> Dict[str, Any]:
-        cmd = "echo 'Deploying...'"  # e.g., "docker compose up -d"
+        token = os.getenv('GITHUB_TOKEN', '')
+        cmd = f"cd /app/project && git add . && git commit -m 'AI Build for task' && git push origin main"
         result = self.deploy_tool(cmd)
         return {"current_result": state["current_result"] + f" Deployed: {result}"}
 
@@ -87,5 +93,5 @@ class Orchestrator:
 
 if __name__ == "__main__":
     orchestrator = Orchestrator()
-    result = orchestrator.run_flow({"task": "Test DevOps Pipeline"})
+    result = orchestrator.run_flow({"task": "Test DevOps Pipeline", "github_url": "https://github.com/youruser/test-devops-repo.git"})
     print(result)

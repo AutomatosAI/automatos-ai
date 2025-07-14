@@ -2,9 +2,9 @@ from huggingface_hub import InferenceClient
 import psycopg2
 import logging
 import os
-from dotenv import load_dotenv  # Add this import
+from dotenv import load_dotenv
 
-load_dotenv()  # Load .env vars explicitly
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -15,14 +15,13 @@ class ContextManager:
             dbname=os.getenv("POSTGRES_DB"),
             user=os.getenv("POSTGRES_USER"),
             password=os.getenv("POSTGRES_PASSWORD"),
-            host="db"  # Docker service name
+            host="db"
         )
         self.cur = self.conn.cursor()
 
     def rag_retrieve(self, query: str) -> str:
         try:
             embedding = self.client.feature_extraction(query)
-            # Assuming embedding is a list; convert to pgvector format
             embedding_str = '[' + ','.join(map(str, embedding[0])) + ']'
             self.cur.execute("SELECT context FROM embeddings ORDER BY embedding <-> %s LIMIT 1;", (embedding_str,))
             result = self.cur.fetchone()

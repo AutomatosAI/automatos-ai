@@ -5,16 +5,17 @@ import logging
 from json.decoder import JSONDecodeError
 import os
 from dotenv import load_dotenv
-load_dotenv()  # Loads .env if present
+
+load_dotenv()
 
 logging.basicConfig(level=logging.DEBUG)
 
 app = FastAPI()
 
-ALLOWED_COMMANDS = ["ls", "git", "npm", "docker", "pytest", "ssh"]  # Expand as needed
+ALLOWED_COMMANDS = ["ls", "git", "npm", "docker", "pytest", "ssh", "echo", "cat", "python"]
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
-API_KEY = os.getenv("API_KEY", "your_secure_key")  # From env var
+API_KEY = os.getenv("API_KEY")
 
 @app.post("/execute")
 async def execute_command(request: Request, api_key: str = Depends(api_key_header)):
@@ -44,3 +45,23 @@ async def execute_command(request: Request, api_key: str = Depends(api_key_heade
     except Exception as e:
         logging.error(f"Unexpected error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/run-task")
+async def run_task(request: Request, api_key: str = Depends(api_key_header)):
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    try:
+        data = await request.json()
+        task = data.get('task', '')
+        github_url = data.get('github_url', '')
+        if not task or not github_url:
+            raise ValueError("Task and GitHub URL required")
+        orchestrator = Orchestrator()
+        input_task = {"task": task, "github_url": github_url}
+        result = orchestrator.run_flow(input_task)
+        return {"result": result}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Run task error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal error")

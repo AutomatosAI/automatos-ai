@@ -6,9 +6,9 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env  # Loads all vars from .env
+      - .env
     environment:
-      - PYTHONUNBUFFERED=1  # Non-sensitive stays here
+      - PYTHONUNBUFFERED=1
     restart: always
     depends_on:
       db:
@@ -22,7 +22,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     env_file:
-      - .env  # DB also loads from .env
+      - .env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
