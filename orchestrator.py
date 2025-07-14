@@ -4,6 +4,9 @@ from typing import TypedDict, Dict, Any
 import os
 import requests
 from context_manager import ContextManager  # Import for RAG
+import os
+from dotenv import load_dotenv
+load_dotenv()  # Loads .env if present
 
 class State(TypedDict):
     input_task: Dict

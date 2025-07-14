@@ -3,6 +3,9 @@ from fastapi.security import APIKeyHeader
 import subprocess
 import logging
 from json.decoder import JSONDecodeError
+import os
+from dotenv import load_dotenv
+load_dotenv()  # Loads .env if present
 
 logging.basicConfig(level=logging.DEBUG)
 

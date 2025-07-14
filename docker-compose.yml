@@ -2,32 +2,27 @@ services:
   mcp-bridge:
     build: .
     ports:
-      - "5679:5678"  # Adjusted to avoid conflict with n8n on 5678
+      - "5679:5678"
     volumes:
-      - .:/app  # For hot-reloading in dev
+      - .:/app
+    env_file:
+      - .env  # Loads all vars from .env
     environment:
-      - PYTHONUNBUFFERED=1  # For real-time logs
-      - API_KEY=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  # For bridge auth; customize
-      - POSTGRES_USER=xplaincrypto
-      - POSTGRES_PASSWORD=xplaincrypto_pwd
-      - POSTGRES_DB=xplaincrypto
-      - HUGGINGFACE_API_KEY=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
-    restart: always  # Auto-restart on failure
+      - PYTHONUNBUFFERED=1  # Non-sensitive stays here
+    restart: always
     depends_on:
       db:
-        condition: service_healthy  # Wait for DB to be ready
+        condition: service_healthy
 
   db:
-    image: pgvector/pgvector:pg16  # Latest PostgreSQL with pgvector extension
+    image: pgvector/pgvector:pg16
     ports:
-      - "5432:5432"  # Expose DB port (optional for local access; secure in prod)
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data  # Persistent volume for data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql  # Optional: Init script for pgvector setup
-    environment:
-      - POSTGRES_USER=youruser  # Customize: DB user
-      - POSTGRES_PASSWORD=yourpassword  # Customize: Secure password
-      - POSTGRES_DB=yourdb  # Customize: DB name
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    env_file:
+      - .env  # DB also loads from .env
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -36,4 +31,4 @@ services:
     restart: always
 
 volumes:
-  pgdata:  # Named volume for persistence (survives container restarts)
+  pgdata:

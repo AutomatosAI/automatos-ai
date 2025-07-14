@@ -2,6 +2,9 @@ from huggingface_hub import InferenceClient
 import psycopg2
 import logging
 import os
+import os
+from dotenv import load_dotenv
+load_dotenv()  # Loads .env if present
 
 logging.basicConfig(level=logging.INFO)
 
