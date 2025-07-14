@@ -1,0 +1,11 @@
+
+services:
+  mcp-bridge:
+    build: .
+    ports:
+      - "5678:5678"
+    volumes:
+      - .:/app  # For hot-reloading in dev
+    environment:
+      - PYTHONUNBUFFERED=1  # For real-time logs
+    restart: always  # Auto-restart on failure
