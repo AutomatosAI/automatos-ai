@@ -94,7 +94,7 @@ Orchestrator AI employs a sophisticated multi-layered architecture designed for 
 
 ```bash
 # Clone the repository
-git clone https://github.com/Orchestrator-ai/orchestrator.git
+git clone https://github.com/orchestrator-ai/orchestrator.git
 cd orchestrator
 
 # Configure environment
@@ -366,21 +366,21 @@ Pre-built dashboards available for:
 
 ## 📚 Documentation
 
-- **[Architecture Guide](docs/architecture.md)**: Detailed system architecture and design patterns
-- **[API Documentation](docs/api.md)**: Complete REST API reference with examples
-- **[Security Guide](docs/security.md)**: Security configuration and best practices
-- **[Deployment Guide](docs/deployment.md)**: Production deployment instructions
-- **[MCP Integration](docs/mcp-integration.md)**: IDE integration guide
-- **[Enterprise Setup](docs/enterprise-setup.md)**: Enterprise deployment and configuration
+- **[Architecture Guide](orchestrator/docs/architecture.md)**: Detailed system architecture and design patterns
+- **[API Documentation](orchestrator/docs/api.md)**: Complete REST API reference with examples
+- **[Security Guide](orchestrator/docs/security.md)**: Security configuration and best practices
+- **[Deployment Guide](orchestrator/docs/deployment.md)**: Production deployment instructions
+- **[MCP Integration](orchestrator/docs/mcp-integration.md)**: IDE integration guide
+- **[Enterprise Setup](orchestrator/docs/enterprise-setup.md)**: Enterprise deployment and configuration
 
 ## 🤝 Contributing
 
 We welcome contributions from the community! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-### Development Setup
+### Development Setup 
 ```bash
 # Clone repository
-git clone https://github.com/Orchestrator-ai/orchestrator.git
+git clone https://github.com/Gerard161-Site/orchestrator-ai.git
 cd orchestrator
 
 # Install development dependencies
@@ -410,9 +410,9 @@ The Apache 2.0 license allows:
 ## 🆘 Support
 
 ### Community Support
-- **GitHub Issues**: [Report bugs and request features](https://github.com/Orchestrator-ai/orchestrator/issues)
-- **Discussions**: [Community discussions and Q&A](https://github.com/Orchestrator-ai/orchestrator/discussions)
-- **Documentation**: [Comprehensive guides and tutorials](https://docs.Orchestrator.ai)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/orchestrator-ai/orchestrator/issues)
+- **Discussions**: [Community discussions and Q&A](https://github.com/orchestrator-ai/orchestrator/discussions)
+- **Documentation**: [Comprehensive guides and tutorials](https://docs.orchestrator.ai)
 
 ### Enterprise Support
 - **Priority Support**: 24/7 support with guaranteed response times
@@ -448,4 +448,4 @@ Contact: enterprise@Orchestrator.ai
 
 *Transforming DevOps through Intelligent Automation*
 
-For more information, visit [Orchestrator.ai](https://Orchestrator.ai)
+For more information, visit [Orchestrator.ai](https://orchestrator.ai)
