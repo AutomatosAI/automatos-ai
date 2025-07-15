@@ -1,0 +1,81 @@
+
+# Core AI and LLM libraries
+openai>=1.0.0
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+crewai>=0.1.0
+langgraph>=0.0.30
+
+# Vector databases and embeddings
+chromadb>=0.4.0
+faiss-cpu>=1.7.4
+qdrant-client>=1.7.0
+sentence-transformers>=2.2.2
+transformers>=4.35.0
+
+# Web framework and API
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+python-multipart>=0.0.6
+
+# Database and caching
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+redis>=5.0.0
+alembic>=1.13.0
+
+# SSH and Security
+paramiko>=3.3.0
+cryptography>=41.0.0
+bandit>=1.7.5
+safety>=2.3.0
+
+# Code analysis and quality
+mypy>=1.7.0
+flake8>=6.1.0
+black>=23.11.0
+isort>=5.12.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pre-commit>=3.5.0
+
+# YAML processing
+PyYAML>=6.0.1
+jsonschema>=4.19.0
+
+# Utilities and helpers
+python-dotenv>=1.0.0
+requests>=2.31.0
+aiohttp>=3.9.0
+asyncio-throttle>=1.0.2
+tenacity>=8.2.0
+click>=8.1.0
+websockets>=12.0
+
+# Monitoring and observability
+psutil>=5.9.0
+prometheus-client>=0.19.0
+structlog>=23.2.0
+
+# Text processing and NLP
+nltk>=3.8.1
+spacy>=3.7.0
+beautifulsoup4>=4.12.0
+markdown>=3.5.0
+
+# Development and testing
+jupyter>=1.0.0
+ipython>=8.17.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+coverage>=7.3.0
+
+# Docker integration
+docker>=6.1.0
+
+# Optional: GPU support (uncomment if using GPU)
+# torch>=2.1.0
+# torchvision>=0.16.0
+# faiss-gpu>=1.7.4

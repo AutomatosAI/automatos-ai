@@ -1,0 +1,30 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Central orchestrator node -->
+  <circle cx="12" cy="12" r="3" fill="#4F46E5"/>
+  
+  <!-- Agent nodes around the center -->
+  <circle cx="6" cy="6" r="2" fill="#10B981"/>
+  <circle cx="18" cy="6" r="2" fill="#10B981"/>
+  <circle cx="6" cy="18" r="2" fill="#10B981"/>
+  <circle cx="18" cy="18" r="2" fill="#10B981"/>
+  
+  <!-- Connection lines -->
+  <line x1="9" y1="9" x2="12" y2="12"/>
+  <line x1="15" y1="9" x2="12" y2="12"/>
+  <line x1="9" y1="15" x2="12" y2="12"/>
+  <line x1="15" y1="15" x2="12" y2="12"/>
+  
+  <!-- Data flow indicators -->
+  <path d="M12 2 L12 6" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <path d="M22 12 L18 12" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <path d="M12 22 L12 18" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <path d="M2 12 L6 12" stroke="#F59E0B" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#F59E0B"/>
+    </marker>
+  </defs>
+</svg>

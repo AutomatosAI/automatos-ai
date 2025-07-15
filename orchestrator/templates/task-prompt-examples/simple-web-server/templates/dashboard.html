@@ -1,0 +1,124 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .crypto-card {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .crypto-name {
+            font-weight: bold;
+            text-transform: capitalize;
+        }
+        .crypto-price {
+            font-size: 1.2em;
+            color: #2c3e50;
+        }
+        .crypto-change {
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            font-weight: bold;
+        }
+        .positive {
+            background-color: #27ae60;
+        }
+        .negative {
+            background-color: #e74c3c;
+        }
+        .loading {
+            text-align: center;
+            color: #666;
+        }
+        .error {
+            color: #e74c3c;
+            text-align: center;
+            padding: 10px;
+            background-color: #fdf2f2;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cryptocurrency Dashboard</h1>
+        <div id="crypto-list" class="loading">Loading cryptocurrency data...</div>
+    </div>
+
+    <script>
+        async function loadCryptoPrices() {
+            try {
+                const response = await fetch('/api/prices');
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayCryptoPrices(result.data);
+                } else {
+                    showError('Failed to load cryptocurrency data');
+                }
+            } catch (error) {
+                showError('Error connecting to server');
+            }
+        }
+
+        function displayCryptoPrices(data) {
+            const container = document.getElementById('crypto-list');
+            container.innerHTML = '';
+
+            for (const [crypto, info] of Object.entries(data)) {
+                const card = document.createElement('div');
+                card.className = 'crypto-card';
+                
+                const changeClass = info.change >= 0 ? 'positive' : 'negative';
+                const changeSign = info.change >= 0 ? '+' : '';
+                
+                card.innerHTML = `
+                    <div class="crypto-name">${crypto}</div>
+                    <div class="crypto-price">$${info.price.toLocaleString()}</div>
+                    <div class="crypto-change ${changeClass}">${changeSign}${info.change}%</div>
+                `;
+                
+                container.appendChild(card);
+            }
+        }
+
+        function showError(message) {
+            const container = document.getElementById('crypto-list');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Load data when page loads
+        loadCryptoPrices();
+
+        // Refresh data every 30 seconds
+        setInterval(loadCryptoPrices, 30000);
+    </script>
+</body>
+</html>

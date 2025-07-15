@@ -1,0 +1,93 @@
+
+name: "crypto-api"
+version: "1.0.0"
+description: "Cryptocurrency data API service"
+module_type: "api"
+
+# Build configuration
+build_command: "pip install -r requirements.txt"
+test_command: "pytest tests/ -v"
+start_command: "uvicorn main:app --host 0.0.0.0 --port 8000"
+
+# Dependencies
+dependencies:
+  - "fastapi==0.104.0"
+  - "uvicorn==0.24.0"
+  - "pydantic==2.5.0"
+  - "httpx==0.25.0"
+  - "redis==5.0.0"
+  - "sqlalchemy==2.0.0"
+  - "psycopg2-binary==2.9.0"
+
+dev_dependencies:
+  - "pytest==7.4.0"
+  - "pytest-asyncio==0.21.0"
+  - "black==23.11.0"
+  - "flake8==6.1.0"
+
+system_dependencies:
+  - "python3"
+  - "pip"
+  - "postgresql-client"
+
+# Environment variables
+environment_variables:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  DATABASE_URL: "postgresql://user:pass@localhost/crypto_db"
+  REDIS_URL: "redis://localhost:6379"
+
+# Secrets
+secrets:
+  - "DATABASE_PASSWORD"
+  - "REDIS_PASSWORD"
+  - "API_SECRET_KEY"
+  - "COINMARKETCAP_API_KEY"
+
+# Deployment configuration
+deployment_target: "docker"
+port: 8000
+
+# Resource requirements
+resources:
+  cpu: "500m"
+  memory: "1Gi"
+  storage: "2Gi"
+  gpu: false
+
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval: 30
+  timeout: 10
+  retries: 3
+
+# Security configuration
+security:
+  enable_auth: true
+  auth_type: "jwt"
+  rate_limiting: true
+  input_validation: true
+  cors_enabled: true
+  allowed_origins:
+    - "https://xplaincrypto.ai"
+    - "https://dashboard.xplaincrypto.ai"
+
+# Monitoring configuration
+monitoring:
+  metrics_enabled: true
+  logging_level: "INFO"
+  tracing_enabled: true
+  alerts_enabled: true
+
+# Advanced features
+auto_scaling: true
+backup_enabled: true
+rollback_enabled: true
+
+# Custom configuration
+custom_config:
+  cache_ttl: 300
+  max_requests_per_minute: 1000
+  database_pool_size: 10

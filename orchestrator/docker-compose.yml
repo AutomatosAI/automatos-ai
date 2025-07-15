@@ -1,0 +1,174 @@
+
+version: '3.8'
+
+services:
+  # PostgreSQL database for audit logging
+  postgres:
+    image: postgres:15-alpine
+    container_name: enhanced_orchestrator_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - orchestrator_network
+    restart: unless-stopped
+
+  # Redis for rate limiting and caching
+  redis:
+    image: redis:7-alpine
+    container_name: enhanced_orchestrator_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password_123}
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-redis_password_123}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - orchestrator_network
+    restart: unless-stopped
+
+  # Enhanced MCP Bridge
+  mcp_bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: enhanced_mcp_bridge
+    ports:
+      - "${MCP_PORT:-8001}:8001"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password_123}
+      - API_KEY=${API_KEY:-your_secure_api_key_here}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEPLOY_HOST=${DEPLOY_HOST:-mcp.xplaincrypto.ai}
+      - DEPLOY_PORT=${DEPLOY_PORT:-22}
+      - DEPLOY_USER=${DEPLOY_USER:-root}
+      - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/app/logs
+      - ./vector_stores:/app/vector_stores
+      - ./keys:/app/keys:ro
+      - ./projects:/app/projects
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - orchestrator_network
+    restart: unless-stopped
+    command: ["python", "mcp_bridge.py"]
+
+  # Main Orchestrator (CLI interface)
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: enhanced_orchestrator
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password_123}
+      - MCP_URL=http://mcp_bridge:8001
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CHROMA_PERSIST_DIRECTORY=/app/vector_stores
+      - DEPLOY_HOST=${DEPLOY_HOST:-mcp.xplaincrypto.ai}
+      - DEPLOY_PORT=${DEPLOY_PORT:-22}
+      - DEPLOY_USER=${DEPLOY_USER:-root}
+      - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+    volumes:
+      - ./logs:/app/logs
+      - ./vector_stores:/app/vector_stores
+      - ./projects:/app/projects
+      - ./keys:/app/keys:ro
+    depends_on:
+      mcp_bridge:
+        condition: service_healthy
+    networks:
+      - orchestrator_network
+    restart: "no"
+    profiles:
+      - cli
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: enhanced_orchestrator_prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - orchestrator_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: enhanced_orchestrator_grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - orchestrator_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  orchestrator_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
