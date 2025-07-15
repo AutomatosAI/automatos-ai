@@ -21,10 +21,10 @@ Orchestrator AI employs a sophisticated multi-layered architecture designed for 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Integration Layer                         │
+│                    Integration Layer                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ MCP Server  │  │  Web UI     │  │  CLI Interface      │  │
-│  │ (Headless)  │  │ Dashboard   │  │  & API Gateway     │  │
+│  │ (Headless)  │  │ Dashboard   │  │  & API Gateway      │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │
