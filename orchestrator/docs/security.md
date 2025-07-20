@@ -741,7 +741,7 @@ recover_system() {
     
     # Backup current state
     tar -czf "/backup/incident_backup_$(date +%Y%m%d_%H%M%S).tar.gz" \
-        /opt/enhanced_orchestrator_v2
+        /opt/Automatos_v2
     
     # Reset to known good state
     git checkout main
@@ -780,17 +780,17 @@ docker-compose exec -T postgres pg_dump -U postgres orchestrator_db | \
 
 # Configuration backup
 tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" \
-    /opt/enhanced_orchestrator_v2/.env \
-    /opt/enhanced_orchestrator_v2/docker-compose.yml \
-    /opt/enhanced_orchestrator_v2/keys/
+    /opt/Automatos_v2/.env \
+    /opt/Automatos_v2/docker-compose.yml \
+    /opt/Automatos_v2/keys/
 
 # Logs backup
 tar -czf "$BACKUP_DIR/logs_$DATE.tar.gz" \
-    /opt/enhanced_orchestrator_v2/logs/
+    /opt/Automatos_v2/logs/
 
 # Vector stores backup
 tar -czf "$BACKUP_DIR/vector_stores_$DATE.tar.gz" \
-    /opt/enhanced_orchestrator_v2/vector_stores/
+    /opt/Automatos_v2/vector_stores/
 
 # Clean old backups
 find "$BACKUP_DIR" -name "*.gz" -mtime +$RETENTION_DAYS -delete
@@ -880,7 +880,7 @@ python3 -m pytest security_tests/
 
 # Docker security scanning
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-    aquasec/trivy image enhanced_orchestrator_v2:latest
+    aquasec/trivy image Automatos_v2:latest
 ```
 
 #### Security Test Cases

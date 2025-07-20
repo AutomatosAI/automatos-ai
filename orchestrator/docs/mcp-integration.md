@@ -3,7 +3,7 @@
 
 ## 🌐 Overview
 
-ContextFlow AI includes a comprehensive MCP (Model Context Protocol) server that enables seamless integration with modern IDEs and development environments. This headless interface allows developers to access all orchestration functionality directly from their preferred development tools.
+Automatos AI includes a comprehensive MCP (Model Context Protocol) server that enables seamless integration with modern IDEs and development environments. This headless interface allows developers to access all orchestration functionality directly from their preferred development tools.
 
 ## 🚀 Quick Start
 
@@ -45,7 +45,7 @@ async with MCPClient(config) as client:
 ### Cursor Integration
 
 #### Setup
-1. Install the ContextFlow AI extension from Cursor marketplace
+1. Install the Automatos AI extension from Cursor marketplace
 2. Configure MCP server endpoint in settings
 3. Authenticate with your API token
 
@@ -88,22 +88,22 @@ if __name__ == "__main__":
 ```
 
 #### Cursor Commands
-- `ContextFlow: Deploy Current Project` - Deploy current repository
-- `ContextFlow: Monitor Deployments` - View active deployments
-- `ContextFlow: View Logs` - Stream deployment logs
-- `ContextFlow: SSH Execute` - Run commands on deployment target
+- `Automatos: Deploy Current Project` - Deploy current repository
+- `Automatos: Monitor Deployments` - View active deployments
+- `Automatos: View Logs` - Stream deployment logs
+- `Automatos: SSH Execute` - Run commands on deployment target
 
 ### DeepAgent Integration
 
 #### Setup
 ```javascript
 // deepagent-config.js
-const { MCPClient } = require('@contextflow/mcp-client');
+const { MCPClient } = require('@Automatos/mcp-client');
 
 const client = new MCPClient({
     host: 'localhost',
     port: 8002,
-    token: process.env.CONTEXTFLOW_TOKEN
+    token: process.env.Automatos_TOKEN
 });
 
 module.exports = { client };
@@ -115,7 +115,7 @@ module.exports = { client };
 // deepagent-plugin.js
 const { client } = require('./deepagent-config');
 
-class ContextFlowPlugin {
+class AutomatosPlugin {
     async deployProject(projectPath, options = {}) {
         try {
             const repoUrl = await this.getRepositoryUrl(projectPath);
@@ -149,7 +149,7 @@ class ContextFlowPlugin {
     }
 }
 
-module.exports = ContextFlowPlugin;
+module.exports = AutomatosPlugin;
 ```
 
 ### VS Code Integration
@@ -158,8 +158,8 @@ module.exports = ContextFlowPlugin;
 ```json
 // package.json (VS Code extension)
 {
-    "name": "contextflow-ai",
-    "displayName": "ContextFlow AI",
+    "name": "Automatos-ai",
+    "displayName": "Automatos AI",
     "description": "AI-powered DevOps orchestration",
     "version": "1.0.0",
     "engines": {
@@ -167,30 +167,30 @@ module.exports = ContextFlowPlugin;
     },
     "categories": ["Other"],
     "activationEvents": [
-        "onCommand:contextflow.deploy",
-        "onCommand:contextflow.monitor"
+        "onCommand:Automatos.deploy",
+        "onCommand:Automatos.monitor"
     ],
     "main": "./out/extension.js",
     "contributes": {
         "commands": [
             {
-                "command": "contextflow.deploy",
-                "title": "Deploy with ContextFlow AI"
+                "command": "Automatos.deploy",
+                "title": "Deploy with Automatos AI"
             },
             {
-                "command": "contextflow.monitor",
+                "command": "Automatos.monitor",
                 "title": "Monitor Deployments"
             }
         ],
         "configuration": {
-            "title": "ContextFlow AI",
+            "title": "Automatos AI",
             "properties": {
-                "contextflow.serverUrl": {
+                "Automatos.serverUrl": {
                     "type": "string",
                     "default": "http://localhost:8002",
                     "description": "MCP server URL"
                 },
-                "contextflow.apiToken": {
+                "Automatos.apiToken": {
                     "type": "string",
                     "description": "API token for authentication"
                 }
@@ -203,11 +203,11 @@ module.exports = ContextFlowPlugin;
 ```typescript
 // extension.ts
 import * as vscode from 'vscode';
-import { MCPClient, MCPConfig } from '@contextflow/mcp-client';
+import { MCPClient, MCPConfig } from '@Automatos/mcp-client';
 
 export function activate(context: vscode.ExtensionContext) {
-    const deployCommand = vscode.commands.registerCommand('contextflow.deploy', async () => {
-        const config = vscode.workspace.getConfiguration('contextflow');
+    const deployCommand = vscode.commands.registerCommand('Automatos.deploy', async () => {
+        const config = vscode.workspace.getConfiguration('Automatos');
         const client = new MCPClient({
             host: config.get('serverUrl', 'http://localhost:8002'),
             token: config.get('apiToken', '')
@@ -238,7 +238,7 @@ export function activate(context: vscode.ExtensionContext) {
             );
             
             // Show progress in output channel
-            const outputChannel = vscode.window.createOutputChannel('ContextFlow AI');
+            const outputChannel = vscode.window.createOutputChannel('Automatos AI');
             outputChannel.show();
             
             for await (const progress of client.streamProgress(workflow.workflowId)) {
@@ -418,7 +418,7 @@ async with MCPClient(config) as client:
 ### JavaScript/TypeScript Client
 
 ```typescript
-import { MCPClient, MCPConfig } from '@contextflow/mcp-client';
+import { MCPClient, MCPConfig } from '@Automatos/mcp-client';
 
 const client = new MCPClient({
     host: 'localhost',
@@ -452,18 +452,18 @@ import (
     "fmt"
     "log"
     
-    "github.com/contextflow-ai/go-client"
+    "github.com/Automatos-ai/go-client"
 )
 
 func main() {
-    client := contextflow.NewClient(&contextflow.Config{
+    client := Automatos.NewClient(&Automatos.Config{
         Host:  "localhost",
         Port:  8002,
         Token: "your-token",
     })
     
     // Deploy application
-    workflow, err := client.CreateWorkflow(context.Background(), &contextflow.WorkflowRequest{
+    workflow, err := client.CreateWorkflow(context.Background(), &Automatos.WorkflowRequest{
         RepositoryURL: "https://github.com/user/app.git",
         TaskPrompt:    "Deploy Go microservice",
     })
@@ -554,8 +554,8 @@ async def create_workflow(request: Request, ...):
 from prometheus_client import Counter, Histogram, generate_latest
 
 # Metrics
-workflow_counter = Counter('contextflow_workflows_total', 'Total workflows created')
-deployment_duration = Histogram('contextflow_deployment_duration_seconds', 'Deployment duration')
+workflow_counter = Counter('Automatos_workflows_total', 'Total workflows created')
+deployment_duration = Histogram('Automatos_deployment_duration_seconds', 'Deployment duration')
 
 @app.get("/metrics")
 async def metrics():
@@ -635,27 +635,27 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: contextflow-mcp-server
+  name: Automatos-mcp-server
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: contextflow-mcp-server
+      app: Automatos-mcp-server
   template:
     metadata:
       labels:
-        app: contextflow-mcp-server
+        app: Automatos-mcp-server
     spec:
       containers:
       - name: mcp-server
-        image: contextflow/mcp-server:2.0.0
+        image: Automatos/mcp-server:2.0.0
         ports:
         - containerPort: 8002
         env:
         - name: MCP_API_TOKEN
           valueFrom:
             secretKeyRef:
-              name: contextflow-secrets
+              name: Automatos-secrets
               key: mcp-api-token
         resources:
           requests:
@@ -668,10 +668,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: contextflow-mcp-server
+  name: Automatos-mcp-server
 spec:
   selector:
-    app: contextflow-mcp-server
+    app: Automatos-mcp-server
   ports:
   - port: 8002
     targetPort: 8002
@@ -688,7 +688,7 @@ spec:
 curl http://localhost:8002/health
 
 # Check logs
-docker logs contextflow-mcp-server
+docker logs Automatos-mcp-server
 
 # Verify port binding
 netstat -tlnp | grep 8002

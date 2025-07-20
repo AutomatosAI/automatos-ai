@@ -10,7 +10,7 @@ set -e
 # Configuration
 DEPLOY_HOST="${DEPLOY_HOST:-mcp.xplaincrypto.ai}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
-DEPLOY_PATH="/opt/enhanced_orchestrator_v2"
+DEPLOY_PATH="/opt/Automatos_v2"
 BACKUP_PATH="/backup/orchestrator_$(date +%Y%m%d_%H%M%S)"
 
 # Colors for output
@@ -181,7 +181,7 @@ setup_monitoring() {
     log "Setting up monitoring configuration..."
     
     ssh "$DEPLOY_USER@$DEPLOY_HOST" << 'EOF'
-        cd /opt/enhanced_orchestrator_v2
+        cd /opt/Automatos_v2
         
         # Create Prometheus configuration
         cat > monitoring/prometheus.yml << 'PROMETHEUS_EOF'

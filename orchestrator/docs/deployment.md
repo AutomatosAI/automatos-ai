@@ -1,7 +1,19 @@
 
-# Deployment Guide for mcp.xplaincrypto.ai
+# Deployment Guide for Automatos AI
 
-This guide provides step-by-step instructions for deploying the Enhanced Two-Tiered Multi-Agent Orchestration System to the DigitalOcean droplet at `mcp.xplaincrypto.ai`.
+This guide provides step-by-step instructions for deploying the Enhanced Two-Tiered Multi-Agent Orchestration System, including both backend services and the Next.js frontend.
+
+## Deployment Options
+
+### Option 1: Single Server Deployment
+Deploy both backend and frontend on the same server (recommended for development/testing).
+
+### Option 2: Multi-Server Deployment  
+Deploy backend and frontend on separate servers (recommended for production).
+
+## Backend Deployment
+
+This section covers deploying the core backend services (API, Database, Redis, Monitoring).
 
 ## Prerequisites
 
@@ -22,7 +34,7 @@ This guide provides step-by-step instructions for deploying the Enhanced Two-Tie
 
 ### Access Requirements
 
-- SSH key access to `mcp.xplaincrypto.ai`
+- SSH key access to your target server(s)
 - OpenAI API key
 - Domain DNS configuration (if using custom domain)
 
@@ -30,10 +42,10 @@ This guide provides step-by-step instructions for deploying the Enhanced Two-Tie
 
 ### 1. Server Preparation
 
-Connect to your DigitalOcean droplet:
+Connect to your target server:
 
 ```bash
-ssh root@mcp.xplaincrypto.ai
+ssh root@your-server-ip
 ```
 
 Update the system:
@@ -87,7 +99,7 @@ docker-compose --version
 Generate SSH keys for deployment (if not already available):
 
 ```bash
-ssh-keygen -t ed25519 -C "orchestrator@mcp.xplaincrypto.ai" -f /root/.ssh/orchestrator_key
+ssh-keygen -t ed25519 -C "orchestrator@your-server" -f /root/.ssh/orchestrator_key
 ```
 
 Add the public key to authorized_keys:
@@ -102,8 +114,8 @@ cat /root/.ssh/orchestrator_key.pub >> /root/.ssh/authorized_keys
 
 ```bash
 cd /opt
-git clone https://github.com/your-org/enhanced_orchestrator_v2.git
-cd enhanced_orchestrator_v2
+git clone https://github.com/your-org/Automatos_v2.git
+cd Automatos_v2
 ```
 
 ### 2. Environment Configuration
@@ -136,7 +148,7 @@ API_KEY=your_secure_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
 
 # SSH Deployment Configuration
-DEPLOY_HOST=mcp.xplaincrypto.ai
+DEPLOY_HOST=your-server-ip
 DEPLOY_PORT=22
 DEPLOY_USER=root
 DEPLOY_KEY_PATH=/app/keys/orchestrator_key
@@ -242,9 +254,165 @@ Start monitoring services:
 docker-compose --profile monitoring up -d
 ```
 
-Access Grafana at `http://mcp.xplaincrypto.ai:3000` (admin/your_grafana_password)
+Access Grafana at `http://your-server-ip:3000` (admin/your_grafana_password)
 
-## Firewall Configuration
+## Frontend Deployment
+
+This section covers deploying the Next.js frontend application.
+
+### Prerequisites
+
+- Docker and Docker Compose installed (same as backend)
+- Backend API accessible (default: http://localhost:8001)
+- Node.js 18+ (for local development)
+
+### Frontend Deployment Steps
+
+#### 1. Clone Repository (if not already done)
+
+```bash
+cd /opt
+git clone https://github.com/your-org/Automatos_v2.git
+cd Automatos_v2/app
+```
+
+#### 2. Environment Configuration
+
+Copy and configure environment variables:
+
+```bash
+cp env.example .env
+```
+
+Edit the `.env` file with your specific configuration:
+
+```bash
+nano .env
+```
+
+**Required Configuration:**
+
+```env
+# Frontend Configuration
+FRONTEND_PORT=3000
+
+# API Configuration
+API_BASE_URL=http://localhost:8001  # Point to your backend API
+
+# NextAuth Configuration
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-nextauth-secret-here
+
+# Database (if needed for NextAuth)
+DATABASE_URL=postgresql://postgres:password@localhost:5432/orchestrator_db
+
+# Optional: Redis Cache
+REDIS_CACHE_PORT=6380
+REDIS_CACHE_PASSWORD=your_redis_password
+```
+
+**For Multi-Server Deployment:**
+- Set `API_BASE_URL` to your backend server's public IP/domain
+- Set `NEXTAUTH_URL` to your frontend server's public IP/domain
+
+#### 3. Deploy Frontend
+
+Run the deployment script:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+#### 4. Verify Frontend Deployment
+
+Test the frontend:
+
+```bash
+curl http://localhost:3000
+```
+
+Expected response: HTML content from Next.js application.
+
+#### 5. Optional: Enable Redis Cache
+
+To enable Redis caching for the frontend:
+
+```bash
+docker-compose --profile cache up -d
+```
+
+### Frontend Firewall Configuration
+
+Configure UFW firewall for frontend:
+
+```bash
+# Enable UFW
+ufw enable
+
+# Allow SSH
+ufw allow 22/tcp
+
+# Allow HTTP/HTTPS
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Allow frontend service
+ufw allow 3000/tcp  # Frontend
+ufw allow 6380/tcp  # Redis cache (optional)
+
+# Check status
+ufw status
+```
+
+### Frontend SSL/TLS Configuration (Recommended)
+
+#### Using Let's Encrypt with Nginx
+
+Install Nginx:
+
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+```
+
+Create Nginx configuration for frontend:
+
+```bash
+cat > /etc/nginx/sites-available/frontend << 'EOF'
+server {
+    listen 80;
+    server_name your-frontend-domain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOF
+```
+
+Enable the site:
+
+```bash
+ln -s /etc/nginx/sites-available/frontend /etc/nginx/sites-enabled/
+nginx -t
+systemctl reload nginx
+```
+
+Obtain SSL certificate:
+
+```bash
+certbot --nginx -d your-frontend-domain.com
+```
+
+## Backend Firewall Configuration
 
 Configure UFW firewall:
 
@@ -313,12 +481,32 @@ certbot --nginx -d mcp.xplaincrypto.ai
 
 ## Testing the Deployment
 
-### 1. Test AI Module Workflow
+### 1. Test Frontend (if deployed)
+
+Access the frontend in your browser:
+- **Single Server**: http://localhost:3000
+- **Multi Server**: http://your-frontend-server-ip:3000
+
+Or test via curl:
+
+```bash
+curl http://localhost:3000
+```
+
+### 2. Test Backend API
+
+Test the API health endpoint:
+
+```bash
+curl -H "X-API-Key: your_secure_api_key_here" http://localhost:8001/health
+```
+
+### 3. Test AI Module Workflow
 
 Create a test repository with `ai-module.yaml`:
 
 ```bash
-curl -X POST http://mcp.xplaincrypto.ai:8001/workflow \
+curl -X POST http://localhost:8001/workflow \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_secure_api_key_here" \
   -d '{
@@ -329,7 +517,7 @@ curl -X POST http://mcp.xplaincrypto.ai:8001/workflow \
 ### 2. Test Task Prompt Workflow
 
 ```bash
-curl -X POST http://mcp.xplaincrypto.ai:8001/workflow \
+curl -X POST http://localhost:8001/workflow \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_secure_api_key_here" \
   -d '{
@@ -341,7 +529,7 @@ curl -X POST http://mcp.xplaincrypto.ai:8001/workflow \
 ### 3. Test SSH Command Execution
 
 ```bash
-curl -X POST http://mcp.xplaincrypto.ai:8001/execute \
+curl -X POST http://localhost:8001/execute \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_secure_api_key_here" \
   -d '{
@@ -372,7 +560,7 @@ Rotate logs:
 ```bash
 # Configure logrotate
 cat > /etc/logrotate.d/orchestrator << 'EOF'
-/opt/enhanced_orchestrator_v2/logs/*.log {
+/opt/Automatos_v2/logs/*.log {
     daily
     missingok
     rotate 30
@@ -403,7 +591,7 @@ docker-compose exec -T postgres psql -U postgres orchestrator_db < backup_202401
 Update the system:
 
 ```bash
-cd /opt/enhanced_orchestrator_v2
+cd /opt/Automatos_v2
 git pull origin main
 docker-compose build --no-cache
 docker-compose up -d
@@ -492,6 +680,101 @@ docker-compose up -d
 - **Monthly**: Update dependencies and security patches
 - **Quarterly**: Review and rotate credentials
 - **Annually**: Security audit and penetration testing
+
+## Deployment Scenarios
+
+### Scenario 1: Single Server (Development/Testing)
+
+Deploy everything on one server:
+
+```bash
+# 1. Deploy backend
+cd /opt/Automatos_v2
+docker-compose up -d
+
+# 2. Deploy frontend
+cd /opt/Automatos_v2/app
+cp env.example .env
+# Edit .env: API_BASE_URL=http://localhost:8001
+./deploy.sh
+```
+
+**Access URLs:**
+- Frontend: http://localhost:3000
+- API: http://localhost:8001
+- Grafana: http://localhost:3000 (if monitoring enabled)
+
+### Scenario 2: Multi-Server (Production)
+
+**Backend Server:**
+```bash
+# Deploy backend only
+cd /opt/Automatos_v2
+docker-compose up -d
+```
+
+**Frontend Server:**
+```bash
+# Deploy frontend only
+cd /opt/Automatos_v2/app
+cp env.example .env
+# Edit .env: API_BASE_URL=http://backend-server-ip:8001
+./deploy.sh
+```
+
+**Access URLs:**
+- Frontend: http://frontend-server-ip:3000
+- API: http://backend-server-ip:8001
+
+### Scenario 3: Docker Swarm (Advanced)
+
+For production deployments with high availability:
+
+```bash
+# Initialize swarm
+docker swarm init
+
+# Deploy backend stack
+docker stack deploy -c docker-compose.yml backend
+
+# Deploy frontend stack
+cd app
+docker stack deploy -c docker-compose.yml frontend
+```
+
+## Troubleshooting Frontend Issues
+
+### Common Frontend Issues
+
+1. **Frontend won't start**
+   ```bash
+   cd /opt/Automatos_v2/app
+   docker-compose logs frontend
+   docker-compose ps
+   ```
+
+2. **API connection fails**
+   ```bash
+   # Check API_BASE_URL in .env
+   cat .env | grep API_BASE_URL
+   # Test API connectivity
+   curl $API_BASE_URL/health
+   ```
+
+3. **NextAuth issues**
+   ```bash
+   # Check NEXTAUTH_SECRET is set
+   # Verify NEXTAUTH_URL matches your domain
+   # Check database connection if using database adapter
+   ```
+
+4. **Build failures**
+   ```bash
+   # Clean and rebuild
+   docker-compose down
+   docker-compose build --no-cache
+   docker-compose up -d
+   ```
 
 ### Contact Information
 

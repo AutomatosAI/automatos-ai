@@ -5,7 +5,7 @@ services:
   # PostgreSQL database for audit logging
   postgres:
     image: postgres:15-alpine
-    container_name: enhanced_orchestrator_postgres
+    container_name: Automatos_postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -27,7 +27,7 @@ services:
   # Redis for rate limiting and caching
   redis:
     image: redis:7-alpine
-    container_name: enhanced_orchestrator_redis
+    container_name: Automatos_redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -87,7 +87,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: enhanced_orchestrator
+    container_name: Automatos
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
       - REDIS_HOST=redis
@@ -117,7 +117,7 @@ services:
   # Prometheus for monitoring (optional)
   prometheus:
     image: prom/prometheus:latest
-    container_name: enhanced_orchestrator_prometheus
+    container_name: Automatos_prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
@@ -139,7 +139,7 @@ services:
   # Grafana for visualization (optional)
   grafana:
     image: grafana/grafana:latest
-    container_name: enhanced_orchestrator_grafana
+    container_name: Automatos_grafana
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     environment:

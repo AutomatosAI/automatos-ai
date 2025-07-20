@@ -1,9 +1,9 @@
 
-# ContextFlow AI - System Architecture
+# Automatos AI - System Architecture
 
 ## Executive Summary
 
-ContextFlow AI represents a paradigm shift in DevOps orchestration, delivering enterprise-grade intelligent automation through advanced context engineering and multi-agent collaboration. This document outlines the comprehensive system architecture designed for scalability, security, and intelligent decision-making.
+Automatos AI represents a paradigm shift in DevOps orchestration, delivering enterprise-grade intelligent automation through advanced context engineering and multi-agent collaboration. This document outlines the comprehensive system architecture designed for scalability, security, and intelligent decision-making.
 
 ## Overview
 
