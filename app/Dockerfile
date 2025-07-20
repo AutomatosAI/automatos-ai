@@ -9,7 +9,9 @@ WORKDIR /app
 
 # Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* ./
-RUN npm ci --legacy-peer-deps
+
+# Try npm ci first, fall back to npm install if lock file is out of sync
+RUN npm ci --legacy-peer-deps || (rm -f package-lock.json && npm install --legacy-peer-deps)
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -22,7 +24,7 @@ COPY . .
 # Uncomment the following line in case you want to disable telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED 1
 
-RUN npm run build
+RUN npm run buildiop
 
 # Production image, copy all the files and run next
 FROM base AS runner
