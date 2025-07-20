@@ -24,6 +24,9 @@ COPY . .
 # Uncomment the following line in case you want to disable telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED 1
 
+# Generate Prisma client before building
+RUN npx prisma generate
+
 RUN npm run build
 
 # Production image, copy all the files and run next
@@ -48,6 +51,10 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Copy Prisma client and schema
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+
 USER nextjs
 
 EXPOSE 3000
@@ -70,6 +77,9 @@ RUN npm ci --legacy-peer-deps
 
 # Copy source code
 COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
 
 # Expose port
 EXPOSE 3000
