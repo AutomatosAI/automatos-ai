@@ -50,7 +50,7 @@ Next.js frontend for the Automatos AI orchestration platform.
 To enable Redis caching for the frontend:
 
 ```bash
-docker-compose --profile cache up -d
+docker compose --profile cache up -d
 ```
 
 ## Development
@@ -71,19 +71,19 @@ npm start
 
 ```bash
 # Build and start
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop services
-docker-compose down
+docker compose down
 
 # Rebuild
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Enable Redis cache
-docker-compose --profile cache up -d
+docker compose --profile cache up -d
 ```
 
 ## Architecture

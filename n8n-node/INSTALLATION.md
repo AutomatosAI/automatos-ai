@@ -62,7 +62,7 @@ USER node
 ```
 
 #### Option B: Docker Compose
-Update your `docker-compose.yml`:
+Update your `docker compose.yml`:
 
 ```yaml
 version: '3.8'
@@ -266,9 +266,9 @@ docker exec n8n_container npm list n8n-nodes-multi-agent-orchestrator
 docker exec n8n_container env | grep N8N_COMMUNITY
 
 # Rebuild container if needed
-docker-compose down
-docker-compose build --no-cache
-docker-compose up
+docker compose down
+docker compose build --no-cache
+docker compose up
 ```
 
 #### 5. Version Compatibility

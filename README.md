@@ -1,10 +1,10 @@
-# Orchestrator AI - Multi-Agent Orchestration Platform
+# Automotas AI - Multi-Agent Orchestration Platform
 
 **Enterprise-grade intelligent orchestration system for automated DevOps workflows with advanced context engineering and multi-agent collaboration.**
 
 ## 🚀 Overview
 
-Orchestrator AI is a revolutionary multi-agent orchestration platform that transforms how enterprises approach DevOps automation. By combining advanced AI agents with sophisticated context engineering, it delivers intelligent, adaptive deployment workflows that understand your infrastructure and optimize themselves.
+Automotas AI is a revolutionary multi-agent orchestration platform that transforms how enterprises approach DevOps automation. By combining advanced AI agents with sophisticated context engineering, it delivers intelligent, adaptive deployment workflows that understand your infrastructure and optimize themselves.
 
 ### Key Differentiators
 
@@ -17,7 +17,7 @@ Orchestrator AI is a revolutionary multi-agent orchestration platform that trans
 
 ## 🏗️ Architecture
 
-Orchestrator AI employs a sophisticated multi-layered architecture designed for enterprise scalability:
+Automotas AI employs a sophisticated multi-layered architecture designed for enterprise scalability:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -94,8 +94,8 @@ Orchestrator AI employs a sophisticated multi-layered architecture designed for 
 
 ```bash
 # Clone the repository
-git clone https://github.com/orchestrator-ai/orchestrator.git
-cd orchestrator
+git clone https://github.com/Automotas-ai/Automotas.git
+cd Automotas
 
 # Configure environment
 cp .env.example .env
@@ -105,7 +105,7 @@ cp .env.example .env
 pip install -r requirements.txt
 
 # Start services
-docker-compose up -d
+docker compose up -d
 
 # Verify installation
 curl http://localhost:8001/health
@@ -115,7 +115,7 @@ curl http://localhost:8001/health
 
 ```bash
 # Using CLI
-python orchestrator.py --repository https://github.com/user/app.git
+python Automotas.py --repository https://github.com/user/app.git
 
 # Using API
 curl -X POST http://localhost:8001/workflow \
@@ -175,8 +175,8 @@ OPENAI_API_KEY=your_openai_api_key
 API_KEY=your_secure_api_key
 
 # Database
-POSTGRES_DB=Orchestrator_db
-POSTGRES_USER=Orchestrator
+POSTGRES_DB=Automotas_db
+POSTGRES_USER=Automotas
 POSTGRES_PASSWORD=secure_password
 
 # Redis Cache
@@ -199,7 +199,7 @@ THREAT_DETECTION=true
 
 ## 🌐 MCP Server Integration
 
-Orchestrator AI includes a complete MCP (Model Context Protocol) server for seamless IDE integration:
+Automotas AI includes a complete MCP (Model Context Protocol) server for seamless IDE integration:
 
 ### IDE Integration Examples
 
@@ -228,7 +228,7 @@ async with MCPClient(config) as client:
 #### DeepAgent Integration
 ```javascript
 // JavaScript/TypeScript client
-import { MCPClient } from '@Orchestrator/mcp-client';
+import { MCPClient } from '@Automotas/mcp-client';
 
 const client = new MCPClient({
     host: 'localhost',
@@ -260,7 +260,7 @@ client.streamProgress(workflow.workflowId, (progress) => {
 ```yaml
 # prometheus.yml
 scrape_configs:
-  - job_name: 'Orchestrator'
+  - job_name: 'Automotas'
     static_configs:
       - targets: ['localhost:8001']
     metrics_path: '/metrics'
@@ -325,7 +325,7 @@ Pre-built dashboards available for:
 
 ## 🏆 Competitive Advantages
 
-| Feature | Orchestrator AI | Jenkins | GitLab CI | GitHub Actions |
+| Feature | Automotas AI | Jenkins | GitLab CI | GitHub Actions |
 |---------|----------------|---------|-----------|----------------|
 | AI-Powered Intelligence | ✅ Advanced | ❌ None | ⚠️ Basic | ⚠️ Basic |
 | Context Engineering | ✅ Deep Learning | ❌ None | ❌ None | ❌ None |
@@ -366,12 +366,12 @@ Pre-built dashboards available for:
 
 ## 📚 Documentation
 
-- **[Architecture Guide](orchestrator/docs/architecture.md)**: Detailed system architecture and design patterns
-- **[API Documentation](orchestrator/docs/api.md)**: Complete REST API reference with examples
-- **[Security Guide](orchestrator/docs/security.md)**: Security configuration and best practices
-- **[Deployment Guide](orchestrator/docs/deployment.md)**: Production deployment instructions
-- **[MCP Integration](orchestrator/docs/mcp-integration.md)**: IDE integration guide
-- **[Enterprise Setup](orchestrator/docs/enterprise-setup.md)**: Enterprise deployment and configuration
+- **[Architecture Guide](docs/architecture.md)**: Detailed system architecture and design patterns
+- **[API Documentation](docs/api.md)**: Complete REST API reference with examples
+- **[Security Guide](docs/security.md)**: Security configuration and best practices
+- **[Deployment Guide](docs/deployment.md)**: Production deployment instructions
+- **[MCP Integration](docs/mcp-integration.md)**: IDE integration guide
+- **[Enterprise Setup]docs/enterprise-setup.md)**: Enterprise deployment and configuration
 
 ## 🤝 Contributing
 
@@ -380,8 +380,8 @@ We welcome contributions from the community! Please see our [Contributing Guide]
 ### Development Setup 
 ```bash
 # Clone repository
-git clone https://github.com/Gerard161-Site/orchestrator-ai.git
-cd orchestrator
+git clone https://github.com/Gerard161-Site/Automotas-ai.git
+cd Automotas
 
 # Install development dependencies
 pip install -r requirements-dev.txt
@@ -410,9 +410,9 @@ The Apache 2.0 license allows:
 ## 🆘 Support
 
 ### Community Support
-- **GitHub Issues**: [Report bugs and request features](https://github.com/orchestrator-ai/orchestrator/issues)
-- **Discussions**: [Community discussions and Q&A](https://github.com/orchestrator-ai/orchestrator/discussions)
-- **Documentation**: [Comprehensive guides and tutorials](https://docs.orchestrator.ai)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/automotas-ai/automotas/issues)
+- **Discussions**: [Community discussions and Q&A](https://github.com/automotas-ai/Automotas/discussions)
+- **Documentation**: [Comprehensive guides and tutorials](https://docs.automotas-ai.ai)
 
 ### Enterprise Support
 - **Priority Support**: 24/7 support with guaranteed response times
@@ -420,9 +420,9 @@ The Apache 2.0 license allows:
 - **Dedicated Success Manager**: Personalized support for enterprise customers
 - **Custom Development**: Tailored features and integrations
 
-Contact: enterprise@Orchestrator.ai
+Contact: enterprise@Automotas.ai
 
-## 🌟 Why Choose Orchestrator AI?
+## 🌟 Why Choose Automotas AI?
 
 ### For Developers
 - **Natural Language Deployments**: Describe what you want, AI handles the how
@@ -444,8 +444,8 @@ Contact: enterprise@Orchestrator.ai
 
 ---
 
-**Built with ❤️ by the Orchestrator AI Team**
+**Built with ❤️ by the Automotas AI Team**
 
 *Transforming DevOps through Intelligent Automation*
 
-For more information, visit [Orchestrator.ai](https://orchestrator.ai)
+For more information, visit [Automotas.ai](https://Automotas.ai)

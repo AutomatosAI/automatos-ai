@@ -10,7 +10,7 @@ set -e
 # Configuration
 DEPLOY_HOST="${DEPLOY_HOST:-mcp.xplaincrypto.ai}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
-DEPLOY_PATH="/opt/Automatos_v2"
+DEPLOY_PATH="/opt/Automatos"
 BACKUP_PATH="/backup/orchestrator_$(date +%Y%m%d_%H%M%S)"
 
 # Colors for output
@@ -56,8 +56,8 @@ check_prerequisites() {
         INSTALL_DOCKER=false
     fi
     
-    # Check if docker-compose is installed
-    if ! ssh "$DEPLOY_USER@$DEPLOY_HOST" "command -v docker-compose >/dev/null 2>&1"; then
+    # Check if docker compose is installed
+    if ! ssh "$DEPLOY_USER@$DEPLOY_HOST" "command -v docker compose >/dev/null 2>&1"; then
         warning "Docker Compose not found on target server. Will install Docker Compose."
         INSTALL_COMPOSE=true
     else
@@ -104,13 +104,13 @@ install_docker_compose() {
         log "Installing Docker Compose on target server..."
         ssh "$DEPLOY_USER@$DEPLOY_HOST" << 'EOF'
             # Download Docker Compose
-            curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            curl -L "https://github.com/docker/compose/releases/latest/download/docker compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker compose
             
             # Make it executable
-            chmod +x /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker compose
             
             # Create symlink
-            ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+            ln -sf /usr/local/bin/docker compose /usr/bin/docker compose
 EOF
         log "Docker Compose installation completed."
     fi
@@ -181,7 +181,7 @@ setup_monitoring() {
     log "Setting up monitoring configuration..."
     
     ssh "$DEPLOY_USER@$DEPLOY_HOST" << 'EOF'
-        cd /opt/Automatos_v2
+        cd /opt/Automatos
         
         # Create Prometheus configuration
         cat > monitoring/prometheus.yml << 'PROMETHEUS_EOF'
@@ -268,21 +268,21 @@ deploy_services() {
         cd "$DEPLOY_PATH"
         
         # Stop existing services
-        docker-compose down || true
+        docker compose down || true
         
         # Build and start services
-        docker-compose up -d postgres redis
+        docker compose up -d postgres redis
         
         # Wait for database to be ready
         echo "Waiting for database to be ready..."
         sleep 30
         
         # Start main services
-        docker-compose up -d mcp_bridge
+        docker compose up -d mcp_bridge
         
         # Check service health
         sleep 10
-        docker-compose ps
+        docker compose ps
 EOF
 }
 
@@ -302,11 +302,11 @@ verify_deployment() {
     ssh "$DEPLOY_USER@$DEPLOY_HOST" << EOF
         cd "$DEPLOY_PATH"
         echo "Container status:"
-        docker-compose ps
+        docker compose ps
         
         echo ""
         echo "Recent logs:"
-        docker-compose logs --tail=20 mcp_bridge
+        docker compose logs --tail=20 mcp_bridge
 EOF
 }
 

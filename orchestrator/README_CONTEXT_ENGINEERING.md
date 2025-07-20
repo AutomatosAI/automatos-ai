@@ -6,7 +6,7 @@ The Context Engineering System has been successfully implemented as a comprehens
 
 ## 🏗️ Architecture
 
-### Backend Components (~/Automatos_v2/)
+### Backend Components (~/Automatos/)
 
 1. **Document Manager** (`document_manager.py`)
    - Multi-format document processing (PDF, DOCX, MD, TXT, PY, JSON)
@@ -49,7 +49,7 @@ The Context Engineering System has been successfully implemented as a comprehens
 
 ### Backend Setup
 ```bash
-cd ~/Automatos_v2
+cd ~/Automatos
 
 # Install dependencies
 pip install -r requirements.txt
@@ -184,8 +184,8 @@ The system tracks comprehensive usage analytics:
 ### Docker Deployment
 ```bash
 # Build and run with Docker Compose
-cd ~/Automatos_v2
-docker-compose up -d
+cd ~/Automatos
+docker compose up -d
 ```
 
 ## 📊 Success Metrics

@@ -3,7 +3,7 @@
 -- This script creates the necessary tables and indexes
 
 -- Create database if it doesn't exist (PostgreSQL)
--- Note: This is handled by docker-compose environment variables
+-- Note: This is handled by docker compose environment variables
 
 -- Create extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
