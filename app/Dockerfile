@@ -27,6 +27,10 @@ ENV NEXT_TELEMETRY_DISABLED 1
 # Generate Prisma client before building
 RUN npx prisma generate
 
+# Set environment to skip Prisma during build
+ENV SKIP_ENV_VALIDATION=1
+ENV NODE_ENV=production
+
 RUN npm run build
 
 # Production image, copy all the files and run next
