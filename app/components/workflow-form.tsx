@@ -48,7 +48,10 @@ export function WorkflowForm({ onWorkflowStart, isLoading, setIsLoading }: Workf
         headers: {
           'Content-Type': 'application/json',
         },
-// Map frontend fields to backend expected fields        const backendPayload = {          repository_url: formData.githubUrl,          task_prompt: formData.prompt || undefined,        };                body: JSON.stringify(backendPayload),
+        body: JSON.stringify({
+          repository_url: formData.githubUrl,
+          task_prompt: formData.prompt || undefined,
+        }),
       });
 
       const result = await response.json();
@@ -59,7 +62,7 @@ export function WorkflowForm({ onWorkflowStart, isLoading, setIsLoading }: Workf
 
       // Create a mock workflow object for the callback
       const mockWorkflow: Workflow = {
-        id: result.workflow_id,
+        id: result.data.workflowId,
         githubUrl: formData.githubUrl,
         prompt: formData.prompt,
         mode: formData.mode,
