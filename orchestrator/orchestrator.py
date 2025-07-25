@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 import hashlib
 from datetime import datetime
@@ -377,18 +378,43 @@ class EnhancedTwoTierOrchestrator:
             f"{repository_url}{time.time()}".encode()
         ).hexdigest()[:16]
         
-        # Clone repository
+        # Clone repository with DEPLOY flag logic
         project_path = f"/tmp/projects/{workflow_id}"
-        clone_result = await self.ssh_manager.execute_command(
-            self.default_ssh_config,
-            f"git clone {repository_url} {project_path}"
-        )
+        deploy_mode = os.getenv("DEPLOY", "false").lower() == "true"
         
-        if not clone_result.success:
-            return {
-                "success": False,
-                "error": f"Failed to clone repository: {clone_result.stderr}"
-            }
+        if deploy_mode:
+            # Use SSH for deployment tasks
+            print(f"[DEPLOY=true] Using SSH to clone repository {repository_url}")
+            clone_result = await self.ssh_manager.execute_command(
+                self.default_ssh_config,
+                f"git clone {repository_url} {project_path}"
+            )
+            if not clone_result.success:
+                return {
+                    "success": False,
+                    "error": f"Failed to clone repository: {clone_result.stderr}"
+                }
+        else:
+            # Use local execution for simple coding tasks
+            print(f"[DEPLOY=false] Using local git clone for repository {repository_url}")
+            try:
+                # import os already available at module level
+                os.makedirs("/tmp/projects", exist_ok=True)
+                result = subprocess.run(
+                    f"git clone {repository_url} {project_path}",
+                    shell=True, capture_output=True, text=True, timeout=60
+                )
+                if result.returncode != 0:
+                    return {
+                        "success": False,
+                        "error": f"Failed to clone repository: {result.stderr}"
+                    }
+                print(f"[DEPLOY=false] Local clone succeeded: {repository_url} -> {project_path}")
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+                return {
+                    "success": False,
+                    "error": f"Failed to clone repository: Local execution error: {e}"
+                }
         
         # Detect workflow type
         workflow_type = await self.detect_workflow_type(project_path)
@@ -557,14 +583,32 @@ done
         return [architect_agent, devops_agent, security_agent]
     
     async def _analyze_repository_structure(self, project_path: str) -> Dict[str, Any]:
-        """Analyze repository structure to determine deployment strategy"""
+        """Analyze repository structure - use local execution for simple tasks"""
         
-        analysis_result = await self.ssh_manager.execute_command(
-            self.default_ssh_config,
-            f"find {project_path} -type f -name '*.json' -o -name '*.py' -o -name '*.js' -o -name 'Dockerfile' -o -name 'requirements.txt' -o -name 'package.json' | head -20"
-        )
+        # Check if we should deploy or just code locally
+        deploy_mode = os.getenv("DEPLOY", "false").lower() == "true"
         
-        files = analysis_result.stdout.strip().split('\n') if analysis_result.success else []
+        if deploy_mode:
+            # Use SSH for actual deployment tasks
+            print(f"[DEPLOY=true] Using SSH to analyze repository structure at {project_path}")
+            analysis_result = await self.ssh_manager.execute_command(
+                self.default_ssh_config,
+                f"find {project_path} -type f -name '*.json' -o -name '*.py' -o -name '*.js' -o -name 'Dockerfile' -o -name 'requirements.txt' -o -name 'package.json' | head -20"
+            )
+            files = analysis_result.stdout.strip().split('\n') if analysis_result.success else []
+        else:
+            # Use local execution for simple coding tasks
+            print(f"[DEPLOY=false] Using local execution to analyze repository structure at {project_path}")
+            try:
+                result = subprocess.run(
+                    f"find {project_path} -type f -name '*.json' -o -name '*.py' -o -name '*.js' -o -name 'Dockerfile' -o -name 'requirements.txt' -o -name 'package.json' | head -20",
+                    shell=True, capture_output=True, text=True, timeout=30
+                )
+                files = result.stdout.strip().split('\n') if result.returncode == 0 and result.stdout.strip() else []
+                print(f"[DEPLOY=false] Local file analysis succeeded: found {len(files)} files")
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+                print(f"[DEPLOY=false] Local file analysis failed: {e}")
+                files = []
         
         # Detect technology stack
         tech_stack = []
@@ -582,7 +626,6 @@ done
             "has_package_json": any('package.json' in f for f in files),
             "has_requirements": any('requirements.txt' in f for f in files)
         }
-    
     async def _generate_deployment_strategy(
         self, 
         task_prompt: str, 

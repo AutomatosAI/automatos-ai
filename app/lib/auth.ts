@@ -1,11 +1,17 @@
 import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { PrismaAdapter } from '@next-auth/prisma-adapter';
-import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 
+// Simple hardcoded test user - replace with database later
+const testUser = {
+  id: '1',
+  email: 'admin@test.com',
+  password: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/lewmyBSWKl2/Gl4yq', // 'admin123'
+  name: 'Admin User',
+  role: 'admin'
+};
+
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
   providers: [
     CredentialsProvider({
       name: 'credentials',
@@ -18,31 +24,24 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const user = await prisma.user.findUnique({
-          where: {
-            email: credentials.email
+        // Simple test user authentication
+        if (credentials.email === testUser.email) {
+          const isPasswordValid = await bcrypt.compare(
+            credentials.password,
+            testUser.password
+          );
+
+          if (isPasswordValid) {
+            return {
+              id: testUser.id,
+              email: testUser.email,
+              name: testUser.name,
+              role: testUser.role,
+            };
           }
-        });
-
-        if (!user) {
-          return null;
         }
 
-        const isPasswordValid = await bcrypt.compare(
-          credentials.password,
-          user.password
-        );
-
-        if (!isPasswordValid) {
-          return null;
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name || undefined,
-          role: user.role,
-        };
+        return null;
       }
     })
   ],

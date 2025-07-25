@@ -61,6 +61,7 @@ services:
       - DEPLOY_PORT=${DEPLOY_PORT:-22}
       - DEPLOY_USER=${DEPLOY_USER:-root}
       - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+      - DEPLOY=${DEPLOY:-false}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./logs:/app/logs
@@ -100,6 +101,7 @@ services:
       - DEPLOY_PORT=${DEPLOY_PORT:-22}
       - DEPLOY_USER=${DEPLOY_USER:-root}
       - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+      - DEPLOY=${DEPLOY:-false}
     volumes:
       - ./logs:/app/logs
       - ./vector_stores:/app/vector_stores
