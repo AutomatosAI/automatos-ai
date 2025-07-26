@@ -674,7 +674,7 @@ express-api/
 ```
 docker-app/
 ├── Dockerfile
-├── docker-compose.yml
+├── docker compose.yml
 ├── app/
 │   ├── main.py
 │   └── requirements.txt
@@ -685,7 +685,7 @@ docker-app/
 ```markdown
 # Dockerized Python Application
 
-**Task Prompt:** "Deploy a containerized Python application using Docker. The application should include a web interface, database connectivity, and proper logging. Use docker-compose for orchestration."
+**Task Prompt:** "Deploy a containerized Python application using Docker. The application should include a web interface, database connectivity, and proper logging. Use docker compose for orchestration."
 ```
 
 **File: `Dockerfile`**

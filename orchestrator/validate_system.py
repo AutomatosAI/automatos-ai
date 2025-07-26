@@ -18,7 +18,7 @@ def validate_files():
         'security/audit.py',
         'requirements.txt',
         'Dockerfile',
-        'docker-compose.yml',
+        'docker compose.yml',
         '.env.example',
         'init.sql',
         'deploy.sh'

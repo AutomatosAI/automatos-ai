@@ -608,7 +608,7 @@ CMD ["python", "-m", "mcp_server.main"]
 ```
 
 ```yaml
-# docker-compose.yml
+# docker compose.yml
 version: '3.8'
 
 services:

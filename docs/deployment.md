@@ -76,8 +76,8 @@ apt update
 apt install -y docker-ce docker-ce-cli containerd.io
 
 # Install Docker Compose
-curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+curl -L "https://github.com/docker/compose/releases/latest/download/docker compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker compose
+chmod +x /usr/local/bin/docker compose
 
 # Start and enable Docker
 systemctl start docker
@@ -91,7 +91,7 @@ Verify installation:
 
 ```bash
 docker --version
-docker-compose --version
+docker compose --version
 ```
 
 ### 3. SSH Key Setup
@@ -114,8 +114,8 @@ cat /root/.ssh/orchestrator_key.pub >> /root/.ssh/authorized_keys
 
 ```bash
 cd /opt
-git clone https://github.com/your-org/Automatos_v2.git
-cd Automatos_v2
+git clone https://github.com/your-org/Automatos.git
+cd Automatos
 ```
 
 ### 2. Environment Configuration
@@ -212,19 +212,19 @@ EOF
 Start the core services:
 
 ```bash
-docker-compose up -d postgres redis mcp_bridge
+docker compose up -d postgres redis mcp_bridge
 ```
 
 Wait for services to be healthy:
 
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 Check logs:
 
 ```bash
-docker-compose logs -f mcp_bridge
+docker compose logs -f mcp_bridge
 ```
 
 ### 7. Verify Deployment
@@ -251,7 +251,7 @@ Expected response:
 Start monitoring services:
 
 ```bash
-docker-compose --profile monitoring up -d
+docker compose --profile monitoring up -d
 ```
 
 Access Grafana at `http://your-server-ip:3000` (admin/your_grafana_password)
@@ -272,8 +272,8 @@ This section covers deploying the Next.js frontend application.
 
 ```bash
 cd /opt
-git clone https://github.com/your-org/Automatos_v2.git
-cd Automatos_v2/app
+git clone https://github.com/your-org/Automatos.git
+cd Automatos/app
 ```
 
 #### 2. Environment Configuration
@@ -339,7 +339,7 @@ Expected response: HTML content from Next.js application.
 To enable Redis caching for the frontend:
 
 ```bash
-docker-compose --profile cache up -d
+docker compose --profile cache up -d
 ```
 
 ### Frontend Firewall Configuration
@@ -546,10 +546,10 @@ View logs:
 
 ```bash
 # All services
-docker-compose logs -f
+docker compose logs -f
 
 # Specific service
-docker-compose logs -f mcp_bridge
+docker compose logs -f mcp_bridge
 
 # System logs
 tail -f /var/log/syslog
@@ -560,7 +560,7 @@ Rotate logs:
 ```bash
 # Configure logrotate
 cat > /etc/logrotate.d/orchestrator << 'EOF'
-/opt/Automatos_v2/logs/*.log {
+/opt/Automatos/logs/*.log {
     daily
     missingok
     rotate 30
@@ -577,13 +577,13 @@ EOF
 Backup database:
 
 ```bash
-docker-compose exec postgres pg_dump -U postgres orchestrator_db > backup_$(date +%Y%m%d).sql
+docker compose exec postgres pg_dump -U postgres orchestrator_db > backup_$(date +%Y%m%d).sql
 ```
 
 Restore database:
 
 ```bash
-docker-compose exec -T postgres psql -U postgres orchestrator_db < backup_20240115.sql
+docker compose exec -T postgres psql -U postgres orchestrator_db < backup_20240115.sql
 ```
 
 ### Updates and Upgrades
@@ -591,10 +591,10 @@ docker-compose exec -T postgres psql -U postgres orchestrator_db < backup_202401
 Update the system:
 
 ```bash
-cd /opt/Automatos_v2
+cd /opt/Automatos
 git pull origin main
-docker-compose build --no-cache
-docker-compose up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
 ## Troubleshooting
@@ -603,8 +603,8 @@ docker-compose up -d
 
 1. **Container won't start**
    ```bash
-   docker-compose logs container_name
-   docker-compose ps
+   docker compose logs container_name
+   docker compose ps
    ```
 
 2. **SSH connection fails**
@@ -618,9 +618,9 @@ docker-compose up -d
 3. **Database connection issues**
    ```bash
    # Check database status
-   docker-compose exec postgres pg_isready -U postgres
+   docker compose exec postgres pg_isready -U postgres
    # Check connection from app
-   docker-compose exec mcp_bridge python -c "import psycopg2; print('DB OK')"
+   docker compose exec mcp_bridge python -c "import psycopg2; print('DB OK')"
    ```
 
 4. **API not responding**
@@ -644,7 +644,7 @@ docker-compose up -d
 
 2. **Optimize PostgreSQL**
    ```bash
-   # Tune PostgreSQL settings in docker-compose.yml
+   # Tune PostgreSQL settings in docker compose.yml
    # Add performance-related environment variables
    ```
 
@@ -689,11 +689,11 @@ Deploy everything on one server:
 
 ```bash
 # 1. Deploy backend
-cd /opt/Automatos_v2
-docker-compose up -d
+cd /opt/Automatos
+docker compose up -d
 
 # 2. Deploy frontend
-cd /opt/Automatos_v2/app
+cd /opt/Automatos/app
 cp env.example .env
 # Edit .env: API_BASE_URL=http://localhost:8001
 ./deploy.sh
@@ -709,14 +709,14 @@ cp env.example .env
 **Backend Server:**
 ```bash
 # Deploy backend only
-cd /opt/Automatos_v2
-docker-compose up -d
+cd /opt/Automatos
+docker compose up -d
 ```
 
 **Frontend Server:**
 ```bash
 # Deploy frontend only
-cd /opt/Automatos_v2/app
+cd /opt/Automatos/app
 cp env.example .env
 # Edit .env: API_BASE_URL=http://backend-server-ip:8001
 ./deploy.sh
@@ -735,11 +735,11 @@ For production deployments with high availability:
 docker swarm init
 
 # Deploy backend stack
-docker stack deploy -c docker-compose.yml backend
+docker stack deploy -c docker compose.yml backend
 
 # Deploy frontend stack
 cd app
-docker stack deploy -c docker-compose.yml frontend
+docker stack deploy -c docker compose.yml frontend
 ```
 
 ## Troubleshooting Frontend Issues
@@ -748,9 +748,9 @@ docker stack deploy -c docker-compose.yml frontend
 
 1. **Frontend won't start**
    ```bash
-   cd /opt/Automatos_v2/app
-   docker-compose logs frontend
-   docker-compose ps
+   cd /opt/Automatos/app
+   docker compose logs frontend
+   docker compose ps
    ```
 
 2. **API connection fails**
@@ -771,9 +771,9 @@ docker stack deploy -c docker-compose.yml frontend
 4. **Build failures**
    ```bash
    # Clean and rebuild
-   docker-compose down
-   docker-compose build --no-cache
-   docker-compose up -d
+   docker compose down
+   docker compose build --no-cache
+   docker compose up -d
    ```
 
 ### Contact Information

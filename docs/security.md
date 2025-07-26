@@ -209,7 +209,7 @@ fi
 sed -i "s/API_KEY=$OLD_KEY/API_KEY=$NEW_KEY/" .env
 
 # Restart services
-docker-compose restart mcp_bridge
+docker compose restart mcp_bridge
 
 # Verify new key works
 curl -H "X-API-Key: $NEW_KEY" http://localhost:8001/health
@@ -570,7 +570,7 @@ security_events_total.labels(
 #### Database Encryption
 
 ```yaml
-# docker-compose.yml - PostgreSQL with encryption
+# docker compose.yml - PostgreSQL with encryption
 postgres:
   image: postgres:15-alpine
   environment:
@@ -645,7 +645,7 @@ api_key = vault.get_secret("orchestrator/api_key")
 #### Docker Secrets
 
 ```yaml
-# docker-compose.yml with secrets
+# docker compose.yml with secrets
 version: '3.8'
 
 secrets:
@@ -737,19 +737,19 @@ contain_threat() {
 
 recover_system() {
     # Stop all services
-    docker-compose down
+    docker compose down
     
     # Backup current state
     tar -czf "/backup/incident_backup_$(date +%Y%m%d_%H%M%S).tar.gz" \
-        /opt/Automatos_v2
+        /opt/Automatos
     
     # Reset to known good state
     git checkout main
     git pull origin main
     
     # Rebuild and restart
-    docker-compose build --no-cache
-    docker-compose up -d
+    docker compose build --no-cache
+    docker compose up -d
     
     # Verify system health
     sleep 30
@@ -775,22 +775,22 @@ RETENTION_DAYS=30
 mkdir -p "$BACKUP_DIR"
 
 # Database backup
-docker-compose exec -T postgres pg_dump -U postgres orchestrator_db | \
+docker compose exec -T postgres pg_dump -U postgres orchestrator_db | \
     gzip > "$BACKUP_DIR/database_$DATE.sql.gz"
 
 # Configuration backup
 tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" \
-    /opt/Automatos_v2/.env \
-    /opt/Automatos_v2/docker-compose.yml \
-    /opt/Automatos_v2/keys/
+    /opt/Automatos/.env \
+    /opt/Automatos/docker compose.yml \
+    /opt/Automatos/keys/
 
 # Logs backup
 tar -czf "$BACKUP_DIR/logs_$DATE.tar.gz" \
-    /opt/Automatos_v2/logs/
+    /opt/Automatos/logs/
 
 # Vector stores backup
 tar -czf "$BACKUP_DIR/vector_stores_$DATE.tar.gz" \
-    /opt/Automatos_v2/vector_stores/
+    /opt/Automatos/vector_stores/
 
 # Clean old backups
 find "$BACKUP_DIR" -name "*.gz" -mtime +$RETENTION_DAYS -delete
@@ -880,7 +880,7 @@ python3 -m pytest security_tests/
 
 # Docker security scanning
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-    aquasec/trivy image Automatos_v2:latest
+    aquasec/trivy image Automatos:latest
 ```
 
 #### Security Test Cases
