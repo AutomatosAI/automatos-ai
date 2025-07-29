@@ -32,7 +32,6 @@ import os
 #     "user": "postgres",
 #     "password": "secure_password_123"
 # }
-# openai_api_key = os.getenv("OPENAI_API_KEY", "***REMOVED***")
 # doc_manager = DocumentManager(db_config, openai_api_key)
 doc_manager = None  # Temporarily disabled
 
