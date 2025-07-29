@@ -1,24 +1,27 @@
+
 FROM node:18-alpine
 
+# Set working directory
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json yarn.lock* package-lock.json* ./
 
 # Install dependencies
-RUN npm install --legacy-peer-deps
+RUN npm ci --only=production
 
-# Copy source code
+# Copy application code
 COPY . .
 
-# Generate Prisma client
-RUN npx prisma generate
-
-# Build the app
+# Build the application
 RUN npm run build
 
 # Expose port
 EXPOSE 3000
 
-# Start the app
-CMD ["npm", "start"] 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Start the application
+CMD ["npm", "start"]

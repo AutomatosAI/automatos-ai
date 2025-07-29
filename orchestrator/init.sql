@@ -1,118 +1,215 @@
 
--- Initialize database for Enhanced Orchestrator
--- This script creates the necessary tables and indexes
+-- Initialize Automotas AI Database
+-- This script sets up the basic database structure
 
--- Create database if it doesn't exist (PostgreSQL)
--- Note: This is handled by docker compose environment variables
+-- Create database if it doesn't exist (handled by Docker)
+-- CREATE DATABASE IF NOT EXISTS orchestrator_db;
 
--- Create extensions
+-- Use the database
+-- \c orchestrator_db;
+
+-- Create extension for UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Create audit logging table
-CREATE TABLE IF NOT EXISTS security_events (
-    event_id VARCHAR(255) PRIMARY KEY,
-    event_type VARCHAR(100) NOT NULL,
-    security_level VARCHAR(50) NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-    user_id VARCHAR(255),
-    source_ip INET,
-    resource TEXT,
-    action VARCHAR(255),
-    result VARCHAR(100),
-    details JSONB,
-    risk_score INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Create threat indicators table
-CREATE TABLE IF NOT EXISTS threat_indicators (
-    id SERIAL PRIMARY KEY,
-    indicator_type VARCHAR(100) NOT NULL,
-    value TEXT NOT NULL,
-    severity VARCHAR(50) NOT NULL,
-    description TEXT,
-    first_seen TIMESTAMP WITH TIME ZONE NOT NULL,
-    last_seen TIMESTAMP WITH TIME ZONE NOT NULL,
-    count INTEGER DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(indicator_type, value)
-);
-
--- Create command executions table
-CREATE TABLE IF NOT EXISTS command_executions (
-    id VARCHAR(255) PRIMARY KEY,
-    command TEXT NOT NULL,
-    user_id VARCHAR(255),
-    source_ip INET,
-    execution_time FLOAT,
-    exit_code INTEGER,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    success BOOLEAN,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
 
 -- Create workflows table
 CREATE TABLE IF NOT EXISTS workflows (
-    workflow_id VARCHAR(255) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255) UNIQUE NOT NULL,
     workflow_type VARCHAR(50) NOT NULL,
     status VARCHAR(50) NOT NULL,
-    repository_url TEXT NOT NULL,
+    repository_url TEXT,
     target_host VARCHAR(255),
     project_path TEXT,
-    config JSONB,
     task_prompt TEXT,
+    config JSONB,
     environment_variables JSONB,
     deployment_logs JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create workflow_steps table for detailed step tracking
+CREATE TABLE IF NOT EXISTS workflow_steps (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255) NOT NULL,
+    step_id VARCHAR(255) NOT NULL,
+    step_name VARCHAR(255) NOT NULL,
+    agent_id VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    start_time TIMESTAMP WITH TIME ZONE,
+    end_time TIMESTAMP WITH TIME ZONE,
+    duration_seconds DECIMAL(10,3),
+    progress_percentage DECIMAL(5,2) DEFAULT 0.0,
+    metadata JSONB,
+    error_details TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+);
+
+-- Create agent_communications table
+CREATE TABLE IF NOT EXISTS agent_communications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255),
+    message_id VARCHAR(255) UNIQUE NOT NULL,
+    from_agent VARCHAR(255) NOT NULL,
+    to_agent VARCHAR(255) NOT NULL,
+    message_type VARCHAR(50) NOT NULL,
+    priority INTEGER DEFAULT 2,
+    content JSONB NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    requires_response BOOLEAN DEFAULT FALSE,
+    correlation_id VARCHAR(255),
+    metadata JSONB,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+);
+
+-- Create performance_metrics table
+CREATE TABLE IF NOT EXISTS performance_metrics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255),
+    operation_name VARCHAR(255) NOT NULL,
+    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_time TIMESTAMP WITH TIME ZONE,
+    duration_seconds DECIMAL(10,3),
+    cpu_usage_percent DECIMAL(5,2),
+    memory_usage_mb DECIMAL(10,2),
+    tokens_used INTEGER DEFAULT 0,
+    estimated_cost_usd DECIMAL(10,6) DEFAULT 0.0,
+    success BOOLEAN DEFAULT TRUE,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+);
+
+-- Create agent_status table
+CREATE TABLE IF NOT EXISTS agent_status (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255),
+    agent_id VARCHAR(255) NOT NULL,
+    agent_type VARCHAR(100) NOT NULL,
+    current_task TEXT,
+    status VARCHAR(50) NOT NULL,
+    progress_percentage DECIMAL(5,2) DEFAULT 0.0,
+    start_time TIMESTAMP WITH TIME ZONE,
+    last_update TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+);
+
+-- Create code_generation_logs table
+CREATE TABLE IF NOT EXISTS code_generation_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255),
+    file_path VARCHAR(500) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    lines_generated INTEGER DEFAULT 0,
+    file_size_bytes INTEGER DEFAULT 0,
+    content_type VARCHAR(100),
+    quality_score DECIMAL(4,2),
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+);
+
+-- Create git_operations table
+CREATE TABLE IF NOT EXISTS git_operations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id VARCHAR(255),
+    operation VARCHAR(100) NOT NULL,
+    repository_path TEXT,
+    files JSONB,
+    commit_message TEXT,
+    branch VARCHAR(255),
+    success BOOLEAN DEFAULT TRUE,
+    operation_results JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
 );
 
 -- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_security_events_timestamp ON security_events(timestamp);
-CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id);
-CREATE INDEX IF NOT EXISTS idx_security_events_ip ON security_events(source_ip);
-CREATE INDEX IF NOT EXISTS idx_security_events_type ON security_events(event_type);
-CREATE INDEX IF NOT EXISTS idx_security_events_level ON security_events(security_level);
-
-CREATE INDEX IF NOT EXISTS idx_threat_indicators_type ON threat_indicators(indicator_type);
-CREATE INDEX IF NOT EXISTS idx_threat_indicators_severity ON threat_indicators(severity);
-CREATE INDEX IF NOT EXISTS idx_threat_indicators_last_seen ON threat_indicators(last_seen);
-
-CREATE INDEX IF NOT EXISTS idx_command_executions_timestamp ON command_executions(timestamp);
-CREATE INDEX IF NOT EXISTS idx_command_executions_user ON command_executions(user_id);
-CREATE INDEX IF NOT EXISTS idx_command_executions_ip ON command_executions(source_ip);
-
+CREATE INDEX IF NOT EXISTS idx_workflows_workflow_id ON workflows(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
-CREATE INDEX IF NOT EXISTS idx_workflows_type ON workflows(workflow_type);
-CREATE INDEX IF NOT EXISTS idx_workflows_created ON workflows(created_at);
+CREATE INDEX IF NOT EXISTS idx_workflows_created_at ON workflows(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow_id ON workflow_steps(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_status ON workflow_steps(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_agent_id ON workflow_steps(agent_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_communications_workflow_id ON agent_communications(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_agent_communications_from_agent ON agent_communications(from_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_communications_to_agent ON agent_communications(to_agent);
+CREATE INDEX IF NOT EXISTS idx_agent_communications_timestamp ON agent_communications(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_performance_metrics_workflow_id ON performance_metrics(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_performance_metrics_operation_name ON performance_metrics(operation_name);
+CREATE INDEX IF NOT EXISTS idx_performance_metrics_start_time ON performance_metrics(start_time);
+
+CREATE INDEX IF NOT EXISTS idx_agent_status_workflow_id ON agent_status(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_agent_status_agent_id ON agent_status(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_status_last_update ON agent_status(last_update);
+
+CREATE INDEX IF NOT EXISTS idx_code_generation_logs_workflow_id ON code_generation_logs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_code_generation_logs_file_path ON code_generation_logs(file_path);
+
+CREATE INDEX IF NOT EXISTS idx_git_operations_workflow_id ON git_operations(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_git_operations_operation ON git_operations(operation);
 
 -- Create a function to update the updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = NOW();
+    NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
 $$ language 'plpgsql';
 
--- Create trigger for workflows table
+-- Create trigger to automatically update updated_at
 CREATE TRIGGER update_workflows_updated_at 
     BEFORE UPDATE ON workflows 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
--- Insert initial data
-INSERT INTO security_events (
-    event_id, event_type, security_level, timestamp, user_id, 
-    source_ip, resource, action, result, details
-) VALUES (
-    'init-001', 'SYSTEM_ERROR', 'low', NOW(), 'system', 
-    '127.0.0.1', 'database', 'initialization', 'success',
-    '{"message": "Database initialized successfully"}'
-) ON CONFLICT (event_id) DO NOTHING;
+-- Insert initial data (optional)
+-- This can be used for testing or default configurations
 
--- Grant permissions (adjust as needed for your setup)
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
+-- Create a view for workflow summaries
+CREATE OR REPLACE VIEW workflow_summaries AS
+SELECT 
+    w.workflow_id,
+    w.workflow_type,
+    w.status,
+    w.created_at,
+    w.updated_at,
+    COUNT(DISTINCT ws.id) as total_steps,
+    COUNT(DISTINCT CASE WHEN ws.status = 'completed' THEN ws.id END) as completed_steps,
+    COUNT(DISTINCT ast.agent_id) as total_agents,
+    COALESCE(SUM(pm.tokens_used), 0) as total_tokens,
+    COALESCE(SUM(pm.estimated_cost_usd), 0.0) as total_cost,
+    COALESCE(AVG(pm.duration_seconds), 0.0) as avg_operation_duration
+FROM workflows w
+LEFT JOIN workflow_steps ws ON w.workflow_id = ws.workflow_id
+LEFT JOIN agent_status ast ON w.workflow_id = ast.workflow_id
+LEFT JOIN performance_metrics pm ON w.workflow_id = pm.workflow_id
+GROUP BY w.workflow_id, w.workflow_type, w.status, w.created_at, w.updated_at;
 
-COMMIT;
+-- Grant permissions (adjust as needed for your security requirements)
+-- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO orchestrator_user;
+-- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO orchestrator_user;
+
+-- Log successful initialization
+INSERT INTO workflows (workflow_id, workflow_type, status, task_prompt, created_at) 
+VALUES ('init_db_001', 'system', 'completed', 'Database initialization completed successfully', CURRENT_TIMESTAMP)
+ON CONFLICT (workflow_id) DO NOTHING;
+
+-- Display initialization summary
+SELECT 
+    'Database initialization completed' as message,
+    COUNT(*) as tables_created
+FROM information_schema.tables 
+WHERE table_schema = 'public' 
+AND table_name IN (
+    'workflows', 'workflow_steps', 'agent_communications', 
+    'performance_metrics', 'agent_status', 'code_generation_logs', 
+    'git_operations'
+);

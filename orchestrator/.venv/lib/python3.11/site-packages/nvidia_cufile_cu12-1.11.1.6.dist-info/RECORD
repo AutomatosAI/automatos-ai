@@ -1,0 +1,17 @@
+nvidia/__init__.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+nvidia/__pycache__/__init__.cpython-311.pyc,,
+nvidia/cufile/__init__.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+nvidia/cufile/__pycache__/__init__.cpython-311.pyc,,
+nvidia/cufile/include/__init__.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+nvidia/cufile/include/__pycache__/__init__.cpython-311.pyc,,
+nvidia/cufile/include/cufile.h,sha256=bFRQGX1WBWhnf8TZJ84O5HCmLF1jmfoSC6XYPUkaZtA,29408
+nvidia/cufile/lib/__init__.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+nvidia/cufile/lib/__pycache__/__init__.cpython-311.pyc,,
+nvidia/cufile/lib/libcufile.so.0,sha256=rWZI7Pdz2lovuCn-YVc8BNYhEkvqzYd949L6mPy17H0,3041296
+nvidia/cufile/lib/libcufile_rdma.so.1,sha256=mpEoGEkKqSa07RW1ACaa4GTXKHgDFBjOYLjIu773fM8,46528
+nvidia_cufile_cu12-1.11.1.6.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+nvidia_cufile_cu12-1.11.1.6.dist-info/License.txt,sha256=rW9YU_ugyg0VnQ9Y1JrkmDDC-Mk_epJki5zpCttMbM0,59262
+nvidia_cufile_cu12-1.11.1.6.dist-info/METADATA,sha256=VX1ZLwif4u1BmKzFpQv1uU4ntuGIv76vGcSgsyIOCi8,1498
+nvidia_cufile_cu12-1.11.1.6.dist-info/RECORD,,
+nvidia_cufile_cu12-1.11.1.6.dist-info/WHEEL,sha256=CLmCDi-3U0BMEYIar4BKFH4TFOkRFoYVA_v18zlwuO4,144
+nvidia_cufile_cu12-1.11.1.6.dist-info/top_level.txt,sha256=fTkAtiFuL16nUrB9ytDDtpytz2t0B4NvYTnRzwAhO14,7

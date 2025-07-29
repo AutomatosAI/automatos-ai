@@ -1,0 +1,1284 @@
+{
+  "test_session": {
+    "start_time": "2025-07-28T12:09:08.492352",
+    "end_time": "2025-07-28T12:09:08.710126",
+    "total_duration_seconds": 0.217774,
+    "base_url": "http://localhost:8000"
+  },
+  "test_results": [
+    {
+      "category": "Health & Basic Endpoints",
+      "results": [
+        {
+          "endpoint": "/health",
+          "method": "GET",
+          "description": "Health check",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.012825965881347656,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/",
+          "method": "GET",
+          "description": "Root endpoint",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0012824535369873047,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/docs",
+          "method": "GET",
+          "description": "API documentation",
+          "success": true,
+          "status_code": 200,
+          "response_time": 0.0011374950408935547,
+          "response_data": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <link type=\"text/css\" rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css\">\n    <link rel=\"shortcut icon\" href=\"https://fastapi.tiangolo.com/img/favicon.png\">\n    <title>MCP Service API - Swagger UI</title>\n    </head>\n    <body>\n    <div id=\"swagger-ui\">\n    </div>\n    <script src=\"https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>\n    <!-- `SwaggerUIBundle` is now available on the page -->\n    <script>\n    const ui = SwaggerUIBundle({\n        url: '/openapi.json',\n    \"dom_id\": \"#swagger-ui\",\n\"layout\": \"BaseLayout\",\n\"deepLinking\": true,\n\"showExtensions\": true,\n\"showCommonExtensions\": true,\noauth2RedirectUrl: window.location.origin + '/docs/oauth2-redirect',\n    presets: [\n        SwaggerUIBundle.presets.apis,\n        SwaggerUIBundle.SwaggerUIStandalonePreset\n        ],\n    })\n    </script>\n    </body>\n    </html>\n    ",
+          "payload": null
+        },
+        {
+          "endpoint": "/openapi.json",
+          "method": "GET",
+          "description": "OpenAPI schema",
+          "success": true,
+          "status_code": 200,
+          "response_time": 0.001409769058227539,
+          "response_data": {
+            "openapi": "3.1.0",
+            "info": {
+              "title": "MCP Service API",
+              "description": "REST API for managing Model Context Protocol servers",
+              "version": "1.0.0"
+            },
+            "paths": {
+              "/startServer": {
+                "post": {
+                  "summary": "Spawn a new MCP server",
+                  "operationId": "spawn_server_startServer_post",
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "$ref": "#/components/schemas/SpawnServerRequest"
+                        }
+                      }
+                    },
+                    "required": true
+                  },
+                  "responses": {
+                    "201": {
+                      "description": "Successful Response",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/ServerInfo"
+                          }
+                        }
+                      }
+                    },
+                    "422": {
+                      "description": "Validation Error",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/HTTPValidationError"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/startServers": {
+                "post": {
+                  "summary": "Spawn multiple MCP servers",
+                  "operationId": "spawn_servers_startServers_post",
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "$ref": "#/components/schemas/SpawnServersRequest"
+                        }
+                      }
+                    },
+                    "required": true
+                  },
+                  "responses": {
+                    "201": {
+                      "description": "Successful Response",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "items": {
+                              "$ref": "#/components/schemas/ServerInfo"
+                            },
+                            "type": "array",
+                            "title": "Response Spawn Servers Startservers Post"
+                          }
+                        }
+                      }
+                    },
+                    "422": {
+                      "description": "Validation Error",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/HTTPValidationError"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/listServers": {
+                "get": {
+                  "summary": "List all managed servers",
+                  "operationId": "list_servers_listServers_get",
+                  "responses": {
+                    "200": {
+                      "description": "Successful Response",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/ServerListResponse"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/stopServer": {
+                "post": {
+                  "summary": "Stop and remove a server",
+                  "operationId": "stop_server_stopServer_post",
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "$ref": "#/components/schemas/StopServerRequest"
+                        }
+                      }
+                    },
+                    "required": true
+                  },
+                  "responses": {
+                    "204": {
+                      "description": "Successful Response"
+                    },
+                    "422": {
+                      "description": "Validation Error",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/HTTPValidationError"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/listTools": {
+                "post": {
+                  "summary": "List tools available on servers",
+                  "operationId": "list_tools_listTools_post",
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "$ref": "#/components/schemas/ListToolsRequest"
+                        }
+                      }
+                    }
+                  },
+                  "responses": {
+                    "200": {
+                      "description": "Successful Response",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/ServerToolsResponse"
+                          }
+                        }
+                      }
+                    },
+                    "422": {
+                      "description": "Validation Error",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/HTTPValidationError"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/callTool": {
+                "post": {
+                  "summary": "Call a tool on a server",
+                  "operationId": "call_tool_callTool_post",
+                  "requestBody": {
+                    "content": {
+                      "application/json": {
+                        "schema": {
+                          "$ref": "#/components/schemas/CallToolRequest"
+                        }
+                      }
+                    },
+                    "required": true
+                  },
+                  "responses": {
+                    "200": {
+                      "description": "Successful Response",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/CallToolResponse"
+                          }
+                        }
+                      }
+                    },
+                    "422": {
+                      "description": "Validation Error",
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "$ref": "#/components/schemas/HTTPValidationError"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "/stopAllServers": {
+                "post": {
+                  "summary": "Stop all servers",
+                  "operationId": "stop_all_servers_stopAllServers_post",
+                  "responses": {
+                    "204": {
+                      "description": "Successful Response"
+                    }
+                  }
+                }
+              }
+            },
+            "components": {
+              "schemas": {
+                "CallToolRequest": {
+                  "properties": {
+                    "server_name": {
+                      "type": "string",
+                      "title": "Server Name"
+                    },
+                    "tool_name": {
+                      "type": "string",
+                      "title": "Tool Name"
+                    },
+                    "arguments": {
+                      "additionalProperties": true,
+                      "type": "object",
+                      "title": "Arguments",
+                      "default": {}
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "server_name",
+                    "tool_name"
+                  ],
+                  "title": "CallToolRequest"
+                },
+                "CallToolResponse": {
+                  "properties": {
+                    "server_name": {
+                      "type": "string",
+                      "title": "Server Name"
+                    },
+                    "tool_name": {
+                      "type": "string",
+                      "title": "Tool Name"
+                    },
+                    "result": {
+                      "title": "Result"
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Error"
+                    },
+                    "tool_response_file_path": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Tool Response File Path"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "server_name",
+                    "tool_name",
+                    "result"
+                  ],
+                  "title": "CallToolResponse"
+                },
+                "HTTPValidationError": {
+                  "properties": {
+                    "detail": {
+                      "items": {
+                        "$ref": "#/components/schemas/ValidationError"
+                      },
+                      "type": "array",
+                      "title": "Detail"
+                    }
+                  },
+                  "type": "object",
+                  "title": "HTTPValidationError"
+                },
+                "ListToolsRequest": {
+                  "properties": {
+                    "server_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Server Name"
+                    }
+                  },
+                  "type": "object",
+                  "title": "ListToolsRequest"
+                },
+                "ServerConfig": {
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name",
+                      "description": "Unique name for the server"
+                    },
+                    "type": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/ServerType"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Type of MCP server (inferred if not provided)"
+                    },
+                    "command": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Command",
+                      "description": "Command to run (for STDIO servers)"
+                    },
+                    "args": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Args",
+                      "description": "Command arguments (for STDIO servers)"
+                    },
+                    "cwd": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Cwd",
+                      "description": "Working directory (for STDIO servers)"
+                    },
+                    "env": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Env",
+                      "description": "Environment variables"
+                    },
+                    "url": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Url",
+                      "description": "URL to connect to SSE servers"
+                    },
+                    "headers": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Headers",
+                      "description": "HTTP headers for SSE servers"
+                    },
+                    "sse_read_timeout": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Sse Read Timeout",
+                      "description": "SSE read timeout in seconds",
+                      "default": 300.0
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "title": "ServerConfig",
+                  "description": "Configuration for an MCP server."
+                },
+                "ServerInfo": {
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name"
+                    },
+                    "type": {
+                      "$ref": "#/components/schemas/ServerType"
+                    },
+                    "tools_count": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Tools Count"
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Status"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "type"
+                  ],
+                  "title": "ServerInfo"
+                },
+                "ServerListResponse": {
+                  "properties": {
+                    "servers": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServerInfo"
+                      },
+                      "type": "array",
+                      "title": "Servers"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "servers"
+                  ],
+                  "title": "ServerListResponse"
+                },
+                "ServerToolsResponse": {
+                  "properties": {
+                    "server_tools": {
+                      "additionalProperties": {
+                        "items": {
+                          "$ref": "#/components/schemas/ToolInfo"
+                        },
+                        "type": "array"
+                      },
+                      "type": "object",
+                      "title": "Server Tools"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "server_tools"
+                  ],
+                  "title": "ServerToolsResponse"
+                },
+                "ServerType": {
+                  "type": "string",
+                  "enum": [
+                    "stdio",
+                    "sse",
+                    "streamable_http"
+                  ],
+                  "title": "ServerType",
+                  "description": "Types of MCP servers that can be managed."
+                },
+                "SpawnServerRequest": {
+                  "properties": {
+                    "config": {
+                      "$ref": "#/components/schemas/ServerConfig"
+                    },
+                    "timeout": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Timeout",
+                      "default": 30
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "config"
+                  ],
+                  "title": "SpawnServerRequest"
+                },
+                "SpawnServersRequest": {
+                  "properties": {
+                    "configs": {
+                      "items": {
+                        "$ref": "#/components/schemas/ServerConfig"
+                      },
+                      "type": "array",
+                      "title": "Configs"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "configs"
+                  ],
+                  "title": "SpawnServersRequest"
+                },
+                "StopServerRequest": {
+                  "properties": {
+                    "server_name": {
+                      "type": "string",
+                      "title": "Server Name"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "server_name"
+                  ],
+                  "title": "StopServerRequest"
+                },
+                "ToolInfo": {
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Name"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "title": "Description"
+                    },
+                    "schema": {
+                      "additionalProperties": true,
+                      "type": "object",
+                      "title": "Schema",
+                      "default": {}
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "title": "ToolInfo"
+                },
+                "ValidationError": {
+                  "properties": {
+                    "loc": {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "integer"
+                          }
+                        ]
+                      },
+                      "type": "array",
+                      "title": "Location"
+                    },
+                    "msg": {
+                      "type": "string",
+                      "title": "Message"
+                    },
+                    "type": {
+                      "type": "string",
+                      "title": "Error Type"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                  ],
+                  "title": "ValidationError"
+                }
+              }
+            }
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 4,
+        "successful_tests": 2,
+        "failed_tests": 2,
+        "success_rate": 0.5,
+        "avg_response_time": 0.004163920879364014,
+        "max_response_time": 0.012825965881347656
+      }
+    },
+    {
+      "category": "MCP Service Endpoints",
+      "results": [
+        {
+          "endpoint": "/listServers",
+          "method": "GET",
+          "description": "List MCP servers",
+          "success": true,
+          "status_code": 200,
+          "response_time": 0.0013735294342041016,
+          "response_data": {
+            "servers": []
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/listTools",
+          "method": "POST",
+          "description": "List tools",
+          "success": true,
+          "status_code": 200,
+          "response_time": 0.0014986991882324219,
+          "response_data": {
+            "server_tools": {}
+          },
+          "payload": {
+            "server_name": null
+          }
+        },
+        {
+          "endpoint": "/stopAllServers",
+          "method": "POST",
+          "description": "Stop all servers",
+          "success": true,
+          "status_code": 204,
+          "response_time": 0.0011806488037109375,
+          "response_data": "",
+          "payload": null
+        },
+        {
+          "endpoint": "/startServer",
+          "method": "POST",
+          "description": "Start MCP server",
+          "success": false,
+          "status_code": 500,
+          "response_time": 0.0034973621368408203,
+          "response_data": {
+            "detail": "Failed to spawn server: Failed to start server: Failed to connect: Connection closed"
+          },
+          "payload": {
+            "config": {
+              "name": "test-server",
+              "type": "stdio",
+              "command": "echo",
+              "args": [
+                "hello"
+              ]
+            }
+          }
+        }
+      ],
+      "summary": {
+        "total_tests": 4,
+        "successful_tests": 3,
+        "failed_tests": 1,
+        "success_rate": 0.75,
+        "avg_response_time": 0.0018875598907470703,
+        "max_response_time": 0.0034973621368408203
+      }
+    },
+    {
+      "category": "Agent Management Endpoints",
+      "results": [
+        {
+          "endpoint": "/api/agents/",
+          "method": "GET",
+          "description": "List agents",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010209083557128906,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/",
+          "method": "POST",
+          "description": "Create agent",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.001016378402709961,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "name": "Test API Agent",
+            "description": "Agent created for API testing",
+            "agent_type": "custom",
+            "configuration": {
+              "test_mode": true
+            }
+          }
+        },
+        {
+          "endpoint": "/api/agents/99999",
+          "method": "GET",
+          "description": "Get non-existent agent",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010447502136230469,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/?skip=0&limit=10",
+          "method": "GET",
+          "description": "Filter agents: skip=0&limit=10",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010046958923339844,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/?status=active",
+          "method": "GET",
+          "description": "Filter agents: status=active",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009517669677734375,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/?agent_type=custom",
+          "method": "GET",
+          "description": "Filter agents: agent_type=custom",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010766983032226562,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/?search=test",
+          "method": "GET",
+          "description": "Filter agents: search=test",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009653568267822266,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 7,
+        "successful_tests": 0,
+        "failed_tests": 7,
+        "success_rate": 0.0,
+        "avg_response_time": 0.0010115078517368861,
+        "max_response_time": 0.0010766983032226562
+      }
+    },
+    {
+      "category": "Skill Management Endpoints",
+      "results": [
+        {
+          "endpoint": "/api/skills/",
+          "method": "GET",
+          "description": "List skills",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009412765502929688,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/skills/",
+          "method": "POST",
+          "description": "Create skill",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009813308715820312,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "name": "test_api_skill",
+            "skill_type": "technical",
+            "description": "Skill created for API testing",
+            "parameters": {
+              "test_mode": true
+            }
+          }
+        },
+        {
+          "endpoint": "/api/skills/?skill_type=technical",
+          "method": "GET",
+          "description": "Filter skills: skill_type=technical",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009465217590332031,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/skills/?search=test",
+          "method": "GET",
+          "description": "Filter skills: search=test",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010101795196533203,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/skills/?skip=0&limit=5",
+          "method": "GET",
+          "description": "Filter skills: skip=0&limit=5",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.000957489013671875,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 5,
+        "successful_tests": 0,
+        "failed_tests": 5,
+        "success_rate": 0.0,
+        "avg_response_time": 0.0009673595428466797,
+        "max_response_time": 0.0010101795196533203
+      }
+    },
+    {
+      "category": "Workflow Management Endpoints",
+      "results": [
+        {
+          "endpoint": "/api/workflows/",
+          "method": "GET",
+          "description": "List workflows",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009696483612060547,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/workflows/",
+          "method": "POST",
+          "description": "Create workflow",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009717941284179688,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "name": "Test API Workflow",
+            "description": "Workflow created for API testing",
+            "steps": [
+              {
+                "name": "analysis_step",
+                "agent_type": "custom",
+                "task": "Analyze input data"
+              },
+              {
+                "name": "output_step",
+                "agent_type": "custom",
+                "task": "Generate output"
+              }
+            ]
+          }
+        },
+        {
+          "endpoint": "/api/workflows/executions/",
+          "method": "GET",
+          "description": "List workflow executions",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009534358978271484,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/workflows/executions/test-id",
+          "method": "GET",
+          "description": "Get execution status",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009274482727050781,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 4,
+        "successful_tests": 0,
+        "failed_tests": 4,
+        "success_rate": 0.0,
+        "avg_response_time": 0.0009555816650390625,
+        "max_response_time": 0.0009717941284179688
+      }
+    },
+    {
+      "category": "Document Management Endpoints",
+      "results": [
+        {
+          "endpoint": "/api/documents/",
+          "method": "GET",
+          "description": "List documents",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009477138519287109,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/documents/upload",
+          "method": "POST",
+          "description": "Upload document",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0013704299926757812,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "files": [
+            "file"
+          ],
+          "data": {
+            "tags": "api,test,automation",
+            "description": "Test document for API testing",
+            "created_by": "api_test"
+          }
+        },
+        {
+          "endpoint": "/api/documents/search",
+          "method": "POST",
+          "description": "Search documents",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010318756103515625,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "query": "test document",
+            "limit": 10
+          }
+        },
+        {
+          "endpoint": "/api/context/search",
+          "method": "POST",
+          "description": "Context search",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009653568267822266,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "query": "API testing",
+            "limit": 5
+          }
+        },
+        {
+          "endpoint": "/api/documents/stats",
+          "method": "GET",
+          "description": "Document statistics",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009005069732666016,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 5,
+        "successful_tests": 0,
+        "failed_tests": 5,
+        "success_rate": 0.0,
+        "avg_response_time": 0.0010431766510009765,
+        "max_response_time": 0.0013704299926757812
+      }
+    },
+    {
+      "category": "System Management Endpoints",
+      "results": [
+        {
+          "endpoint": "/api/system/status",
+          "method": "GET",
+          "description": "System status",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009226799011230469,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/system/metrics",
+          "method": "GET",
+          "description": "System metrics",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0011324882507324219,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/system/config",
+          "method": "GET",
+          "description": "System configuration",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009458065032958984,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/system/logs",
+          "method": "GET",
+          "description": "System logs",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0008993148803710938,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/system/config",
+          "method": "POST",
+          "description": "Update system config",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009527206420898438,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": {
+            "test_setting": "test_value"
+          }
+        }
+      ],
+      "summary": {
+        "total_tests": 5,
+        "successful_tests": 0,
+        "failed_tests": 5,
+        "success_rate": 0.0,
+        "avg_response_time": 0.0009706020355224609,
+        "max_response_time": 0.0011324882507324219
+      }
+    },
+    {
+      "category": "Performance Testing",
+      "results": [
+        {
+          "endpoint": "Concurrent Health Checks",
+          "description": "5 concurrent health check requests",
+          "success": false,
+          "status_code": 0,
+          "response_time": 0.004286813735961914,
+          "details": {
+            "successful_requests": 0,
+            "total_requests": 5,
+            "avg_response_time": 0.004286813735961914,
+            "max_response_time": 0.0053997039794921875
+          }
+        },
+        {
+          "endpoint": "/health",
+          "method": "GET",
+          "description": "Performance: /health",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009403228759765625,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/",
+          "method": "GET",
+          "description": "Performance: /",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0009882450103759766,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/api/agents/",
+          "method": "GET",
+          "description": "Performance: /api/agents/",
+          "success": false,
+          "status_code": 404,
+          "response_time": 0.0010592937469482422,
+          "response_data": {
+            "detail": "Not Found"
+          },
+          "payload": null
+        },
+        {
+          "endpoint": "/listServers",
+          "method": "GET",
+          "description": "Performance: /listServers",
+          "success": true,
+          "status_code": 200,
+          "response_time": 0.0013475418090820312,
+          "response_data": {
+            "servers": []
+          },
+          "payload": null
+        }
+      ],
+      "summary": {
+        "total_tests": 5,
+        "successful_tests": 1,
+        "failed_tests": 4,
+        "success_rate": 0.2,
+        "avg_response_time": 0.0017244434356689451,
+        "max_response_time": 0.004286813735961914
+      }
+    }
+  ],
+  "summary": {
+    "total_tests": 39,
+    "successful_tests": 6,
+    "failed_tests": 33,
+    "categories_tested": 8
+  }
+}

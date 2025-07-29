@@ -2,9 +2,9 @@
 version: '3.8'
 
 services:
-  # PostgreSQL database for audit logging
+  # PostgreSQL database with pgvector for cognitive functions
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: Automatos_postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
@@ -14,7 +14,8 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./init_pgvector.sql:/docker-entrypoint-initdb.d/02-init_pgvector.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 30s
@@ -48,6 +49,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: enhanced_mcp_bridge
+    env_file:
+      - ./.env
     ports:
       - "${MCP_PORT:-8001}:8001"
     environment:
@@ -89,6 +92,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: Automatos
+    env_file:
+      - ./.env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
       - REDIS_HOST=redis
@@ -143,7 +148,7 @@ services:
     image: grafana/grafana:latest
     container_name: Automatos_grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${GRAFANA_PORT:-3002}:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
     volumes:

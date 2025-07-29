@@ -5,26 +5,30 @@
 
 @layer base {
   :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 262.1 83.3% 57.8%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 262.1 83.3% 57.8%;
-    --radius: 0.5rem;
+    --background: 0 0% 6%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 8%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 16 100% 60%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 16 100% 60%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 16 100% 60%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
   }
 }
 
@@ -37,148 +41,98 @@
   }
 }
 
-/* Custom scrollbar styling */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
-
-/* Animation for progress bars */
-@keyframes progress {
-  0% {
-    transform: translateX(-100%);
+@layer components {
+  .gradient-bg {
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
   }
-  100% {
-    transform: translateX(0%);
+  
+  .gradient-accent {
+    background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%);
   }
-}
-
-.progress-animate {
-  animation: progress 0.5s ease-out;
-}
-
-/* Custom gradient backgrounds */
-.gradient-bg {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.gradient-purple {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-/* Loading shimmer effect */
-@keyframes shimmer {
-  0% {
-    background-position: -468px 0;
+  
+  .gradient-text {
+    background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
-  100% {
-    background-position: 468px 0;
+  
+  .card-glow {
+    box-shadow: 0 0 20px rgba(255, 107, 53, 0.1);
   }
-}
-
-.shimmer {
-  animation: shimmer 1.2s ease-in-out infinite;
-  background: linear-gradient(
-    to right,
-    #eff1f3 4%,
-    #e2e2e2 25%,
-    #eff1f3 36%
-  );
-  background-size: 1000px 100%;
-}
-
-/* Dark theme enhancements */
-.dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-}
-
-/* Form focus states */
-.form-input:focus {
-  @apply ring-2 ring-purple-500 ring-offset-2 ring-offset-slate-900;
-}
-
-/* Button hover effects */
-.btn-hover {
-  @apply transition-all duration-200 ease-in-out transform hover:scale-105 hover:shadow-lg;
-}
-
-/* Card hover effects */
-.card-hover {
-  @apply transition-all duration-200 ease-in-out hover:shadow-xl hover:scale-[1.02];
-}
-
-/* Status indicators */
-.status-pending {
-  @apply bg-yellow-500/20 text-yellow-400 border-yellow-500/30;
-}
-
-.status-running {
-  @apply bg-blue-500/20 text-blue-400 border-blue-500/30;
-}
-
-.status-completed {
-  @apply bg-green-500/20 text-green-400 border-green-500/30;
-}
-
-.status-failed {
-  @apply bg-red-500/20 text-red-400 border-red-500/30;
-}
-
-/* Typography enhancements */
-.text-gradient {
-  @apply bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent;
-}
-
-/* Layout utilities */
-.container-custom {
-  @apply container mx-auto max-w-6xl px-4;
-}
-
-/* Animation utilities */
-.fade-in {
-  animation: fadeIn 0.5s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+  
+  .card-glow:hover {
+    box-shadow: 0 0 40px rgba(255, 107, 53, 0.2);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+
+  .glass-card {
+    @apply bg-card/50 backdrop-blur-sm border border-border/50 rounded-2xl;
+  }
+
+  .icon-gradient {
+    background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%);
+  }
+
+  .sidebar-item {
+    @apply flex items-center px-4 py-3 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-lg transition-all duration-200;
+  }
+
+  .sidebar-item.active {
+    @apply text-foreground bg-secondary border-l-2 border-primary;
+  }
+
+  .metric-card {
+    @apply glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300;
+  }
+
+  .data-table {
+    @apply w-full border-collapse;
+  }
+
+  .data-table th {
+    @apply border-b border-border/50 px-4 py-3 text-left text-sm font-medium text-muted-foreground;
+  }
+
+  .data-table td {
+    @apply border-b border-border/30 px-4 py-3 text-sm;
+  }
+
+  .data-table tr:hover {
+    @apply bg-secondary/30;
   }
 }
 
-.slide-up {
-  animation: slideUp 0.3s ease-out;
+html {
+  scroll-behavior: smooth;
 }
 
-@keyframes slideUp {
-  from {
-    transform: translateY(10px);
-    opacity: 0;
+.parallax-bg {
+  background-attachment: fixed;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parallax-bg {
+    background-attachment: scroll;
   }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
 }
 
-/* WebSocket status indicators */
-.ws-connected {
-  @apply bg-green-500;
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
 }
 
-.ws-disconnected {
-  @apply bg-red-500;
+::-webkit-scrollbar-track {
+  background: hsl(var(--secondary));
 }
 
-.ws-connecting {
-  @apply bg-yellow-500 animate-pulse;
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary));
 }

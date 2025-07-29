@@ -1,44 +1,28 @@
-
-export interface User {
-  id: string;
-  email: string;
-  name?: string;
-  role: string;
+export type Expense = {
+  id: string
+  amount: number
+  category: string
+  description: string
+  date: Date
 }
 
-export interface Workflow {
-  id: string;
-  githubUrl: string;
-  prompt?: string;
-  mode: 'self-contained' | 'prompt-driven';
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  progress: number;
-  logs?: string;
-  result?: string;
-  error?: string;
-  userId: string;
-  createdAt: Date;
-  updatedAt: Date;
+export type ExpenseFormData = Omit<Expense, 'id' | 'date'> & {
+  date: string
 }
 
-export interface WorkflowFormData {
-  githubUrl: string;
-  prompt?: string;
-  mode: 'self-contained' | 'prompt-driven';
-}
+export const EXPENSE_CATEGORIES = [
+  'Food',
+  'Transportation',
+  'Housing',
+  'Utilities',
+  'Entertainment',
+  'Healthcare',
+  'Shopping',
+  'Education',
+  'Other'
+] as const
 
-export interface ProgressUpdate {
-  workflowId: string;
-  status: string;
-  progress: number;
-  message?: string;
-  logs?: string;
-  error?: string;
-}
-
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
+export type DateRange = {
+  from: Date | undefined
+  to: Date | undefined
 }

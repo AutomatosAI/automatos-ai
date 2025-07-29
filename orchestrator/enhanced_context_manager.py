@@ -65,7 +65,8 @@ class EnhancedContextManager:
     def __init__(self, db_config: Dict[str, str], openai_api_key: str):
         self.db_config = db_config
         self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        self.document_manager = DocumentManager(db_config, openai_api_key)
+        # self.document_manager = DocumentManager(db_config, openai_api_key)
+        self.document_manager = None  # Temporarily disabled due to pgvector dependency
         
         # Context configuration
         self.default_chunk_size = 1000

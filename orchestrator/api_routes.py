@@ -126,8 +126,9 @@ async def startup_event():
     openai_api_key = "your_openai_api_key"  # Change this to your actual API key
     
     try:
-        doc_manager = DocumentManager(db_config, openai_api_key)
-        logger.info("Document manager initialized successfully")
+        # doc_manager = DocumentManager(db_config, openai_api_key)
+        doc_manager = None  # Temporarily disabled due to pgvector dependency
+        logger.info("Document manager temporarily disabled")
     except Exception as e:
         logger.error(f"Failed to initialize document manager: {e}")
         raise
