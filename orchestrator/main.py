@@ -24,6 +24,10 @@ from api.workflows import router as workflows_router
 from api.documents import router as documents_router
 from api.system import router as system_router
 from api.context import router as context_engineering_router
+from api.skills import router as skills_router
+from api.patterns import router as patterns_router
+from api.statistics import router as statistics_router
+from api.templates import router as templates_router
 
 # Import WebSocket manager
 from websocket_manager import manager, WebSocketEventType
@@ -75,9 +79,13 @@ app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
+app.include_router(skills_router)
+app.include_router(patterns_router)
+app.include_router(statistics_router)
+app.include_router(templates_router)
 
 
-n# Testing helper endpoint
+# Testing helper endpoint
 @app.get("/api/test-data")
 async def get_test_data():
     """Helper endpoint that returns available test data for API testing"""
@@ -187,7 +195,7 @@ async def websocket_endpoint(
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
-n# Testing helper endpoint
+# Testing helper endpoint
 @app.get("/api/test-data")
 async def get_test_data():
     """Helper endpoint that returns available test data for API testing"""

@@ -39,6 +39,12 @@ class Agent(Base):
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
     performance_metrics = Column(JSON)  # Performance data
+    
+    # NEW FIELDS for UI requirements
+    priority_level = Column(String(50), default='medium')  # 'low', 'medium', 'high', 'critical'
+    max_concurrent_tasks = Column(Integer, default=5)  # Maximum concurrent tasks
+    auto_start = Column(Boolean, default=False)  # Auto-start on system boot
+    
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
@@ -55,6 +61,10 @@ class Skill(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     skill_type = Column(String(100), nullable=False)  # 'cognitive', 'technical', 'communication'
+    
+    # NEW FIELD for UI requirements - skill categorization
+    category = Column(String(100), nullable=False)  # 'development', 'security', 'infrastructure', 'analytics'
+    
     implementation = Column(Text)  # Code or configuration
     parameters = Column(JSON)  # Skill parameters
     performance_data = Column(JSON)  # Usage statistics
@@ -179,10 +189,22 @@ class AgentType(str, Enum):
     SYSTEM = "system"
     SPECIALIZED = "specialized"
 
+class PriorityLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
 class SkillType(str, Enum):
     COGNITIVE = "cognitive"
     TECHNICAL = "technical"
     COMMUNICATION = "communication"
+
+class SkillCategory(str, Enum):
+    DEVELOPMENT = "development"
+    SECURITY = "security"
+    INFRASTRUCTURE = "infrastructure"
+    ANALYTICS = "analytics"
 
 class WorkflowStatus(str, Enum):
     DRAFT = "draft"
@@ -202,6 +224,9 @@ class AgentCreate(BaseModel):
     agent_type: AgentType
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
+    priority_level: Optional[PriorityLevel] = PriorityLevel.MEDIUM
+    max_concurrent_tasks: Optional[int] = Field(default=5, ge=1, le=100)
+    auto_start: Optional[bool] = False
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
@@ -209,6 +234,9 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
+    priority_level: Optional[PriorityLevel] = None
+    max_concurrent_tasks: Optional[int] = Field(default=None, ge=1, le=100)
+    auto_start: Optional[bool] = None
 
 class AgentResponse(BaseModel):
     id: int
@@ -218,6 +246,9 @@ class AgentResponse(BaseModel):
     status: str
     configuration: Optional[Dict[str, Any]]
     performance_metrics: Optional[Dict[str, Any]]
+    priority_level: str
+    max_concurrent_tasks: int
+    auto_start: bool
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str]
@@ -227,12 +258,14 @@ class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     skill_type: SkillType
+    category: SkillCategory
     implementation: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
 class SkillUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[SkillCategory] = None
     implementation: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
@@ -242,6 +275,7 @@ class SkillResponse(BaseModel):
     name: str
     description: Optional[str]
     skill_type: str
+    category: str
     implementation: Optional[str]
     parameters: Optional[Dict[str, Any]]
     performance_data: Optional[Dict[str, Any]]
@@ -255,6 +289,13 @@ class PatternCreate(BaseModel):
     description: Optional[str] = None
     pattern_type: str
     pattern_data: Dict[str, Any]
+
+class PatternUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    pattern_type: Optional[str] = None
+    pattern_data: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
 
 class PatternResponse(BaseModel):
     id: int
@@ -381,3 +422,35 @@ class WebSocketMessage(BaseModel):
     type: str
     data: Dict[str, Any]
     timestamp: datetime = Field(default_factory=datetime.now)
+
+# New API Models for UI Requirements
+class AgentTemplate(BaseModel):
+    name: str
+    description: str
+    agent_type: AgentType
+    default_skills: List[str]
+    default_configuration: Dict[str, Any]
+    priority_level: PriorityLevel
+    max_concurrent_tasks: int
+
+class AgentStatistics(BaseModel):
+    total_agents: int
+    active_agents: int
+    inactive_agents: int
+    agents_by_type: Dict[str, int]
+    average_performance: float
+    total_executions: int
+    successful_executions: int
+    failed_executions: int
+
+class SkillsByCategory(BaseModel):
+    category: str
+    skills: List[SkillResponse]
+
+class SystemMetrics(BaseModel):
+    uptime: str
+    cpu_usage: float
+    memory_usage: float
+    active_connections: int
+    total_requests: int
+    error_rate: float
