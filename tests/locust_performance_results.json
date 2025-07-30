@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-07-30T13:06:55.286833",
+  "test_type": "locust_performance",
+  "endpoints_tested": [
+    "/health",
+    "/api/system/metrics"
+  ],
+  "total_requests": 16,
+  "total_failures": 0,
+  "average_response_time": 194.50899526054855,
+  "min_response_time": 4.619935993105173,
+  "max_response_time": 1007.9160489840433,
+  "requests_per_second": 0.5,
+  "failure_rate": 0.0
+}
