@@ -9,3 +9,24 @@ env/
 *.venv/
 **/venv/
 **/.venv/
+
+# Environment files with secrets
+.env
+.env.local
+.env.backup
+*.env
+
+# API Keys and secrets
+*api_key*
+*secret*
+*password*
+
+# Private keys
+*.pem
+*.key
+id_rsa*
+
+# Logs with potential sensitive data
+logs/
+*.log
+

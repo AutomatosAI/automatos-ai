@@ -83,8 +83,8 @@ LLM_TEMPERATURE=0.1
 LLM_MAX_TOKENS=4000
 
 # API Keys (Replace with your actual keys)
-OPENAI_API_KEY=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
-ANTHROPIC_API_KEY=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
+OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Development Configuration
 DEBUG=false
