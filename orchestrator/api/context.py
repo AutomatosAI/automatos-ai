@@ -12,6 +12,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from database import get_db
 from models import RAGConfiguration, Document
@@ -34,7 +35,7 @@ async def get_context_stats(
         # Get document count for vector embeddings estimate
         document_count = db.query(Document).count()
         total_chunks = db.query(Document).with_entities(
-            db.func.sum(Document.chunk_count)
+            func.sum(Document.chunk_count)
         ).scalar() or 0
         
         return {
