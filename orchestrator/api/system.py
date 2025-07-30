@@ -421,3 +421,6 @@ async def get_system_metrics():
     except Exception as e:
         logger.error(f"Error getting system metrics: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting system metrics: {str(e)}")
+@router.get("/test-route")
+async def test_route():
+    return {"message": "Test route works"}

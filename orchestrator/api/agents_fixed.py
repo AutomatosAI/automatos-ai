@@ -27,10 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 # Agent endpoints
-n@router.get("/test123")
-async def test_simple_route():
-    return {"message": "Simple test route works"}
-
 @router.post("/", response_model=AgentResponse)
 async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
     """Create a new agent"""
@@ -132,6 +128,166 @@ async def list_agents(
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing agents: {str(e)}")
+
+@router.get("/patterns", response_model=List[PatternResponse])
+async def list_patterns(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    pattern_type: Optional[str] = None,
+    search: Optional[str] = None,
+    active_only: bool = Query(True),
+    db: Session = Depends(get_db)
+):
+    """List coordination patterns with filtering and pagination"""
+    try:
+        query = db.query(Pattern)
+        
+        # Apply filters
+        if active_only:
+            query = query.filter(Pattern.is_active == True)
+        if pattern_type:
+            query = query.filter(Pattern.pattern_type == pattern_type)
+        if search:
+            query = query.filter(
+                or_(
+                    Pattern.name.ilike(f"%{search}%"),
+                    Pattern.description.ilike(f"%{search}%")
+                )
+            )
+        
+        patterns = query.offset(skip).limit(limit).all()
+        
+        return [
+            PatternResponse(
+                id=pattern.id,
+                name=pattern.name,
+                description=pattern.description,
+                pattern_type=pattern.pattern_type,
+                pattern_data=pattern.pattern_data,
+                usage_count=pattern.usage_count,
+                effectiveness_score=pattern.effectiveness_score,
+                is_active=pattern.is_active,
+                created_at=pattern.created_at,
+                updated_at=pattern.updated_at,
+                created_by=pattern.created_by
+            ) for pattern in patterns
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error listing patterns: {e}")
+
+@router.get("/skills", response_model=List[SkillResponse])
+async def list_skills(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    skill_type: Optional[SkillType] = None,
+    search: Optional[str] = None,
+    active_only: bool = Query(True),
+    db: Session = Depends(get_db)
+):
+    """List skills with filtering and pagination"""
+    try:
+        query = db.query(Skill)
+        
+        # Apply filters
+        if active_only:
+            query = query.filter(Skill.is_active == True)
+        if skill_type:
+            query = query.filter(Skill.skill_type == skill_type.value)
+        if search:
+            query = query.filter(
+                or_(
+                    Skill.name.ilike(f"%{search}%"),
+                    Skill.description.ilike(f"%{search}%")
+                )
+            )
+        
+        skills = query.offset(skip).limit(limit).all()
+        
+        return [
+            SkillResponse(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                skill_type=skill.skill_type,
+                implementation=skill.implementation,
+                parameters=skill.parameters,
+                performance_data=skill.performance_data,
+                is_active=skill.is_active,
+                created_at=skill.created_at,
+                updated_at=skill.updated_at,
+                created_by=skill.created_by
+            ) for skill in skills
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error listing skills: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing skills: {str(e)}")
+
+
+@router.get("/professional-skills", response_model=List[dict])
+async def get_professional_skills():
+    """Get all available professional skills across agent types"""
+    try:
+        all_skills = {}
+        
+        for agent_type, agent_class in AGENT_REGISTRY.items():
+            # Create temporary instance to get skills
+            temp_agent = agent_class(
+                agent_id=0,
+                name="temp",
+                description="temp"
+            )
+            
+            for skill_name, skill in temp_agent.skills.items():
+                if skill_name not in all_skills:
+                    all_skills[skill_name] = {
+                        "name": skill.name,
+                        "skill_type": skill.skill_type.value,
+                        "description": skill.description,
+                        "parameters": skill.parameters,
+                        "agent_types": [agent_type]
+                    }
+                else:
+                    all_skills[skill_name]["agent_types"].append(agent_type)
+        
+        return list(all_skills.values())
+        
+    except Exception as e:
+        logger.error(f"Error getting professional skills: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting professional skills: {str(e)}")
+
+# Skill endpoints
+
+@router.get("/types", response_model=List[dict])
+async def get_agent_types():
+    """Get available professional agent types with their capabilities"""
+    try:
+        agent_types = []
+        
+        for agent_type, agent_class in AGENT_REGISTRY.items():
+            # Create a temporary instance to get metadata
+            temp_agent = agent_class(
+                agent_id=0,
+                name="temp",
+                description="temp"
+            )
+            
+            agent_types.append({
+                "type": agent_type,
+                "name": agent_type.replace('_', ' ').title(),
+                "description": temp_agent.description,
+                "default_skills": temp_agent.default_skills,
+                "specializations": temp_agent.specializations,
+                "capabilities": list(temp_agent.capabilities.keys())
+            })
+        
+        return agent_types
+        
+    except Exception as e:
+        logger.error(f"Error getting agent types: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting agent types: {str(e)}")
+
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: int, db: Session = Depends(get_db)):
@@ -242,35 +398,6 @@ async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error deleting agent: {str(e)}")
 
 # Professional Agent Management Endpoints
-@router.get("/types", response_model=List[dict])
-async def get_agent_types():
-    """Get available professional agent types with their capabilities"""
-    try:
-        agent_types = []
-        
-        for agent_type, agent_class in AGENT_REGISTRY.items():
-            # Create a temporary instance to get metadata
-            temp_agent = agent_class(
-                agent_id=0,
-                name="temp",
-                description="temp"
-            )
-            
-            agent_types.append({
-                "type": agent_type,
-                "name": agent_type.replace('_', ' ').title(),
-                "description": temp_agent.description,
-                "default_skills": temp_agent.default_skills,
-                "specializations": temp_agent.specializations,
-                "capabilities": list(temp_agent.capabilities.keys())
-            })
-        
-        return agent_types
-        
-    except Exception as e:
-        logger.error(f"Error getting agent types: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting agent types: {str(e)}")
-
 @router.post("/{agent_id}/execute", response_model=dict)
 async def execute_agent_task(
     agent_id: int, 
@@ -388,39 +515,6 @@ async def validate_agent_task(
         logger.error(f"Error validating task for agent {agent_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error validating task: {str(e)}")
 
-@router.get("/professional-skills", response_model=List[dict])
-async def get_professional_skills():
-    """Get all available professional skills across agent types"""
-    try:
-        all_skills = {}
-        
-        for agent_type, agent_class in AGENT_REGISTRY.items():
-            # Create temporary instance to get skills
-            temp_agent = agent_class(
-                agent_id=0,
-                name="temp",
-                description="temp"
-            )
-            
-            for skill_name, skill in temp_agent.skills.items():
-                if skill_name not in all_skills:
-                    all_skills[skill_name] = {
-                        "name": skill.name,
-                        "skill_type": skill.skill_type.value,
-                        "description": skill.description,
-                        "parameters": skill.parameters,
-                        "agent_types": [agent_type]
-                    }
-                else:
-                    all_skills[skill_name]["agent_types"].append(agent_type)
-        
-        return list(all_skills.values())
-        
-    except Exception as e:
-        logger.error(f"Error getting professional skills: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting professional skills: {str(e)}")
-
-# Skill endpoints
 @router.post("/skills", response_model=SkillResponse)
 async def create_skill(skill_data: SkillCreate, db: Session = Depends(get_db)):
     """Create a new skill"""
@@ -456,54 +550,6 @@ async def create_skill(skill_data: SkillCreate, db: Session = Depends(get_db)):
         db.rollback()
         logger.error(f"Error creating skill: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating skill: {str(e)}")
-
-@router.get("/skills", response_model=List[SkillResponse])
-async def list_skills(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    skill_type: Optional[SkillType] = None,
-    search: Optional[str] = None,
-    active_only: bool = Query(True),
-    db: Session = Depends(get_db)
-):
-    """List skills with filtering and pagination"""
-    try:
-        query = db.query(Skill)
-        
-        # Apply filters
-        if active_only:
-            query = query.filter(Skill.is_active == True)
-        if skill_type:
-            query = query.filter(Skill.skill_type == skill_type.value)
-        if search:
-            query = query.filter(
-                or_(
-                    Skill.name.ilike(f"%{search}%"),
-                    Skill.description.ilike(f"%{search}%")
-                )
-            )
-        
-        skills = query.offset(skip).limit(limit).all()
-        
-        return [
-            SkillResponse(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                skill_type=skill.skill_type,
-                implementation=skill.implementation,
-                parameters=skill.parameters,
-                performance_data=skill.performance_data,
-                is_active=skill.is_active,
-                created_at=skill.created_at,
-                updated_at=skill.updated_at,
-                created_by=skill.created_by
-            ) for skill in skills
-        ]
-        
-    except Exception as e:
-        logger.error(f"Error listing skills: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing skills: {str(e)}")
 
 @router.get("/skills/{skill_id}", response_model=SkillResponse)
 async def get_skill(skill_id: int, db: Session = Depends(get_db)):
@@ -613,50 +659,4 @@ async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_
         logger.error(f"Error creating pattern: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating pattern: {str(e)}")
 
-@router.get("/patterns", response_model=List[PatternResponse])
-async def list_patterns(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    pattern_type: Optional[str] = None,
-    search: Optional[str] = None,
-    active_only: bool = Query(True),
-    db: Session = Depends(get_db)
-):
-    """List coordination patterns with filtering and pagination"""
-    try:
-        query = db.query(Pattern)
-        
-        # Apply filters
-        if active_only:
-            query = query.filter(Pattern.is_active == True)
-        if pattern_type:
-            query = query.filter(Pattern.pattern_type == pattern_type)
-        if search:
-            query = query.filter(
-                or_(
-                    Pattern.name.ilike(f"%{search}%"),
-                    Pattern.description.ilike(f"%{search}%")
-                )
-            )
-        
-        patterns = query.offset(skip).limit(limit).all()
-        
-        return [
-            PatternResponse(
-                id=pattern.id,
-                name=pattern.name,
-                description=pattern.description,
-                pattern_type=pattern.pattern_type,
-                pattern_data=pattern.pattern_data,
-                usage_count=pattern.usage_count,
-                effectiveness_score=pattern.effectiveness_score,
-                is_active=pattern.is_active,
-                created_at=pattern.created_at,
-                updated_at=pattern.updated_at,
-                created_by=pattern.created_by
-            ) for pattern in patterns
-        ]
-        
-    except Exception as e:
-        logger.error(f"Error listing patterns: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing patterns: {str(e)}")
