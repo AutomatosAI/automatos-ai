@@ -77,6 +77,16 @@ app.include_router(system_router)
 app.include_router(context_engineering_router)
 
 
+n# Testing helper endpoint
+@app.get("/api/test-data")
+async def get_test_data():
+    """Helper endpoint that returns available test data for API testing"""
+    return {
+        "agents": {"available_ids": [1, 2, 3, 4], "valid_types": ["code_architect", "security_expert", "performance_optimizer", "custom"]},
+        "workflows": {"available_ids": [1, 2, 3]},
+        "example_payloads": {"agent_create": {"name": "Test Agent", "agent_type": "code_architect"}}
+    }
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -177,6 +187,16 @@ async def websocket_endpoint(
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
+n# Testing helper endpoint
+@app.get("/api/test-data")
+async def get_test_data():
+    """Helper endpoint that returns available test data for API testing"""
+    return {
+        "agents": {"available_ids": [1, 2, 3, 4], "valid_types": ["code_architect", "security_expert", "performance_optimizer", "custom"]},
+        "workflows": {"available_ids": [1, 2, 3]},
+        "example_payloads": {"agent_create": {"name": "Test Agent", "agent_type": "code_architect"}}
+    }
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -225,3 +245,45 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+# Testing helper endpoint
+@app.get("/api/test-data")
+async def get_test_data():
+    """Helper endpoint that returns available test data for API testing"""
+    return {
+        "message": "Available test data for API testing",
+        "agents": {
+            "available_ids": [1, 2, 3, 4],
+            "valid_types": ["code_architect", "security_expert", "performance_optimizer", "data_analyst", "infrastructure_manager", "custom", "system", "specialized"],
+            "example_create_payload": {
+                "name": "Test Agent",
+                "description": "A test agent",
+                "agent_type": "code_architect",
+                "configuration": {"test": True}
+            }
+        },
+        "workflows": {
+            "available_ids": [1, 2, 3],
+            "valid_statuses": ["draft", "active", "completed", "failed", "archived"],
+            "example_create_payload": {
+                "name": "Test Workflow",
+                "description": "A test workflow",
+                "workflow_definition": {"steps": ["init", "process", "complete"]},
+                "status": "draft"
+            }
+        },
+        "system_config": {
+            "required_fields": ["config_key", "config_value"],
+            "example_create_payload": {
+                "config_key": "test_setting",
+                "config_value": "test_value"
+            }
+        },
+        "rag_config": {
+            "required_fields": ["name"],
+            "example_create_payload": {
+                "name": "test_rag_config",
+                "description": "Test RAG configuration"
+            }
+        }
+    }
