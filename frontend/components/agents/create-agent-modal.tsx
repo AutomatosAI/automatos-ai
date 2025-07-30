@@ -165,7 +165,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
       
     } catch (error) {
       console.error('Error creating agent:', error)
-      alert(`Error creating agent: ${error.message}`)
+      alert(`Error creating agent: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

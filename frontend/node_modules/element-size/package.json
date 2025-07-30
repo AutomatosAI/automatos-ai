@@ -1,0 +1,30 @@
+{
+  "name": "element-size",
+  "version": "1.1.1",
+  "description": "Get the size of an element in pixels, including margins",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {},
+  "author": "Hugh Kennedy <hughskennedy@gmail.com> (http://hughsk.io/)",
+  "dependencies": {},
+  "devDependencies": {
+    "tape": "^2.13.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/hughsk/element-size.git"
+  },
+  "keywords": [
+    "element",
+    "dom",
+    "browser",
+    "browserify",
+    "node",
+    "dimensions",
+    "margin"
+  ],
+  "homepage": "https://github.com/hughsk/element-size",
+  "bugs": {
+    "url": "https://github.com/hughsk/element-size/issues"
+  }
+}

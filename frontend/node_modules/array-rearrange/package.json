@@ -1,0 +1,33 @@
+{
+  "name": "array-rearrange",
+  "version": "2.2.2",
+  "description": "Rearrange array elements by index array",
+  "main": "index.js",
+  "dependencies": {},
+  "devDependencies": {
+    "array-range": "^1.0.1"
+  },
+  "scripts": {
+    "test": "node test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/dfcreative/array-rearrange.git"
+  },
+  "keywords": [
+    "array",
+    "arrange",
+    "reorder",
+    "order",
+    "rearrange",
+    "index",
+    "resort",
+    "sort"
+  ],
+  "author": "Dmitry Yv <dfcreative@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dfcreative/array-rearrange/issues"
+  },
+  "homepage": "https://github.com/dfcreative/array-rearrange#readme"
+}

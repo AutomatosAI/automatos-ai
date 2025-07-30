@@ -1,0 +1,103 @@
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app';
+
+export interface SystemHealth {
+  status: string;
+  timestamp: string;
+  version: string;
+}
+
+export interface SystemMetrics {
+  cpu: {
+    usage_percent: number;
+    cores: number;
+  };
+  memory: {
+    usage_percent: number;
+    used_gb: number;
+    total_gb: number;
+  };
+  disk: {
+    usage_percent: number;
+    used_gb: number;
+    total_gb: number;
+  };
+  network: {
+    packets_sent: number;
+    packets_recv: number;
+    bytes_sent: number;
+    bytes_recv: number;
+  };
+  timestamp: number;
+}
+
+class ApiClient {
+  private baseUrl: string;
+  private apiKey: string;
+
+  constructor(baseUrl: string = API_BASE_URL) {
+    this.baseUrl = baseUrl;
+    this.apiKey = 'test_api_key_for_backend_validation_2025';
+  }
+
+  async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    
+    const config: RequestInit = {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      ...options,
+    };
+
+    if (endpoint.startsWith('/api/')) {
+      config.headers = {
+        ...config.headers,
+        'Authorization': `Bearer ${this.apiKey}`,
+      };
+    }
+
+    try {
+      const response = await fetch(url, config);
+      
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`API request failed: ${url}`, error);
+      throw error;
+    }
+  }
+
+  async getSystemHealth(): Promise<SystemHealth> {
+    return this.request<SystemHealth>('/health');
+  }
+
+  async getSystemMetrics(): Promise<SystemMetrics> {
+    return this.request<SystemMetrics>('/api/system/metrics');
+  }
+
+  async getAgents(): Promise<any[]> {
+    console.warn('Agents endpoint not yet implemented in backend');
+    return [];
+  }
+
+  async getAgentTypes(): Promise<string[]> {
+    return ['code_architect', 'security_expert', 'performance_optimizer', 'data_analyst', 'infrastructure_manager', 'custom'];
+  }
+
+  async getWorkflows(): Promise<any[]> {
+    console.warn('Workflows endpoint not yet implemented in backend');
+    return [];
+  }
+
+  async getDocuments(): Promise<any[]> {
+    console.warn('Documents endpoint not yet implemented in backend');
+    return [];
+  }
+}
+
+export const apiClient = new ApiClient();
+export default apiClient;

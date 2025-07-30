@@ -701,7 +701,7 @@ export function WorkflowManagement() {
                               {agent.description}
                             </p>
                             <div className="flex flex-wrap gap-1">
-                              {agent.skills.map(skill => (
+                              {agent.skills.map((skill: string) => (
                                 <Badge key={skill} variant="outline" className="text-xs">
                                   {skill}
                                 </Badge>

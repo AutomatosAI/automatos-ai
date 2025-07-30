@@ -1,4 +1,3 @@
-
 FROM node:18-alpine
 
 # Set working directory
@@ -8,20 +7,19 @@ WORKDIR /app
 COPY package.json yarn.lock* package-lock.json* ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci --legacy-peer-deps
 
-# Copy application code
+# Copy source code
 COPY . .
+
+# Create environment file
+RUN touch .env.local
 
 # Build the application
 RUN npm run build
 
-# Expose port
-EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/api/health || exit 1
+# Remove dev dependencies after build
+RUN npm prune --production
 
 # Start the application
-CMD ["npm", "start"]
+CMD [npm, start]

@@ -5,11 +5,11 @@ import { motion } from 'framer-motion'
 import { LucideIcon } from 'lucide-react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
-interface MetricCardProps {
+export interface MetricCardProps {
   title: string
   value: string
   change: string
-  changeType: 'positive' | 'negative'
+  changeType: 'positive' | 'negative' | 'neutral'
   icon: LucideIcon
   gradient: string
 }
@@ -34,7 +34,7 @@ export function MetricCard({
         </div>
         
         <div className={`flex items-center space-x-1 text-sm ${
-          changeType === 'positive' ? 'text-green-400' : 'text-red-400'
+          changeType === 'positive' ? 'text-green-400' : changeType === 'negative' ? 'text-red-400' : 'text-gray-400'
         }`}>
           {changeType === 'positive' ? (
             <TrendingUp className="w-4 h-4" />

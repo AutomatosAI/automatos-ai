@@ -19,14 +19,11 @@ from database import init_database, get_db
 from models import Base
 
 # Import API routers
-from api_agents import router as agents_router
-from api_workflows import router as workflows_router
-from api_documents import router as documents_router
-from api_system import router as system_router
-from api_document_processing import router as document_processing_router
-from api_workflow_enhanced import router as workflow_enhanced_router
-from api_context_engineering import router as context_engineering_router
-from api_routes import app as legacy_routes  # Keep existing routes
+from api.agents import router as agents_router
+from api.workflows import router as workflows_router
+from api.documents import router as documents_router
+from api.system import router as system_router
+from api.context import router as context_engineering_router
 
 # Import WebSocket manager
 from websocket_manager import manager, WebSocketEventType
@@ -77,15 +74,8 @@ app.include_router(agents_router)
 app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
-app.include_router(document_processing_router)
-app.include_router(workflow_enhanced_router)
 app.include_router(context_engineering_router)
 
-# Include legacy routes (from existing api_routes.py)
-try:
-    app.mount("/legacy", legacy_routes)
-except Exception as e:
-    logger.warning(f"Could not mount legacy routes: {e}")
 
 # Health check endpoint
 @app.get("/health")

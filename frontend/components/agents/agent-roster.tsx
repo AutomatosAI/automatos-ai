@@ -222,7 +222,7 @@ export function AgentRoster() {
       
     } catch (error) {
       console.error('Error updating agent status:', error)
-      alert(`Error updating agent status: ${error.message}`)
+      alert(`Error updating agent status: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   

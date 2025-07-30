@@ -1,0 +1,120 @@
+{
+  "version": "4.5.0",
+  "name": "csv-generate",
+  "description": "CSV and object generation implementing the Node.js `stream.Readable` API",
+  "keywords": [
+    "stream",
+    "generate",
+    "csv",
+    "object",
+    "backend",
+    "frontend"
+  ],
+  "bugs": "https://github.com/adaltas/node-csv-generate/issues",
+  "author": "David Worms <david@adaltas.com> (https://www.adaltas.com)",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.15.30",
+    "dedent": "^1.6.0",
+    "each": "^2.7.2",
+    "mocha": "~11.5.0",
+    "prettier": "^3.5.3",
+    "rollup": "^4.41.1",
+    "rollup-plugin-node-builtins": "^2.1.2",
+    "rollup-plugin-node-globals": "^1.4.0",
+    "should": "~13.2.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./sync": {
+      "import": {
+        "types": "./lib/sync.d.ts",
+        "default": "./lib/sync.js"
+      },
+      "require": {
+        "types": "./dist/cjs/sync.d.cts",
+        "default": "./dist/cjs/sync.cjs"
+      }
+    },
+    "./stream": {
+      "import": {
+        "types": "./lib/stream.d.ts",
+        "default": "./lib/stream.js"
+      },
+      "require": {
+        "types": "./dist/cjs/stream.d.cts",
+        "default": "./dist/cjs/stream.cjs"
+      }
+    },
+    "./browser/esm": {
+      "types": "./dist/esm/index.d.ts",
+      "default": "./dist/esm/index.js"
+    },
+    "./browser/esm/sync": {
+      "types": "./dist/esm/sync.d.ts",
+      "default": "./dist/esm/sync.js"
+    }
+  },
+  "files": [
+    "dist",
+    "lib"
+  ],
+  "homepage": "https://csv.js.org/generate",
+  "license": "MIT",
+  "main": "./dist/cjs/index.cjs",
+  "mocha": {
+    "inline-diffs": true,
+    "loader": "ts-node/esm",
+    "recursive": true,
+    "reporter": "spec",
+    "throw-deprecation": false,
+    "timeout": 40000
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adaltas/node-csv.git",
+    "directory": "packages/csv-generate"
+  },
+  "scripts": {
+    "build": "npm run build:rollup && npm run build:ts",
+    "build:rollup": "npx rollup -c",
+    "build:ts": "cp lib/index.d.ts dist/cjs/index.d.cts && cp lib/stream.d.ts dist/cjs/stream.d.cts && cp lib/sync.d.ts dist/cjs/sync.d.cts && cp lib/*.ts dist/esm",
+    "postbuild:ts": "find dist/cjs -name '*.d.cts' -exec sh -c \"sed -i \"s/\\.js'/\\.cjs'/g\" {} || sed -i '' \"s/\\.js'/\\.cjs'/g\" {}\" \\;",
+    "lint:check": "eslint",
+    "lint:fix": "eslint --fix",
+    "lint:ts": "tsc --noEmit true",
+    "preversion": "npm run build && git add dist",
+    "test": "mocha 'test/**/*.{js,ts}'",
+    "test:legacy": "mocha --ignore test/api.web_stream.js 'test/**/*.{js,ts}'"
+  },
+  "type": "module",
+  "types": "dist/esm/index.d.ts",
+  "typesVersions": {
+    "*": {
+      ".": [
+        "dist/esm/index.d.ts"
+      ],
+      "sync": [
+        "dist/esm/sync.d.ts"
+      ],
+      "browser/esm": [
+        "dist/esm/index.d.ts"
+      ],
+      "browser/esm/sync": [
+        "dist/esm/sync.d.ts"
+      ]
+    }
+  }
+}

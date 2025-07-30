@@ -59,10 +59,10 @@ class ContextService {
       const response = await apiClient.request('/api/context/stats');
       
       return {
-        contextQueries: response.contextQueries || 0,
-        retrievalSuccess: response.retrievalSuccess || 0,
-        avgResponseTime: response.avgResponseTime || '0s',
-        vectorEmbeddings: response.vectorEmbeddings || 0
+        contextQueries: (response as any).contextQueries || 0,
+        retrievalSuccess: (response as any).retrievalSuccess || 0,
+        avgResponseTime: (response as any).avgResponseTime || '0s',
+        vectorEmbeddings: (response as any).vectorEmbeddings || 0
       };
     } catch (error) {
       console.error('Error fetching context stats:', error);

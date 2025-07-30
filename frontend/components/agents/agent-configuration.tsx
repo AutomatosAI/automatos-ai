@@ -271,7 +271,7 @@ export function AgentConfiguration() {
       
     } catch (error) {
       console.error('Error saving configuration:', error)
-      alert(`Error saving configuration: ${error.message}`)
+      alert(`Error saving configuration: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setSaving(false)
     }

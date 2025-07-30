@@ -31,24 +31,21 @@ export function ActivityChart() {
         const agents = await apiClient.getAgents()
         agentCount = agents.filter(agent => agent.status === 'active').length
       } catch (err) {
-        // Use CPU usage as a proxy for agent activity
-        agentCount = Math.floor(systemMetrics.cpu.average_usage / 10) + 1
+        agentCount = 0  // NO FAKE DATA
       }
       
       try {
         const workflows = await apiClient.getWorkflows()
         workflowCount = workflows.filter(workflow => workflow.status === 'active').length
       } catch (err) {
-        // Use memory usage as a proxy for workflow activity
-        workflowCount = Math.floor(systemMetrics.memory.percent / 20) + 1
+        workflowCount = 0  // NO FAKE DATA
       }
       
       try {
         const documents = await apiClient.getDocuments()
         documentCount = documents.length
       } catch (err) {
-        // Use disk activity as a proxy for document processing
-        documentCount = Math.floor(systemMetrics.disk.percent / 5) + 2
+        documentCount = 0  // NO FAKE DATA  
       }
 
       const now = new Date()
@@ -80,9 +77,9 @@ export function ActivityChart() {
           hour: '2-digit', 
           minute: '2-digit' 
         }),
-        agents: Math.floor(Math.random() * 5) + 1,
-        workflows: Math.floor(Math.random() * 3) + 1,
-        documents: Math.floor(Math.random() * 10) + 5
+        agents: 0,
+        workflows: 0,
+        documents: 0
       }
 
       setData(prevData => {
@@ -109,9 +106,9 @@ export function ActivityChart() {
             hour: '2-digit', 
             minute: '2-digit' 
           }),
-          agents: Math.floor(Math.random() * 5) + 1,
-          workflows: Math.floor(Math.random() * 3) + 1,
-          documents: Math.floor(Math.random() * 10) + 5
+        agents: 0,
+        workflows: 0,
+        documents: 0
         })
       }
       

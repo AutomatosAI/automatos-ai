@@ -494,6 +494,45 @@ class EnhancedMCPBridge:
             log_level="info"
         )
 
+        @self.app.get("/api/system/metrics")        async def get_real_system_metrics():            """Get REAL system metrics from actual running system"""            try:                import psutil                import time                                # Get REAL metrics from the actual system                cpu_percent = psutil.cpu_percent(interval=1)                memory = psutil.virtual_memory()                disk = psutil.disk_usage("/")                network = psutil.net_io_counters()                                return {                    "cpu": {                        "average_usage": round(cpu_percent, 1),                        "cores": psutil.cpu_count()                    },                    "memory": {                        "percent": round(memory.percent, 1),                        "used_gb": round(memory.used / (1024**3), 1),                        "total_gb": round(memory.total / (1024**3), 1)                    },                    "disk": {                        "percent": round((disk.used / disk.total) * 100, 1),                        "used_gb": round(disk.used / (1024**3), 1),                        "total_gb": round(disk.total / (1024**3), 1)                    },                    "network": {                        "packets_sent": network.packets_sent,                        "packets_recv": network.packets_recv,                        "bytes_sent": network.bytes_sent,                        "bytes_recv": network.bytes_recv                    },                    "timestamp": time.time()                }            except Exception as e:                logger.error(f"Error getting real system metrics: {e}")                raise HTTPException(status_code=500, detail="Could not fetch system metrics")
+        # System Health Monitoring Module
+        @self.app.get("/api/system/metrics")
+        async def get_system_metrics():
+            """Get real system metrics - CPU, Memory, Disk"""
+            try:
+                import psutil
+                
+                cpu_percent = psutil.cpu_percent(interval=1)
+                memory = psutil.virtual_memory()
+                disk = psutil.disk_usage("/")
+                network = psutil.net_io_counters()
+                
+                return {
+                    "cpu": {
+                        "usage_percent": round(cpu_percent, 1),
+                        "cores": psutil.cpu_count()
+                    },
+                    "memory": {
+                        "usage_percent": round(memory.percent, 1),
+                        "used_gb": round(memory.used / (1024**3), 1),
+                        "total_gb": round(memory.total / (1024**3), 1)
+                    },
+                    "disk": {
+                        "usage_percent": round((disk.used / disk.total) * 100, 1),
+                        "used_gb": round(disk.used / (1024**3), 1),
+                        "total_gb": round(disk.total / (1024**3), 1)
+                    },
+                    "network": {
+                        "packets_sent": network.packets_sent,
+                        "packets_recv": network.packets_recv
+                    },
+                    "timestamp": time.time()
+                }
+            except Exception as e:
+                logger.error(f"Error getting system metrics: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+
 # Standalone execution
 if __name__ == "__main__":
     bridge = EnhancedMCPBridge()

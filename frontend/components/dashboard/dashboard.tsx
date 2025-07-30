@@ -18,7 +18,7 @@ import {
   Database,
   Cpu
 } from 'lucide-react'
-import { MetricCard } from './metric-card'
+import { MetricCard, type MetricCardProps } from './metric-card'
 import { ActivityChart } from './activity-chart'
 import { RecentActivities } from './recent-activities'
 import { SystemHealth } from './system-health'
@@ -39,12 +39,12 @@ export function Dashboard() {
   })
 
   // State for real data
-  const [metrics, setMetrics] = useState([
+  const [metrics, setMetrics] = useState<MetricCardProps[]>([
     {
       title: 'Active Agents',
       value: '0',
       change: '+0',
-      changeType: 'neutral' as const,
+      changeType: 'neutral',
       icon: Bot,
       gradient: 'from-orange-500 to-red-500'
     },
@@ -52,7 +52,7 @@ export function Dashboard() {
       title: 'Running Workflows',
       value: '0',
       change: '+0',
-      changeType: 'neutral' as const,
+      changeType: 'neutral',
       icon: GitBranch,
       gradient: 'from-primary to-orange-400'
     },
@@ -60,7 +60,7 @@ export function Dashboard() {
       title: 'Documents Processed',
       value: '0',
       change: '+0',
-      changeType: 'neutral' as const,
+      changeType: 'neutral',
       icon: FileText,
       gradient: 'from-red-500 to-pink-500'
     },
@@ -68,7 +68,7 @@ export function Dashboard() {
       title: 'System Health',
       value: '0%',
       change: '+0%',
-      changeType: 'neutral' as const,
+      changeType: 'neutral',
       icon: Activity,
       gradient: 'from-green-500 to-emerald-500'
     }
@@ -139,18 +139,18 @@ export function Dashboard() {
       
       // Fetch system health
       let systemHealthValue = '0%'
-      let systemHealthChange = 'neutral' as const
+      let systemHealthChange: 'positive' | 'neutral' | 'negative' = 'neutral'
       try {
         const health = await apiClient.getSystemHealth()
         if (health.status === 'healthy') {
           systemHealthValue = '98.7%'
-          systemHealthChange = 'positive' as const
+          systemHealthChange = 'positive'
         } else if (health.status === 'degraded') {
           systemHealthValue = '75.0%'
-          systemHealthChange = 'neutral' as const
+          systemHealthChange = 'neutral'
         } else {
           systemHealthValue = '25.0%'
-          systemHealthChange = 'negative' as const
+          systemHealthChange = 'negative'
         }
       } catch (error) {
         console.warn('Could not fetch system health:', error)
@@ -162,7 +162,7 @@ export function Dashboard() {
         const systemMetrics = await apiClient.getSystemMetrics()
         
         // Calculate active users (mock based on system activity)
-        const activeUsers = Math.floor(systemMetrics.cpu.average_usage / 5) + 1
+        const activeUsers = Math.floor(systemMetrics.cpu.usage_percent / 5) + 1
         
         // Calculate API calls per minute (mock based on network activity)
         const apiCallsPerMin = Math.floor((systemMetrics.network.packets_sent + systemMetrics.network.packets_recv) / 10000) || 42
@@ -170,15 +170,15 @@ export function Dashboard() {
         setSystemStats([
           {
             label: 'CPU Usage',
-            value: `${systemMetrics.cpu.average_usage.toFixed(1)}%`,
+            value: `${systemMetrics.cpu.usage_percent.toFixed(1)}%`,
             icon: Cpu,
-            color: systemMetrics.cpu.average_usage > 80 ? 'text-red-400' : systemMetrics.cpu.average_usage > 60 ? 'text-yellow-400' : 'text-blue-400'
+            color: systemMetrics.cpu.usage_percent > 80 ? 'text-red-400' : systemMetrics.cpu.usage_percent > 60 ? 'text-yellow-400' : 'text-blue-400'
           },
           {
             label: 'Memory Usage',
-            value: `${systemMetrics.memory.percent.toFixed(1)}%`,
+            value: `${systemMetrics.memory.usage_percent.toFixed(1)}%`,
             icon: Database,
-            color: systemMetrics.memory.percent > 80 ? 'text-red-400' : systemMetrics.memory.percent > 60 ? 'text-yellow-400' : 'text-green-400'
+            color: systemMetrics.memory.usage_percent > 80 ? 'text-red-400' : systemMetrics.memory.usage_percent > 60 ? 'text-yellow-400' : 'text-green-400'
           },
           {
             label: 'Active Users',
@@ -204,7 +204,7 @@ export function Dashboard() {
           title: 'Active Agents',
           value: activeAgents.toString(),
           change: `+${Math.max(0, activeAgents - 2)}`,
-          changeType: activeAgents > 2 ? 'positive' as const : 'neutral' as const,
+          changeType: activeAgents > 2 ? 'positive' : 'neutral',
           icon: Bot,
           gradient: 'from-orange-500 to-red-500'
         },
@@ -212,7 +212,7 @@ export function Dashboard() {
           title: 'Running Workflows',
           value: runningWorkflows.toString(),
           change: `+${Math.max(0, runningWorkflows - 1)}`,
-          changeType: runningWorkflows > 1 ? 'positive' as const : 'neutral' as const,
+          changeType: runningWorkflows > 1 ? 'positive' : 'neutral',
           icon: GitBranch,
           gradient: 'from-primary to-orange-400'
         },
@@ -220,7 +220,7 @@ export function Dashboard() {
           title: 'Documents Processed',
           value: documentsCount.toString(),
           change: `+${Math.max(0, documentsCount - 5)}`,
-          changeType: documentsCount > 5 ? 'positive' as const : 'neutral' as const,
+          changeType: documentsCount > 5 ? 'positive' : 'neutral',
           icon: FileText,
           gradient: 'from-red-500 to-pink-500'
         },
