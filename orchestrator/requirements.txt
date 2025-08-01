@@ -50,7 +50,7 @@ paramiko>=2.9.0
 jsonschema>=4.0.0
 
 # Additional AI/ML dependencies from docs
-pdfplumber==3.4.2
+pdfplumber==0.11.7
 chromadb==0.4.18
 openai==1.3.7
 anthropic==0.8.1

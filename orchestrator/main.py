@@ -5,6 +5,7 @@ Main FastAPI Application for Automotas AI
 
 Comprehensive API server with WebSocket support for real-time updates.
 """
+import sys
 
 import os
 import logging
@@ -15,22 +16,22 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 # Import database and models
-from database import init_database, get_db
-from models import Base
+from src.database.database import init_database, get_db
+from src.database.models import Base
 
 # Import API routers
-from api.agents import router as agents_router
-from api.workflows import router as workflows_router
-from api.documents import router as documents_router
-from api.system import router as system_router
-from api.context import router as context_engineering_router
-from api.skills import router as skills_router
-from api.patterns import router as patterns_router
-from api.statistics import router as statistics_router
-from api.templates import router as templates_router
+from src.api.agents import router as agents_router
+from src.api.workflows import router as workflows_router
+from src.api.documents import router as documents_router
+from src.api.system import router as system_router
+from src.api.context import router as context_engineering_router
+from src.api.skills import router as skills_router
+from src.api.patterns import router as patterns_router
+from src.api.statistics import router as statistics_router
+from src.api.templates import router as templates_router
 
 # Import WebSocket manager
-from websocket_manager import manager, WebSocketEventType
+from src.services.websocket_manager import manager, WebSocketEventType
 
 # Configure logging
 logging.basicConfig(
@@ -74,12 +75,13 @@ app.add_middleware(
 )
 
 # Include API routers
-app.include_router(agents_router)
+# MOVED BELOW
 app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
-app.include_router(skills_router)
+app.include_router(skills_router)  # Must come BEFORE agents_router
+app.include_router(agents_router)
 app.include_router(patterns_router)
 app.include_router(statistics_router)
 app.include_router(templates_router)
@@ -99,7 +101,7 @@ async def get_test_data():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "automotas-ai-api"}
+    return {"status": "healthy", "service": "automatos-ai-api"}
 
 @app.get("/")
 async def root():
@@ -211,7 +213,7 @@ async def health_check():
     """Basic health check endpoint"""
     return {
         "status": "healthy",
-        "service": "automotas-ai-api",
+        "service": "automatos-ai-api",
         "version": "1.0.0",
         "timestamp": "2025-07-26T00:00:00Z"
     }
@@ -249,7 +251,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=8001,
         reload=True,
         log_level="info"
     )

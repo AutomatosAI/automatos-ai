@@ -162,7 +162,7 @@ The enhanced system provides the foundation for Phase 2 (Context Engineering) wi
 ## 📁 File Structure
 
 ```
-automotas-ai/
+automatos-ai/
 ├── docker-compose.yml              # Complete infrastructure setup
 ├── .env.example                    # Environment configuration template
 ├── orchestrator/

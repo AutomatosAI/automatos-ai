@@ -53,7 +53,7 @@ services:
     env_file:
     - ./.env
     ports:
-    - ${MCP_PORT:-8000}:8001
+    - ${MCP_PORT:-8001}:8001
     environment:
     - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
     - REDIS_HOST=redis
@@ -82,7 +82,7 @@ services:
       - CMD
       - curl
       - -f
-      - http://localhost:8001/health
+      - http://localhost:8000/health
       interval: 30s
       timeout: 10s
       retries: 3

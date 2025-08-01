@@ -257,8 +257,8 @@ CREATE TABLE git_operations (
 
 1. **Clone Repository**
    ```bash
-   git clone https://github.com/Gerard161-Site/automotas-ai.git
-   cd automotas-ai/orchestrator
+   git clone https://github.com/Gerard161-Site/automatos-ai.git
+   cd automatos-ai/orchestrator
    ```
 
 2. **Install Dependencies**

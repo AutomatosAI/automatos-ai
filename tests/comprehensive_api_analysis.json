@@ -1445,7 +1445,7 @@
       "status_code": 200,
       "response": {
         "status": "healthy",
-        "service": "automotas-ai-api"
+        "service": "automatos-ai-api"
       },
       "duration": 0.1006166934967041,
       "error": null
