@@ -20,6 +20,93 @@ from src.services.websocket_manager import manager
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["document-processing"])
 
+# Basic CRUD endpoints for document management
+@router.get("/", response_model=List[Dict[str, Any]])
+async def list_documents(
+    limit: int = Query(default=50, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get a list of all documents with pagination."""
+    try:
+        documents = db.query(Document).offset(offset).limit(limit).all()
+        return [
+            {
+                "id": doc.id,
+                "filename": doc.filename,
+                "file_type": doc.file_type,
+                "file_size": doc.file_size,
+                "status": doc.status,
+                "chunk_count": doc.chunk_count,
+                "upload_date": doc.upload_date,
+                "created_by": doc.created_by
+            }
+            for doc in documents
+        ]
+    except Exception as e:
+        logger.error(f"Error listing documents: {e}")
+        return []
+
+@router.post("/upload")
+async def upload_document(document_data: Dict[str, Any], db: Session = Depends(get_db)):
+    """Upload a new document for processing."""
+    try:
+        content = document_data.get("content", "")
+        content_size = len(content.encode('utf-8')) if content else 0
+        
+        new_doc = Document(
+            filename=document_data.get("filename", "untitled.txt"),
+            original_filename=document_data.get("filename", "untitled.txt"),
+            file_type=document_data.get("document_type", "text"),
+            file_size=content_size,
+            file_path=f"/tmp/uploads/{document_data.get('filename', 'untitled.txt')}",
+            status="uploaded",
+            description=f"Uploaded document with {len(content)} characters",
+            doc_metadata={"content_preview": content[:200] + "..." if len(content) > 200 else content},
+            created_by="api"
+        )
+        
+        db.add(new_doc)
+        db.commit()
+        db.refresh(new_doc)
+        
+        return {
+            "id": new_doc.id,
+            "filename": new_doc.filename,
+            "status": "uploaded",
+            "file_size": content_size,
+            "message": "Document uploaded successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+@router.get("/{document_id}")
+async def get_document(document_id: int, db: Session = Depends(get_db)):
+    """Get a specific document by ID."""
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        return {
+            "id": document.id,
+            "filename": document.filename,
+            "file_type": document.file_type,
+            "file_size": document.file_size,
+            "status": document.status,
+            "chunk_count": document.chunk_count,
+            "upload_date": document.upload_date,
+            "description": document.description,
+            "created_by": document.created_by
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving document: {str(e)}")
+
+
 @router.get("/processing/pipeline")
 async def get_processing_pipeline(db: Session = Depends(get_db)):
     """Get document processing pipeline status and metrics"""

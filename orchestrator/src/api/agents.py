@@ -27,6 +27,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
         agent_type=agent.agent_type,
         status=agent.status,
         configuration=agent.configuration or {},
+        performance_metrics=getattr(agent, "performance_metrics", None),
         skills=[SkillResponse(
             id=skill.id,
             name=skill.name,
@@ -41,7 +42,8 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
         max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5),
         auto_start=getattr(agent, 'auto_start', False),
         created_at=agent.created_at,
-        updated_at=agent.updated_at
+        updated_at=agent.updated_at,
+        created_by=getattr(agent, "created_by", None)
     )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
