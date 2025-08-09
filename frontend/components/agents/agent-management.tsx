@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -10,104 +10,48 @@ import { AgentConfiguration } from './agent-configuration'
 import { AgentPerformance } from './agent-performance'
 import { AgentSkills } from './agent-skills'
 import { AgentCoordination } from './agent-coordination'
+import { MultiAgentDashboard } from './multi-agent-dashboard'
 import { CreateAgentModal } from './create-agent-modal'
 import { Button } from '@/components/ui/button'
-import { Plus, Bot, Settings, BarChart, Users, Zap, AlertCircle } from 'lucide-react'
-import { apiClient, Agent } from '@/lib/api'
+import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
 
 export function AgentManagement() {
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   })
 
-  // Fetch agents data
-  useEffect(() => {
-    const fetchAgents = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getAgents()
-        setAgents(data)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch agents')
-        console.error('Error fetching agents:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchAgents()
-  }, [])
-
-  // Calculate real stats from agents data
   const stats = [
     {
       label: 'Total Agents',
-      value: agents.length.toString(),
-      change: `${agents.length} agents configured`,
+      value: '24',
+      change: '+3 this week',
       icon: Bot,
       color: 'text-orange-400'
     },
     {
       label: 'Active Agents',
-      value: agents.filter(agent => agent.status === 'active').length.toString(),
-      change: `${Math.round((agents.filter(agent => agent.status === 'active').length / Math.max(agents.length, 1)) * 100)}% active`,
+      value: '18',
+      change: '75% utilization',
       icon: Zap,
       color: 'text-green-400'
     },
     {
       label: 'Agent Types',
-      value: [...new Set(agents.map(agent => agent.agent_type))].length.toString(),
-      change: `${[...new Set(agents.map(agent => agent.agent_type))].length} unique types`,
+      value: '8',
+      change: '4 custom types',
       icon: Settings,
       color: 'text-blue-400'
     },
     {
       label: 'Avg Performance',
-      value: agents.length > 0 ? 
-        `${Math.round(agents.reduce((acc, agent) => 
-          acc + (agent.performance_metrics?.success_rate || 0), 0) / agents.length * 100)}%` : 
-        '0%',
-      change: 'Success rate average',
+      value: '94.2%',
+      change: '+2.1% this month',
       icon: BarChart,
       color: 'text-purple-400'
     }
   ]
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading agent management...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
-          <p className="text-red-500 mb-2">Error loading agent management</p>
-          <p className="text-sm text-muted-foreground">{error}</p>
-          <Button 
-            onClick={() => window.location.reload()} 
-            className="mt-4"
-            variant="outline"
-          >
-            Retry
-          </Button>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-8">
@@ -172,11 +116,15 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="roster" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+        <Tabs defaultValue="dashboard" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
+            <TabsTrigger value="dashboard" className="flex items-center space-x-2">
+              <Brain className="w-4 h-4" />
+              <span className="hidden sm:inline">Multi-Agent</span>
+            </TabsTrigger>
             <TabsTrigger value="roster" className="flex items-center space-x-2">
               <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Agent Roster</span>
+              <span className="hidden sm:inline">Roster</span>
             </TabsTrigger>
             <TabsTrigger value="skills" className="flex items-center space-x-2">
               <Zap className="w-4 h-4" />
@@ -184,7 +132,7 @@ export function AgentManagement() {
             </TabsTrigger>
             <TabsTrigger value="configuration" className="flex items-center space-x-2">
               <Settings className="w-4 h-4" />
-              <span className="hidden sm:inline">Configuration</span>
+              <span className="hidden sm:inline">Config</span>
             </TabsTrigger>
             <TabsTrigger value="coordination" className="flex items-center space-x-2">
               <Bot className="w-4 h-4" />
@@ -195,6 +143,10 @@ export function AgentManagement() {
               <span className="hidden sm:inline">Analytics</span>
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="dashboard" className="space-y-6">
+            <MultiAgentDashboard />
+          </TabsContent>
 
           <TabsContent value="roster" className="space-y-6">
             <AgentRoster />
