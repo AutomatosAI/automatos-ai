@@ -1,7 +1,7 @@
-# Automotas AI v2.5 - Local Development Setup Guide
+# Automatos AI v2.5 - Local Development Setup Guide
 
 ## Overview
-This guide provides instructions for setting up the Automotas AI v2.5 project locally for development and testing.
+This guide provides instructions for setting up the Automatos AI v2.5 project locally for development and testing.
 
 ## Prerequisites
 - Ubuntu 22.04 or similar Linux distribution

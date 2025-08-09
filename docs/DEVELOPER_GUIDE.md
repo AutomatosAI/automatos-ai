@@ -1,4 +1,4 @@
-# Developer Onboarding Guide - Automotas AI
+# Developer Onboarding Guide - Automatos AI
 
 ## 🚀 Quick Start
 

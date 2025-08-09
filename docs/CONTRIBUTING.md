@@ -121,7 +121,7 @@
 ### **Step 1: Choose Your Adventure**
 
 #### **🔰 First-Time Contributors**
-1. **Browse [Good First Issues](https://github.com/automotas-ai/automotas/labels/good%20first%20issue)**
+1. **Browse [Good First Issues](https://github.com/AutomatosAI/automatos-ai/labels/good%20first%20issue)**
 2. **Join our [Discord community](https://discord.gg/automotas)**
 3. **Read this contributing guide completely**
 4. **Set up your development environment**
@@ -760,9 +760,9 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.automotas.ai/v2
+  - url: https://api.automatos.ai/v2
     description: Production server
-  - url: https://staging-api.automotas.ai/v2
+  - url: https://staging-api.automatos.ai/v2
     description: Staging server
   - url: http://localhost:8002/v2
     description: Development server
@@ -1055,7 +1055,7 @@ automatos workflow create \
   --environment production
 
 # Using API
-curl -X POST https://api.automotas.ai/v2/workflows \
+curl -X POST https://api.automatos.ai/v2/workflows \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1148,7 +1148,7 @@ For custom integrations, connect to live updates:
 
 ```javascript
 // Connect to workflow updates
-const ws = new WebSocket(`wss://api.automotas.ai/v2/ws/workflows/${workflowId}`);
+const ws = new WebSocket(`wss://api.automatos.ai/v2/ws/workflows/${workflowId}`);
 
 ws.onmessage = (event) => {
   const update = JSON.parse(event.data);
@@ -1329,7 +1329,7 @@ If you encounter any issues:
 
 - **📖 [Documentation](https://docs.automotas.ai)**: Comprehensive guides and references
 - **💬 [Community Discord](https://discord.gg/automotas)**: Get help from the community
-- **🐛 [GitHub Issues](https://github.com/automotas-ai/automotas/issues)**: Report bugs or request features
+- **🐛 [GitHub Issues](https://github.com/AutomatosAI/automatos-ai/issues)**: Report bugs or request features
 - **📧 [Support Email](mailto:support@automotas.ai)**: Direct support for complex issues
 - **📞 [Enterprise Support](https://automotas.ai/enterprise)**: Priority support for enterprise customers
 
@@ -1471,7 +1471,7 @@ If you encounter any issues:
 
 **Ready to make your mark on the future of AI automation?**
 
-🚀 **[Start Contributing Today](https://github.com/automotas-ai/automotas/issues/good%20first%20issue)**
+🚀 **[Start Contributing Today](https://github.com/AutomatosAI/automatos-ai/issues/good%20first%20issue)**
 
 *Join thousands of developers building the future of intelligent automation.*
 

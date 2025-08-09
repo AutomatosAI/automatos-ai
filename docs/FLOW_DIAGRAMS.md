@@ -1,4 +1,4 @@
-# Automotas AI - System Flow Diagrams
+# Automatos AI - System Flow Diagrams
 
 ## 🔄 Request Flow Diagrams
 

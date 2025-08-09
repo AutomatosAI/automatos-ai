@@ -380,7 +380,7 @@ Our mission is to eliminate the complexity barrier that prevents teams from leve
 
 #### **Development Updates**
 - **📱 Twitter**: [@automotas_ai](https://twitter.com/automotas_ai) - Daily development updates
-- **💻 GitHub**: [automotas-ai/automotas](https://github.com/automotas-ai/automotas) - Code and issue tracking
+- **💻 GitHub**: [automotas-ai/automotas](https://github.com/AutomatosAI/automatos-ai) - Code and issue tracking
 - **📝 Blog**: [blog.automotas.ai](https://blog.automotas.ai) - Deep-dive technical articles
 - **📧 Newsletter**: Monthly progress reports and insights
 
@@ -393,8 +393,8 @@ Our mission is to eliminate the complexity barrier that prevents teams from leve
 ### **Feedback & Input**
 
 #### **Product Feedback**
-- **Feature Requests**: [GitHub Issues](https://github.com/automotas-ai/automotas/issues)
-- **Roadmap Input**: [GitHub Discussions](https://github.com/automotas-ai/automotas/discussions)
+- **Feature Requests**: [GitHub Issues](https://github.com/AutomatosAI/automatos-ai/issues)
+- **Roadmap Input**: [GitHub Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)
 - **User Research**: Participate in user interviews and surveys
 - **Beta Testing**: Early access to new features and capabilities
 

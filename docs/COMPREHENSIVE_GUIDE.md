@@ -69,8 +69,8 @@ Automatos AI is a revolutionary **multi-agent orchestration platform** that tran
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/automotas-ai/automotas.git
-cd automotas
+git clone https://github.com/AutomatosAI/automatos-ai.git
+cd automatos-ai
 
 # 2. Configure environment
 cp .env.example .env
@@ -81,7 +81,7 @@ docker-compose up -d
 
 # 4. Access the platform
 echo "🎉 Platform ready at http://localhost:3000"
-echo "📚 API docs at http://localhost:8002/docs"
+echo "📚 API docs at http://localhost:8000/docs"
 ```
 
 ### **📋 System Requirements**

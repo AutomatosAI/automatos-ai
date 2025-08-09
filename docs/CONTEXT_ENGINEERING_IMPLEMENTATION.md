@@ -3,7 +3,7 @@
 
 ## Overview
 
-This document outlines the implementation of David Kimaii's Context Engineering research into the Automotas AI system. The implementation addresses critical gaps identified in the external code review and provides comprehensive mathematical foundations for advanced context processing.
+This document outlines the implementation of David Kimaii's Context Engineering research into the Automatos AI system. The implementation addresses critical gaps identified in the external code review and provides comprehensive mathematical foundations for advanced context processing.
 
 ## Architecture Overview
 

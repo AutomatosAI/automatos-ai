@@ -30,3 +30,5 @@ id_rsa*
 logs/
 *.log
 
+.DS_Store
+docs/*.pdf

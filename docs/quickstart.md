@@ -54,7 +54,7 @@ git --version      # Should be 2.30+
 
 ### **Step 1: Clone Repository**
 ```bash
-git clone https://github.com/automotas-ai/automotas.git
+git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automotas
 ```
 
@@ -326,7 +326,7 @@ curl -H "Authorization: Bearer your_api_key_here" \
 
 ### **Getting Help**
 - **💬 [Discord Community](https://discord.gg/automotas)**: Real-time help from the community
-- **🐛 [GitHub Issues](https://github.com/automotas-ai/automotas/issues)**: Report bugs or request features  
+- **🐛 [GitHub Issues](https://github.com/AutomatosAI/automatos-ai/issues)**: Report bugs or request features  
 - **📧 [Support Email](mailto:support@automotas.ai)**: Direct technical support
 - **📖 [Documentation](https://docs.automotas.ai)**: Comprehensive guides and references
 

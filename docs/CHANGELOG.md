@@ -439,7 +439,7 @@ The first stable release of Automatos AI, providing core multi-agent orchestrati
 We welcome community contributions to keep this changelog accurate and comprehensive:
 
 ### **How to Contribute**
-1. **Report Missing Changes**: Notice something missing? [Open an issue](https://github.com/automotas-ai/automotas/issues)
+1. **Report Missing Changes**: Notice something missing? [Open an issue](https://github.com/AutomatosAI/automatos-ai/issues)
 2. **Suggest Improvements**: Have ideas for better changelog format? Join our [Discord](https://discord.gg/automotas)
 3. **Add Context**: Help add more context to existing entries
 4. **Translation**: Help translate changelog for international users
@@ -456,12 +456,12 @@ We welcome community contributions to keep this changelog accurate and comprehen
 ## 📞 Support & Feedback
 
 ### **Found an Issue?**
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/automotas-ai/automotas/issues)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/AutomatosAI/automatos-ai/issues)
 - 💬 **Community Support**: [Discord](https://discord.gg/automotas)
 - 📧 **Direct Support**: [support@automotas.ai](mailto:support@automotas.ai)
 
 ### **Have Feedback?**
-- 💡 **Feature Requests**: [GitHub Discussions](https://github.com/automotas-ai/automotas/discussions)
+- 💡 **Feature Requests**: [GitHub Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)
 - 🗳️ **Roadmap Input**: [Roadmap Discussions](ROADMAP.md)
 - 📊 **User Research**: Participate in user interviews and surveys
 

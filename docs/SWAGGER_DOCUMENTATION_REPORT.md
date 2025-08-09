@@ -3,7 +3,7 @@
 
 ## 📋 Overview
 
-This document summarizes the comprehensive enhancements made to the Automotas AI API Swagger documentation to provide world-class developer experience and API discoverability.
+This document summarizes the comprehensive enhancements made to the Automatos AI API Swagger documentation to provide world-class developer experience and API discoverability.
 
 ## 🎯 Key Enhancements Implemented
 
@@ -219,7 +219,7 @@ swagger_ui_parameters={
 
 ## 🎯 Conclusion
 
-The enhanced Swagger FastAPI documentation transforms the Automotas AI API into a world-class developer platform. With comprehensive examples, rich documentation, and interactive testing capabilities, developers can now:
+The enhanced Swagger FastAPI documentation transforms the Automatos AI API into a world-class developer platform. With comprehensive examples, rich documentation, and interactive testing capabilities, developers can now:
 
 1. **Quickly Understand** the API capabilities and structure
 2. **Rapidly Prototype** with comprehensive examples
@@ -230,4 +230,4 @@ The documentation now serves as both a comprehensive reference and an interactiv
 
 ---
 
-**🌟 Ready for Production**: The enhanced API documentation is production-ready and positions Automotas AI as the leading open-source AI orchestration platform with developer-first approach.
+**🌟 Ready for Production**: The enhanced API documentation is production-ready and positions Automatos AI as the leading open-source AI orchestration platform with developer-first approach.

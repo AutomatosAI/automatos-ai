@@ -1,7 +1,7 @@
 # Frontend Functionality Fixes Report
 
 **Date:** July 28, 2025  
-**System:** Automotas AI Multi-Agent Orchestration Platform  
+**System:** Automatos AI Multi-Agent Orchestration Platform  
 **Backend:** http://localhost:8002  
 **Frontend:** http://localhost:3000  
 
