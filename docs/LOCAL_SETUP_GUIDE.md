@@ -28,14 +28,14 @@ sudo -u postgres psql -c "CREATE DATABASE orchestrator_db;"
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secure_password_123';"
 
 # Initialize database schema
-cd ~/automatos-ai-v2.5/automatos-ai/automatos-ai/orchestrator
+cd automatos-ai/orchestrator
 sudo -u postgres psql -d orchestrator_db -f init.sql
 ```
 
 ### 2. Backend Setup
 ```bash
 # Navigate to orchestrator directory
-cd ~/automatos-ai-v2.5/automatos-ai/automatos-ai/orchestrator
+cd automatos-ai/orchestrator
 
 # Install Python dependencies
 pip3 install -r requirements.txt
@@ -48,7 +48,7 @@ python3 main.py
 ### 3. Frontend Setup
 ```bash
 # Navigate to frontend directory
-cd ~/automatos-ai-v2.5/automatos-ai/automatos-ai/frontend/app
+cd automatos-ai/frontend
 
 # Install Node.js dependencies
 npm install --legacy-peer-deps
@@ -60,7 +60,7 @@ npm run dev
 ## Configuration Files
 
 ### Backend Environment (.env)
-Location: `~/automatos-ai-v2.5/automatos-ai/automatos-ai/.env`
+Location: `automatos-ai/orchestrator/.env`
 ```env
 # Database Configuration
 POSTGRES_DB=orchestrator_db
@@ -92,7 +92,7 @@ LOG_LEVEL=INFO
 ```
 
 ### Frontend Environment (.env.local)
-Location: `~/automatos-ai-v2.5/automatos-ai/automatos-ai/frontend/app/.env.local`
+Location: `automatos-ai/frontend/.env.local`
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
@@ -116,8 +116,8 @@ NEXTAUTH_SECRET=automatos_nextauth_secret_2024_local_dev
 4. **Database Initialization**: Ensured proper PostgreSQL setup with required extensions
 
 ### Updated Docker Compose Configuration:
-- Main compose file: `~/automatos-ai-v2.5/automatos-ai/automatos-ai/docker-compose.yml`
-- Orchestrator compose file: `~/automatos-ai-v2.5/automatos-ai/automatos-ai/orchestrator/docker-compose.yml`
+- Main compose file: `automatos-ai/docker-compose.yml`
+- Orchestrator compose file: `automatos-ai/orchestrator/docker-compose.yml`
 
 ## Testing the Setup
 
@@ -178,13 +178,13 @@ netstat -tlnp | grep -E "(8000|3000|5432|6379)"
 
 2. **Start Backend**
    ```bash
-   cd ~/automatos-ai-v2.5/automatos-ai/automatos-ai/orchestrator
+   cd automatos-ai/orchestrator
    python3 main.py
    ```
 
 3. **Start Frontend** (in separate terminal)
    ```bash
-   cd ~/automatos-ai-v2.5/automatos-ai/automatos-ai/frontend/app
+   cd automatos-ai/frontend
    npm run dev
    ```
 
