@@ -104,9 +104,12 @@ graph TB
             AGENTS[Agents API]
             WORKFLOWS[Workflows API]
             DOCS[Documents API]
-            SKILLS[Skills API]
+            MEMORY[Memory API]
+            EVALUATION[Evaluation API]
+            MULTIAGENT[Multi-Agent API]
+            FIELD[Field Theory API]
             SYSTEM[System API]
-            CONTEXT[Context API]
+            CONTEXT[Context Engineering API]
         end
     end
     
@@ -151,9 +154,12 @@ graph TB
     MAIN --> AGENTS
     MAIN --> WORKFLOWS
     MAIN --> DOCS
-    MAIN --> SKILLS
     MAIN --> SYSTEM
     MAIN --> CONTEXT
+     MAIN --> MEMORY
+     MAIN --> EVALUATION
+     MAIN --> MULTIAGENT
+     MAIN --> FIELD
     
     AGENTS --> LLM
     AGENTS --> WS_MGR

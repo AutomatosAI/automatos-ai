@@ -52,11 +52,11 @@ curl http://localhost:8000/api/system/metrics
 
 ### Adding New API Endpoints
 
-1. **Create Router** (`src/api/your_module.py`)
+1. **Create Router** (`orchestrator/api/your_module.py`)
 ```python
 from fastapi import APIRouter, Depends
-from src.database.database import get_db
-from src.database.models import YourModel
+from database.database import get_db
+from database.models import YourModel
 
 router = APIRouter(prefix=/api/your-module, tags=[your-module])
 
@@ -67,13 +67,13 @@ async def list_items(db: Session = Depends(get_db)):
 
 2. **Register Router** (`main.py`)
 ```python
-from src.api.your_module import router as your_router
+from api.your_module import router as your_router
 app.include_router(your_router)
 ```
 
 ### Adding Database Models
 
-1. **Define Model** (`src/database/models.py`)
+1. **Define Model** (`orchestrator/database/models.py`)
 ```python
 class YourModel(Base):
     __tablename__ = your_table
@@ -91,7 +91,7 @@ docker compose exec backend_api alembic upgrade head
 
 ### Adding Services
 
-1. **Create Service** (`src/services/your_service.py`)
+1. **Create Service** (`orchestrator/services/your_service.py`)
 ```python
 import logging
 
@@ -108,7 +108,7 @@ class YourService:
 
 2. **Use in API**
 ```python
-from src.services.your_service import YourService
+from services.your_service import YourService
 
 service = YourService()
 result = await service.process(input_data)
@@ -192,7 +192,7 @@ async def create_item(item_data: ItemCreate, db: Session = Depends(get_db)):
 
 ### 3. WebSocket Events
 ```python
-from src.services.websocket_manager import manager
+from services.websocket_manager import manager
 
 async def notify_clients(event_type: str, data: dict):
     await manager.broadcast({
@@ -257,7 +257,7 @@ def test_agent_workflow_integration():
 1. **Import Errors**
    - Check file paths in `src/` directory
    - Verify `__init__.py` files exist
-   - Use absolute imports: `from src.database.models import Agent`
+   - Use absolute imports: `from database.models import Agent`
 
 2. **Database Connection**
    - Verify PostgreSQL container is running
