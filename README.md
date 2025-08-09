@@ -105,7 +105,7 @@ cd orchestrator
 python -m pytest
 
 # Run with coverage
-python -m pytest --cov=src
+python -m pytest --cov=orchestrator
 
 # Async tests
 python -m pytest tests/test_agents.py -v
@@ -141,8 +141,8 @@ API_KEY=your_internal_api_key
 
 ## 📖 Documentation
 
-- **[Architecture Guide](./orchestrator/ARCHITECTURE.md)**: System design and components
-- **[Developer Guide](./orchestrator/DEVELOPER_GUIDE.md)**: Development setup and workflows
+- **[Architecture Guide](docs/architecture.md)**: System design and components
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Development setup and workflows
 - **[API Documentation](http://localhost:8000/docs)**: Interactive OpenAPI docs
 
 ## 🤝 Contributing
