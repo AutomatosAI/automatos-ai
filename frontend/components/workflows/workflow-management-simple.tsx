@@ -19,12 +19,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiClient } from '@/lib/api'
+import { CreateWorkflowModal } from './create-workflow-modal'
+import { RunWorkflowModal } from './run-workflow-modal'
+import { EditWorkflowModal } from './edit-workflow-modal'
 
 export function WorkflowManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [workflows, setWorkflows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [editId, setEditId] = useState<string | null>(null)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -78,6 +84,9 @@ export function WorkflowManagement() {
     }
 
     loadWorkflows()
+    const h = () => loadWorkflows()
+    window.addEventListener('workflows:refresh', h)
+    return () => window.removeEventListener('workflows:refresh', h)
   }, [])
 
   return (
@@ -98,7 +107,7 @@ export function WorkflowManagement() {
           </p>
         </div>
         
-        <Button className="gradient-accent hover:opacity-90 transition-opacity">
+        <Button className="gradient-accent hover:opacity-90 transition-opacity" onClick={()=>setCreateOpen(true)}>
           <Plus className="w-4 h-4 mr-2" />
           Create Workflow
         </Button>
@@ -218,7 +227,7 @@ export function WorkflowManagement() {
             {/* Workflow List */}
             {!loading && !error && workflows.length > 0 && (
               <div className="space-y-4">
-                {workflows.map((workflow, index) => (
+                {workflows.filter(w => !searchTerm || (w.name||'').toLowerCase().includes(searchTerm.toLowerCase())).map((workflow, index) => (
                   <Card key={workflow.id} className="glass-card">
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between">
@@ -228,9 +237,16 @@ export function WorkflowManagement() {
                             {workflow.description || 'No description'}
                           </p>
                         </div>
-                        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
-                          {workflow.status || 'unknown'}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">{workflow.status || 'unknown'}</Badge>
+                          <Button size="sm" variant="secondary" onClick={()=>setRunId(String(workflow.id))}>Run</Button>
+                          <Button size="sm" variant="outline" onClick={()=>setEditId(String(workflow.id))}>Edit</Button>
+                          <Button size="sm" variant="destructive" onClick={async ()=>{
+                            if (!confirm('Delete this workflow?')) return
+                            await apiClient.deleteWorkflow(workflow.id)
+                            try { window.dispatchEvent(new Event('workflows:refresh')) } catch {}
+                          }}>Delete</Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -278,6 +294,9 @@ export function WorkflowManagement() {
             </Card>
           </TabsContent>
         </Tabs>
+        <CreateWorkflowModal open={createOpen} onClose={()=>setCreateOpen(false)} />
+        {runId ? <RunWorkflowModal open={!!runId} onClose={()=>setRunId(null)} id={runId} /> : null}
+        {editId ? <EditWorkflowModal open={!!editId} onClose={()=>setEditId(null)} id={editId} /> : null}
       </motion.div>
     </div>
   )

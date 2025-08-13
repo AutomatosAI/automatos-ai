@@ -10,10 +10,11 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
+import uuid
 from datetime import datetime
 
 # Import database and models
@@ -30,9 +31,18 @@ from api.memory import router as memory_router
 from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
 from api.field_theory import router as field_theory_router
+from api.context_policy import router as context_policy_router
+from api.api_code_graph import router as code_graph_router
+from api.api_playbooks import router as playbooks_router
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
+from utils.logging_adapter import (
+    install_request_context_logging,
+    set_request_id,
+    clear_request_id,
+    request_id_var,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -60,7 +70,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app with enhanced documentation
 app = FastAPI(
-    title="🤖 Automotas AI API",
+    title="🤖 Automatos AI API",
     description="""
     ## 🚀 Comprehensive API for Automotas AI Platform
     
@@ -165,8 +175,8 @@ app = FastAPI(
     """,
     version="1.0.0",
     contact={
-        "name": "Automotas AI Development Team",
-        "url": "https://github.com/automotas-ai/platform",
+        "name": "Automatos AI Development Team",
+        "url": "https://github.com/AutomatosAI/automatos-ai",
         "email": "developers@automotas.ai"
     },
     license_info={
@@ -179,7 +189,7 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": "https://api.automotas.ai",
+            "url": "https://api.automatos.ai",
             "description": "Production server"
         }
     ],
@@ -209,11 +219,32 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Install logging context filter and add request-id middleware
+install_request_context_logging()
+
+@app.middleware("http")
+async def add_request_id_middleware(request, call_next):
+    inbound = request.headers.get("X-Request-ID")
+    token = set_request_id(inbound or uuid.uuid4().hex[:12])
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request.headers.get("X-Request-ID") or request_id_var.get()
+        return response
+    finally:
+        clear_request_id(token)
+
+# Simple API key auth dependency
+def require_api_key(x_api_key: str = Header(None)):
+    required = os.getenv("API_KEY")
+    if required and x_api_key != required:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return True
 
 # Include API routers
 app.include_router(agents_router)
@@ -225,6 +256,9 @@ app.include_router(memory_router)
 app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
+app.include_router(context_policy_router)
+app.include_router(code_graph_router)
+app.include_router(playbooks_router)
 
 # Include legacy routes (from existing api_routes.py)
 try:
@@ -434,7 +468,7 @@ async def health_check():
         
         return {
             "status": overall_status,
-            "service": "automotas-ai-api",
+            "service": "automatos-ai-api",
             "version": "1.0.0",
             "timestamp": datetime.utcnow().isoformat(),
             
@@ -500,7 +534,7 @@ async def root():
     documentation links, and system information to help developers get started quickly.
     """
     return {
-        "service": "Automotas AI API Server",
+        "service": "Automatos AI API Server",
         "version": "1.0.0",
         "status": "operational",
         "description": "World's Most Advanced Multi-Agent AI Orchestration Platform",
@@ -586,9 +620,9 @@ async def root():
         },
         
         "📞 support": {
-            "documentation": "https://docs.automotas.ai",
-            "github": "https://github.com/automotas-ai/platform",
-            "community": "https://community.automotas.ai"
+            "documentation": "https://docs.automatos.ai",
+            "github": "https://github.com/AutomatosAI/automatos-ai",
+            "community": "https://community.automatos.ai"
         },
         
         "⚡ performance": {

@@ -101,6 +101,9 @@ class Workflow(Base):
     description = Column(Text)
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
+    owner = Column(String(255), nullable=True)
+    tags = Column(JSON, nullable=True)
+    default_policy_id = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
@@ -279,8 +282,11 @@ class PatternResponse(BaseModel):
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    workflow_definition: Dict[str, Any]
+    workflow_definition: Dict[str, Any] = Field(default_factory=dict)
     agent_ids: Optional[List[int]] = []
+    owner: Optional[str] = None
+    tags: Optional[List[str]] = []
+    default_policy_id: Optional[str] = None
 
 class WorkflowUpdate(BaseModel):
     name: Optional[str] = None
@@ -288,6 +294,9 @@ class WorkflowUpdate(BaseModel):
     workflow_definition: Optional[Dict[str, Any]] = None
     status: Optional[WorkflowStatus] = None
     agent_ids: Optional[List[int]] = None
+    owner: Optional[str] = None
+    tags: Optional[List[str]] = None
+    default_policy_id: Optional[str] = None
 
 class WorkflowResponse(BaseModel):
     id: int
@@ -295,6 +304,9 @@ class WorkflowResponse(BaseModel):
     description: Optional[str]
     workflow_definition: Dict[str, Any]
     status: str
+    owner: Optional[str]
+    tags: Optional[List[str]]
+    default_policy_id: Optional[str]
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str]

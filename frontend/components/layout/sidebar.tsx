@@ -59,6 +59,12 @@ const navigationItems = [
     href: '/analytics',
     icon: BarChart3,
     description: 'Metrics and system performance'
+  },
+  {
+    name: 'Playbooks',
+    href: '/playbooks',
+    icon: FileText,
+    description: 'Mine and manage playbooks'
   }
 ]
 

@@ -1,27 +1,44 @@
+"""
+Legacy cognitive patch methods (safe no-op).
 
-# Add these three methods to EnhancedTwoTierOrchestrator class around line 750
+This module previously contained class-bound methods intended to be
+manually inserted into `EnhancedTwoTierOrchestrator`. It caused import-time
+syntax errors. It is now a safe, importable placeholder to avoid breaking
+tooling or application startup. If you need these utilities, wire them
+explicitly in the orchestrator and write proper tests.
+"""
 
-    async def cognitive_task_breakdown(self, task_prompt: str):
-        """Break down task prompt into specific coding tasks"""
-        try:
-            logger.info(f"Breaking down task: {task_prompt[:100]}...")
-            tasks = [
-                {"task": "create_main_file", "description": "Create main hello world Python application", "file": "app.py", "content_type": "python_code"},
-                {"task": "create_tests", "description": "Create unit tests for the application", "file": "test_app.py", "content_type": "python_test"},
-                {"task": "create_docs", "description": "Create README documentation", "file": "README.md", "content_type": "documentation"},
-                {"task": "create_requirements", "description": "Create requirements.txt", "file": "requirements.txt", "content_type": "requirements"}
-            ]
-            logger.info(f"Task breakdown completed: {len(tasks)} tasks generated")
-            return tasks
-        except Exception as e:
-            logger.error(f"Task breakdown failed: {e}")
-            return []
+from __future__ import annotations
 
-    async def cognitive_content_generation(self, task, project_path: str):
-        """Generate specific file content based on task type"""
-        try:
-            content_type = task.get("content_type", "")
-            if content_type == "python_code":
-                return '''#!/usr/bin/env python3
-def hello_world():
-    return "Hello, World"""
+from typing import Any, Dict, List
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def cognitive_task_breakdown(task_prompt: str) -> List[Dict[str, Any]]:
+    """Return an empty task list by default.
+
+    This placeholder avoids accidental side-effects at import time.
+    Replace with a concrete implementation and explicit wiring where needed.
+    """
+    try:
+        logger.info("cognitive_task_breakdown invoked (no-op placeholder)")
+        return []
+    except Exception as exc:  # pragma: no cover
+        logger.error("cognitive_task_breakdown failed: %s", exc)
+        return []
+
+
+async def cognitive_content_generation(task: Dict[str, Any], project_path: str) -> str:
+    """Return an empty string by default.
+
+    This placeholder avoids accidental side-effects at import time.
+    Replace with a concrete implementation and explicit wiring where needed.
+    """
+    try:
+        logger.info("cognitive_content_generation invoked (no-op placeholder)")
+        return ""
+    except Exception as exc:  # pragma: no cover
+        logger.error("cognitive_content_generation failed: %s", exc)
+        return ""

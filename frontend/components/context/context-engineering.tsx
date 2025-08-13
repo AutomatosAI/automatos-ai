@@ -27,6 +27,9 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { PolicyEditor } from '@/components/context/PolicyEditor'
+import { AssemblyPreview } from '@/components/context/AssemblyPreview'
+import { usePolicy, useAssemble, useUpsertPolicy } from '@/hooks/use-policy'
 import { contextService, type ContextStats, type ContextQuery, type ContextPattern, type ContextSource, type RAGPerformanceData } from '@/lib/context-service'
 import { ConfigureRAGModal } from './configure-rag-modal'
 
@@ -93,6 +96,21 @@ export function ContextEngineering() {
     triggerOnce: true,
     threshold: 0.1,
   })
+
+  // Policy tab state/hooks
+  const POLICY_ID = 'code_assistant'
+  const { data: policyData } = usePolicy(POLICY_ID)
+  const [policy, setPolicy] = useState<any>(null)
+  useEffect(() => {
+    if (policyData && !policy) {
+      // backend may wrap in { policy }
+      // @ts-ignore
+      setPolicy((policyData as any)?.policy || policyData)
+    }
+  }, [policyData])
+  const assemble = useAssemble(POLICY_ID)
+  const upsert = useUpsertPolicy(POLICY_ID)
+  const [testQuery, setTestQuery] = useState('Summarize main ideas from this document')
 
   // Load real data from backend
   useEffect(() => {
@@ -259,7 +277,7 @@ export function ContextEngineering() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="performance" className="flex items-center space-x-2">
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -271,6 +289,10 @@ export function ContextEngineering() {
             <TabsTrigger value="patterns" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
               <span className="hidden sm:inline">Patterns</span>
+            </TabsTrigger>
+            <TabsTrigger value="policy" className="flex items-center space-x-2">
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">Policy</span>
             </TabsTrigger>
             <TabsTrigger value="optimization" className="flex items-center space-x-2">
               <Brain className="w-4 h-4" />
@@ -412,6 +434,51 @@ export function ContextEngineering() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="policy" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Policy Editor</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        placeholder="Test query..."
+                        value={testQuery}
+                        onChange={(e) => setTestQuery(e.target.value)}
+                        className="bg-secondary/50 border-secondary focus:border-primary/50"
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => assemble.mutate({ q: testQuery })}
+                        disabled={assemble.isPending}
+                      >
+                        Assemble
+                      </Button>
+                      <Button
+                        onClick={() => policy && upsert.mutate({ policy })}
+                        disabled={!policy || upsert.isPending}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                    <PolicyEditor policy={policy || {}} onChange={setPolicy} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Assembly Preview</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <AssemblyPreview result={assemble.data} />
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="queries" className="space-y-6">

@@ -54,23 +54,46 @@ class PerformanceService {
     try {
       // Get real system metrics
       const systemMetrics = await apiClient.getSystemMetrics();
-      
-      // Calculate uptime based on system health
-      const uptime = systemMetrics.cpu ? 99.7 : 0; // High uptime if system is responding
-      
-      // Calculate memory usage percentage
-      const memoryUsage = systemMetrics.memory ? 
-        ((systemMetrics.memory.used / systemMetrics.memory.total) * 100) : 0;
-      
-      // Estimate costs based on system usage (simplified calculation)
-      const estimatedCost = Math.round(systemMetrics.cpu?.average_usage * 50 || 0);
-      
+
+      // Helpers to normalize metrics across different shapes
+      const num = (...values: Array<number | undefined | null>) => {
+        for (const v of values) {
+          if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return 0;
+      };
+
+      const cpuUsage = num(
+        // common backends
+        (systemMetrics as any)?.cpu?.average_usage,
+        (systemMetrics as any)?.cpu?.usage_percent
+      );
+
+      const memoryPercent = num(
+        (systemMetrics as any)?.memory?.percent,
+        (systemMetrics as any)?.memory?.usage_percent,
+        // derive from used/total (gb)
+        (() => {
+          const used = (systemMetrics as any)?.memory?.used_gb;
+          const total = (systemMetrics as any)?.memory?.total_gb;
+          if (typeof used === 'number' && typeof total === 'number' && total > 0) {
+            return (used / total) * 100;
+          }
+          return undefined;
+        })()
+      );
+
+      // Calculate uptime based on system responsiveness
+      const uptime = (systemMetrics && (systemMetrics as any).timestamp != null) ? 99.7 : 0;
+
+      // Estimate costs based on CPU usage (placeholder heuristic)
+      const estimatedCost = Math.round(cpuUsage * 50);
+
       // Estimate token usage based on CPU activity
-      const tokenUsage = Math.round((systemMetrics.cpu?.average_usage || 0) * 10000);
-      
-      // Calculate average response time based on system load
-      const avgResponse = systemMetrics.memory ? 
-        (memoryUsage / 100 * 2 + 0.5) : 1.8;
+      const tokenUsage = Math.round(cpuUsage * 10000);
+
+      // Calculate average response time based on memory pressure
+      const avgResponse = memoryPercent ? (memoryPercent / 100 * 2 + 0.5) : 1.8;
 
       return {
         systemUptime: uptime,
@@ -96,13 +119,20 @@ class PerformanceService {
   async getSystemPerformanceData(): Promise<SystemPerformanceData[]> {
     try {
       const systemMetrics = await apiClient.getSystemMetrics();
-      
+
+      const num = (...values: Array<number | undefined | null>) => {
+        for (const v of values) {
+          if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return 0;
+      };
+
       // Generate 24-hour performance data based on current metrics
       const data: SystemPerformanceData[] = [];
-      const baseCpu = systemMetrics.cpu?.average_usage || 20;
-      const baseMemory = systemMetrics.memory?.percent || 50;
+      const baseCpu = num((systemMetrics as any)?.cpu?.average_usage, (systemMetrics as any)?.cpu?.usage_percent) || 20;
+      const baseMemory = num((systemMetrics as any)?.memory?.percent, (systemMetrics as any)?.memory?.usage_percent) || 50;
       const baseNetwork = 15; // Estimated network usage
-      const baseStorage = systemMetrics.disk?.percent || 40;
+      const baseStorage = num((systemMetrics as any)?.disk?.percent, (systemMetrics as any)?.disk?.usage_percent) || 40;
       
       for (let hour = 0; hour < 24; hour += 4) {
         const timeStr = `${hour.toString().padStart(2, '0')}:00`;
@@ -130,10 +160,16 @@ class PerformanceService {
   async getCostAnalysisData(): Promise<CostAnalysisData[]> {
     try {
       const systemMetrics = await apiClient.getSystemMetrics();
-      
+      const num = (...values: Array<number | undefined | null>) => {
+        for (const v of values) {
+          if (typeof v === 'number' && Number.isFinite(v)) return v;
+        }
+        return 0;
+      };
+
       // Generate 7-day cost analysis based on system metrics
       const data: CostAnalysisData[] = [];
-      const baseCost = Math.round((systemMetrics.cpu?.average_usage || 20) * 10);
+      const baseCost = Math.round((num((systemMetrics as any)?.cpu?.average_usage, (systemMetrics as any)?.cpu?.usage_percent) || 20) * 10);
       
       for (let day = 6; day >= 0; day--) {
         const date = new Date();
@@ -182,7 +218,7 @@ class PerformanceService {
       }
       
       // Generate utilization data for real agents
-      const baseUtilization = systemMetrics.cpu?.average_usage || 20;
+      const baseUtilization = ((systemMetrics as any)?.cpu?.average_usage ?? (systemMetrics as any)?.cpu?.usage_percent) || 20;
       
       return agents.map((agent, index) => {
         const variation = Math.random() * 0.5 - 0.25; // ±25% variation
@@ -212,36 +248,39 @@ class PerformanceService {
       const alerts: SystemAlert[] = [];
       
       // Generate alerts based on real system conditions
-      if (systemMetrics.memory && systemMetrics.memory.percent > 80) {
+      const memoryPercent = (systemMetrics as any)?.memory?.percent ?? (systemMetrics as any)?.memory?.usage_percent;
+      if (typeof memoryPercent === 'number' && memoryPercent > 80) {
         alerts.push({
           id: 'memory-high',
           type: 'warning',
           title: 'High Memory Usage',
-          description: `Memory utilization at ${systemMetrics.memory.percent.toFixed(1)}%`,
+          description: `Memory utilization at ${memoryPercent.toFixed(1)}%`,
           severity: 'medium',
           timestamp: '5 minutes ago',
           component: 'System Memory'
         });
       }
       
-      if (systemMetrics.cpu && systemMetrics.cpu.average_usage > 90) {
+      const cpuUsage = (systemMetrics as any)?.cpu?.average_usage ?? (systemMetrics as any)?.cpu?.usage_percent;
+      if (typeof cpuUsage === 'number' && cpuUsage > 90) {
         alerts.push({
           id: 'cpu-high',
           type: 'warning',
           title: 'High CPU Usage',
-          description: `CPU utilization at ${systemMetrics.cpu.average_usage.toFixed(1)}%`,
+          description: `CPU utilization at ${cpuUsage.toFixed(1)}%`,
           severity: 'high',
           timestamp: '2 minutes ago',
           component: 'System CPU'
         });
       }
       
-      if (systemMetrics.disk && systemMetrics.disk.percent > 85) {
+      const diskPercent = (systemMetrics as any)?.disk?.percent ?? (systemMetrics as any)?.disk?.usage_percent;
+      if (typeof diskPercent === 'number' && diskPercent > 85) {
         alerts.push({
           id: 'disk-high',
           type: 'warning',
           title: 'High Disk Usage',
-          description: `Disk utilization at ${systemMetrics.disk.percent.toFixed(1)}%`,
+          description: `Disk utilization at ${diskPercent.toFixed(1)}%`,
           severity: 'medium',
           timestamp: '10 minutes ago',
           component: 'System Storage'
@@ -249,12 +288,12 @@ class PerformanceService {
       }
       
       // Add positive alerts for good performance
-      if (systemMetrics.cpu && systemMetrics.cpu.average_usage < 30) {
+      if (typeof cpuUsage === 'number' && cpuUsage < 30) {
         alerts.push({
           id: 'performance-good',
           type: 'success',
           title: 'Optimal Performance',
-          description: `System running efficiently at ${systemMetrics.cpu.average_usage.toFixed(1)}% CPU`,
+          description: `System running efficiently at ${cpuUsage.toFixed(1)}% CPU`,
           severity: 'low',
           timestamp: '1 hour ago',
           component: 'Performance Monitor'

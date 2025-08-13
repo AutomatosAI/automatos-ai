@@ -1,7 +1,7 @@
 generator client {
     provider = "prisma-client-js"
     binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
-    output = "/home/ubuntu/workspace/automotas-ai-frontend/app/node_modules/.prisma/client"
+    // Let Prisma manage output in node_modules; avoid hard-coded host-specific paths
 }
 
 datasource db {
