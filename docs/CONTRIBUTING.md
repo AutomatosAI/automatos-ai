@@ -1,4 +1,9 @@
 
+---
+title: Contributing Guide
+description: Join the revolution in AI-powered automation! We welcome contributors of all skill levels
+---
+
 # 🤝 Contributing to Automatos AI
 
 *Join the revolution in AI-powered automation! We welcome contributors of all skill levels.*

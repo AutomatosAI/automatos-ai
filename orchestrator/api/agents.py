@@ -16,7 +16,7 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agents", tags=["agents"])
+router = APIRouter(prefix="/api/agents", tags=["agents"]) 
 
 def _build_agent_response(agent: Agent) -> AgentResponse:
     """Build agent response with skills"""
@@ -45,11 +45,13 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
     )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
-@router.get("/types")
+from ..main import require_api_key
+
+@router.get("/types", dependencies=[Depends(require_api_key)])
 async def get_agent_types():
     """Get available agent types"""
     return {
-        "types": [
+        "data": [
             "code_architect", 
             "security_expert", 
             "performance_optimizer",
@@ -71,7 +73,7 @@ async def get_agent_types():
         }
     }
 
-@router.get("/stats")
+@router.get("/stats", dependencies=[Depends(require_api_key)])
 async def get_agent_stats(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
@@ -100,7 +102,7 @@ async def get_agent_stats(db: Session = Depends(get_db)):
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/bulk", response_model=List[AgentResponse])
+@router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
 async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
@@ -159,7 +161,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
 
-@router.post("/", response_model=AgentResponse)
+@router.post("/", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     try:
@@ -201,7 +203,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         # Load skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills)
+        return {"data": _build_agent_response(agent_with_skills)}
         
     except HTTPException:
         raise
@@ -210,7 +212,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
 
-@router.get("/", response_model=List[AgentResponse])
+@router.get("/", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
 async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -243,13 +245,13 @@ async def list_agents(
         
         agents = query.offset(skip).limit(limit).all()
         
-        return [_build_agent_response(agent) for agent in agents]
+        return {"data": [_build_agent_response(agent) for agent in agents]}
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/status")
+@router.get("/{agent_id}/status", dependencies=[Depends(require_api_key)])
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
@@ -275,7 +277,7 @@ async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/execute")
+@router.post("/{agent_id}/execute", dependencies=[Depends(require_api_key)])
 async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
@@ -305,7 +307,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}", response_model=AgentResponse)
+@router.get("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def get_agent(agent_id: int, db: Session = Depends(get_db)):
     """Get a specific agent by ID"""
     try:
@@ -320,7 +322,58 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{agent_id}", response_model=AgentResponse)
+@router.get("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
+async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
+    """Get skills for a specific agent"""
+    try:
+        agent = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        skills = [SkillResponse(
+            id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            skill_type=skill.skill_type,
+            category=skill.category,
+            is_active=skill.is_active,
+            created_at=skill.created_at,
+            updated_at=skill.updated_at
+        ) for skill in agent.skills] if agent.skills else []
+        
+        return {"data": skills}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting agent skills: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
+async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = Depends(get_db)):
+    """Add skills to an agent"""
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        skills = db.query(Skill).filter(Skill.id.in_(skill_ids), Skill.is_active == True).all()
+        if len(skills) != len(skill_ids):
+            found_ids = [skill.id for skill in skills]
+            missing_ids = [sid for sid in skill_ids if sid not in found_ids]
+            raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
+        
+        agent.skills.extend(skills)
+        db.commit()
+        
+        return {"data": {"message": "Skills added successfully", "agent_id": agent_id, "skill_ids": skill_ids}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding agent skills: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
@@ -348,7 +401,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills)
+        return {"data": _build_agent_response(agent_with_skills)}
         
     except HTTPException:
         raise
@@ -357,7 +410,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
 
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", dependencies=[Depends(require_api_key)])
 async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
     """Delete an agent"""
     try:

@@ -18,8 +18,9 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 # Import database and dependencies
-from database import get_db
+from database.database import get_db
 from services.orchestrator_service import EnhancedOrchestratorService
+from ..main import require_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ orchestrator_service = EnhancedOrchestratorService()
 
 @router.post("/reasoning/collaborative", 
              response_model=Dict[str, Any],
+              dependencies=[Depends(require_api_key)],
              summary="🧠 Collaborative Agent Reasoning",
              description="Enable multiple agents to collaborate on complex reasoning tasks with consensus mechanisms",
              response_description="Collaborative reasoning results with consensus score and agent insights",
@@ -263,7 +265,7 @@ async def perform_collaborative_reasoning(
         logger.error(f"Collaborative reasoning failed: {e}")
         raise HTTPException(status_code=500, detail=f"Collaborative reasoning failed: {str(e)}")
 
-@router.post("/coordination/coordinate", response_model=Dict[str, Any])
+@router.post("/coordination/coordinate", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def coordinate_agents(
     request: AgentCoordinationRequest,
     db: Session = Depends(get_db)
@@ -296,7 +298,7 @@ async def coordinate_agents(
         logger.error(f"Agent coordination failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent coordination failed: {str(e)}")
 
-@router.post("/behavior/monitor", response_model=Dict[str, Any])
+@router.post("/behavior/monitor", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def monitor_emergent_behavior(
     request: BehaviorMonitoringRequest
 ):
@@ -324,7 +326,7 @@ async def monitor_emergent_behavior(
         logger.error(f"Behavior monitoring failed: {e}")
         raise HTTPException(status_code=500, detail=f"Behavior monitoring failed: {str(e)}")
 
-@router.post("/optimization/optimize", response_model=Dict[str, Any])
+@router.post("/optimization/optimize", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def optimize_multi_agent_system(
     request: OptimizationRequest,
     db: Session = Depends(get_db)
@@ -357,7 +359,7 @@ async def optimize_multi_agent_system(
         logger.error(f"Multi-agent optimization failed: {e}")
         raise HTTPException(status_code=500, detail=f"Multi-agent optimization failed: {str(e)}")
 
-@router.post("/coordination/rebalance", response_model=Dict[str, Any])
+@router.post("/coordination/rebalance", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def rebalance_agents(
     request: AgentRebalanceRequest,
     db: Session = Depends(get_db)
@@ -385,7 +387,7 @@ async def rebalance_agents(
         logger.error(f"Agent rebalancing failed: {e}")
         raise HTTPException(status_code=500, detail=f"Agent rebalancing failed: {str(e)}")
 
-@router.get("/reasoning/statistics", response_model=Dict[str, Any])
+@router.get("/reasoning/statistics", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def get_reasoning_statistics():
     """Get collaborative reasoning statistics and performance metrics"""
     try:
@@ -401,7 +403,7 @@ async def get_reasoning_statistics():
         logger.error(f"Failed to get reasoning statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/coordination/statistics", response_model=Dict[str, Any])
+@router.get("/coordination/statistics", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def get_coordination_statistics():
     """Get coordination management statistics and performance metrics"""
     try:
@@ -417,7 +419,7 @@ async def get_coordination_statistics():
         logger.error(f"Failed to get coordination statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/behavior/statistics", response_model=Dict[str, Any])
+@router.get("/behavior/statistics", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def get_behavior_statistics():
     """Get behavior monitoring statistics and performance metrics"""
     try:
@@ -433,7 +435,7 @@ async def get_behavior_statistics():
         logger.error(f"Failed to get behavior statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/optimization/statistics", response_model=Dict[str, Any])
+@router.get("/optimization/statistics", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def get_optimization_statistics():
     """Get optimization statistics and performance metrics"""
     try:
@@ -449,7 +451,7 @@ async def get_optimization_statistics():
         logger.error(f"Failed to get optimization statistics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/health", response_model=Dict[str, Any])
+@router.get("/health", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
 async def multi_agent_health_check():
     """Health check for multi-agent systems"""
     try:

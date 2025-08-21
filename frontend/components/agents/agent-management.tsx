@@ -6,6 +6,10 @@ import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AgentRoster } from './agent-roster'
+import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
+import { AgentDetailPanel } from '@/components/agents/agent-detail-panel'
+import { AgentRunsPanel } from '@/components/agents/agent-runs-panel'
+import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentPerformance } from './agent-performance'
 import { AgentSkills } from './agent-skills'
@@ -17,6 +21,7 @@ import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
 
 export function AgentManagement() {
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -149,7 +154,7 @@ export function AgentManagement() {
           </TabsContent>
 
           <TabsContent value="roster" className="space-y-6">
-            <AgentRoster />
+            <AgentsTable2 onSelect={(id)=>setSelectedAgentId(id)} />
           </TabsContent>
 
           <TabsContent value="skills" className="space-y-6">
@@ -158,6 +163,14 @@ export function AgentManagement() {
 
           <TabsContent value="configuration" className="space-y-6">
             <AgentConfiguration />
+            {selectedAgentId ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <AgentDetailPanel id={selectedAgentId} />
+                <AgentRunsPanel id={selectedAgentId} />
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">Select an agent from the Roster to edit details and view recent runs.</div>
+            )}
           </TabsContent>
 
           <TabsContent value="coordination" className="space-y-6">

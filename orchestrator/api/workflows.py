@@ -9,7 +9,7 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
 import asyncio
 import logging
@@ -26,6 +26,48 @@ from services.websocket_manager import manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
+
+@router.get("")
+async def list_workflows(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = None,
+    owner: Optional[str] = Query(None, description="Filter by owner exact match"),
+    tag: Optional[str] = Query(None, description="Filter by tag (contained in tags array)"),
+    db: Session = Depends(get_db),
+):
+    try:
+        query = db.query(Workflow)
+        if q:
+            query = query.filter(or_(Workflow.name.ilike(f"%{q}%"), Workflow.description.ilike(f"%{q}%")))
+        if owner:
+            query = query.filter(Workflow.owner == owner)
+        if tag:
+            # For JSON array column 'tags', check if provided tag is contained
+            try:
+                query = query.filter(Workflow.tags.contains([tag]))
+            except Exception:
+                # Fallback: simple text match on serialized JSON
+                query = query.filter(func.cast(Workflow.tags, String).ilike(f"%\"{tag}\"%"))
+        total = query.count()
+        rows = query.order_by(desc(Workflow.updated_at)).offset(skip).limit(limit).all()
+        items = [
+            {
+                "id": w.id,
+                "name": w.name,
+                "description": w.description,
+                "status": w.status,
+                "owner": getattr(w, 'owner', None),
+                "tags": getattr(w, 'tags', None),
+                "default_policy_id": getattr(w, 'default_policy_id', None),
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "updated_at": w.updated_at.isoformat() if w.updated_at else None,
+            } for w in rows
+        ]
+        return {"items": items, "total": total}
+    except Exception as e:
+        logger.error(f"Error listing workflows: {e}")
+        raise HTTPException(status_code=500, detail="Error listing workflows")
 
 @router.get("/active")
 async def get_active_workflows(db: Session = Depends(get_db)):
