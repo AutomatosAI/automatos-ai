@@ -34,6 +34,7 @@ from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
 from api.api_code_graph import router as code_graph_router
 from api.api_playbooks import router as playbooks_router
+from api.patterns import router as patterns_router
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
@@ -259,6 +260,7 @@ app.include_router(field_theory_router)
 app.include_router(context_policy_router)
 app.include_router(code_graph_router)
 app.include_router(playbooks_router)
+app.include_router(patterns_router)
 
 # Include legacy routes (from existing api_routes.py)
 try:

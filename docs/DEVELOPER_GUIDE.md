@@ -1,3 +1,8 @@
+---
+title: Developer Onboarding Guide
+description: Complete development setup and contribution guide for Automatos AI
+---
+
 # Developer Onboarding Guide - Automatos AI
 
 ## 🚀 Quick Start

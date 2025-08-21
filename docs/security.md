@@ -1,4 +1,9 @@
 
+---
+title: Security Configuration Guide
+description: Comprehensive security configuration guidelines for enterprise-grade protection
+---
+
 # Security Configuration Guide
 
 This document provides comprehensive security configuration guidelines for the Enhanced Two-Tiered Multi-Agent Orchestration System.

@@ -1,4 +1,10 @@
 
+---
+title: System Architecture
+description: Comprehensive system architecture designed for scalability, security, and intelligent decision-making
+cover: .gitbook/assets/architecture-diagram.png
+---
+
 # Automatos AI - System Architecture
 
 ## Executive Summary

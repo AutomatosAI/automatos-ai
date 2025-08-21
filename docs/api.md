@@ -1,4 +1,9 @@
 
+---
+title: API Documentation
+description: Comprehensive REST API for managing workflows, executing commands, and monitoring system health
+---
+
 # API Documentation
 
 The Enhanced Two-Tiered Multi-Agent Orchestration System provides a comprehensive REST API for managing workflows, executing commands, and monitoring system health.

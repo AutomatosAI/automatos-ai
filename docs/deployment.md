@@ -1,4 +1,9 @@
 
+---
+title: Deployment Guide
+description: Step-by-step instructions for deploying Automatos AI in production environments
+---
+
 # Deployment Guide for Automatos AI
 
 This guide provides step-by-step instructions for deploying the Enhanced Two-Tiered Multi-Agent Orchestration System, including both backend services and the Next.js frontend.
