@@ -14,6 +14,11 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
   images: { unoptimized: true },
+  async redirects() {
+    return [
+      { source: '/agents2', destination: '/agents', permanent: true },
+    ];
+  },
 };
 
 module.exports = nextConfig;

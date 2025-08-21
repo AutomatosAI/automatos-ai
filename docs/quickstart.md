@@ -1,4 +1,9 @@
 
+---
+title: Quick Start Guide
+description: Get up and running with the world's most advanced multi-agent orchestration platform in under 10 minutes
+---
+
 # ⚡ Quick Start Guide - Automatos AI
 
 *Get up and running with the world's most advanced multi-agent orchestration platform in under 10 minutes!*

@@ -1,3 +1,8 @@
+---
+title: System Flow Diagrams
+description: Visual representations of system workflows, data flows, and process interactions
+---
+
 # Automatos AI - System Flow Diagrams
 
 ## 🔄 Request Flow Diagrams

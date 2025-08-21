@@ -1,0 +1,701 @@
+/* Automatos AI Documentation Styles */
+
+/* Hero Stats */
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 2rem;
+  margin: 2rem 0;
+  padding: 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  color: white;
+  text-align: center;
+}
+
+.stat-item h3 {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin: 0;
+  color: #fff;
+}
+
+.stat-item p {
+  margin: 0.5rem 0 0 0;
+  opacity: 0.9;
+  font-size: 1rem;
+}
+
+/* Documentation Grid */
+.docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.docs-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.docs-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.docs-card h3 {
+  margin-top: 0;
+  color: #2c3e50;
+}
+
+.btn-primary {
+  display: inline-block;
+  background: #007bff;
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: #0056b3;
+  text-decoration: none;
+}
+
+/* Product Features */
+.product-features {
+  margin: 2rem 0;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 1.5rem 0;
+}
+
+.feature-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.feature-item h4 {
+  margin-top: 0;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.feature-item ul {
+  margin: 1rem 0 0 0;
+  padding-left: 1.2rem;
+}
+
+.feature-item li {
+  margin: 0.3rem 0;
+  color: #555;
+}
+
+/* Product Highlights */
+.product-highlight {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  border-radius: 12px;
+  padding: 2rem;
+  margin: 2rem 0;
+  color: white;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.highlight-content h4 {
+  margin-top: 0;
+  font-size: 1.5rem;
+}
+
+.math-formula {
+  background: rgba(255,255,255,0.1);
+  padding: 1rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+  text-align: center;
+}
+
+.math-formula code {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #fff;
+}
+
+.highlight-demo {
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.highlight-demo pre {
+  margin: 0;
+  background: rgba(0,0,0,0.2);
+  padding: 1rem;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+/* Workflow Types */
+.workflow-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin: 2rem 0;
+}
+
+.workflow-type {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border-left: 4px solid #007bff;
+}
+
+.code-example {
+  background: #2d3748;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.code-example h5 {
+  margin: 0 0 0.5rem 0;
+  color: #a0aec0;
+  font-size: 0.9rem;
+}
+
+.code-example pre {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* Analytics Dashboard */
+.analytics-dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.analytics-section {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.analytics-section h4 {
+  margin-top: 0;
+  color: #2c3e50;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 0.5rem;
+}
+
+/* Integration Grids */
+.integration-grid, .cloud-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.integration-item, .cloud-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.integration-features {
+  margin-top: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  background: #007bff;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  margin: 0.1rem;
+}
+
+/* Use Cases */
+.use-case {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  margin: 2rem 0;
+  padding: 2rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #28a745;
+}
+
+.use-case-description h4 {
+  margin-top: 0;
+  color: #2c3e50;
+}
+
+.use-case-example {
+  background: #2d3748;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.use-case-example h5 {
+  margin: 0 0 0.5rem 0;
+  color: #a0aec0;
+}
+
+/* Math Section */
+.math-section {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2rem;
+  border-radius: 12px;
+  margin: 2rem 0;
+}
+
+.formula-display {
+  text-align: center;
+  margin: 1.5rem 0;
+  font-size: 1.5rem;
+}
+
+.formula-display code {
+  background: rgba(255,255,255,0.1);
+  padding: 0.8rem 1.5rem;
+  border-radius: 6px;
+  font-size: 1.3rem;
+  font-weight: bold;
+}
+
+.context-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.slot {
+  background: rgba(255,255,255,0.1);
+  padding: 1rem;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.slot h5 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+/* Research Grid */
+.research-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.research-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.research-item h4 {
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+}
+
+/* Benchmark Grid */
+.benchmark-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.benchmark-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.metric-large {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #007bff;
+  margin: 0.5rem 0;
+}
+
+.improvement {
+  background: #28a745;
+  color: white;
+  padding: 0.2rem 0.8rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  display: inline-block;
+}
+
+/* Security Features */
+.security-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.security-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border-left: 4px solid #dc3545;
+}
+
+/* Deployment Options */
+.deployment-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.deployment-option {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.deployment-option pre {
+  background: #2d3748;
+  color: #e2e8f0;
+  padding: 1rem;
+  border-radius: 4px;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+
+/* Learning Path */
+.learning-path {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.learning-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.step-number {
+  background: #007bff;
+  color: white;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.step-content h4 {
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+}
+
+.step-content p {
+  margin: 0 0 1rem 0;
+  color: #666;
+}
+
+/* Success Stories */
+.success-stories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.story {
+  background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+  color: #2c3e50;
+  padding: 1.5rem;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.story h4 {
+  margin-top: 0;
+  font-size: 1.2rem;
+}
+
+.story p {
+  margin: 0.5rem 0;
+  font-weight: 500;
+}
+
+/* Community Links */
+.community-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.community-item {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.btn-outline {
+  display: inline-block;
+  border: 2px solid #007bff;
+  color: #007bff;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn-outline:hover {
+  background: #007bff;
+  color: white;
+  text-decoration: none;
+}
+
+/* Enterprise Support */
+.enterprise-support {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.support-tier {
+  background: white;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  position: relative;
+}
+
+.support-tier.featured {
+  border-color: #007bff;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(0,123,255,0.2);
+}
+
+.support-tier h4 {
+  margin-top: 0;
+  color: #2c3e50;
+}
+
+.support-tier ul {
+  text-align: left;
+  margin: 1rem 0;
+}
+
+.price {
+  background: #007bff;
+  color: white;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
+  margin-top: 1rem;
+}
+
+/* CTA Section */
+.cta-section {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 3rem 2rem;
+  border-radius: 12px;
+  text-align: center;
+  margin: 3rem 0;
+}
+
+.cta-main h3 {
+  font-size: 2rem;
+  margin: 0 0 1rem 0;
+}
+
+.cta-buttons {
+  margin-top: 2rem;
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.btn-primary-large, .btn-secondary-large {
+  padding: 1rem 2rem;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 1.1rem;
+  transition: all 0.2s ease;
+}
+
+.btn-primary-large {
+  background: white;
+  color: #667eea;
+}
+
+.btn-secondary-large {
+  background: transparent;
+  color: white;
+  border: 2px solid white;
+}
+
+.btn-primary-large:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255,255,255,0.3);
+}
+
+.btn-secondary-large:hover {
+  background: white;
+  color: #667eea;
+}
+
+/* Footer */
+.footer-info {
+  text-align: center;
+  padding: 2rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin: 3rem 0;
+  color: #666;
+}
+
+.footer-info p {
+  margin: 0.5rem 0;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+th {
+  background: #f8f9fa;
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #2c3e50;
+  border-bottom: 2px solid #e9ecef;
+}
+
+td {
+  padding: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+tr:hover {
+  background: #f8f9fa;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .hero-stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    padding: 1.5rem;
+  }
+  
+  .docs-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .product-highlight {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .workflow-types {
+    grid-template-columns: 1fr;
+  }
+  
+  .cta-buttons {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .btn-primary-large, .btn-secondary-large {
+    width: 100%;
+    max-width: 300px;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .docs-card, .feature-item, .analytics-section, .integration-item, .cloud-item, .learning-step, .support-tier {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+  }
+  
+  .docs-card h3, .feature-item h4, .analytics-section h4, .learning-step h4, .support-tier h4 {
+    color: #e2e8f0;
+  }
+  
+  table {
+    background: #2d3748;
+    color: #e2e8f0;
+  }
+  
+  th {
+    background: #4a5568;
+    color: #e2e8f0;
+  }
+  
+  tr:hover {
+    background: #4a5568;
+  }
+}

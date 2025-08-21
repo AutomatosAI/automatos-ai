@@ -1,3 +1,8 @@
+---
+title: Context Engineering System Architecture
+description: Dynamic loading and management of business documents, process definitions, and domain knowledge into the RAG system
+---
+
 # Context Engineering System Architecture
 
 ## Overview

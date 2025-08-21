@@ -1,4 +1,9 @@
 
+---
+title: Changelog
+description: A comprehensive record of all notable changes, improvements, and milestones in the Automatos AI platform
+---
+
 # 📝 Changelog - Automatos AI
 
 *A comprehensive record of all notable changes, improvements, and milestones in the Automatos AI platform.*

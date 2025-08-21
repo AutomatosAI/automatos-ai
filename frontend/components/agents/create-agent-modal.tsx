@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { apiClient } from '@/lib/api'
 
 interface CreateAgentModalProps {
   open: boolean
@@ -112,8 +113,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
 
   const handleCreate = async () => {
     try {
-      // Create agent via API
-      const createData = {
+      const payload = {
         name: agentData.name,
         description: agentData.description,
         agent_type: agentData.type,
@@ -121,25 +121,11 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
           max_concurrent_tasks: agentData.maxConcurrentTasks,
           priority: agentData.priority,
           auto_start: agentData.autoStart,
-          specializations: agentData.specializations
+          specializations: agentData.specializations,
         },
-        skill_ids: [] // For now, we'll handle skills separately
+        skill_ids: [],
       }
-      
-      const response = await fetch('http://localhost:8080/api/agents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(createData),
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
-      }
-      
-      const newAgent = await response.json()
+      const newAgent = await apiClient.createAgent(payload)
       console.log('Agent created successfully:', newAgent)
       
       // Show success notification (you can add a toast here)
@@ -160,8 +146,8 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
       })
       setStep(1)
       
-      // Refresh the page to show the new agent
-      window.location.reload()
+      // Refresh: emit a lightweight event so lists can refetch
+      try { window.dispatchEvent(new Event('agents:refresh')) } catch {}
       
     } catch (error) {
       console.error('Error creating agent:', error)

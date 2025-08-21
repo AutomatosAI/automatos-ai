@@ -1,0 +1,69 @@
+{
+  "title": "Automatos AI Documentation",
+  "description": "Comprehensive documentation for the world's most advanced multi-agent orchestration platform",
+  "author": "Automatos AI Team",
+  "language": "en",
+  "root": ".",
+  "structure": {
+    "readme": "README.md",
+    "summary": "SUMMARY.md"
+  },
+  "plugins": [
+    "theme-default",
+    "search",
+    "sharing",
+    "fontsettings",
+    "livereload",
+    "prism",
+    "mermaid-gb3",
+    "expandable-chapters",
+    "back-to-top-button",
+    "copy-code-button",
+    "advanced-emoji",
+    "github",
+    "edit-link"
+  ],
+  "pluginsConfig": {
+    "theme-default": {
+      "showLevel": true
+    },
+    "search": {
+      "maxIndexSize": 1000000
+    },
+    "sharing": {
+      "facebook": false,
+      "twitter": true,
+      "google": false,
+      "linkedin": true,
+      "weibo": false,
+      "instapaper": false,
+      "vk": false,
+      "all": ["twitter", "linkedin"]
+    },
+    "fontsettings": {
+      "theme": "white",
+      "family": "sans",
+      "size": 2
+    },
+    "github": {
+      "url": "https://github.com/AutomatosAI/automatos-ai"
+    },
+    "edit-link": {
+      "base": "https://github.com/AutomatosAI/automatos-ai/edit/main/docs",
+      "label": "Edit This Page"
+    },
+    "prism": {
+      "css": [
+        "prism-themes/themes/prism-atom-dark.css"
+      ]
+    }
+  },
+  "variables": {
+    "version": "2.0.0",
+    "platform": "Automatos AI",
+    "company": "Automatos AI Team"
+  },
+  "styles": {
+    "website": ".gitbook/styles.css"
+  }
+}

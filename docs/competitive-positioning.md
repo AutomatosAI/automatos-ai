@@ -1,4 +1,9 @@
 
+---
+title: Competitive Positioning
+description: How Automatos AI compares to market leaders and why it's the future of DevOps orchestration
+---
+
 # Competitive Positioning: Automatos AI vs Market Leaders
 
 ## 🎯 Executive Summary

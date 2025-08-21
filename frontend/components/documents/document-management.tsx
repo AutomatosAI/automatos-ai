@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { apiClient, Document } from '@/lib/api'
 import { ProcessingTab } from './processing-tab'
 import { AnalyticsTab } from './analytics-tab'
@@ -414,7 +415,7 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span className="hidden sm:inline">Document Library</span>
@@ -430,6 +431,10 @@ export function DocumentManagement() {
             <TabsTrigger value="analytics" className="flex items-center space-x-2">
               <Eye className="w-4 h-4" />
               <span className="hidden sm:inline">Analytics</span>
+            </TabsTrigger>
+            <TabsTrigger value="codegraph" className="flex items-center space-x-2">
+              <Database className="w-4 h-4" />
+              <span className="hidden sm:inline">CodeGraph</span>
             </TabsTrigger>
           </TabsList>
 
@@ -647,6 +652,10 @@ export function DocumentManagement() {
 
           <TabsContent value="analytics" className="space-y-6">
             <AnalyticsTab />
+          </TabsContent>
+
+          <TabsContent value="codegraph" className="space-y-6">
+            <CodeGraphPanel />
           </TabsContent>
         </Tabs>
       </motion.div>

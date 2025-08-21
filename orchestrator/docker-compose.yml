@@ -53,7 +53,7 @@ services:
     env_file:
     - ./.env
     ports:
-    - ${MCP_PORT:-8001}:8001
+    - ${API_PORT:-8000}:8000
     environment:
     - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
     - REDIS_HOST=redis
@@ -163,36 +163,6 @@ services:
     restart: unless-stopped
     profiles:
     - monitoring
-  frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-    container_name: frontend_ui
-    ports:
-    - 3000:3000
-    environment:
-    - NODE_ENV=production
-    - NEXT_PUBLIC_API_URL=https://api.automatos.app
-    - NEXT_PUBLIC_WS_URL=wss://api.automatos.app/ws
-    volumes:
-    - ../frontend:/app
-    - /app/node_modules
-    - /app/.next
-    depends_on:
-    - backend_api
-    networks:
-    - orchestrator_network
-    healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:3000/api/health
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
 volumes:
   postgres_data:
     driver: local

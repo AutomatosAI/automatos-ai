@@ -92,15 +92,18 @@ class OpenAIProvider(BaseLLMProvider):
         logger.info(f"Initialized OpenAI client with model: {self.config.model}")
     
     async def generate_response(self, messages: List[Dict[str, str]]) -> LLMResponse:
-        """Generate response using OpenAI API (async)"""
+        """Generate response using OpenAI API without blocking the event loop"""
+        import asyncio
+        loop = asyncio.get_running_loop()
         try:
-            response = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens
-            )
-            
+            def _call():
+                return self.client.chat.completions.create(
+                    model=self.config.model,
+                    messages=messages,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens
+                )
+            response = await loop.run_in_executor(None, _call)
             return LLMResponse(
                 content=response.choices[0].message.content,
                 usage={
@@ -169,18 +172,20 @@ class AnthropicProvider(BaseLLMProvider):
         return system_message, user_messages
     
     async def generate_response(self, messages: List[Dict[str, str]]) -> LLMResponse:
-        """Generate response using Anthropic API (async)"""
+        """Generate response using Anthropic API without blocking the event loop"""
+        import asyncio
+        loop = asyncio.get_running_loop()
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
-            
-            response = self.client.messages.create(
-                model=self.config.model,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                system=system_message,
-                messages=user_messages
-            )
-            
+            def _call():
+                return self.client.messages.create(
+                    model=self.config.model,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature,
+                    system=system_message,
+                    messages=user_messages
+                )
+            response = await loop.run_in_executor(None, _call)
             return LLMResponse(
                 content=response.content[0].text,
                 usage={

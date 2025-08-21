@@ -1,4 +1,9 @@
 
+---
+title: Swagger Documentation Report
+description: Comprehensive enhancements made to the Automatos AI API Swagger documentation for world-class developer experience
+---
+
 # 🚀 Enhanced Swagger FastAPI Documentation Report
 
 ## 📋 Overview

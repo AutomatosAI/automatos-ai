@@ -1,4 +1,9 @@
 
+---
+title: Comprehensive Platform Guide
+description: The complete guide to mastering the world's most advanced open source multi-agent orchestration platform
+---
+
 # 🎯 Automatos AI - Comprehensive Platform Guide
 
 *The complete guide to mastering the world's most advanced open source multi-agent orchestration platform*
