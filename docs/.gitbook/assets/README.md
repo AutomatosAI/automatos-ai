@@ -14,11 +14,4 @@ This directory contains assets for GitBook documentation:
 - **Icons**: 64x64px, PNG with transparency
 - **Social cards**: 1200x630px, JPEG format
 
-## Usage
 
-Images are referenced in frontmatter:
-```yaml
----
-cover: .gitbook/assets/hero-banner.png
----
-```

@@ -129,7 +129,6 @@ All documentation files should include YAML frontmatter:
 ---
 title: Page Title
 description: Brief description of the page content
-cover: .gitbook/assets/image.png  # Optional
 ---
 ```
 

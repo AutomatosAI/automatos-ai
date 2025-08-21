@@ -1,6 +1,5 @@
 ---
 title: Automatos AI Products
-cover: assets/social-card.jpeg
 ---
 
 # 🚀 Automatos AI Products Dashboard

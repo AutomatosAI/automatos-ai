@@ -1,7 +1,6 @@
 ---
 title: Automatos AI Documentation Hub
 description: Your comprehensive guide to the world's most advanced multi-agent orchestration platform
-cover: .gitbook/assets/hero-banner.png
 ---
 
 # 🚀 Automatos AI Documentation Hub
