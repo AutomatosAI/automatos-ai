@@ -1,6 +1,5 @@
 ---
 title: Local Development Setup Guide
-description: Complete instructions for setting up Automatos AI locally for development and testing
 ---
 
 # Automatos AI v2.5 - Local Development Setup Guide

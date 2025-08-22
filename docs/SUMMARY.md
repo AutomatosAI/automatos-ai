@@ -27,8 +27,6 @@
 * [Template Repository Guide](templates.md)
 
 ## Reference
-* [Changelog](CHANGELOG.md)
 * [Competitive Positioning](competitive-positioning.md)
-* [Context Engineering README](README_CONTEXT_ENGINEERING.md)
 * [Swagger Documentation Report](SWAGGER_DOCUMENTATION_REPORT.md)
 * [Frontend Fixes Report](frontend-fixes-report.md)

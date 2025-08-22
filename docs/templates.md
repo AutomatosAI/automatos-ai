@@ -1,10 +1,7 @@
 
 ---
 title: Template Repository Guide
-description: Comprehensive guide for creating and using template repositories for AI Module and Task Prompt workflows
 ---
-
-# Template Repository Guide
 
 This guide provides comprehensive information about creating and using template repositories for both AI Module and Task Prompt workflows in the Enhanced Two-Tiered Multi-Agent Orchestration System.
 

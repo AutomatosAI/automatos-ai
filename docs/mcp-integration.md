@@ -1,7 +1,6 @@
 
 ---
 title: MCP Server Integration Guide
-description: Seamless integration with modern IDEs and development environments through MCP protocol
 ---
 
 # MCP Server Integration Guide

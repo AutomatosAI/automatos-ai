@@ -1,7 +1,6 @@
 
 ---
 title: Deployment Guide
-description: Step-by-step instructions for deploying Automatos AI in production environments
 ---
 
 # Deployment Guide for Automatos AI
