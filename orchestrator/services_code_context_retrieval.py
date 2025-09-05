@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from .models_code_graph import CodeSymbol, CodeEdge
+from models_code_graph import CodeSymbol, CodeEdge
 
 
 class CodeContextRetrieval:

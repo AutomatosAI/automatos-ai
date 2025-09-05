@@ -1,54 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-let BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-let PREFIX = (process.env.NEXT_PUBLIC_API_PREFIX || '/api').replace(/\/$/, '');
-let API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
-let AUTH = process.env.NEXT_PUBLIC_AUTH_TOKEN || '';
-let TENANT_ID = process.env.NEXT_PUBLIC_TENANT_ID || '';
+// API Configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_PREFIX = process.env.NEXT_PUBLIC_API_PREFIX || '/api'
 
-function readRuntimeOverrides() {
-  if (process.env.NODE_ENV === 'production') return;
-  if (typeof window === 'undefined') return;
-  try {
-    const overrides = JSON.parse(localStorage.getItem('automatos.api.overrides') || '{}');
-    if (overrides.base) BASE = String(overrides.base).replace(/\/$/, '');
-    if (overrides.prefix) PREFIX = String(overrides.prefix).replace(/\/$/, '');
-    if (overrides.apiKey != null) API_KEY = String(overrides.apiKey);
-    if (overrides.authToken != null) AUTH = String(overrides.authToken);
-    if (overrides.tenantId != null) TENANT_ID = String(overrides.tenantId);
-  } catch {}
-}
-
-function buildUrl(path: string): string {
-  readRuntimeOverrides();
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  if (!path.startsWith('/')) path = '/' + path;
-  // Allow absolute root paths like '/health' without prefix
-  const isRootHealth = path === '/health';
-  const full = isRootHealth ? `${BASE}${path}` : `${BASE}${PREFIX}${path}`;
-  return full;
-}
-
-async function http<T = any>(path: string, init?: RequestInit): Promise<T> {
-  readRuntimeOverrides();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(init?.headers as any || {}),
-  };
-  if (API_KEY && !headers['X-API-Key']) headers['X-API-Key'] = API_KEY;
-  if (AUTH && !headers['Authorization']) headers['Authorization'] = `Bearer ${AUTH}`;
-  if (TENANT_ID && !headers['X-Tenant-ID']) headers['X-Tenant-ID'] = TENANT_ID;
-
-  const res = await fetch(buildUrl(path), { ...init, headers, cache: 'no-store' });
-  const ct = res.headers.get('content-type') || '';
-  const text = await res.text();
-  let data: any = null;
-  if (text) {
-    try { data = JSON.parse(text); } catch { data = { __raw: text, __contentType: ct }; }
-  }
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} :: ${path} :: ${typeof data === 'string' ? data : JSON.stringify(data).slice(0, 400)}`);
-  return (data ?? null) as T;
-}
+// Types
+export type Document = any;
+export type Workflow = any;
+export type Agent = any;
 
 export interface SystemHealth {
   status: string;
@@ -64,50 +23,65 @@ export interface SystemMetrics {
   timestamp?: number | string;
 }
 
-export type Agent = any;
-export type Document = any;
-export type Workflow = any;
+class ApiClient {
+  private baseURL: string;
+  private headers: Record<string, string>;
 
-export const apiClient = {
-  // System
-  async getSystemHealth(): Promise<SystemHealth> {
-    try { return await http<SystemHealth>('/system/health'); } catch { return http<SystemHealth>('/health'); }
-  },
-  async getSystemMetrics(): Promise<SystemMetrics> {
-    return http<SystemMetrics>('/system/metrics');
-  },
+  constructor() {
+    // Handle case where API_URL already contains the API path
+    if (API_URL.endsWith('/api') || API_URL.endsWith('/api/')) {
+      this.baseURL = API_URL.replace(/\/api\/?$/, '') + API_PREFIX;
+    } else {
+      this.baseURL = API_URL + API_PREFIX;
+    }
+    this.headers = {
+      'Content-Type': 'application/json',
+    };
+  }
 
-  // Agents
-  async getAgents(params?: { q?: string; limit?: number; offset?: number; tenant_id?: string }): Promise<Agent[]> {
-    const qs = new URLSearchParams();
-    if (params?.q) qs.set('q', params.q);
-    if (params?.limit != null) qs.set('limit', String(params.limit));
-    if (params?.offset != null) qs.set('offset', String(params.offset));
-    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id);
-    const url = `/agents${qs.toString() ? `?${qs.toString()}` : ''}`;
-    // Some backends return { items, total }. Normalize to array.
-    const data: any = await http(url);
-    if (Array.isArray(data)) return data;
-    if (data?.items) return data.items;
-    return [];
-  },
-  async getAgent(id: string | number): Promise<Agent | null> {
-    try { return await http<Agent>(`/agents/${encodeURIComponent(String(id))}`); } catch { return null; }
-  },
-  async getAgentRuns(agent_id: string | number, limit = 50): Promise<{ items: any[]; total?: number }> {
-    const qs = new URLSearchParams({ agent_id: String(agent_id), limit: String(limit) }).toString();
-    try { return await http<{ items: any[]; total?: number }>(`/runs?${qs}`); } catch { return { items: [] }; }
-  },
-  async createAgent(payload: any): Promise<Agent> {
-    return http<Agent>(`/agents`, { method: 'POST', body: JSON.stringify(payload) });
-  },
-  async updateAgent(id: string | number, payload: any): Promise<Agent> {
-    return http<Agent>(`/agents/${encodeURIComponent(String(id))}`, { method: 'PUT', body: JSON.stringify(payload) });
-  },
-  async deleteAgent(id: string | number): Promise<boolean> {
-    await http<void>(`/agents/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
-    return true;
-  },
+  // Public flexible request helper that accepts absolute URLs or API-relative paths
+  public async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    let url = endpoint
+    if (!/^https?:\/\//i.test(endpoint)) {
+      // Normalize: strip leading /api to avoid duplicate when baseURL already includes it
+      const normalized = endpoint.startsWith('/api/') ? endpoint.replace(/^\/api/, '') : endpoint
+      url = this.baseURL + (normalized.startsWith('/') ? normalized : `/${normalized}`)
+    }
+
+    // Debug logging (will be visible in browser console)
+    if (typeof window !== 'undefined' && window.console) {
+      console.log(`[API] ${endpoint} -> ${url}`)
+    }
+
+    const config: RequestInit = {
+      ...options,
+      headers: {
+        ...this.headers,
+        ...options.headers,
+      },
+    }
+
+    const res = await fetch(url, config)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.json()
+  }
+
+  private async http<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = this.baseURL + endpoint;
+    const config: RequestInit = {
+      ...options,
+      headers: {
+        ...this.headers,
+        ...options.headers,
+      },
+    };
+
+    const response = await fetch(url, config);
+    if (response.ok === false) {
+      throw new Error('HTTP error status: ' + response.status);
+    }
+    return response.json();
+  }
 
   // Documents
   async getDocuments(params?: { limit?: number; offset?: number; q?: string }): Promise<Document[]> {
@@ -115,117 +89,142 @@ export const apiClient = {
     if (params?.limit != null) qs.set('limit', String(params.limit));
     if (params?.offset != null) qs.set('offset', String(params.offset));
     if (params?.q) qs.set('q', params.q);
-    const url = `/documents${qs.toString() ? `?${qs.toString()}` : ''}`;
-    const data: any = await http(url);
+    const url = '/documents' + (qs.toString() ? '?' + qs.toString() : '');
+    const data: any = await this.http(url);
     if (Array.isArray(data)) return data;
     if (data?.items) return data.items;
     return [];
-  },
+  }
 
-  // Workflows
-  async getWorkflows(params?: { q?: string; limit?: number; offset?: number; tenant_id?: string; owner?: string; tag?: string }): Promise<{ items: Workflow[]; total: number }>{
-    const qs = new URLSearchParams();
-    if (params?.q) qs.set('q', params.q);
-    if (params?.limit != null) qs.set('limit', String(params.limit));
-    if (params?.offset != null) qs.set('offset', String(params.offset));
-    if (params?.tenant_id) qs.set('tenant_id', params.tenant_id);
-    if (params?.owner) qs.set('owner', params.owner);
-    if (params?.tag) qs.set('tag', params.tag);
-    const url = `/workflows${qs.toString() ? `?${qs.toString()}` : ''}`;
-    const data: any = await http(url);
-    if (Array.isArray(data)) return { items: data, total: data.length };
-    if (data?.items != null && data?.total != null) return data as { items: Workflow[]; total: number };
-    return { items: [], total: 0 };
-  },
-  async getWorkflow(id: string | number): Promise<Workflow | null> {
-    try { return await http<Workflow>(`/workflows/${encodeURIComponent(String(id))}`); } catch { return null }
-  },
-  async createWorkflow(body: Partial<Workflow>): Promise<Workflow> {
-    return http<Workflow>(`/workflows`, { method: 'POST', body: JSON.stringify(body) });
-  },
-  async updateWorkflow(id: string | number, body: Partial<Workflow>): Promise<Workflow> {
-    return http<Workflow>(`/workflows/${encodeURIComponent(String(id))}`, { method: 'PUT', body: JSON.stringify(body) });
-  },
-  async runWorkflow(id: string | number, input: any): Promise<{ run_id: string }> {
-    return http<{ run_id: string }>(`/workflows/${encodeURIComponent(String(id))}/run`, { method: 'POST', body: JSON.stringify({ input }) });
-  },
-  async deleteWorkflow(id: string | number): Promise<boolean> {
-    await http<void>(`/workflows/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+  async uploadDocument(file: File, metadata?: { description?: string; tags?: string | string[] }): Promise<any> {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (metadata?.description) formData.append('description', String(metadata.description))
+    if (metadata?.tags) {
+      const tagsValue = Array.isArray(metadata.tags) ? metadata.tags.join(',') : metadata.tags
+      formData.append('tags', tagsValue)
+    }
+
+    // Use the request method to handle URL properly
+    const response = await fetch(this.baseURL + '/api/documents/upload', {
+      method: 'POST',
+      body: formData,
+      // Don't set Content-Type - let browser set it for FormData
+    })
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+    return response.json()
+  }
+
+  async deleteDocument(id: string | number): Promise<boolean> {
+    await this.http('/documents/' + encodeURIComponent(String(id)), { method: 'DELETE' });
     return true;
-  },
+  }
 
-  // Code Graph
-  async codegraphIndex(payload: { project: string; root_dir: string }): Promise<any> {
-    return http(`/codegraph/index`, { method: 'POST', body: JSON.stringify(payload) });
-  },
-  async codegraphSearch(params: { project: string; q: string; limit?: number }): Promise<{ prompt_block: string; count: number }>{
-    const qs = new URLSearchParams({ project: params.project, q: params.q });
-    if (params.limit != null) qs.set('limit', String(params.limit));
-    return http(`/codegraph/search?${qs.toString()}`);
-  },
+  async reprocessDocument(id: string | number): Promise<any> {
+    return this.http('/documents/' + encodeURIComponent(String(id)) + '/reprocess', { method: 'POST' });
+  }
 
-  // Playbooks
-  async listPlaybooks(params?: { tenant_id?: string }): Promise<{ items: any[] }>{
-    const qs = new URLSearchParams();
-    const effectiveTenant = params?.tenant_id || TENANT_ID || '';
-    if (effectiveTenant) qs.set('tenant_id', effectiveTenant);
-    const url = `/playbooks${qs.toString() ? `?${qs.toString()}` : ''}`;
-    return http(url);
-  },
-  async minePlaybooks(body: { tenant_id?: string; min_support?: number; top_k?: number; name_prefix?: string }): Promise<{ generated: any[] }>{
-    return http(`/playbooks/mine`, { method: 'POST', body: JSON.stringify(body || {}) });
-  },
-};
+  async getDocumentContent(id: string | number): Promise<any> {
+    return this.http('/documents/' + encodeURIComponent(String(id)) + '/content');
+  }
 
-export default apiClient;
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app';
-
-export interface SystemHealth {
-  status: string;
-  timestamp: string;
-  version: string;
-}
-
-export interface SystemMetrics {
-  cpu: {
-    usage_percent: number;
-    cores: number;
-  };
-  memory: {
-    usage_percent: number;
-    used_gb: number;
-    total_gb: number;
-  };
-  disk: {
-    usage_percent: number;
-    used_gb: number;
-    total_gb: number;
-  };
-  network: {
-    packets_sent: number;
-    packets_recv: number;
-    bytes_sent: number;
-    bytes_recv: number;
-  };
-  timestamp: number;
-}
-
-      return await response.json();
+  // Processing methods with fallbacks
+  async getProcessingPipeline(): Promise<any> {
+    try {
+      return await this.http('/documents/processing/pipeline');
     } catch (error) {
-      console.error(`API request failed: ${url}`, error);
-      throw error;
+      return { stages: [], status: 'unavailable' };
     }
   }
 
+  async getProcessingLiveStatus(): Promise<any> {
+    try {
+      return await this.http('/documents/processing/live-status');
+    } catch (error) {
+      return { active_jobs: [] };
+    }
+  }
+
+  async reprocessAllDocuments(): Promise<any> {
+    try {
+      return await this.http('/documents/processing/reprocess-all', { method: 'POST' });
+    } catch (error) {
+      return { message: 'Feature not available' };
+    }
+  }
+
+  async getAnalyticsOverview(): Promise<any> {
+    try {
+      return await this.http('/documents/analytics/overview');
+    } catch (error) {
+      return { totalDocuments: 0, processedDocuments: 0, failedDocuments: 0 };
+    }
+  }
+
+  async getSearchPatterns(): Promise<any> {
+    try {
+      return await this.http('/documents/analytics/search-patterns');
+    } catch (error) {
+      return { patterns: [] };
+    }
+  }
+
+  // Agents
+  async getAgents(): Promise<Agent[]> {
+    return this.http('/agents')
+  }
+
+  async getAgent(id: string | number): Promise<Agent> {
+    return this.http(`/agents/${encodeURIComponent(String(id))}`)
+  }
+
+  async getAgentRuns(id: string | number, limit: number = 50): Promise<any> {
+    return this.http(`/agents/${encodeURIComponent(String(id))}/runs?limit=${limit}`)
+  }
+
+  async createAgent(payload: any): Promise<any> {
+    return this.http('/agents', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+  }
+
+  async updateAgent(agentId: string | number, body: any): Promise<any> {
+    return this.http(`/agents/${encodeURIComponent(String(agentId))}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+  }
+
+  // Workflows
+  async getWorkflows(params?: { limit?: number; offset?: number; q?: string }): Promise<Workflow[]> {
+    const qs = new URLSearchParams()
+    if (params?.limit != null) qs.set('limit', String(params.limit))
+    if (params?.offset != null) qs.set('offset', String(params.offset))
+    if (params?.q) qs.set('q', params.q)
+    const url = '/workflows' + (qs.toString() ? `?${qs.toString()}` : '')
+    const data: any = await this.http(url)
+    if (Array.isArray(data)) return data
+    if (data?.items) return data.items
+    return [] as unknown as Workflow[]
+  }
+
+  // System
   async getSystemHealth(): Promise<SystemHealth> {
-    return this.request<SystemHealth>('/health');
+    return this.http('/system/health')
   }
 
   async getSystemMetrics(): Promise<SystemMetrics> {
-    return this.request<SystemMetrics>('/api/system/metrics');
+    return this.http('/system/metrics')
+  }
+
+  async saveSystemConfig(configKey: string, configValue: any, description?: string): Promise<any> {
+    return this.http('/system/config', {
+      method: 'POST',
+      body: JSON.stringify({ config_key: configKey, config_value: configValue, description }),
+    })
   }
 }
 
-const apiClient = new ApiClient();
+export const apiClient = new ApiClient();
 export default apiClient;

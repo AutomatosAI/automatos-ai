@@ -20,7 +20,7 @@ import networkx as nx
 
 # Import models and database
 from models import Task, User, TaskCreate, TaskUpdate, TaskResponse
-from database import get_db
+from database.database import get_db
 
 # Import memory and reasoning systems
 from memory.manager import AdvancedMemoryManager

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 # Import database and dependencies
-from database import get_db
+from database.database import get_db
 from services.orchestrator_service import EnhancedOrchestratorService
 
 logger = logging.getLogger(__name__)

@@ -176,13 +176,13 @@ export function AgentRoster() {
   }, [])
 
   // Context menu handlers
-  const handleViewDetails = (agentId: number) => {
+  const handleViewDetails = (agentId: string) => {
     console.log('View details for agent:', agentId)
     // You can implement a modal or navigate to a details page
     alert(`Viewing details for agent ${agentId}`)
   }
 
-  const handleConfigure = (agentId: number) => {
+  const handleConfigure = (agentId: string) => {
     console.log('Configure agent:', agentId)
     // Navigate to configuration tab or open configuration modal
     // For now, we'll show an alert
@@ -192,28 +192,16 @@ export function AgentRoster() {
   const handleToggleStatus = async (agentId: number, currentStatus: string) => {
     try {
       const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
-      
-      const response = await fetch(`http://localhost:8080/api/agents/${agentId}`, {
+      const updatedAgent = await apiClient.request(`/api/agents/${agentId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          status: newStatus
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
       })
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
-      }
-      
-      const updatedAgent = await response.json()
       console.log('Agent status updated:', updatedAgent)
       
       // Update the local state
       setAgents(prevAgents => 
-        prevAgents.map(agent => 
+        prevAgents.map((agent: any) => 
           agent.id === agentId ? { ...agent, status: newStatus } : agent
         )
       )
@@ -229,7 +217,7 @@ export function AgentRoster() {
   const filteredAgents = agents.filter(agent =>
     (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
     (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.skills && agent.skills.some(skill => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
+    (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
   )
 
   if (loading) {
@@ -387,7 +375,7 @@ export function AgentRoster() {
               <div className="mb-4">
                 <p className="text-xs text-muted-foreground mb-2">Primary Skills</p>
                 <div className="flex flex-wrap gap-1">
-                  {agent.skills && agent.skills.slice(0, 3).map(skill => (
+                  {agent.skills && agent.skills.slice(0, 3).map((skill: any) => (
                     <Badge key={skill.id} variant="secondary" className="text-xs">
                       {skill.name ? skill.name.replace('_', ' ') : 'Unknown Skill'}
                     </Badge>

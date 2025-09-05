@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from database import get_db
+from database.database import get_db
 from models import Document, DocumentUploadResponse, DocumentResponse
-from document_manager import DocumentManager, DocumentStatus, DocumentType
+from utils.document_manager import DocumentManager, DocumentStatus, DocumentType
 import logging
 
 logger = logging.getLogger(__name__)

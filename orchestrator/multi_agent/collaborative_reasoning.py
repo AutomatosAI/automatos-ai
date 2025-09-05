@@ -27,7 +27,7 @@ import json
 
 # Import models
 from models import Task, Agent
-from database import get_db
+from database.database import get_db
 
 logger = logging.getLogger(__name__)
 

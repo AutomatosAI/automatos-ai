@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from ..services_code_graph_builder import CodeGraphBuilder
-from ..services_code_context_retrieval import CodeContextRetrieval
+from services_code_graph_builder import CodeGraphBuilder
+from services_code_context_retrieval import CodeContextRetrieval
 
 
 router = APIRouter(prefix="/codegraph", tags=["code-graph"])

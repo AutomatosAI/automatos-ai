@@ -9,12 +9,10 @@ import { AgentRoster } from './agent-roster'
 import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
 import { AgentDetailPanel } from '@/components/agents/agent-detail-panel'
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel'
-import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentPerformance } from './agent-performance'
 import { AgentSkills } from './agent-skills'
 import { AgentCoordination } from './agent-coordination'
-import { MultiAgentDashboard } from './multi-agent-dashboard'
 import { CreateAgentModal } from './create-agent-modal'
 import { Button } from '@/components/ui/button'
 import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
@@ -150,7 +148,6 @@ export function AgentManagement() {
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-6">
-            <MultiAgentDashboard />
           </TabsContent>
 
           <TabsContent value="roster" className="space-y-6">

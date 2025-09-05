@@ -44,7 +44,7 @@ from sqlalchemy import and_
 
 # Import models
 from models import Task, User
-from database import get_db
+from database.database import get_db
 
 logger = logging.getLogger(__name__)
 

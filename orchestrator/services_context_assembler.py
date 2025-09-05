@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-from .models_context_policy import ContextPolicyModel
-from .context_policy import ContextPolicy, assemble_context, SlotName
+from models_context_policy import ContextPolicyModel
+from context_policy import ContextPolicy, assemble_context, SlotName
 
 
 class ContextAssembler:

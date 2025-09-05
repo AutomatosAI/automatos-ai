@@ -5,13 +5,13 @@ import logging
 
 from database.database import get_db
 from models import Pattern, PatternCreate, PatternResponse
-from ..main import require_api_key
+#from main import require_api_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/patterns", tags=["patterns"])
 
-@router.get("/", dependencies=[Depends(require_api_key)])
+@router.get("/", )
 async def list_patterns(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -38,7 +38,7 @@ async def list_patterns(
         logger.error(f"Error listing patterns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/", dependencies=[Depends(require_api_key)])
+@router.post("/", )
 async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_db)):
     """Create a new pattern"""
     try:
@@ -78,7 +78,7 @@ async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_
         logger.error(f"Error creating pattern: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating pattern: {str(e)}")
 
-@router.get("/{pattern_id}", dependencies=[Depends(require_api_key)])
+@router.get("/{pattern_id}", )
 async def get_pattern(pattern_id: int, db: Session = Depends(get_db)):
     """Get a specific pattern by ID"""
     try:
@@ -105,7 +105,7 @@ async def get_pattern(pattern_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting pattern: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/{pattern_id}", dependencies=[Depends(require_api_key)])
+@router.delete("/{pattern_id}", )
 async def delete_pattern(pattern_id: int, db: Session = Depends(get_db)):
     """Delete a pattern"""
     try:

@@ -227,10 +227,10 @@ class AgentResponse(BaseModel):
     agent_type: str
     status: str
     configuration: Optional[Dict[str, Any]]
-    performance_metrics: Optional[Dict[str, Any]]
+    performance_metrics: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = None
     skills: List[Dict[str, Any]] = []
 
 class SkillCreate(BaseModel):
@@ -258,7 +258,7 @@ class SkillResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = None
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -277,7 +277,7 @@ class PatternResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = None
 
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -309,7 +309,7 @@ class WorkflowResponse(BaseModel):
     default_policy_id: Optional[str]
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = None
     agents: List[Dict[str, Any]] = []
 
 class WorkflowExecutionCreate(BaseModel):
@@ -347,7 +347,7 @@ class DocumentResponse(BaseModel):
     description: Optional[str]
     upload_date: datetime
     processed_date: Optional[datetime]
-    created_by: Optional[str]
+    created_by: Optional[str] = None
 
 class SystemConfigCreate(BaseModel):
     config_key: str
@@ -387,7 +387,7 @@ class RAGConfigResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = None
 
 class SystemHealthResponse(BaseModel):
     status: str
