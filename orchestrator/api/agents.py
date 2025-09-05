@@ -7,8 +7,9 @@ import logging
 
 from database.database import get_db
 from database.models import PriorityLevel
+from database.models import Agent, Skill, Pattern, agent_skills
 from models import (
-    Agent, Skill, Pattern, agent_skills,
+    
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,

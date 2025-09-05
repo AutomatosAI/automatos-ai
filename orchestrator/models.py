@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
+from database.models import PriorityLevel
 
 Base = declarative_base()
 
@@ -212,6 +213,9 @@ class AgentCreate(BaseModel):
     agent_type: AgentType
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
+    priority_level: Optional[PriorityLevel] = None
+    max_concurrent_tasks: Optional[int] = 5
+    auto_start: Optional[bool] = False
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
