@@ -38,14 +38,20 @@ import { AnalyticsTab } from './analytics-tab'
 // Real document interface to match backend response
 interface BackendDocument {
   id: number;
-  name: string;
-  type: string;
-  size: string;
+  filename: string;
+  original_filename?: string;
+  file_type?: string;
+  file_size?: number;
+  status?: string;
+  chunk_count?: number;
+  upload_date?: string;
+  processed_date?: string | null;
 }
 
 // Stats will be calculated dynamically from real data
 
 const statusStyles: Record<string, string> = {
+  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
   processed: 'bg-green-500/10 text-green-400 border-green-500/20',
   processing: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
@@ -115,31 +121,15 @@ export function DocumentManagement() {
     const fetchDocuments = async () => {
       try {
         setLoading(true)
-        // Use direct fetch to match the actual backend API
-        const response = await fetch('http://localhost:8080/api/documents')
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-        const documents: BackendDocument[] = await response.json()
+        const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
         setRealDocuments(documents)
         
         // Calculate real stats from backend data
         const totalDocs = documents.length
-        const processedDocs = documents.length // All documents are considered processed in current backend
-        
-        // Parse size strings to calculate total storage
-        let totalSizeBytes = 0
-        documents.forEach(doc => {
-          const sizeStr = doc.size.toLowerCase()
-          if (sizeStr.includes('mb')) {
-            totalSizeBytes += parseFloat(sizeStr) * 1024 * 1024
-          } else if (sizeStr.includes('kb')) {
-            totalSizeBytes += parseFloat(sizeStr) * 1024
-          } else if (sizeStr.includes('gb')) {
-            totalSizeBytes += parseFloat(sizeStr) * 1024 * 1024 * 1024
-          }
-        })
-        const sizeInGB = (totalSizeBytes / (1024 * 1024 * 1024)).toFixed(1)
+        const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
+        const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
+        const sizeInMB = totalSizeBytes / (1024 * 1024)
+        const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
         
         setStats([
           {
@@ -158,15 +148,15 @@ export function DocumentManagement() {
           },
           {
             label: 'Storage Used',
-            value: `${sizeInGB} GB`,
-            change: `+${Math.max(0, parseFloat(sizeInGB) - 0.5).toFixed(1)} GB this week`,
+            value: sizeDisplay,
+            change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
             icon: FolderOpen,
             color: 'text-orange-400'
           },
           {
             label: 'Vector Chunks',
-            value: (totalDocs * 25).toString(), // Estimate 25 chunks per document
-            change: `+${Math.max(0, (totalDocs * 25) - 50)} chunks`,
+            value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
+            change: '',
             icon: Database,
             color: 'text-purple-400'
           }
@@ -205,28 +195,13 @@ export function DocumentManagement() {
           })
         }, 200)
 
-        // Upload to backend API (using the actual endpoint)
-        const response = await fetch('http://localhost:8080/api/documents', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: file.name,
-            type: file.type || 'unknown',
-            size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`
-          })
-        })
+        // Upload to backend API (multipart/form-data -> /api/documents/upload)
+        const uploadRes = await apiClient.uploadDocument(file, { description: '', tags: [] })
 
         clearInterval(interval)
         setUploadProgress(100)
 
-        if (!response.ok) {
-          throw new Error(`Failed to upload ${file.name}`)
-        }
-
-        const result = await response.json()
-        console.log('Upload result:', result)
+        console.log('Upload result:', uploadRes)
 
         // Small delay to show completion
         await new Promise(resolve => setTimeout(resolve, 500))
@@ -242,28 +217,18 @@ export function DocumentManagement() {
         
         // Refresh documents list
         try {
-          const response = await fetch('http://localhost:8080/api/documents')
-          if (response.ok) {
-            const documents: BackendDocument[] = await response.json()
+          const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
+          if (Array.isArray(documents)) {
             setRealDocuments(documents)
             
             // Recalculate stats
             const totalDocs = documents.length
-            const processedDocs = documents.length
+            const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
             
-            // Parse size strings to calculate total storage
-            let totalSizeBytes = 0
-            documents.forEach(doc => {
-              const sizeStr = doc.size.toLowerCase()
-              if (sizeStr.includes('mb')) {
-                totalSizeBytes += parseFloat(sizeStr) * 1024 * 1024
-              } else if (sizeStr.includes('kb')) {
-                totalSizeBytes += parseFloat(sizeStr) * 1024
-              } else if (sizeStr.includes('gb')) {
-                totalSizeBytes += parseFloat(sizeStr) * 1024 * 1024 * 1024
-              }
-            })
-            const sizeInGB = (totalSizeBytes / (1024 * 1024 * 1024)).toFixed(1)
+            // Calculate total storage (bytes)
+            const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
+            const sizeInMB = totalSizeBytes / (1024 * 1024)
+            const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
             
             setStats([
               {
@@ -282,15 +247,15 @@ export function DocumentManagement() {
               },
               {
                 label: 'Storage Used',
-                value: `${sizeInGB} GB`,
-                change: `+${Math.max(0, parseFloat(sizeInGB) - 0.5).toFixed(1)} GB this week`,
+                value: sizeDisplay,
+                change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
                 icon: FolderOpen,
                 color: 'text-orange-400'
               },
               {
                 label: 'Vector Chunks',
-                value: (totalDocs * 25).toString(),
-                change: `+${Math.max(0, (totalDocs * 25) - 50)} chunks`,
+                value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
+                change: '',
                 icon: Database,
                 color: 'text-purple-400'
               }
@@ -336,9 +301,59 @@ export function DocumentManagement() {
     }
   }
 
+  // Core User Functions - Following Testing Rules
+  const handleViewDetails = async (documentId: number) => {
+    try {
+      const document = await apiClient.request<BackendDocument>(`/api/documents/${documentId}`)
+      alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+    } catch (error) {
+      console.error('Error viewing document details:', error)
+      alert('Error loading document details')
+    }
+  }
+
+  const handleDownload = async (documentId: number, filename: string) => {
+    try {
+      // Create download link
+      const downloadUrl = `https://api.automatos.app/api/documents/${documentId}/download`
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Error downloading document:', error)
+      alert('Error downloading document')
+    }
+  }
+
+  const handleDelete = async (documentId: number) => {
+    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+      return
+    }
+    
+    try {
+      await apiClient.request(`/api/documents/${documentId}`, {
+        method: 'DELETE'
+      })
+      
+      // Refresh documents list after deletion
+      const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
+      if (Array.isArray(documents)) {
+        setRealDocuments(documents)
+      }
+      
+      alert('Document deleted successfully')
+    } catch (error) {
+      console.error('Error deleting document:', error)
+      alert('Error deleting document')
+    }
+  }
+
   const filteredDocuments = realDocuments.filter(doc =>
-    doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    doc.type.toLowerCase().includes(searchTerm.toLowerCase())
+    (doc.filename || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   return (
@@ -459,7 +474,7 @@ export function DocumentManagement() {
             {/* Document Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredDocuments.map((doc, index) => {
-                const fileType = doc.type.toLowerCase()
+                const fileType = (doc.file_type || 'unknown').toLowerCase()
                 const TypeIcon = typeIcons[fileType] || File
                 
                 return (
@@ -477,9 +492,15 @@ export function DocumentManagement() {
                           <TypeIcon className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold truncate">{doc.name}</h3>
+                          <h3 className="font-semibold truncate">{doc.filename}</h3>
                           <p className="text-xs text-muted-foreground">
-                            {doc.type.toUpperCase()} • {doc.size}
+                            {(doc.file_type || 'unknown').toUpperCase()} • {(() => {
+                              const bytes = doc.file_size || 0
+                              if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024*1024*1024)).toFixed(1)}GB`
+                              if (bytes >= 1024 * 1024) return `${(bytes / (1024*1024)).toFixed(1)}MB`
+                              if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}KB`
+                              return `${bytes}B`
+                            })()}
                           </p>
                         </div>
                       </div>
@@ -491,15 +512,15 @@ export function DocumentManagement() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleViewDetails(doc.id)}>
                             <Eye className="w-4 h-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDownload(doc.id, doc.filename)}>
                             <Download className="w-4 h-4 mr-2" />
                             Download
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-400">
+                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id)}>
                             <Trash2 className="w-4 h-4 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -509,11 +530,11 @@ export function DocumentManagement() {
 
                     {/* Status */}
                     <div className="flex items-center justify-between mb-4">
-                      <Badge className={statusStyles.processed}>
-                        processed
+                      <Badge className={statusStyles[(doc.status || 'completed').toLowerCase()] || statusStyles.completed}>
+                        {(doc.status || 'completed').toLowerCase()}
                       </Badge>
                       <Badge variant="outline" className="text-xs">
-                        {doc.type}
+                        {doc.file_type || 'unknown'}
                       </Badge>
                     </div>
 
@@ -526,12 +547,12 @@ export function DocumentManagement() {
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div>
                         <p className="text-sm font-medium">Vector Chunks</p>
-                        <p className="text-xs text-muted-foreground">25</p>
+                        <p className="text-xs text-muted-foreground">{doc.chunk_count ?? 0}</p>
                       </div>
                       <div>
                         <p className="text-sm font-medium">Uploaded</p>
                         <p className="text-xs text-muted-foreground">
-                          {new Date().toLocaleDateString()}
+                          {doc.upload_date ? new Date(doc.upload_date).toLocaleDateString() : new Date().toLocaleDateString()}
                         </p>
                       </div>
                     </div>
@@ -539,10 +560,10 @@ export function DocumentManagement() {
                     {/* Tags */}
                     <div className="flex flex-wrap gap-1">
                       <Badge variant="secondary" className="text-xs">
-                        {doc.type}
+                        {doc.file_type || 'unknown'}
                       </Badge>
                       <Badge variant="secondary" className="text-xs">
-                        processed
+                        {(doc.status || 'processed').toLowerCase()}
                       </Badge>
                     </div>
                   </motion.div>

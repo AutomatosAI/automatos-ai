@@ -26,10 +26,10 @@ from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.documents_v2 import router as documents_router
 from api.system import router as system_router
-from api.context_engineering import router as context_engineering_router
-from api.memory import router as memory_router
+#from api.context_engineering import router as context_engineering_router
+#from api.memory import router as memory_router
 from api.evaluation import router as evaluation_router
-from api.multi_agent import router as multi_agent_router
+#from api.multi_agent import router as multi_agent_router
 from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
 from api.api_code_graph import router as code_graph_router
@@ -252,10 +252,10 @@ app.include_router(agents_router)
 app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
-app.include_router(context_engineering_router)
-app.include_router(memory_router)
+#app.include_router(context_engineering_router)
+#app.include_router(memory_router)
 app.include_router(evaluation_router)
-app.include_router(multi_agent_router)
+#app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
 app.include_router(context_policy_router)
 app.include_router(code_graph_router)

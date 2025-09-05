@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import String, Integer, JSON, DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from .models import Base
+from models import Base
 
 
 class ContextPolicyModel(Base):

@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import String, Integer, Text, DateTime, Index, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from .models import Base
+from models import Base
 
 
 class CodeSymbol(Base):

@@ -4,7 +4,7 @@ import ast
 import os
 from typing import Optional, Tuple, Dict
 from sqlalchemy.orm import Session
-from .models_code_graph import CodeSymbol, CodeEdge
+from models_code_graph import CodeSymbol, CodeEdge
 
 
 class CodeGraphBuilder:

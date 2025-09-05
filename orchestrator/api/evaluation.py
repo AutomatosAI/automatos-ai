@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 # Database imports
-from database import get_db
+from database.database import get_db
 from models import (
     EvaluationResult as EvaluationResultDB,
     BenchmarkAssessment,

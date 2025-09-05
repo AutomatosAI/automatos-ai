@@ -31,7 +31,7 @@ from enum import Enum
 
 # Import models
 from models import Task, Agent, Workflow
-from database import get_db
+from database.database import get_db
 
 logger = logging.getLogger(__name__)
 

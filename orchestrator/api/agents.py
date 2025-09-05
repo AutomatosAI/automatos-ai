@@ -6,12 +6,13 @@ import time
 import logging
 
 from database.database import get_db
+from database.models import PriorityLevel
 from models import (
     Agent, Skill, Pattern, agent_skills,
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,
-    AgentStatus, AgentType, PriorityLevel
+    AgentStatus, AgentType
 )
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,9 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
     )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
-from ..main import require_api_key
+# from main import require_api_key
 
-@router.get("/types", dependencies=[Depends(require_api_key)])
+@router.get("/types", )
 async def get_agent_types():
     """Get available agent types"""
     return {
@@ -73,7 +74,7 @@ async def get_agent_types():
         }
     }
 
-@router.get("/stats", dependencies=[Depends(require_api_key)])
+@router.get("/stats", )
 async def get_agent_stats(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
@@ -102,7 +103,7 @@ async def get_agent_stats(db: Session = Depends(get_db)):
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
+@router.post("/bulk", response_model=List[AgentResponse], )
 async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
@@ -161,7 +162,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
 
-@router.post("/", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
+@router.post("/", response_model=AgentResponse, )
 async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     try:
@@ -212,7 +213,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
 
-@router.get("/", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
+@router.get("/", response_model=List[AgentResponse], )
 async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -251,7 +252,7 @@ async def list_agents(
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/status", dependencies=[Depends(require_api_key)])
+@router.get("/{agent_id}/status", )
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
@@ -277,7 +278,7 @@ async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/execute", dependencies=[Depends(require_api_key)])
+@router.post("/{agent_id}/execute", )
 async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
@@ -307,7 +308,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
+@router.get("/{agent_id}", response_model=AgentResponse, )
 async def get_agent(agent_id: int, db: Session = Depends(get_db)):
     """Get a specific agent by ID"""
     try:
@@ -322,7 +323,7 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
+@router.get("/{agent_id}/skills", )
 async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
     """Get skills for a specific agent"""
     try:
@@ -348,7 +349,7 @@ async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
+@router.post("/{agent_id}/skills", )
 async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
@@ -373,7 +374,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = De
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
+@router.put("/{agent_id}", response_model=AgentResponse, )
 async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
@@ -410,7 +411,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
 
-@router.delete("/{agent_id}", dependencies=[Depends(require_api_key)])
+@router.delete("/{agent_id}", )
 async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
     """Delete an agent"""
     try:

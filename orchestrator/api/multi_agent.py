@@ -20,7 +20,7 @@ from datetime import datetime
 # Import database and dependencies
 from database.database import get_db
 from services.orchestrator_service import EnhancedOrchestratorService
-from ..main import require_api_key
+from main import require_api_key
 
 logger = logging.getLogger(__name__)
 
