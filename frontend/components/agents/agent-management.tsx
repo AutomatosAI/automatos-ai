@@ -61,7 +61,7 @@ export function AgentManagement() {
     const fetchAgentStats = async () => {
       try {
         console.log('Fetching agent stats...')
-        const response = await fetch('/api/agents')
+        const response = await fetch('/api/agents/')
         const agents = await response.json()
         console.log('Agent data received:', agents.length, 'agents')
         
