@@ -1,11 +1,13 @@
 
-import { MainLayout } from '@/components/layout/main-layout'
-import { PerformanceAnalytics } from '@/components/analytics/performance-analytics'
+
+import { EnhancedMainLayout } from '@/components/layout/enhanced-main-layout'
+import { EnhancedPerformanceAnalytics } from '@/components/analytics/enhanced-performance-analytics'
 
 export default function AnalyticsPage() {
   return (
-    <MainLayout>
-      <PerformanceAnalytics />
-    </MainLayout>
+    <EnhancedMainLayout>
+      <EnhancedPerformanceAnalytics />
+    </EnhancedMainLayout>
   )
 }
+
