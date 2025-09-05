@@ -205,7 +205,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         # Load skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return {"data": _build_agent_response(agent_with_skills)}
+        return _build_agent_response(agent_with_skills)
         
     except HTTPException:
         raise
@@ -247,7 +247,7 @@ async def list_agents(
         
         agents = query.offset(skip).limit(limit).all()
         
-        return {"data": [_build_agent_response(agent) for agent in agents]}
+        return [_build_agent_response(agent) for agent in agents]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
@@ -403,7 +403,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return {"data": _build_agent_response(agent_with_skills)}
+        return _build_agent_response(agent_with_skills)
         
     except HTTPException:
         raise
