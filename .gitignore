@@ -32,3 +32,5 @@ logs/
 
 .DS_Store
 docs/*.pdf
+frontend/.next/
+frontend/node_modules/
