@@ -424,6 +424,7 @@ async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
         db.commit()
         
         return {"message": f"Agent {agent_id} deleted successfully"}
+    except HTTPException:        raise
         
     except Exception as e:
         db.rollback()
