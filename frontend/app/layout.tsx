@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import { Providers } from '@/components/providers'
+import { ChatWidget } from '@/components/chatbot/chat-widget'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -45,6 +46,7 @@ export default function RootLayout({
       <body className={`${inter.className} gradient-bg min-h-screen antialiased`}>
         <Providers>
           {children}
+          <ChatWidget position="bottom-right" />
           <Toaster 
             position="top-right"
             toastOptions={{
