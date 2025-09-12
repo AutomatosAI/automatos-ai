@@ -614,7 +614,7 @@ export function WorkflowManagement() {
                         <SelectValue placeholder="Select a workflow template" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Custom Workflow</SelectItem>
+                        <SelectItem value="custom">Custom Workflow</SelectItem>
                         {workflowTemplates.map(template => (
                           <SelectItem key={template.id} value={template.id}>
                             {template.name}

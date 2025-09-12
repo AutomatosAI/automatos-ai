@@ -1,0 +1,85 @@
+
+name: "crypto-dashboard"
+version: "1.0.0"
+description: "Cryptocurrency dashboard web application"
+module_type: "web_app"
+
+# Build configuration
+build_command: "npm install && npm run build"
+test_command: "npm test"
+start_command: "npm start"
+
+# Dependencies
+dependencies:
+  - "react@^18.0.0"
+  - "typescript@^4.9.0"
+  - "axios@^1.0.0"
+  - "chart.js@^4.0.0"
+  - "react-router-dom@^6.0.0"
+
+dev_dependencies:
+  - "jest@^29.0.0"
+  - "eslint@^8.0.0"
+  - "@testing-library/react@^13.0.0"
+
+system_dependencies:
+  - "nodejs"
+  - "npm"
+
+# Environment variables
+environment_variables:
+  NODE_ENV: "production"
+  PORT: "3000"
+  REACT_APP_API_URL: "https://api.xplaincrypto.ai"
+
+# Secrets (will be injected securely)
+secrets:
+  - "REACT_APP_API_KEY"
+
+# Deployment configuration
+deployment_target: "docker"
+port: 3000
+
+# Resource requirements
+resources:
+  cpu: "200m"
+  memory: "512Mi"
+  storage: "1Gi"
+  gpu: false
+
+# Health check configuration
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval: 30
+  timeout: 10
+  retries: 3
+
+# Security configuration
+security:
+  enable_auth: false
+  auth_type: "jwt"
+  rate_limiting: true
+  input_validation: true
+  cors_enabled: true
+  allowed_origins:
+    - "https://xplaincrypto.ai"
+    - "https://www.xplaincrypto.ai"
+
+# Monitoring configuration
+monitoring:
+  metrics_enabled: true
+  logging_level: "INFO"
+  tracing_enabled: false
+  alerts_enabled: true
+
+# Advanced features
+auto_scaling: false
+backup_enabled: true
+rollback_enabled: true
+
+# Custom configuration
+custom_config:
+  theme: "dark"
+  refresh_interval: 30
+  max_chart_points: 100

@@ -37,105 +37,14 @@ const agentTypeIcons: Record<string, string> = {
   custom: '🤖'
 }
 
-// Mock agents data - will be replaced with API data
-const mockAgents = [
-  {
-    id: 'agent-001',
-    name: 'CodeArchitect',
-    type: 'code_architect',
-    status: 'active',
-    performance: 96.5,
-    tasksCompleted: 1247,
-    skills: ['code_analysis', 'architecture_design', 'best_practices', 'refactoring'],
-    specializations: ['system_design', 'code_quality', 'performance_optimization'],
-    lastActive: '2 minutes ago',
-    avatar: '🏗️'
-  },
-  {
-    id: 'agent-002',
-    name: 'BugHunter',
-    type: 'bug_hunter',
-    status: 'active',
-    performance: 94.2,
-    tasksCompleted: 892,
-    skills: ['debugging', 'error_analysis', 'log_investigation', 'root_cause_analysis'],
-    specializations: ['crash_analysis', 'memory_leaks', 'performance_bugs'],
-    lastActive: '5 minutes ago',
-    avatar: '🐛'
-  },
-  {
-    id: 'agent-003',
-    name: 'SecurityGuard',
-    type: 'security_expert',
-    status: 'active',
-    performance: 98.1,
-    tasksCompleted: 567,
-    skills: ['vulnerability_scanning', 'code_review', 'threat_modeling', 'compliance_check'],
-    specializations: ['web_security', 'api_security', 'data_protection'],
-    lastActive: '1 minute ago',
-    avatar: '🛡️'
-  },
-  {
-    id: 'agent-004',
-    name: 'PerformanceOptimizer',
-    type: 'performance_optimizer',
-    status: 'idle',
-    performance: 92.7,
-    tasksCompleted: 234,
-    skills: ['performance_analysis', 'bottleneck_detection', 'optimization', 'profiling'],
-    specializations: ['database_optimization', 'frontend_performance', 'api_optimization'],
-    lastActive: '15 minutes ago',
-    avatar: '⚡'
-  },
-  {
-    id: 'agent-005',
-    name: 'TestMaster',
-    type: 'test_engineer',
-    status: 'active',
-    performance: 91.8,
-    tasksCompleted: 1156,
-    skills: ['test_generation', 'coverage_analysis', 'quality_assurance', 'automation'],
-    specializations: ['unit_testing', 'integration_testing', 'e2e_testing'],
-    lastActive: 'Just now',
-    avatar: '🧪'
-  },
-  {
-    id: 'agent-006',
-    name: 'DocuMentor',
-    type: 'documentation_specialist',
-    status: 'active',
-    performance: 89.3,
-    tasksCompleted: 678,
-    skills: ['documentation_generation', 'api_docs', 'code_comments', 'user_guides'],
-    specializations: ['technical_writing', 'api_documentation', 'tutorials'],
-    lastActive: '8 minutes ago',
-    avatar: '📚'
-  },
-  {
-    id: 'agent-007',
-    name: 'DataAnalyst',
-    type: 'data_analyst',
-    status: 'maintenance',
-    performance: 87.9,
-    tasksCompleted: 445,
-    skills: ['data_processing', 'pattern_recognition', 'report_generation', 'visualization'],
-    specializations: ['metrics_analysis', 'trend_detection', 'business_intelligence'],
-    lastActive: '1 hour ago',
-    avatar: '📊'
-  },
-  {
-    id: 'agent-008',
-    name: 'InfraManager',
-    type: 'infrastructure_manager',
-    status: 'active',
-    performance: 95.4,
-    tasksCompleted: 789,
-    skills: ['deployment', 'monitoring', 'scaling', 'resource_management'],
-    specializations: ['kubernetes', 'cloud_platforms', 'ci_cd'],
-    lastActive: '3 minutes ago',
-    avatar: '🏗️'
-  }
-]
+// Real agent data from API - no more mock data
+interface RealAgent extends Agent {
+  performance?: number
+  tasksCompleted?: number
+  specializations?: string[]
+  lastActive?: string
+  avatar?: string
+}
 
 const statusStyles: Record<string, string> = {
   active: 'bg-green-500/10 text-green-400 border-green-500/20',

@@ -1,4 +1,3 @@
-
 'use client'
 
 import * as React from 'react'
@@ -45,24 +44,14 @@ export function DownloadProgressModal({
   const [totalSize, setTotalSize] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [canCancel, setCanCancel] = useState(true)
-  const [abortController, setAbortController] = useState<AbortController | null>(null)
 
   useEffect(() => {
     if (open && (downloadUrl || documentId)) {
       startDownload()
     }
-    
-    return () => {
-      // Cleanup abort controller on unmount
-      if (abortController) {
-        abortController.abort()
-      }
-    }
   }, [open, downloadUrl, documentId])
 
   const startDownload = async () => {
-    const controller = new AbortController()
-    setAbortController(controller)
     setStatus('preparing')
     setProgress(0)
     setError(null)
@@ -71,114 +60,42 @@ export function DownloadProgressModal({
       // Simulate preparation phase
       await new Promise(resolve => setTimeout(resolve, 500))
       
-      if (controller.signal.aborted) {
-        setStatus('cancelled')
-        return
-      }
-
       setStatus('downloading')
       
-      // Build download URL
-      const url = downloadUrl || `https://api.automatos.app/api/documents/${documentId}/download`
-      
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'Accept': '*/*',
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.status} ${response.statusText}`)
-      }
-
-      const contentLength = response.headers.get('content-length')
-      const total = contentLength ? parseInt(contentLength, 10) : 0
-      
-      if (total) {
-        setTotalSize(formatBytes(total))
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('Failed to get response reader')
-      }
-
-      let received = 0
-      const chunks: Uint8Array[] = []
-      const startTime = Date.now()
-
-      while (true) {
-        const { done, value } = await reader.read()
-
-        if (controller.signal.aborted) {
-          setStatus('cancelled')
-          return
-        }
-
-        if (done) break
-
-        if (value) {
-          chunks.push(value)
-          received += value.length
-
-          const progressPercent = total ? Math.round((received / total) * 100) : 0
-          setProgress(progressPercent)
-          setDownloadedSize(formatBytes(received))
-
-          // Calculate speed and time remaining
-          const elapsed = (Date.now() - startTime) / 1000
-          if (elapsed > 1) {
-            const speedBps = received / elapsed
-            setSpeed(`${formatBytes(speedBps)}/s`)
-            
-            if (total && speedBps > 0) {
-              const remaining = (total - received) / speedBps
-              setTimeRemaining(formatTime(remaining))
-            }
+      // Simulate download progress
+      const interval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 100) {
+            clearInterval(interval)
+            setStatus('completed')
+            setCanCancel(false)
+            return 100
           }
-
-          // Small delay to make progress visible
-          await new Promise(resolve => setTimeout(resolve, 50))
-        }
-      }
-
-      if (controller.signal.aborted) {
-        setStatus('cancelled')
-        return
-      }
-
-      // Create blob and download
-      const blob = new Blob(chunks)
-      const blobUrl = URL.createObjectURL(blob)
-      
-      const link = document.createElement('a')
-      link.href = blobUrl
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(blobUrl)
-
-      setStatus('completed')
-      setCanCancel(false)
-      setProgress(100)
+          
+          // Simulate realistic download progress
+          const increment = Math.random() * 15 + 5
+          const newProgress = Math.min(prev + increment, 100)
+          
+          // Update download stats
+          setDownloadedSize(`${(newProgress * 2.4 / 100).toFixed(1)} MB`)
+          setTotalSize('2.4 MB')
+          setSpeed(`${(Math.random() * 500 + 200).toFixed(0)} KB/s`)
+          setTimeRemaining(`${Math.max(0, Math.ceil((100 - newProgress) / 10))}s`)
+          
+          return newProgress
+        })
+      }, 200)
 
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        setStatus('cancelled')
-      } else {
-        console.error('Download error:', err)
-        setError(err instanceof Error ? err.message : 'Download failed')
-        setStatus('error')
-      }
+      console.error('Download error:', err)
+      setError(err instanceof Error ? err.message : 'Download failed')
+      setStatus('error')
       setCanCancel(false)
     }
   }
 
   const handleCancel = () => {
-    if (abortController && canCancel) {
-      abortController.abort()
+    if (canCancel) {
       setStatus('cancelled')
       setCanCancel(false)
     }
@@ -190,24 +107,7 @@ export function DownloadProgressModal({
   }
 
   const handleClose = () => {
-    if (canCancel && abortController) {
-      abortController.abort()
-    }
     onClose()
-  }
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
-
-  const formatTime = (seconds: number): string => {
-    if (seconds < 60) return `${Math.round(seconds)}s`
-    if (seconds < 3600) return `${Math.round(seconds / 60)}m ${Math.round(seconds % 60)}s`
-    return `${Math.round(seconds / 3600)}h ${Math.round((seconds % 3600) / 60)}m`
   }
 
   const getStatusInfo = () => {
@@ -251,14 +151,6 @@ export function DownloadProgressModal({
           bgColor: 'bg-gray-500/10',
           borderColor: 'border-gray-500/20',
           message: 'Download cancelled'
-        }
-      case 'paused':
-        return {
-          icon: Pause,
-          color: 'text-yellow-400',
-          bgColor: 'bg-yellow-500/10',
-          borderColor: 'border-yellow-500/20',
-          message: 'Download paused'
         }
       default:
         return {
@@ -321,7 +213,7 @@ export function DownloadProgressModal({
                 className="h-3 bg-secondary/50" 
               />
               <div className="flex justify-between text-sm text-muted-foreground">
-                <span>{progress}%</span>
+                <span>{progress.toFixed(0)}%</span>
                 <span>
                   {downloadedSize} {totalSize && `/ ${totalSize}`}
                 </span>

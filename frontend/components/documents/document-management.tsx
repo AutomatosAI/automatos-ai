@@ -35,11 +35,6 @@ import { apiClient, Document } from '@/lib/api'
 import { ProcessingTab } from './processing-tab'
 import { AnalyticsTab } from './analytics-tab'
 
-// Import the new professional modals
-import { DocumentDetailsModal } from './document-details-modal'
-import { DownloadProgressModal } from './download-progress-modal'
-import { DeleteConfirmationModal } from './delete-confirmation-modal'
-
 // Real document interface to match backend response
 interface BackendDocument {
   id: number;
@@ -52,6 +47,8 @@ interface BackendDocument {
   upload_date?: string;
   processed_date?: string | null;
 }
+
+// Stats will be calculated dynamically from real data
 
 const statusStyles: Record<string, string> = {
   completed: 'bg-green-500/10 text-green-400 border-green-500/20',
@@ -114,15 +111,6 @@ export function DocumentManagement() {
       color: 'text-purple-400'
     }
   ])
-  
-  // Modal states
-  const [detailsModalOpen, setDetailsModalOpen] = useState(false)
-  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null)
-  const [downloadModalOpen, setDownloadModalOpen] = useState(false)
-  const [downloadInfo, setDownloadInfo] = useState<{filename: string, documentId: number} | null>(null)
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-  const [deleteInfo, setDeleteInfo] = useState<{documentId: number, filename: string} | null>(null)
-
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -313,27 +301,38 @@ export function DocumentManagement() {
     }
   }
 
-  // Enhanced User Functions - Using Professional Modals
+  // Core User Functions - Following Testing Rules
   const handleViewDetails = async (documentId: number) => {
-    setSelectedDocumentId(documentId)
-    setDetailsModalOpen(true)
+    try {
+      const document = await apiClient.request<BackendDocument>(`/api/documents/${documentId}`)
+      alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+    } catch (error) {
+      console.error('Error viewing document details:', error)
+      alert('Error loading document details')
+    }
   }
 
   const handleDownload = async (documentId: number, filename: string) => {
-    setDownloadInfo({ filename, documentId })
-    setDownloadModalOpen(true)
+    try {
+      // Create download link
+      const downloadUrl = `https://api.automatos.app/api/documents/${documentId}/download`
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Error downloading document:', error)
+      alert('Error downloading document')
+    }
   }
 
   const handleDelete = async (documentId: number) => {
-    const document = realDocuments.find(d => d.id === documentId)
-    if (!document) return
+    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
+      return
+    }
     
-    setDeleteInfo({ documentId, filename: document.filename })
-    setDeleteModalOpen(true)
-  }
-
-  // Modal handlers
-  const handleConfirmDelete = async (documentId: number) => {
     try {
       await apiClient.request(`/api/documents/${documentId}`, {
         method: 'DELETE'
@@ -344,20 +343,11 @@ export function DocumentManagement() {
       if (Array.isArray(documents)) {
         setRealDocuments(documents)
       }
+      
+      alert('Document deleted successfully')
     } catch (error) {
       console.error('Error deleting document:', error)
-      throw error // Re-throw to let the modal handle the error display
-    }
-  }
-
-  const refreshDocuments = async () => {
-    try {
-      const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-      if (Array.isArray(documents)) {
-        setRealDocuments(documents)
-      }
-    } catch (error) {
-      console.error('Error refreshing documents:', error)
+      alert('Error deleting document')
     }
   }
 
@@ -377,40 +367,6 @@ export function DocumentManagement() {
         onChange={handleFileChange}
         className="hidden"
       />
-
-      {/* Professional Modals */}
-      <DocumentDetailsModal
-        documentId={selectedDocumentId}
-        open={detailsModalOpen}
-        onClose={() => {
-          setDetailsModalOpen(false)
-          setSelectedDocumentId(null)
-        }}
-        onDownload={handleDownload}
-        onDelete={handleDelete}
-      />
-
-      <DownloadProgressModal
-        open={downloadModalOpen}
-        onClose={() => {
-          setDownloadModalOpen(false)
-          setDownloadInfo(null)
-        }}
-        filename={downloadInfo?.filename || ''}
-        documentId={downloadInfo?.documentId}
-      />
-
-      <DeleteConfirmationModal
-        documentId={deleteInfo?.documentId || null}
-        filename={deleteInfo?.filename || ''}
-        open={deleteModalOpen}
-        onClose={() => {
-          setDeleteModalOpen(false)
-          setDeleteInfo(null)
-        }}
-        onConfirm={handleConfirmDelete}
-      />
-
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -675,34 +631,51 @@ export function DocumentManagement() {
                 >
                   <Upload className={`w-12 h-12 mx-auto mb-4 ${
                     dragActive ? 'text-primary' : 'text-muted-foreground'
-                  }`} />
-                  <h3 className="text-lg font-semibold mb-2">
-                    {dragActive ? 'Drop files here' : 'Upload Documents'}
-                  </h3>
-                  <p className="text-muted-foreground mb-4">
-                    Drag and drop files here, or click to select files
-                  </p>
-                  <Button onClick={handleUploadClick} disabled={isUploading}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Select Files
-                  </Button>
-                  <p className="text-xs text-muted-foreground mt-4">
-                    Supported formats: PDF, DOCX, TXT, MD, XLSX, CSV, JSON, XML
-                  </p>
+                  } ${isUploading ? 'animate-bounce' : ''}`} />
+                  
+                  {isUploading ? (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold">Uploading...</h3>
+                      <div className="w-full bg-secondary rounded-full h-2">
+                        <div 
+                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">{uploadProgress}% complete</p>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="text-lg font-semibold mb-2">
+                        {dragActive ? 'Drop files here' : 'Drag and drop files here'}
+                      </h3>
+                      <p className="text-muted-foreground mb-4">
+                        Supports PDF, DOCX, TXT, MD, XLSX, CSV, JSON, XML and more
+                      </p>
+                      <Button 
+                        className="gradient-accent hover:opacity-90"
+                        onClick={handleUploadClick}
+                        disabled={isUploading}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Choose Files
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="processing">
+          <TabsContent value="processing" className="space-y-6">
             <ProcessingTab />
           </TabsContent>
 
-          <TabsContent value="analytics">
+          <TabsContent value="analytics" className="space-y-6">
             <AnalyticsTab />
           </TabsContent>
 
-          <TabsContent value="codegraph">
+          <TabsContent value="codegraph" className="space-y-6">
             <CodeGraphPanel />
           </TabsContent>
         </Tabs>
