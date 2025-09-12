@@ -1,7 +1,7 @@
 'use client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-const BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+const BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
 const PREFIX = (process.env.NEXT_PUBLIC_API_PREFIX || '/api').replace(/\/$/, '')
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || ''
 const AUTH = process.env.NEXT_PUBLIC_AUTH_TOKEN || ''

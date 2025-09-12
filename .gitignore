@@ -1,39 +1,47 @@
-.env
+# Node.js
+node_modules/
+.next/
+out/
+.env*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# Python
 __pycache__/
 *.pyc
-
-# Python virtual environments
-.venv/
+*.pyo
+*.pyd
+.Python/
 venv/
 env/
-*.venv/
-**/venv/
-**/.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache/
+.pytest_cache/
 
-# Environment files with secrets
-.env
-.env.local
-.env.backup
-*.env
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 
-# API Keys and secrets
-*api_key*
-*secret*
-*password*
+# Backup files
+*.old
+*.backup
+*.bak
 
-# Private keys
-*.pem
-*.key
-id_rsa*
-
-# Logs with potential sensitive data
-logs/
+# Logs
 *.log
 
-.DS_Store
-docs/*.pdf
-frontend/.next/
-frontend/node_modules/
-frontend/.next/
-frontend/node_modules/
-*.backup
+# Temporary files
+*~
+
+# Other generated files
+dist/
+build/

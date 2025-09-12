@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // API Configuration
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
 const API_PREFIX = process.env.NEXT_PUBLIC_API_PREFIX || '/api'
 
 // Types

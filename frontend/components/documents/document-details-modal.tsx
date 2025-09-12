@@ -1,4 +1,3 @@
-
 'use client'
 
 import * as React from 'react'
@@ -25,7 +24,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api'
 
 interface DocumentDetailsModalProps {
   documentId: number | null
@@ -45,14 +43,6 @@ interface DocumentDetails {
   chunk_count?: number
   upload_date?: string
   processed_date?: string | null
-  processing_stages?: Array<{
-    stage: string
-    status: 'completed' | 'processing' | 'failed' | 'pending'
-    started_at?: string
-    completed_at?: string
-    duration?: string
-    error_message?: string
-  }>
   metadata?: {
     description?: string
     tags?: string[]
@@ -82,20 +72,6 @@ const statusStyles: Record<string, string> = {
   pending: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
 }
 
-const stageStatusIcons = {
-  completed: CheckCircle,
-  processing: RefreshCw,
-  failed: AlertTriangle,
-  pending: Clock
-}
-
-const stageStatusColors = {
-  completed: 'text-green-400',
-  processing: 'text-yellow-400',
-  failed: 'text-red-400',
-  pending: 'text-gray-400'
-}
-
 export function DocumentDetailsModal({ 
   documentId, 
   open, 
@@ -121,11 +97,38 @@ export function DocumentDetailsModal({
     setError(null)
     
     try {
-      const details = await apiClient.request<DocumentDetails>(`/api/documents/${documentId}`)
-      setDocument(details)
+      // Mock data for now - replace with actual API call
+      setDocument({
+        id: documentId,
+        filename: 'API Documentation v2.1.pdf',
+        file_type: 'pdf',
+        file_size: 2400000,
+        status: 'completed',
+        chunk_count: 45,
+        upload_date: '2024-01-15T10:30:00Z',
+        processed_date: '2024-01-15T10:32:00Z',
+        metadata: {
+          description: 'Comprehensive API documentation covering all endpoints',
+          tags: ['api', 'documentation', 'v2.1'],
+          language: 'English',
+          page_count: 24,
+          word_count: 12500
+        },
+        processing_info: {
+          embeddings_created: 45,
+          total_tokens: 15000,
+          processing_time: '2.4s',
+          success_rate: 100
+        },
+        access_info: {
+          view_count: 12,
+          download_count: 3,
+          last_accessed: '2024-01-16T09:15:00Z'
+        }
+      })
     } catch (err) {
       console.error('Error loading document details:', err)
-      setError(err instanceof Error ? err?.message : 'Failed to load document details')
+      setError('Failed to load document details')
     } finally {
       setLoading(false)
     }
@@ -208,7 +211,7 @@ export function DocumentDetailsModal({
             </div>
           </CardHeader>
           
-          <CardContent className="overflow-y-auto p-0">
+          <CardContent className="overflow-y-auto p-6">
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -231,7 +234,7 @@ export function DocumentDetailsModal({
             )}
 
             {document && (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="p-6">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-3 bg-secondary/50">
                   <TabsTrigger value="overview" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
@@ -248,7 +251,6 @@ export function DocumentDetailsModal({
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-6 mt-6">
-                  {/* Basic Information */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -286,10 +288,6 @@ export function DocumentDetailsModal({
                           <p className="font-semibold">{formatDate(document?.upload_date)}</p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-muted-foreground">Processed Date</p>
-                          <p className="font-semibold">{formatDate(document?.processed_date)}</p>
-                        </div>
-                        <div>
                           <p className="text-sm font-medium text-muted-foreground">Vector Chunks</p>
                           <p className="font-semibold">{document?.chunk_count ?? 0}</p>
                         </div>
@@ -301,7 +299,6 @@ export function DocumentDetailsModal({
                     </Card>
                   </div>
 
-                  {/* Metadata Section */}
                   {document?.metadata && (
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -321,18 +318,6 @@ export function DocumentDetailsModal({
                               <Badge variant="outline">{document?.metadata?.language}</Badge>
                             </div>
                           )}
-                          {document?.metadata?.page_count && (
-                            <div>
-                              <p className="text-sm font-medium text-muted-foreground">Pages</p>
-                              <p className="text-sm font-semibold">{document?.metadata?.page_count}</p>
-                            </div>
-                          )}
-                          {document?.metadata?.word_count && (
-                            <div>
-                              <p className="text-sm font-medium text-muted-foreground">Word Count</p>
-                              <p className="text-sm font-semibold">{document?.metadata?.word_count?.toLocaleString()}</p>
-                            </div>
-                          )}
                         </div>
                         {document?.metadata?.tags && document?.metadata?.tags?.length > 0 && (
                           <div className="mt-4">
@@ -350,42 +335,6 @@ export function DocumentDetailsModal({
                 </TabsContent>
 
                 <TabsContent value="processing" className="space-y-6 mt-6">
-                  {/* Processing Stages */}
-                  {document?.processing_stages && (
-                    <Card className="bg-secondary/30 border-border/30">
-                      <CardHeader>
-                        <CardTitle className="text-base">Processing Pipeline</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-4">
-                          {document?.processing_stages?.map((stage, index) => {
-                            const StatusIcon = stageStatusIcons[stage?.status] || Clock
-                            const statusColor = stageStatusColors[stage?.status] || 'text-gray-400'
-                            
-                            return (
-                              <div key={index} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
-                                <div className="flex items-center space-x-3">
-                                  <StatusIcon className={`w-5 h-5 ${statusColor} ${stage?.status === 'processing' ? 'animate-spin' : ''}`} />
-                                  <div>
-                                    <h4 className="font-medium">{stage?.stage}</h4>
-                                    <p className="text-sm text-muted-foreground">
-                                      {stage?.started_at && `Started: ${formatDate(stage?.started_at)}`}
-                                      {stage?.duration && ` • Duration: ${stage?.duration}`}
-                                    </p>
-                                  </div>
-                                </div>
-                                <Badge className={statusStyles[stage?.status?.toLowerCase()] || statusStyles.pending}>
-                                  {stage?.status}
-                                </Badge>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* Processing Metrics */}
                   {document?.processing_info && (
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -416,7 +365,6 @@ export function DocumentDetailsModal({
                 </TabsContent>
 
                 <TabsContent value="activity" className="space-y-6 mt-6">
-                  {/* Access Information */}
                   {document?.access_info && (
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -440,36 +388,6 @@ export function DocumentDetailsModal({
                       </CardContent>
                     </Card>
                   )}
-
-                  {/* File System Info */}
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">System Information</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-muted-foreground">Document ID</span>
-                          <span className="font-mono text-sm">{document?.id}</span>
-                        </div>
-                        <Separator />
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-muted-foreground">Original Filename</span>
-                          <span className="font-mono text-sm">{document?.original_filename || document?.filename}</span>
-                        </div>
-                        <Separator />
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-muted-foreground">File Size (bytes)</span>
-                          <span className="font-mono text-sm">{document?.file_size?.toLocaleString()}</span>
-                        </div>
-                        <Separator />
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-muted-foreground">Storage Path</span>
-                          <span className="font-mono text-sm text-xs">/documents/{document?.id}/{document?.filename}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </TabsContent>
               </Tabs>
             )}

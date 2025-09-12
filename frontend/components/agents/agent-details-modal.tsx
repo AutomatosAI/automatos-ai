@@ -1,4 +1,3 @@
-
 'use client'
 
 import * as React from 'react'
@@ -31,7 +30,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api'
 
 interface AgentDetailsModalProps {
   agentId: number | null
@@ -95,14 +93,6 @@ const statusStyles: Record<string, string> = {
   error: 'bg-red-500/10 text-red-400 border-red-500/20'
 }
 
-const statusIcons = {
-  active: CheckCircle,
-  inactive: Clock,
-  training: RefreshCw,
-  maintenance: Settings,
-  error: AlertTriangle
-}
-
 const agentTypeIcons: Record<string, string> = {
   code_architect: '🏗️',
   security_expert: '🛡️',
@@ -138,19 +128,48 @@ export function AgentDetailsModal({
     setError(null)
     
     try {
-      // Try to fetch real agent details
-      const details = await apiClient.request<AgentDetails>(`/api/agents/${agentId}`)
-      
-      // Enhance with mock data for demonstration
-      const enhancedDetails: AgentDetails = {
-        ...details,
-        current_workload: details?.current_workload || {
-          active_workflows: Math.floor(Math.random() * 10) + 1,
-          queued_tasks: Math.floor(Math.random() * 20),
-          processing_capacity: 100,
-          current_utilization: Math.floor(Math.random() * 80) + 10
+      // Mock data for demonstration - replace with actual API call
+      const mockAgent: AgentDetails = {
+        id: agentId,
+        name: 'Code Architect Agent',
+        description: 'Advanced code analysis and architecture design agent',
+        agent_type: 'code_architect',
+        status: 'active',
+        created_at: '2024-01-15T10:30:00Z',
+        updated_at: '2024-01-16T14:22:00Z',
+        performance_metrics: {
+          success_rate: 0.94,
+          avg_response_time: 1250,
+          tasks_completed: 156,
+          tasks_failed: 8,
+          uptime_hours: 72,
+          efficiency_score: 0.89
         },
-        activity_timeline: details?.activity_timeline || [
+        skills: [
+          {
+            id: 1,
+            name: 'Code Analysis',
+            description: 'Analyze code quality and structure',
+            skill_type: 'technical',
+            category: 'analysis',
+            is_active: true
+          },
+          {
+            id: 2,
+            name: 'Architecture Design',
+            description: 'Design system architecture',
+            skill_type: 'technical',
+            category: 'design',
+            is_active: true
+          }
+        ],
+        current_workload: {
+          active_workflows: 3,
+          queued_tasks: 7,
+          processing_capacity: 100,
+          current_utilization: 45
+        },
+        activity_timeline: [
           {
             timestamp: new Date(Date.now() - 300000).toISOString(),
             event_type: 'task_completed',
@@ -162,26 +181,20 @@ export function AgentDetailsModal({
             event_type: 'workflow_started',
             description: 'Started new workflow execution',
             status: 'info'
-          },
-          {
-            timestamp: new Date(Date.now() - 1200000).toISOString(),
-            event_type: 'skill_applied',
-            description: 'Applied architecture design skill',
-            status: 'success'
           }
         ],
-        resource_usage: details?.resource_usage || {
-          memory_mb: Math.floor(Math.random() * 1024) + 256,
-          cpu_percent: Math.floor(Math.random() * 60) + 20,
-          network_io: Math.floor(Math.random() * 1000),
-          storage_mb: Math.floor(Math.random() * 512) + 128
+        resource_usage: {
+          memory_mb: 512,
+          cpu_percent: 35,
+          network_io: 245,
+          storage_mb: 128
         }
       }
       
-      setAgent(enhancedDetails)
+      setAgent(mockAgent)
     } catch (err) {
       console.error('Error loading agent details:', err)
-      setError(err instanceof Error ? err?.message : 'Failed to load agent details')
+      setError('Failed to load agent details')
     } finally {
       setLoading(false)
     }
@@ -295,7 +308,7 @@ export function AgentDetailsModal({
             </div>
           </CardHeader>
           
-          <CardContent className="overflow-y-auto p-0">
+          <CardContent className="overflow-y-auto p-6">
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -318,7 +331,7 @@ export function AgentDetailsModal({
             )}
 
             {agent && (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="p-6">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                   <TabsTrigger value="overview" className="flex items-center space-x-2">
                     <Eye className="w-4 h-4" />
@@ -339,7 +352,6 @@ export function AgentDetailsModal({
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-6 mt-6">
-                  {/* Agent Information */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -395,7 +407,6 @@ export function AgentDetailsModal({
                     </Card>
                   </div>
 
-                  {/* Quick Stats */}
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Performance Summary</CardTitle>
@@ -438,7 +449,6 @@ export function AgentDetailsModal({
                 </TabsContent>
 
                 <TabsContent value="performance" className="space-y-6 mt-6">
-                  {/* Performance Metrics */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -455,19 +465,6 @@ export function AgentDetailsModal({
                           <Progress 
                             value={agent?.performance_metrics?.success_rate ? 
                               agent.performance_metrics.success_rate * 100 : 0} 
-                            className="h-2"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>Efficiency Score</span>
-                            <span>{agent?.performance_metrics?.efficiency_score ? 
-                              `${(agent.performance_metrics.efficiency_score * 100).toFixed(1)}%` : 'N/A'}
-                            </span>
-                          </div>
-                          <Progress 
-                            value={agent?.performance_metrics?.efficiency_score ? 
-                              agent.performance_metrics.efficiency_score * 100 : 75} 
                             className="h-2"
                           />
                         </div>
@@ -507,55 +504,12 @@ export function AgentDetailsModal({
                           </div>
                           <Progress value={(agent?.resource_usage?.memory_mb || 0) / 10.24} className="h-2" />
                         </div>
-                        <div className="pt-4 grid grid-cols-2 gap-4 text-center">
-                          <div>
-                            <p className="text-lg font-semibold text-blue-400">
-                              {agent?.resource_usage?.network_io || 0} KB/s
-                            </p>
-                            <p className="text-xs text-muted-foreground">Network I/O</p>
-                          </div>
-                          <div>
-                            <p className="text-lg font-semibold text-purple-400">
-                              {agent?.resource_usage?.storage_mb || 0} MB
-                            </p>
-                            <p className="text-xs text-muted-foreground">Storage</p>
-                          </div>
-                        </div>
                       </CardContent>
                     </Card>
                   </div>
-
-                  {/* Activity Timeline */}
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">Recent Activity</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {agent?.activity_timeline?.map((activity, index) => (
-                          <div key={index} className="flex items-start space-x-3 p-3 bg-background/50 rounded-lg">
-                            <div className={`w-2 h-2 rounded-full mt-2 ${
-                              activity.status === 'success' ? 'bg-green-400' :
-                              activity.status === 'warning' ? 'bg-yellow-400' :
-                              activity.status === 'error' ? 'bg-red-400' : 'bg-blue-400'
-                            }`} />
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">{activity.description}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {formatDate(activity.timestamp)} • {activity.event_type.replace('_', ' ')}
-                              </p>
-                            </div>
-                          </div>
-                        )) || (
-                          <p className="text-center text-muted-foreground py-4">No recent activity</p>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
                 </TabsContent>
 
                 <TabsContent value="workload" className="space-y-6 mt-6">
-                  {/* Current Workload */}
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Current Workload</CardTitle>
@@ -585,33 +539,9 @@ export function AgentDetailsModal({
                       </div>
                     </CardContent>
                   </Card>
-
-                  {/* Utilization Chart */}
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">Capacity Utilization</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>Current Utilization</span>
-                            <span>{agent?.current_workload?.current_utilization || 0}%</span>
-                          </div>
-                          <Progress value={agent?.current_workload?.current_utilization || 0} className="h-3" />
-                        </div>
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Idle</span>
-                          <span>Optimal</span>
-                          <span>Overloaded</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </TabsContent>
 
                 <TabsContent value="skills" className="space-y-6 mt-6">
-                  {/* Skills Overview */}
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Assigned Skills</CardTitle>
@@ -654,28 +584,6 @@ export function AgentDetailsModal({
                       )}
                     </CardContent>
                   </Card>
-
-                  {/* Skills Performance */}
-                  {agent?.skills && agent.skills.length > 0 && (
-                    <Card className="bg-secondary/30 border-border/30">
-                      <CardHeader>
-                        <CardTitle className="text-base">Skills Performance</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-4">
-                          {agent.skills.slice(0, 5).map((skill) => (
-                            <div key={skill.id} className="space-y-2">
-                              <div className="flex justify-between text-sm">
-                                <span>{skill.name}</span>
-                                <span>{Math.floor(Math.random() * 30) + 70}% efficiency</span>
-                              </div>
-                              <Progress value={Math.floor(Math.random() * 30) + 70} className="h-2" />
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
                 </TabsContent>
               </Tabs>
             )}

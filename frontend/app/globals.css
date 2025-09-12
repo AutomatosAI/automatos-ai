@@ -24,11 +24,6 @@
     --border: 0 0% 15%;
     --input: 0 0% 15%;
     --ring: 16 100% 60%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
   }
 }
 
@@ -64,42 +59,6 @@
   .card-glow:hover {
     box-shadow: 0 0 40px rgba(255, 107, 53, 0.2);
   }
-
-  .glass-card {
-    @apply bg-card/50 backdrop-blur-sm border border-border/50 rounded-2xl;
-  }
-
-  .icon-gradient {
-    background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%);
-  }
-
-  .sidebar-item {
-    @apply flex items-center px-4 py-3 text-muted-foreground hover:text-foreground hover:bg-secondary/50 rounded-lg transition-all duration-200;
-  }
-
-  .sidebar-item.active {
-    @apply text-foreground bg-secondary border-l-2 border-primary;
-  }
-
-  .metric-card {
-    @apply glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300;
-  }
-
-  .data-table {
-    @apply w-full border-collapse;
-  }
-
-  .data-table th {
-    @apply border-b border-border/50 px-4 py-3 text-left text-sm font-medium text-muted-foreground;
-  }
-
-  .data-table td {
-    @apply border-b border-border/30 px-4 py-3 text-sm;
-  }
-
-  .data-table tr:hover {
-    @apply bg-secondary/30;
-  }
 }
 
 html {
@@ -117,22 +76,4 @@ html {
   .parallax-bg {
     background-attachment: scroll;
   }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: hsl(var(--secondary));
-}
-
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--primary));
 }
