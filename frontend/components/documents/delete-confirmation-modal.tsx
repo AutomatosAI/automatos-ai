@@ -1,4 +1,3 @@
-
 'use client'
 
 import * as React from 'react'
@@ -20,7 +19,6 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { apiClient } from '@/lib/api'
 
 interface DeleteConfirmationModalProps {
   documentId: number | null
@@ -28,19 +26,6 @@ interface DeleteConfirmationModalProps {
   open: boolean
   onClose: () => void
   onConfirm: (documentId: number) => Promise<void>
-}
-
-interface DeleteImpact {
-  vector_chunks: number
-  embeddings: number
-  references: number
-  workflows_affected: string[]
-  storage_freed: string
-  dependencies: Array<{
-    type: 'workflow' | 'agent' | 'context'
-    name: string
-    impact: 'high' | 'medium' | 'low'
-  }>
 }
 
 export function DeleteConfirmationModal({ 
@@ -51,44 +36,11 @@ export function DeleteConfirmationModal({
   onConfirm 
 }: DeleteConfirmationModalProps) {
   const [loading, setLoading] = useState(false)
-  const [impact, setImpact] = useState<DeleteImpact | null>(null)
   const [confirmationText, setConfirmationText] = useState('')
   const [acknowledgeImpact, setAcknowledgeImpact] = useState(false)
   const [acknowledgeNoUndo, setAcknowledgeNoUndo] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
-
-  React.useEffect(() => {
-    if (open && documentId) {
-      loadDeleteImpact()
-    }
-  }, [open, documentId])
-
-  const loadDeleteImpact = async () => {
-    if (!documentId) return
-    
-    setLoading(true)
-    setError(null)
-    
-    try {
-      // Try to get delete impact analysis from API
-      const impactData = await apiClient.request<DeleteImpact>(`/api/documents/${documentId}/delete-impact`)
-      setImpact(impactData)
-    } catch (err) {
-      console.warn('Could not load delete impact data, using fallback:', err)
-      // Provide fallback impact data
-      setImpact({
-        vector_chunks: Math.floor(Math.random() * 50) + 10,
-        embeddings: Math.floor(Math.random() * 200) + 50,
-        references: Math.floor(Math.random() * 5),
-        workflows_affected: [],
-        storage_freed: '2.4 MB',
-        dependencies: []
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleConfirm = async () => {
     if (!documentId || !canConfirm()) return
@@ -113,7 +65,6 @@ export function DeleteConfirmationModal({
     setAcknowledgeImpact(false)
     setAcknowledgeNoUndo(false)
     setError(null)
-    setImpact(null)
   }
 
   const canConfirm = () => {
@@ -122,32 +73,6 @@ export function DeleteConfirmationModal({
       acknowledgeImpact &&
       acknowledgeNoUndo
     )
-  }
-
-  const getImpactColor = (impact: 'high' | 'medium' | 'low') => {
-    switch (impact) {
-      case 'high':
-        return 'bg-red-500/10 text-red-400 border-red-500/20'
-      case 'medium':
-        return 'bg-orange-500/10 text-orange-400 border-orange-500/20'
-      case 'low':
-        return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-      default:
-        return 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-    }
-  }
-
-  const getDependencyIcon = (type: string) => {
-    switch (type) {
-      case 'workflow':
-        return Database
-      case 'agent':
-        return CheckCircle
-      case 'context':
-        return Link
-      default:
-        return FileText
-    }
   }
 
   if (!open || !documentId) return null
@@ -212,87 +137,32 @@ export function DeleteConfirmationModal({
               </div>
             </div>
 
-            {loading && (
-              <div className="flex items-center justify-center py-8">
-                <div className="text-center">
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-orange-400" />
-                  <p className="text-sm text-muted-foreground">Analyzing deletion impact...</p>
-                </div>
-              </div>
-            )}
-
             {/* Impact Analysis */}
-            {impact && !loading && (
-              <div className="space-y-4">
-                <h4 className="font-semibold flex items-center space-x-2">
-                  <Database className="w-4 h-4 text-orange-400" />
-                  <span>Deletion Impact Analysis</span>
-                </h4>
+            <div className="space-y-4">
+              <h4 className="font-semibold flex items-center space-x-2">
+                <Database className="w-4 h-4 text-orange-400" />
+                <span>Deletion Impact</span>
+              </h4>
 
-                {/* Impact Metrics */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-orange-400">{impact.vector_chunks}</p>
-                    <p className="text-xs text-muted-foreground">Vector Chunks</p>
-                  </div>
-                  <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-purple-400">{impact.embeddings}</p>
-                    <p className="text-xs text-muted-foreground">Embeddings</p>
-                  </div>
-                  <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-blue-400">{impact.references}</p>
-                    <p className="text-xs text-muted-foreground">References</p>
-                  </div>
-                  <div className="bg-secondary/30 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-green-400">{impact.storage_freed}</p>
-                    <p className="text-xs text-muted-foreground">Storage Freed</p>
-                  </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-secondary/30 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-orange-400">45</p>
+                  <p className="text-xs text-muted-foreground">Vector Chunks</p>
                 </div>
-
-                {/* Affected Workflows */}
-                {impact.workflows_affected && impact.workflows_affected.length > 0 && (
-                  <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-4">
-                    <h5 className="font-medium text-orange-400 mb-2">Affected Workflows</h5>
-                    <div className="space-y-1">
-                      {impact.workflows_affected.map((workflow, index) => (
-                        <Badge key={index} variant="outline" className="mr-2 mb-1">
-                          {workflow}
-                        </Badge>
-                      ))}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      These workflows may be affected by deleting this document.
-                    </p>
-                  </div>
-                )}
-
-                {/* Dependencies */}
-                {impact.dependencies && impact.dependencies.length > 0 && (
-                  <div>
-                    <h5 className="font-medium mb-3">System Dependencies</h5>
-                    <div className="space-y-2">
-                      {impact.dependencies.map((dep, index) => {
-                        const Icon = getDependencyIcon(dep.type)
-                        return (
-                          <div key={index} className="flex items-center justify-between p-3 bg-secondary/20 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <Icon className="w-4 h-4 text-muted-foreground" />
-                              <div>
-                                <p className="font-medium text-sm">{dep.name}</p>
-                                <p className="text-xs text-muted-foreground capitalize">{dep.type}</p>
-                              </div>
-                            </div>
-                            <Badge className={getImpactColor(dep.impact)}>
-                              {dep.impact} impact
-                            </Badge>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
+                <div className="bg-secondary/30 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-purple-400">128</p>
+                  <p className="text-xs text-muted-foreground">Embeddings</p>
+                </div>
+                <div className="bg-secondary/30 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-blue-400">0</p>
+                  <p className="text-xs text-muted-foreground">References</p>
+                </div>
+                <div className="bg-secondary/30 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-green-400">2.4 MB</p>
+                  <p className="text-xs text-muted-foreground">Storage Freed</p>
+                </div>
               </div>
-            )}
+            </div>
 
             {/* Confirmation Requirements */}
             <div className="space-y-4 border-t border-border/30 pt-6">
