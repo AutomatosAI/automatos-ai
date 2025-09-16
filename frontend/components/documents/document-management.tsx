@@ -32,8 +32,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { apiClient, Document } from '@/lib/api'
-import { ProcessingTab } from './processing-tab'
-import { AnalyticsTab } from './analytics-tab'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -360,7 +358,7 @@ export function DocumentManagement() {
     <div className="space-y-8">
       {/* Hidden file input */}
       <input
-        ref={fileInputRef}
+        ref={fileInputRef} data-testid="file-input"
         type="file"
         multiple
         accept=".pdf,.docx,.txt,.md,.xlsx,.csv,.json,.xml"
@@ -385,7 +383,7 @@ export function DocumentManagement() {
         
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
-          onClick={handleUploadClick}
+          onClick={() => fileInputRef.current?.click()}
           disabled={isUploading}
         >
           <Upload className={`w-4 h-4 mr-2 ${isUploading ? 'animate-spin' : ''}`} />
@@ -654,7 +652,7 @@ export function DocumentManagement() {
                       </p>
                       <Button 
                         className="gradient-accent hover:opacity-90"
-                        onClick={handleUploadClick}
+                        onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
                       >
                         <Plus className="w-4 h-4 mr-2" />
@@ -668,11 +666,11 @@ export function DocumentManagement() {
           </TabsContent>
 
           <TabsContent value="processing" className="space-y-6">
-            <ProcessingTab />
+            <div className="p-12 text-center"><div className="text-lg font-semibold">Processing</div><div className="text-muted-foreground">Processing features coming soon</div></div>
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <AnalyticsTab />
+            <div className="p-12 text-center"><div className="text-lg font-semibold">Analytics</div><div className="text-muted-foreground">Analytics features coming soon</div></div>
           </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">
