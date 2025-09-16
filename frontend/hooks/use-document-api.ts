@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
 
 // API client - you'll need to adjust the import path based on your project structure
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const API_PREFIX = process.env.NEXT_PUBLIC_API_PREFIX || '/api'
 
 // Simple API client for demonstration - replace with your actual API client
