@@ -23,11 +23,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api'
 
 interface CreateAgentModalProps {
   open: boolean
   onClose: () => void
+  onSuccess: () => void
 }
 
 const agentTypes = [
@@ -89,7 +89,7 @@ const availableSkills = [
   'deployment', 'scaling', 'monitoring', 'resource_management', 'ci_cd'
 ]
 
-export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
+export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalProps) {
   const [step, setStep] = useState(1)
   const [agentData, setAgentData] = useState({
     name: '',
@@ -111,48 +111,22 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
     }))
   }
 
-  const handleCreate = async () => {
-    try {
-      const payload = {
-        name: agentData.name,
-        description: agentData.description,
-        agent_type: agentData.type,
-        configuration: {
-          max_concurrent_tasks: agentData.maxConcurrentTasks,
-          priority: agentData.priority,
-          auto_start: agentData.autoStart,
-          specializations: agentData.specializations,
-        },
-        skill_ids: [],
-      }
-      const newAgent = await apiClient.createAgent(payload)
-      console.log('Agent created successfully:', newAgent)
-      
-      // Show success notification (you can add a toast here)
-      alert(`Agent "${newAgent.name}" created successfully!`)
-      
-      onClose()
-      
-      // Reset form
-      setAgentData({
-        name: '',
-        type: '',
-        description: '',
-        skills: [],
-        specializations: [],
-        maxConcurrentTasks: 3,
-        priority: 'normal',
-        autoStart: true
-      })
-      setStep(1)
-      
-      // Refresh: emit a lightweight event so lists can refetch
-      try { window.dispatchEvent(new Event('agents:refresh')) } catch {}
-      
-    } catch (error) {
-      console.error('Error creating agent:', error)
-      alert(`Error creating agent: ${error instanceof Error ? error.message : String(error)}`)
-    }
+  const handleCreate = () => {
+    // Create agent logic here
+    console.log('Creating agent:', agentData)
+    onClose()
+    // Reset form
+    setAgentData({
+      name: '',
+      type: '',
+      description: '',
+      skills: [],
+      specializations: [],
+      maxConcurrentTasks: 3,
+      priority: 'normal',
+      autoStart: true
+    })
+    setStep(1)
   }
 
   const selectedType = agentTypes.find(type => type.type === agentData.type)
@@ -433,10 +407,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                   {step < 3 ? (
                     <Button
                       onClick={() => setStep(Math.min(3, step + 1))}
-                      disabled={
-                        (step === 1 && !agentData.type) ||
-                        (step === 2 && (!agentData.name || !agentData.description))
-                      }
+                      disabled={step === 1 && !agentData.type}
                       className="gradient-accent hover:opacity-90"
                     >
                       Next
@@ -444,7 +415,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      disabled={!agentData.name || !agentData.type || !agentData.description}
+                      disabled={!agentData.name || !agentData.type}
                       className="gradient-accent hover:opacity-90"
                     >
                       Create Agent

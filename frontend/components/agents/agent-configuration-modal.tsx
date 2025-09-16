@@ -1,4 +1,3 @@
-
 'use client'
 
 import * as React from 'react'
@@ -37,7 +36,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { apiClient } from '@/lib/api'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -129,12 +127,29 @@ export function AgentConfigurationModal({
     setError(null)
     
     try {
-      const details = await apiClient.request<AgentConfiguration>(`/api/agents/${agentId}`)
-      
-      // Enhance with mock skills for demonstration
-      const enhancedDetails: AgentConfiguration = {
-        ...details,
-        available_skills: details?.available_skills || [
+      // Mock data for demonstration - replace with actual API call
+      const mockAgent: AgentConfiguration = {
+        id: agentId,
+        name: 'Code Architect Agent',
+        description: 'Advanced code analysis and architecture design agent',
+        agent_type: 'code_architect',
+        status: 'active',
+        configuration: {
+          priority_level: 'high',
+          max_concurrent_tasks: 8,
+          auto_start: true,
+          retry_attempts: 3,
+          timeout_seconds: 300,
+          resource_limits: {
+            memory_mb: 2048,
+            cpu_percent: 75,
+            network_bandwidth: 200
+          },
+          environment: 'production',
+          logging_level: 'info',
+          performance_monitoring: true
+        },
+        available_skills: [
           {
             id: 1,
             name: 'code_analysis',
@@ -142,7 +157,7 @@ export function AgentConfigurationModal({
             skill_type: 'technical',
             category: 'analysis',
             is_active: true,
-            is_assigned: details?.skills?.some(s => s.name === 'code_analysis') || false
+            is_assigned: true
           },
           {
             id: 2,
@@ -151,7 +166,7 @@ export function AgentConfigurationModal({
             skill_type: 'technical',
             category: 'design',
             is_active: true,
-            is_assigned: details?.skills?.some(s => s.name === 'architecture_design') || false
+            is_assigned: true
           },
           {
             id: 3,
@@ -160,53 +175,35 @@ export function AgentConfigurationModal({
             skill_type: 'technical',
             category: 'security',
             is_active: true,
-            is_assigned: details?.skills?.some(s => s.name === 'security_audit') || false
-          },
-          {
-            id: 4,
-            name: 'performance_optimization',
-            description: 'Optimize system performance',
-            skill_type: 'technical',
-            category: 'optimization',
-            is_active: true,
-            is_assigned: details?.skills?.some(s => s.name === 'performance_optimization') || false
-          },
-          {
-            id: 5,
-            name: 'documentation',
-            description: 'Generate technical documentation',
-            skill_type: 'communication',
-            category: 'documentation',
-            is_active: true,
-            is_assigned: details?.skills?.some(s => s.name === 'documentation') || false
+            is_assigned: false
           }
         ]
       }
       
-      setAgent(enhancedDetails)
+      setAgent(mockAgent)
       
       // Initialize form data
       setFormData({
-        name: enhancedDetails.name || '',
-        description: enhancedDetails.description || '',
-        agent_type: enhancedDetails.agent_type || 'custom',
-        priority_level: enhancedDetails.configuration?.priority_level || 'medium',
-        max_concurrent_tasks: enhancedDetails.configuration?.max_concurrent_tasks || 5,
-        auto_start: enhancedDetails.configuration?.auto_start || false,
-        retry_attempts: enhancedDetails.configuration?.retry_attempts || 3,
-        timeout_seconds: enhancedDetails.configuration?.timeout_seconds || 300,
-        memory_mb: enhancedDetails.configuration?.resource_limits?.memory_mb || 1024,
-        cpu_percent: enhancedDetails.configuration?.resource_limits?.cpu_percent || 50,
-        network_bandwidth: enhancedDetails.configuration?.resource_limits?.network_bandwidth || 100,
-        environment: enhancedDetails.configuration?.environment || 'development',
-        logging_level: enhancedDetails.configuration?.logging_level || 'info',
-        performance_monitoring: enhancedDetails.configuration?.performance_monitoring || true,
-        assigned_skills: enhancedDetails.available_skills?.filter(skill => skill.is_assigned).map(skill => skill.id) || []
+        name: mockAgent.name || '',
+        description: mockAgent.description || '',
+        agent_type: mockAgent.agent_type || 'custom',
+        priority_level: mockAgent.configuration?.priority_level || 'medium',
+        max_concurrent_tasks: mockAgent.configuration?.max_concurrent_tasks || 5,
+        auto_start: mockAgent.configuration?.auto_start || false,
+        retry_attempts: mockAgent.configuration?.retry_attempts || 3,
+        timeout_seconds: mockAgent.configuration?.timeout_seconds || 300,
+        memory_mb: mockAgent.configuration?.resource_limits?.memory_mb || 1024,
+        cpu_percent: mockAgent.configuration?.resource_limits?.cpu_percent || 50,
+        network_bandwidth: mockAgent.configuration?.resource_limits?.network_bandwidth || 100,
+        environment: mockAgent.configuration?.environment || 'development',
+        logging_level: mockAgent.configuration?.logging_level || 'info',
+        performance_monitoring: mockAgent.configuration?.performance_monitoring || true,
+        assigned_skills: mockAgent.available_skills?.filter(skill => skill.is_assigned).map(skill => skill.id) || []
       })
       
     } catch (err) {
       console.error('Error loading agent configuration:', err)
-      setError(err instanceof Error ? err?.message : 'Failed to load agent configuration')
+      setError('Failed to load agent configuration')
     } finally {
       setLoading(false)
     }
@@ -255,11 +252,8 @@ export function AgentConfigurationModal({
         skill_assignments: formData.assigned_skills
       }
       
-      await apiClient.request(`/api/agents/${agent.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatePayload)
-      })
+      // Mock save - replace with actual API call
+      console.log('Saving agent configuration:', updatePayload)
       
       if (onSave) {
         onSave(agent.id, updatePayload)
@@ -270,7 +264,7 @@ export function AgentConfigurationModal({
       
     } catch (err) {
       console.error('Error saving agent configuration:', err)
-      setError(err instanceof Error ? err?.message : 'Failed to save agent configuration')
+      setError('Failed to save agent configuration')
     } finally {
       setSaving(false)
     }
@@ -335,7 +329,7 @@ export function AgentConfigurationModal({
             </div>
           </CardHeader>
           
-          <CardContent className="overflow-y-auto p-0">
+          <CardContent className="overflow-y-auto p-6">
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
@@ -358,7 +352,7 @@ export function AgentConfigurationModal({
             )}
 
             {agent && (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="p-6">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
@@ -512,25 +506,6 @@ export function AgentConfigurationModal({
                         </div>
                       </div>
                       
-                      <div className="space-y-3">
-                        <Label>Retry Attempts</Label>
-                        <div className="space-y-2">
-                          <Slider
-                            value={[formData.retry_attempts || 3]}
-                            onValueChange={(value) => updateFormData('retry_attempts', value[0])}
-                            max={10}
-                            min={0}
-                            step={1}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>No retries</span>
-                            <span className="font-medium">{formData.retry_attempts || 3} retries</span>
-                            <span>10 retries</span>
-                          </div>
-                        </div>
-                      </div>
-                      
                       <Separator />
                       
                       <div className="space-y-4">
@@ -613,48 +588,6 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
-                      <div className="space-y-3">
-                        <Label className="flex items-center space-x-2">
-                          <Network className="w-4 h-4" />
-                          <span>Network Bandwidth (MB/s)</span>
-                        </Label>
-                        <div className="space-y-2">
-                          <Slider
-                            value={[formData.network_bandwidth || 100]}
-                            onValueChange={(value) => updateFormData('network_bandwidth', value[0])}
-                            max={1000}
-                            min={10}
-                            step={10}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>10 MB/s</span>
-                            <span className="font-medium">{formData.network_bandwidth || 100} MB/s</span>
-                            <span>1000 MB/s</span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <Separator />
-                      
-                      <div className="space-y-2">
-                        <Label>Logging Level</Label>
-                        <Select 
-                          value={formData.logging_level || 'info'} 
-                          onValueChange={(value) => updateFormData('logging_level', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="debug">Debug (Verbose)</SelectItem>
-                            <SelectItem value="info">Info (Standard)</SelectItem>
-                            <SelectItem value="warning">Warning (Important)</SelectItem>
-                            <SelectItem value="error">Error (Critical Only)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -695,11 +628,6 @@ export function AgentConfigurationModal({
                                           {skill.category}
                                         </Badge>
                                       )}
-                                      {!skill.is_active && (
-                                        <Badge variant="destructive" className="text-xs">
-                                          Inactive
-                                        </Badge>
-                                      )}
                                     </div>
                                   </div>
                                 </Label>
@@ -718,29 +646,6 @@ export function AgentConfigurationModal({
                       )}
                     </CardContent>
                   </Card>
-
-                  {formData.assigned_skills?.length > 0 && (
-                    <Card className="bg-secondary/30 border-border/30">
-                      <CardHeader>
-                        <CardTitle className="text-base">Selected Skills Summary</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="flex flex-wrap gap-2">
-                          {agent?.available_skills
-                            ?.filter(skill => formData.assigned_skills?.includes(skill.id))
-                            ?.map(skill => (
-                              <Badge key={skill.id} variant="secondary" className="flex items-center space-x-1">
-                                <CheckCircle className="w-3 h-3" />
-                                <span>{skill.name}</span>
-                              </Badge>
-                            ))}
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-3">
-                          {formData.assigned_skills.length} skill(s) selected for this agent
-                        </p>
-                      </CardContent>
-                    </Card>
-                  )}
                 </TabsContent>
               </Tabs>
             )}

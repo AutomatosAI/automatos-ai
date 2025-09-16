@@ -1,4 +1,3 @@
-
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
@@ -106,6 +105,14 @@ const config: Config = {
             boxShadow: '0 0 40px rgba(255, 107, 53, 0.3)',
           },
         },
+        'glow-pulse': {
+          '0%, 100%': {
+            boxShadow: '0 0 15px rgba(255, 107, 53, 0.2)',
+          },
+          '50%': {
+            boxShadow: '0 0 30px rgba(255, 107, 53, 0.4)',
+          },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -113,6 +120,7 @@ const config: Config = {
         'fade-in': 'fade-in 0.5s ease-out',
         'slide-in': 'slide-in 0.3s ease-out',
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'glow-pulse': 'glow-pulse 2s ease-in-out infinite',
       },
     },
   },

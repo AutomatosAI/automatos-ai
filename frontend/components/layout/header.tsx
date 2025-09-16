@@ -1,10 +1,10 @@
-
 'use client'
 
 import { motion } from 'framer-motion'
 import { Menu, Search, Bell, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -38,13 +38,16 @@ export function Header({ onMenuClick }: HeaderProps) {
         <div className="flex items-center space-x-4">
           {/* System Status */}
           <motion.div
-            className="hidden md:flex items-center space-x-2 px-3 py-1 bg-green-500/10 border border-green-500/20 rounded-full"
-            animate={{ opacity: [0.7, 1, 0.7] }}
-            transition={{ duration: 2, repeat: Infinity }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="hidden md:flex items-center space-x-2 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/20"
           >
-            <div className="w-2 h-2 bg-green-500 rounded-full" />
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
             <span className="text-xs text-green-400 font-medium">All Systems Operational</span>
           </motion.div>
+
+          {/* Theme Toggle */}
+          <ThemeToggle />
 
           {/* Notifications */}
           <Button variant="ghost" size="icon" className="relative">
