@@ -31,7 +31,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
-import { apiClient, Document } from '@/lib/api'
+
+import { ProcessingTab } from './processing-tab'
+import { AnalyticsTab } from './analytics-tab'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -67,7 +69,7 @@ const typeIcons: Record<string, any> = {
   xml: File
 }
 
-export function DocumentManagement() {
+export function MinimalEnhancedDocumentManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [isUploading, setIsUploading] = useState(false)
@@ -119,7 +121,7 @@ export function DocumentManagement() {
     const fetchDocuments = async () => {
       try {
         setLoading(true)
-        const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
+        const documents = await fetch<BackendDocument[]>('/api/documents/')
         setRealDocuments(documents)
         
         // Calculate real stats from backend data
@@ -215,7 +217,7 @@ export function DocumentManagement() {
         
         // Refresh documents list
         try {
-          const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
+          const documents = await fetch<BackendDocument[]>('/api/documents/')
           if (Array.isArray(documents)) {
             setRealDocuments(documents)
             
@@ -302,7 +304,7 @@ export function DocumentManagement() {
   // Core User Functions - Following Testing Rules
   const handleViewDetails = async (documentId: number) => {
     try {
-      const document = await apiClient.request<BackendDocument>(`/api/documents/${documentId}`)
+      const document = await fetch<BackendDocument>(`/api/documents/${documentId}`)
       alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
     } catch (error) {
       console.error('Error viewing document details:', error)
@@ -332,12 +334,12 @@ export function DocumentManagement() {
     }
     
     try {
-      await apiClient.request(`/api/documents/${documentId}`, {
+      await fetch(`/api/documents/${documentId}`, {
         method: 'DELETE'
       })
       
       // Refresh documents list after deletion
-      const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
+      const documents = await fetch<BackendDocument[]>('/api/documents/')
       if (Array.isArray(documents)) {
         setRealDocuments(documents)
       }
@@ -349,7 +351,7 @@ export function DocumentManagement() {
     }
   }
 
-  const filteredDocuments = realDocuments.filter(doc =>
+  const filteredDocuments = (Array.isArray(realDocuments) ? realDocuments : []).filter(doc =>
     (doc.filename || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -358,7 +360,7 @@ export function DocumentManagement() {
     <div className="space-y-8">
       {/* Hidden file input */}
       <input
-        ref={fileInputRef} data-testid="file-input"
+        ref={fileInputRef}
         type="file"
         multiple
         accept=".pdf,.docx,.txt,.md,.xlsx,.csv,.json,.xml"
@@ -383,7 +385,7 @@ export function DocumentManagement() {
         
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={handleUploadClick}
           disabled={isUploading}
         >
           <Upload className={`w-4 h-4 mr-2 ${isUploading ? 'animate-spin' : ''}`} />
@@ -652,7 +654,7 @@ export function DocumentManagement() {
                       </p>
                       <Button 
                         className="gradient-accent hover:opacity-90"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={handleUploadClick}
                         disabled={isUploading}
                       >
                         <Plus className="w-4 h-4 mr-2" />
@@ -666,11 +668,11 @@ export function DocumentManagement() {
           </TabsContent>
 
           <TabsContent value="processing" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Processing</div><div className="text-muted-foreground">Processing features coming soon</div></div>
+            <ProcessingTab />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Analytics</div><div className="text-muted-foreground">Analytics features coming soon</div></div>
+            <AnalyticsTab />
           </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">
