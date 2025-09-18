@@ -26,7 +26,7 @@ from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.documents_v2 import router as documents_router
 from api.system import router as system_router
-#from api.context_engineering import router as context_engineering_router
+from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
 from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
@@ -42,6 +42,17 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+
+# Import NEW API routers (DeepAgent fixes)
+from api.insights import router as insights_router
+from api.knowledge import router as knowledge_router
+from api.learning import router as learning_router
+from api.orchestrator import router as orchestrator_router
+from api.problems import router as problems_router
+from api.query import router as query_router
+from api.recommendations import router as recommendations_router
+from api.solutions import router as solutions_router
+from api.synthesis import router as synthesis_router
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
@@ -259,7 +270,7 @@ app.include_router(agents_router)
 app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
-#app.include_router(context_engineering_router)
+app.include_router(context_engineering_router)
 app.include_router(memory_router)
 app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
@@ -275,6 +286,17 @@ app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
+
+# Include NEW API routers (DeepAgent fixes)
+app.include_router(insights_router)
+app.include_router(knowledge_router)
+app.include_router(learning_router)
+app.include_router(orchestrator_router)
+app.include_router(problems_router)
+app.include_router(query_router)
+app.include_router(recommendations_router)
+app.include_router(solutions_router)
+app.include_router(synthesis_router)
 
 # Include legacy routes (from existing api_routes.py)
 try:

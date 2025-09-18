@@ -69,6 +69,94 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {e}")
         raise HTTPException(status_code=500, detail="Error listing workflows")
 
+@router.post("")
+async def create_workflow(
+    workflow_data: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Create a new workflow with enhanced validation and error handling"""
+    try:
+        # Extract required fields
+        name = workflow_data.get("name")
+        description = workflow_data.get("description", "")
+        category = workflow_data.get("category", "automation")
+        priority = workflow_data.get("priority", "medium")
+        config = workflow_data.get("config", {})
+        steps = workflow_data.get("steps", [])
+        agents = workflow_data.get("agents", [])
+        tags = workflow_data.get("tags", [])
+
+        if not name:
+            raise HTTPException(status_code=400, detail="Workflow name is required")
+
+        # Check if workflow with this name already exists
+        existing = db.query(Workflow).filter(Workflow.name == name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Workflow with name '{name}' already exists")
+
+        # Build workflow definition from frontend data
+        workflow_definition = {
+            "category": category,
+            "priority": priority,
+            "config": config,
+            "steps": steps,
+            "agents": agents,
+            "version": "1.0"
+        }
+
+        # Create workflow record
+        workflow = Workflow(
+            name=name,
+            description=description,
+            workflow_definition=workflow_definition,
+            status=WorkflowStatus.DRAFT.value,
+            owner=workflow_data.get("owner"),
+            tags=tags,
+            default_policy_id=workflow_data.get("default_policy_id"),
+            created_by=workflow_data.get("created_by", "system")
+        )
+
+        db.add(workflow)
+        db.commit()
+        db.refresh(workflow)
+
+        # Associate agents if provided
+        if agents:
+            agent_ids = [agent.get("id") for agent in agents if agent.get("id")]
+            if agent_ids:
+                # Get agent objects
+                agent_objects = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+                workflow.agents.extend(agent_objects)
+                db.commit()
+
+        # Send real-time update
+        await manager.broadcast({
+            "type": "workflow_created",
+            "workflow_id": workflow.id,
+            "name": workflow.name,
+            "status": workflow.status
+        })
+
+        return {
+            "id": workflow.id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "status": workflow.status,
+            "owner": workflow.owner,
+            "tags": workflow.tags,
+            "default_policy_id": workflow.default_policy_id,
+            "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
+            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None,
+            "message": "Workflow created successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating workflow: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating workflow: {str(e)}")
+
 @router.get("/active")
 async def get_active_workflows(db: Session = Depends(get_db)):
     """Get all currently active workflows with live status"""

@@ -160,7 +160,10 @@ class ApiClient {
   }
 
   async createWorkflow(data: any) {
-    throw new Error('Create workflow endpoint not implemented')
+    return this.request('/api/workflows', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
 
   async runWorkflow(id: string, inputs?: any) {
