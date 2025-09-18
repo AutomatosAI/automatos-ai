@@ -76,3 +76,4 @@ async def extract_insights(
     except Exception as e:
         logger.error(f"Error extracting insights: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to extract insights: {str(e)}")
+

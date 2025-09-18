@@ -66,3 +66,4 @@ async def comprehensive_synthesis(
     except Exception as e:
         logger.error(f"Error performing comprehensive synthesis: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to perform synthesis: {str(e)}")
+

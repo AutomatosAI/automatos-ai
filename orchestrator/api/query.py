@@ -63,3 +63,4 @@ async def platform_help(
     except Exception as e:
         logger.error(f"Error processing platform help query: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process help query: {str(e)}")
+

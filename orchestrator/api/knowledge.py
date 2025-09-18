@@ -64,3 +64,4 @@ async def share_knowledge(
     except Exception as e:
         logger.error(f"Error sharing knowledge: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to share knowledge: {str(e)}")
+

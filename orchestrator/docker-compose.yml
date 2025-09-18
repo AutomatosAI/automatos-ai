@@ -104,7 +104,7 @@ services:
     - REDIS_HOST=redis
     - REDIS_PORT=6379
     - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password_123}
-    - MCP_URL=http://backend_api:8001
+    - MCP_URL=http://backend_api:8000
     - OPENAI_API_KEY=${OPENAI_API_KEY}
     - CHROMA_PERSIST_DIRECTORY=/app/vector_stores
     - DEPLOY_HOST=${DEPLOY_HOST:-mcp.xplaincrypto.ai}

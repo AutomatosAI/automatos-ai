@@ -77,3 +77,4 @@ async def generate_recommendations(
     except Exception as e:
         logger.error(f"Error generating recommendations: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate recommendations: {str(e)}")
+

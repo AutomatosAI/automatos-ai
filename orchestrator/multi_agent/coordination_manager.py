@@ -30,7 +30,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 # Import models
-from models import Task, Agent, Workflow
+from models import Agent, Workflow, WorkflowExecution
 from database.database import get_db
 
 logger = logging.getLogger(__name__)

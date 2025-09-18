@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 # Import models
-from models import Task, User
+from models import WorkflowExecution, Agent
 from database.database import get_db
 
 logger = logging.getLogger(__name__)
