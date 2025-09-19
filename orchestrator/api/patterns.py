@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 import logging
 
 from database.database import get_db
-from models import Pattern, PatternCreate, PatternResponse
+from database.models import Pattern, PatternCreate, PatternResponse
 #from main import require_api_key
 
 logger = logging.getLogger(__name__)

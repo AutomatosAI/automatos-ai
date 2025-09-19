@@ -10,7 +10,7 @@ from database.database import get_db
 from services_playbook_miner import PlaybookMiner
 
 
-router = APIRouter(prefix="/playbooks", tags=["playbooks"])
+router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
 
 
 class MineRequest(BaseModel):

@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field
 
 # Database imports
 from database.database import get_db
-from models import (
-    EvaluationResult as EvaluationResultDB,
+from database.models import (
+    EvaluationResultDB,
     BenchmarkAssessment,
     ComponentMetricsDB,
     IntegrationAnalysisDB,

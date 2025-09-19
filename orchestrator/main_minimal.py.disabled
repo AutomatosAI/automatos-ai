@@ -1,0 +1,57 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import os
+
+app = FastAPI(title='Automatos AI API', version='1.0.0')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
+
+@app.get('/health')
+async def health():
+    return {'status': 'healthy', 'service': 'Automatos AI Platform'}
+
+# Try to import working routers
+try:
+    from api.problems import router as problems_router
+    app.include_router(problems_router, prefix='/api/problems', tags=['Problems'])
+    print('✅ Problems router loaded')
+except Exception as e:
+    print(f'⚠️ Problems router not loaded: {e}')
+
+try:
+    from api.synthesis import router as synthesis_router
+    app.include_router(synthesis_router, prefix='/api/synthesis', tags=['Synthesis'])
+    print('✅ Synthesis router loaded')
+except Exception as e:
+    print(f'⚠️ Synthesis router not loaded: {e}')
+
+try:
+    from api.knowledge import router as knowledge_router
+    app.include_router(knowledge_router, prefix='/api/knowledge', tags=['Knowledge'])
+    print('✅ Knowledge router loaded')
+except Exception as e:
+    print(f'⚠️ Knowledge router not loaded: {e}')
+
+try:
+    from api.learning import router as learning_router
+    app.include_router(learning_router, prefix='/api/learning', tags=['Learning'])
+    print('✅ Learning router loaded')
+except Exception as e:
+    print(f'⚠️ Learning router not loaded: {e}')
+
+try:
+    from api.recommendations import router as recommendations_router
+    app.include_router(recommendations_router, prefix='/api/recommendations', tags=['Recommendations'])
+    print('✅ Recommendations router loaded')
+except Exception as e:
+    print(f'⚠️ Recommendations router not loaded: {e}')
+
+if __name__ == '__main__':
+    uvicorn.run(app, host='0.0.0.0', port=8000)

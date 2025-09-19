@@ -11,7 +11,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Union,  Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 from database.models import PriorityLevel
@@ -565,15 +565,16 @@ class TaskResponse(BaseModel):
 
 class MemoryItemCreate(BaseModel):
     session_id: str
-    content: Dict[str, Any]
+    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
     memory_type: str = "working_data"
     importance: Optional[float] = 0.5
     tags: Optional[List[str]] = []
+    context: Optional[Dict] = None
 
 class MemoryItemResponse(BaseModel):
     id: str
     session_id: str
-    content: Dict[str, Any]
+    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
     memory_type: str
     memory_level: str
     importance: float
@@ -583,13 +584,13 @@ class MemoryItemResponse(BaseModel):
     last_access: datetime
 
 class ExternalKnowledgeCreate(BaseModel):
-    content: Dict[str, Any]
+    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
     source: str = "external"
     knowledge_metadata: Optional[Dict[str, Any]] = None
 
 class ExternalKnowledgeResponse(BaseModel):
     id: int
-    content: Dict[str, Any]
+    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
     source: str
     knowledge_metadata: Optional[Dict[str, Any]]
     access_count: int

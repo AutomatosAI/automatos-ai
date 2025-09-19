@@ -1,3 +1,4 @@
+
 """
 Learning API Endpoints
 =====================
@@ -170,4 +171,3 @@ async def effectiveness_report(
     except Exception as e:
         logger.error(f"Error generating effectiveness report: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
-

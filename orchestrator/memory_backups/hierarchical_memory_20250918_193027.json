@@ -1,0 +1,17 @@
+{
+  "memory_stores": {
+    "immediate": {},
+    "working": {},
+    "short_term": {},
+    "long_term": {},
+    "archival": {}
+  },
+  "capacities": {
+    "immediate": 10,
+    "working": 100,
+    "short_term": 1000,
+    "long_term": 50000,
+    "archival": 1000000
+  },
+  "timestamp": "2025-09-18T19:30:27.718311"
+}

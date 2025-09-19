@@ -20,7 +20,7 @@ import base64
 import os
 
 from database.database import get_db
-from models import ToolCredentials, Tool, CredentialAuditLog
+from database.models import ToolCredentials, Tool, CredentialAuditLog
 from utils.logging_adapter import set_request_id
 import uuid
 

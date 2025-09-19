@@ -1,0 +1,14 @@
+{
+  "external_memories": {},
+  "config": {
+    "model_name": "all-MiniLM-L6-v2",
+    "similarity_threshold": 0.7,
+    "max_external_items": 10000,
+    "embedding_dim": 384
+  },
+  "stats": {
+    "total_items": 0,
+    "next_id": 0
+  },
+  "timestamp": "2025-09-19T12:01:57.629935"
+}

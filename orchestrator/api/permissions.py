@@ -17,7 +17,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from database.database import get_db
-from models import Tool, Agent, AgentToolPermission, PermissionAuditLog
+from database.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
 from utils.logging_adapter import set_request_id
 import uuid
 

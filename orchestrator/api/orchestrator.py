@@ -337,4 +337,3 @@ async def get_active_tasks(
     except Exception as e:
         logger.error(f"Error getting active tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting active tasks: {str(e)}")
-

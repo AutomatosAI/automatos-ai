@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database.database import get_db
-from models import RAGConfiguration, Document
+from database.models import RAGConfiguration, Document
 from services.rag_service import get_rag_service, RAGService
 
 logger = logging.getLogger(__name__)

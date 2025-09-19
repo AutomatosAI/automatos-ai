@@ -118,7 +118,7 @@ class EnhancedMCPBridge:
             "api_key": os.getenv("API_KEY", "default-api-key"),
             "redis_host": os.getenv("REDIS_HOST", "localhost"),
             "redis_port": int(os.getenv("REDIS_PORT", "6379")),
-            "database_url": os.getenv("DATABASE_URL", "sqlite:///mcp_bridge.db"),
+            "database_url": os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos_ai"),
             "rate_limit_requests": int(os.getenv("RATE_LIMIT_REQUESTS", "100")),
             "rate_limit_window": int(os.getenv("RATE_LIMIT_WINDOW", "60"))
         }

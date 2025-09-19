@@ -18,7 +18,7 @@ from enum import Enum
 import threading
 from collections import defaultdict, deque
 import os
-import sqlite3
+import psycopg2
 from contextlib import contextmanager
 
 class SecurityLevel(Enum):
@@ -64,8 +64,11 @@ class ThreatIndicator:
 class SecurityAuditLogger:
     """Comprehensive security audit logging system"""
     
-    def __init__(self, db_path: str = "security_audit.db"):
-        self.db_path = db_path
+    def __init__(self, database_url: str = None):
+        self.database_url = database_url or os.getenv(
+            "DATABASE_URL", 
+            "postgresql://postgres:postgres@localhost:5432/automatos_ai"
+        )
         self.logger = logging.getLogger("security_audit")
         self._setup_database()
         self._setup_logging()
@@ -91,52 +94,54 @@ class SecurityAuditLogger:
         self.lock = threading.Lock()
     
     def _setup_database(self):
-        """Initialize SQLite database for audit logs"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS security_events (
-                    event_id TEXT PRIMARY KEY,
-                    event_type TEXT NOT NULL,
-                    security_level TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    user_id TEXT,
-                    source_ip TEXT,
-                    resource TEXT,
-                    action TEXT,
-                    result TEXT,
-                    details TEXT,
-                    risk_score INTEGER DEFAULT 0
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS threat_indicators (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    indicator_type TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    description TEXT,
-                    first_seen TEXT NOT NULL,
-                    last_seen TEXT NOT NULL,
-                    count INTEGER DEFAULT 1,
-                    UNIQUE(indicator_type, value)
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_events_timestamp 
-                ON security_events(timestamp)
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_events_user 
-                ON security_events(user_id)
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_events_ip 
-                ON security_events(source_ip)
-            ''')
+        """Initialize PostgreSQL database for audit logs"""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS security_events (
+                        event_id VARCHAR(255) PRIMARY KEY,
+                        event_type VARCHAR(100) NOT NULL,
+                        security_level VARCHAR(50) NOT NULL,
+                        timestamp TIMESTAMP NOT NULL,
+                        user_id VARCHAR(255),
+                        source_ip VARCHAR(45),
+                        resource TEXT,
+                        action VARCHAR(255),
+                        result VARCHAR(100),
+                        details JSONB,
+                        risk_score INTEGER DEFAULT 0
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS threat_indicators (
+                        id SERIAL PRIMARY KEY,
+                        indicator_type VARCHAR(100) NOT NULL,
+                        value TEXT NOT NULL,
+                        severity VARCHAR(50) NOT NULL,
+                        description TEXT,
+                        first_seen TIMESTAMP NOT NULL,
+                        last_seen TIMESTAMP NOT NULL,
+                        count INTEGER DEFAULT 1,
+                        UNIQUE(indicator_type, value)
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_events_timestamp 
+                    ON security_events(timestamp)
+                ''')
+                
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_events_user 
+                    ON security_events(user_id)
+                ''')
+                
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_events_ip 
+                    ON security_events(source_ip)
+                ''')
+            conn.commit()
     
     def _setup_logging(self):
         """Setup structured logging"""
@@ -151,7 +156,7 @@ class SecurityAuditLogger:
     @contextmanager
     def get_db_connection(self):
         """Get database connection with proper cleanup"""
-        conn = sqlite3.connect(self.db_path)
+        conn = psycopg2.connect(self.database_url)
         try:
             yield conn
         finally:
@@ -162,24 +167,36 @@ class SecurityAuditLogger:
         with self.lock:
             # Store in database
             with self.get_db_connection() as conn:
-                conn.execute('''
-                    INSERT OR REPLACE INTO security_events 
-                    (event_id, event_type, security_level, timestamp, user_id, 
-                     source_ip, resource, action, result, details, risk_score)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    event.event_id,
-                    event.event_type.value,
-                    event.security_level.value,
-                    event.timestamp.isoformat(),
-                    event.user_id,
-                    event.source_ip,
-                    event.resource,
-                    event.action,
-                    event.result,
-                    json.dumps(event.details),
-                    event.risk_score
-                ))
+                with conn.cursor() as cursor:
+                    cursor.execute('''
+                        INSERT INTO security_events 
+                        (event_id, event_type, security_level, timestamp, user_id, 
+                         source_ip, resource, action, result, details, risk_score)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (event_id) DO UPDATE SET
+                        event_type = EXCLUDED.event_type,
+                        security_level = EXCLUDED.security_level,
+                        timestamp = EXCLUDED.timestamp,
+                        user_id = EXCLUDED.user_id,
+                        source_ip = EXCLUDED.source_ip,
+                        resource = EXCLUDED.resource,
+                        action = EXCLUDED.action,
+                        result = EXCLUDED.result,
+                        details = EXCLUDED.details,
+                        risk_score = EXCLUDED.risk_score
+                    ''', (
+                        event.event_id,
+                        event.event_type.value,
+                        event.security_level.value,
+                        event.timestamp,
+                        event.user_id,
+                        event.source_ip,
+                        event.resource,
+                        event.action,
+                        event.result,
+                        json.dumps(event.details),
+                        event.risk_score
+                    ))
                 conn.commit()
             
             # Log to file
@@ -282,19 +299,25 @@ class SecurityAuditLogger:
         
         # Store in database
         with self.get_db_connection() as conn:
-            conn.execute('''
-                INSERT OR REPLACE INTO threat_indicators 
-                (indicator_type, value, severity, description, first_seen, last_seen, count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                indicator.indicator_type,
-                indicator.value,
-                indicator.severity.value,
-                indicator.description,
-                indicator.first_seen.isoformat(),
-                indicator.last_seen.isoformat(),
-                indicator.count
-            ))
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                    INSERT INTO threat_indicators 
+                    (indicator_type, value, severity, description, first_seen, last_seen, count)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (indicator_type, value) DO UPDATE SET
+                    severity = EXCLUDED.severity,
+                    description = EXCLUDED.description,
+                    last_seen = EXCLUDED.last_seen,
+                    count = EXCLUDED.count
+                ''', (
+                    indicator.indicator_type,
+                    indicator.value,
+                    indicator.severity.value,
+                    indicator.description,
+                    indicator.first_seen,
+                    indicator.last_seen,
+                    indicator.count
+                ))
             conn.commit()
         
         # Log threat indicator
@@ -316,50 +339,51 @@ class SecurityAuditLogger:
         params = []
         
         if start_time:
-            query += " AND timestamp >= ?"
-            params.append(start_time.isoformat())
+            query += " AND timestamp >= %s"
+            params.append(start_time)
         
         if end_time:
-            query += " AND timestamp <= ?"
-            params.append(end_time.isoformat())
+            query += " AND timestamp <= %s"
+            params.append(end_time)
         
         if event_type:
-            query += " AND event_type = ?"
+            query += " AND event_type = %s"
             params.append(event_type.value)
         
         if security_level:
-            query += " AND security_level = ?"
+            query += " AND security_level = %s"
             params.append(security_level.value)
         
         if user_id:
-            query += " AND user_id = ?"
+            query += " AND user_id = %s"
             params.append(user_id)
         
         if source_ip:
-            query += " AND source_ip = ?"
+            query += " AND source_ip = %s"
             params.append(source_ip)
         
-        query += " ORDER BY timestamp DESC LIMIT ?"
+        query += " ORDER BY timestamp DESC LIMIT %s"
         params.append(limit)
         
         events = []
         with self.get_db_connection() as conn:
-            cursor = conn.execute(query, params)
-            for row in cursor.fetchall():
-                event = SecurityEvent(
-                    event_id=row[0],
-                    event_type=EventType(row[1]),
-                    security_level=SecurityLevel(row[2]),
-                    timestamp=datetime.fromisoformat(row[3]),
-                    user_id=row[4],
-                    source_ip=row[5],
-                    resource=row[6],
-                    action=row[7],
-                    result=row[8],
-                    details=json.loads(row[9]) if row[9] else {},
-                    risk_score=row[10]
-                )
-                events.append(event)
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                for row in cursor.fetchall():
+                    event = SecurityEvent(
+                        event_id=row[0],
+                        event_type=EventType(row[1]),
+                        security_level=SecurityLevel(row[2]),
+                        timestamp=row[3],
+                        user_id=row[4],
+                        source_ip=row[5],
+                        resource=row[6],
+                        action=row[7],
+                        result=row[8],
+                        details=row[9] if row[9] else {},
+                        risk_score=row[10]
+                    )
+                    events.append(event)
         
         return events
     
@@ -369,25 +393,26 @@ class SecurityAuditLogger:
         params = []
         
         if severity:
-            query += " AND severity = ?"
+            query += " AND severity = %s"
             params.append(severity.value)
         
         query += " ORDER BY last_seen DESC"
         
         indicators = []
         with self.get_db_connection() as conn:
-            cursor = conn.execute(query, params)
-            for row in cursor.fetchall():
-                indicator = ThreatIndicator(
-                    indicator_type=row[1],
-                    value=row[2],
-                    severity=SecurityLevel(row[3]),
-                    description=row[4],
-                    first_seen=datetime.fromisoformat(row[5]),
-                    last_seen=datetime.fromisoformat(row[6]),
-                    count=row[7]
-                )
-                indicators.append(indicator)
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                for row in cursor.fetchall():
+                    indicator = ThreatIndicator(
+                        indicator_type=row[1],
+                        value=row[2],
+                        severity=SecurityLevel(row[3]),
+                        description=row[4],
+                        first_seen=row[5],
+                        last_seen=row[6],
+                        count=row[7]
+                    )
+                    indicators.append(indicator)
         
         return indicators
     

@@ -572,16 +572,16 @@ class FieldContextManager:
         
         try:
             # Retrieve primary task
-            primary_task = db.query(Task).filter(
-                and_(Task.id == task_id, Task.owner_id == user_id)
+            primary_task = db.query(WorkflowExecution).filter(
+                and_(WorkflowExecution.id == task_id, WorkflowExecution.agent_id == user_id)
             ).first()
             
             if not primary_task:
                 raise ValueError(f"Task {task_id} not found")
             
             # Get related tasks
-            related_tasks = db.query(Task).filter(
-                and_(Task.owner_id == user_id, Task.id != task_id)
+            related_tasks = db.query(WorkflowExecution).filter(
+                and_(WorkflowExecution.agent_id == user_id, WorkflowExecution.id != task_id)
             ).limit(10).all()  # Limit for performance
             
             if not related_tasks:
@@ -836,8 +836,8 @@ class FieldContextManager:
         
         try:
             # Retrieve task
-            task = db.query(Task).filter(
-                and_(Task.id == task_id, Task.owner_id == user_id)
+            task = db.query(WorkflowExecution).filter(
+                and_(WorkflowExecution.id == task_id, WorkflowExecution.agent_id == user_id)
             ).first()
             
             if not task:

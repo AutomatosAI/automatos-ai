@@ -4,7 +4,7 @@ Exposes security audit logs and workflow metrics
 """
 
 import json
-import sqlite3
+import psycopg2
 import time
 from flask import Flask, Response
 from collections import defaultdict, Counter
@@ -15,18 +15,15 @@ app = Flask(__name__)
 def get_security_metrics():
     """Extract metrics from security audit database"""
     try:
-        db_path = '/app/security_audit.db'
-        if not os.path.exists(db_path):
-            return {}
-            
-        conn = sqlite3.connect(db_path)
+        database_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos_ai")
+        conn = psycopg2.connect(database_url)
         cursor = conn.cursor()
         
         # Get metrics from last 24 hours
         cursor.execute("""
             SELECT event_type, COUNT(*) as count, AVG(risk_score) as avg_risk_score
             FROM security_events 
-            WHERE timestamp > datetime('now', '-24 hours')
+            WHERE timestamp > NOW() - INTERVAL '24 hours'
             GROUP BY event_type
         """)
         

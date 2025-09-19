@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import logging
 
 from database.database import get_db
-from models import Document
+from database.models import Document
 from services.websocket_manager import manager
 
 logger = logging.getLogger(__name__)

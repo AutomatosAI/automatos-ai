@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from database.database import get_db
-from models import (
+from database.models import (
     Skill, Agent, SkillCreate, SkillUpdate, SkillResponse, 
     SkillsByCategory, SkillCategory, agent_skills
 )

@@ -1,3 +1,4 @@
+
 """
 Solutions API Endpoints
 ======================
@@ -184,4 +185,3 @@ async def generate_roadmap(
     except Exception as e:
         logger.error(f"Error generating roadmap: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate roadmap: {str(e)}")
-

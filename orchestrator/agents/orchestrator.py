@@ -34,7 +34,7 @@ from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.callbacks import get_openai_callback
-from langchain.evaluation import load_evaluator
+# from langchain.evaluation import load_evaluator
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
