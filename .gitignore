@@ -45,3 +45,4 @@ Thumbs.db
 # Other generated files
 dist/
 build/
+orchestrator/.env
