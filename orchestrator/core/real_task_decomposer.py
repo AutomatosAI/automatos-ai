@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from services.llm_provider import LLMProvider, LLMConfig
+from services.llm_provider import create_llm_manager, LLMConfig, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +25,21 @@ class RealTaskDecomposer:
     REAL task decomposition using LLM - NO MOCK DATA
     """
     
-    def __init__(self, llm_config: Optional[LLMConfig] = None):
+    def __init__(self, llm_manager=None):
         """Initialize with LLM connection"""
-        if not llm_config:
-            # Use config from centralized configuration
+        if not llm_manager:
+            # Use config from centralized configuration to create LLM manager
             from config import config
             
-            llm_config = LLMConfig(
+            # Create the LLM manager with proper provider and model
+            self.llm = create_llm_manager(
                 provider=config.LLM_PROVIDER,
-                model=config.LLM_MODEL,
-                temperature=config.LLM_TEMPERATURE,
-                api_key=config.OPENAI_API_KEY if config.LLM_PROVIDER == "openai" else config.ANTHROPIC_API_KEY
+                model=config.LLM_MODEL
             )
-        
-        self.llm = LLMProvider(llm_config)
-        logger.info("RealTaskDecomposer initialized with REAL LLM connection")
+            logger.info(f"RealTaskDecomposer initialized with {config.LLM_PROVIDER}/{config.LLM_MODEL}")
+        else:
+            self.llm = llm_manager
+            logger.info("RealTaskDecomposer initialized with provided LLM manager")
     
     async def decompose_task(
         self,

@@ -24,7 +24,7 @@ async def test_real_llm():
     print("=" * 50)
     
     try:
-        from orchestrator.services.llm_provider import LLMProvider, LLMConfig
+        from orchestrator.services.llm_provider import create_llm_manager
         
         # Get API key from environment
         api_key = os.getenv("OPENAI_API_KEY")
@@ -36,16 +36,11 @@ async def test_real_llm():
         
         print(f"✅ API Key found: {api_key[:10]}...")
         
-        # Create config
-        config = LLMConfig(
+        # Create LLM manager
+        llm = create_llm_manager(
             provider="openai",
-            model="gpt-4",
-            temperature=0.7,
-            api_key=api_key
+            model="gpt-4"
         )
-        
-        # Initialize provider
-        llm = LLMProvider(config)
         
         print("\n📡 Sending real request to OpenAI...")
         start_time = time.time()
@@ -100,16 +95,13 @@ async def test_task_decomposition():
     print("\n\n🧩 Testing Task Decomposition...")
     print("=" * 50)
     
-    from orchestrator.services.llm_provider import LLMProvider, LLMConfig
+    from orchestrator.services.llm_provider import create_llm_manager
     
-    config = LLMConfig(
+    # Create LLM manager with environment config
+    llm = create_llm_manager(
         provider="openai",
-        model="gpt-4",
-        temperature=0.7,
-        api_key=os.getenv("OPENAI_API_KEY")
+        model="gpt-4"
     )
-    
-    llm = LLMProvider(config)
     
     # Create a real decomposition prompt
     task = "Build a REST API for user authentication with email verification"

@@ -124,9 +124,12 @@ async def analyze_task(
         if not task_id:
             raise HTTPException(status_code=400, detail="Task ID is required")
         
-        # Find the workflow for this task
+        # Find the workflow for this task using JSONB operators
+        from sqlalchemy import cast, String
+        from sqlalchemy.dialects.postgresql import JSONB
+        
         workflow = db.query(Workflow).filter(
-            Workflow.workflow_definition.contains({"config": {"task_id": task_id}})
+            cast(Workflow.workflow_definition, JSONB)["config"]["task_id"].astext == task_id
         ).first()
         
         if not workflow:
