@@ -223,7 +223,7 @@ class ApiClient {
   }
 
   async getAgentSkills(agentId: string) {
-    const response = await this.request(`/api/agents/${agentId}/skills`)
+    const response = await this.request('/api/skills/agents/' + agentId + '/')
     return response
   }
 

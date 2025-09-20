@@ -54,8 +54,8 @@ from api.recommendations import router as recommendations_router
 from api.solutions import router as solutions_router
 from api.query import router as query_router
 # from api.api.analytics import router as analytics_router  # OLD FILE WITH MOCK DATA - DO NOT USE
-from api.chatbot import router as chatbot_router  # Fixed import path
-from api.document_processing import router as document_processing_router
+#from api.chatbot import router as chatbot_router  # Fixed import path
+#from api.document_processing import router as document_processing_router
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
@@ -272,7 +272,7 @@ def require_api_key(x_api_key: str = Header(None)):
 app.include_router(agents_router)
 app.include_router(workflows_router)
 app.include_router(documents_router)
-app.include_router(document_processing_router)  # Added real document processing
+#app.include_router(document_processing_router)  # Added real document processing
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
@@ -289,7 +289,7 @@ app.include_router(recommendations_router)
 app.include_router(solutions_router)
 app.include_router(query_router)
 # app.include_router(analytics_router)  # OLD FILE WITH MOCK DATA - DISABLED
-app.include_router(chatbot_router)
+#app.include_router(chatbot_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
 app.include_router(context_policy_router)
