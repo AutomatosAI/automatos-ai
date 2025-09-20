@@ -53,6 +53,7 @@ from api.insights import router as insights_router
 from api.recommendations import router as recommendations_router
 from api.solutions import router as solutions_router
 from api.query import router as query_router
+from api.agent_endpoints import router as agent_factory_router  # Agent Factory with REAL LLM
 # from api.api.analytics import router as analytics_router  # OLD FILE WITH MOCK DATA - DO NOT USE
 #from api.chatbot import router as chatbot_router  # Fixed import path
 #from api.document_processing import router as document_processing_router
@@ -270,6 +271,7 @@ def require_api_key(x_api_key: str = Header(None)):
 
 # Include API routers
 app.include_router(agents_router)
+app.include_router(agent_factory_router)  # Agent Factory with REAL LLM connections
 app.include_router(workflows_router)
 app.include_router(documents_router)
 #app.include_router(document_processing_router)  # Added real document processing
