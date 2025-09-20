@@ -9,6 +9,8 @@ These endpoints bridge the gap between the user journey tests and the actual orc
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import cast, String
+from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 import logging
 import json

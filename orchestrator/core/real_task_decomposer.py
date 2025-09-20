@@ -149,7 +149,7 @@ Return ONLY valid JSON in this exact format:
                 result["original_task"] = task_description
                 result["decomposed_at"] = datetime.now().isoformat()
                 result["llm_model"] = response.model
-                result["tokens_used"] = response.usage.total_tokens if response.usage else None
+                result["tokens_used"] = response.usage["total_tokens"] if response.usage else None
                 result["decomposition_time"] = elapsed
                 result["is_real_decomposition"] = True  # Proof this is NOT mock data
                 

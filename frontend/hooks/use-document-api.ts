@@ -347,7 +347,7 @@ export function useDeleteDocument() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.deleteDocument,
+    mutationFn: (id) => apiClient.deleteDocument(id),
     onSuccess: (data, documentId) => {
       // Remove from cache and invalidate lists
       queryClient.removeQueries({ queryKey: documentQueryKeys.document(documentId) })
@@ -390,7 +390,7 @@ export function useAnalyzeDocument() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.analyzeDocument,
+    mutationFn: (data) => apiClient.analyzeDocument(data),
     onSuccess: (data, documentId) => {
       // Invalidate document insights and document data
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documentInsights(documentId) })
@@ -408,7 +408,7 @@ export function useAnalyzeDocument() {
 // Generate summary
 export function useGenerateSummary() {
   return useMutation({
-    mutationFn: apiClient.generateSummary,
+    mutationFn: (data) => apiClient.generateSummary(data),
     onSuccess: (data) => {
       toast.success('Summary generated successfully!')
       return data
@@ -425,7 +425,7 @@ export function useIndexDocument() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.indexDocument,
+    mutationFn: (data) => apiClient.indexDocument(data),
     onSuccess: (data, documentId) => {
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.document(documentId) })
       toast.success('Document indexed successfully!')
@@ -463,7 +463,7 @@ export function useBatchDelete() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.batchDelete,
+    mutationFn: (data) => apiClient.batchDelete(data),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documents })
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documentStats })
