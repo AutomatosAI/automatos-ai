@@ -60,14 +60,14 @@ interface Agent {
   }
 }
 
-interface RealAgentDetailsPanelProps {
+interface AgentDetailsPanelProps {
   agent: Agent | null
   open: boolean
   onClose: () => void
   onConfigure?: () => void
 }
 
-export function RealAgentDetailsPanel({ agent, open, onClose, onConfigure }: RealAgentDetailsPanelProps) {
+export function AgentDetailsPanel({ agent, open, onClose, onConfigure }: AgentDetailsPanelProps) {
   const [activeTab, setActiveTab] = useState('overview')
   
   // API hooks for detailed data

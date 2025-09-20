@@ -1,10 +1,10 @@
 import { MainLayout } from '@/components/layout/main-layout'
-import { MinimalEnhancedDocumentManagement } from '@/components/documents/minimal-enhanced-document-management'
+import { DocumentManagement } from '@/components/documents/document-management'
 
 export default function DocumentsPage() {
   return (
     <MainLayout>
-      <MinimalEnhancedDocumentManagement />
+      <DocumentManagement />
     </MainLayout>
   )
 }

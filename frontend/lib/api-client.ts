@@ -239,6 +239,84 @@ class ApiClient {
     })
     return response
   }
+
+  // Chat API methods
+  async sendChatMessage(message: string, context?: any) {
+    const response = await this.request('/api/chat/message', {
+      method: 'POST',
+      body: JSON.stringify({ message, context })
+    })
+    return response
+  }
+
+  async testChat() {
+    const response = await this.request('/api/chat/test')
+    return response
+  }
+
+  // Document Processing API methods
+  async processDocument(documentId: string) {
+    const response = await this.request(`/api/documents/${documentId}/process`, {
+      method: 'POST'
+    })
+    return response
+  }
+
+  // Analytics API methods (return null if not implemented)
+  async getAnalyticsOverview() {
+    try {
+      return await this.request('/api/documents/analytics/overview')
+    } catch {
+      return null // Backend endpoint doesn't exist yet
+    }
+  }
+
+  async getSearchPatterns() {
+    try {
+      return await this.request('/api/documents/analytics/search-patterns')
+    } catch {
+      return null // Backend endpoint doesn't exist yet
+    }
+  }
+
+  async getProcessingPipeline() {
+    try {
+      return await this.request('/api/documents/processing/pipeline')
+    } catch {
+      return null // Backend endpoint doesn't exist yet
+    }
+  }
+
+  async getLiveProcessingJobs() {
+    try {
+      return await this.request('/api/documents/processing/live')
+    } catch {
+      return null // Backend endpoint doesn't exist yet
+    }
+  }
+
+  async reprocessAllDocuments() {
+    try {
+      return await this.request('/api/documents/processing/reprocess-all', {
+        method: 'POST'
+      })
+    } catch {
+      return null // Backend endpoint doesn't exist yet
+    }
+  }
+
+  async getDocumentChunks(documentId: string) {
+    const response = await this.request(`/api/documents/${documentId}/chunks`)
+    return response
+  }
+
+  async searchDocument(documentId: string, query: string) {
+    const response = await this.request(`/api/documents/${documentId}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query })
+    })
+    return response
+  }
 }
 
 export const apiClient = new ApiClient()

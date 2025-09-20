@@ -1,1 +1,0 @@
-import React from 'react'; export function MultiAgentDashboard() { return React.createElement('div', { className: 'p-6' }, React.createElement('h2', { className: 'text-2xl font-bold mb-4' }, 'Multi-Agent Dashboard'), React.createElement('p', null, 'Dashboard is working!')); }

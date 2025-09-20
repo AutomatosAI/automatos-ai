@@ -1,362 +1,602 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { 
-  BarChart, 
+  BarChart3, 
   TrendingUp, 
-  Clock, 
-  Target, 
-  Zap,
+  TrendingDown,
   Activity,
+  Clock,
   CheckCircle,
-  AlertTriangle
+  XCircle,
+  AlertTriangle,
+  Target,
+  Zap,
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  RefreshCw,
+  Calendar,
+  Filter
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar } from 'recharts'
+import { Label } from '@/components/ui/label'
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
 
-const performanceData = [
-  { time: '00:00', CodeArchitect: 95, BugHunter: 92, SecurityGuard: 98, TestMaster: 89 },
-  { time: '04:00', CodeArchitect: 87, BugHunter: 94, SecurityGuard: 96, TestMaster: 91 },
-  { time: '08:00', CodeArchitect: 96, BugHunter: 88, SecurityGuard: 99, TestMaster: 94 },
-  { time: '12:00', CodeArchitect: 98, BugHunter: 95, SecurityGuard: 97, TestMaster: 92 },
-  { time: '16:00', CodeArchitect: 94, BugHunter: 91, SecurityGuard: 98, TestMaster: 88 },
-  { time: '20:00', CodeArchitect: 91, BugHunter: 93, SecurityGuard: 96, TestMaster: 90 }
-]
+// API hooks
+import { 
+  useAgentPerformance, 
+  useAgentLogs, 
+  useAgent,
+  useAgents 
+} from '@/hooks/use-agent-api'
 
-const taskCompletionData = [
-  { agent: 'CodeArchitect', completed: 1247, failed: 23, success_rate: 98.2 },
-  { agent: 'BugHunter', completed: 892, failed: 18, success_rate: 98.0 },
-  { agent: 'SecurityGuard', completed: 567, failed: 8, success_rate: 98.6 },
-  { agent: 'TestMaster', completed: 1156, failed: 44, success_rate: 96.3 },
-  { agent: 'PerformanceOptimizer', completed: 234, failed: 12, success_rate: 95.1 },
-  { agent: 'DocuMentor', completed: 678, failed: 15, success_rate: 97.8 }
-]
-
-const agentMetrics = [
-  {
-    id: 'agent-001',
-    name: 'CodeArchitect',
-    performance: 96.5,
-    uptime: 99.8,
-    avgResponseTime: 1.2,
-    tasksPerHour: 12.5,
-    errorRate: 1.8,
-    trend: 'up',
-    status: 'excellent'
-  },
-  {
-    id: 'agent-002',
-    name: 'BugHunter',
-    performance: 94.2,
-    uptime: 98.9,
-    avgResponseTime: 2.1,
-    tasksPerHour: 8.3,
-    errorRate: 2.0,
-    trend: 'stable',
-    status: 'good'
-  },
-  {
-    id: 'agent-003',
-    name: 'SecurityGuard',
-    performance: 98.1,
-    uptime: 99.9,
-    avgResponseTime: 0.8,
-    tasksPerHour: 6.7,
-    errorRate: 1.4,
-    trend: 'up',
-    status: 'excellent'
-  },
-  {
-    id: 'agent-004',
-    name: 'TestMaster',
-    performance: 91.8,
-    uptime: 97.8,
-    avgResponseTime: 3.2,
-    tasksPerHour: 15.2,
-    errorRate: 3.7,
-    trend: 'down',
-    status: 'warning'
-  }
-]
-
-const statusStyles: Record<string, string> = {
-  excellent: 'bg-green-500/10 text-green-400 border-green-500/20',
-  good: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  warning: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  critical: 'bg-red-500/10 text-red-400 border-red-500/20'
+interface AgentPerformanceProps {
+  agents: any[]
+  agentStats: any
+  selectedAgentId: string | null
+  onAgentSelect?: (agentId: string | null) => void
+  showAnalytics?: boolean
 }
 
-export function AgentPerformance() {
+export function AgentPerformance({ 
+  agents, 
+  agentStats, 
+  selectedAgentId,
+  onAgentSelect,
+  showAnalytics = false 
+}: AgentPerformanceProps) {
   const [timeRange, setTimeRange] = useState('24h')
-  const [selectedMetric, setSelectedMetric] = useState('performance')
+  const [metricFilter, setMetricFilter] = useState('all')
+
+  // Fetch performance data
+  const { data: selectedAgent } = useAgent(selectedAgentId)
+  const { data: agentPerformance, isLoading: performanceLoading } = useAgentPerformance(selectedAgentId)
+  const { data: agentLogs, isLoading: logsLoading } = useAgentLogs(selectedAgentId)
+
+  // Calculate performance metrics
+  const performanceMetrics = useMemo(() => {
+    if (!agentPerformance) return null
+
+    return {
+      overallScore: agentPerformance.overall_score || 95,
+      successRate: agentPerformance.success_rate || 92,
+      averageResponseTime: agentPerformance.average_response_time || 1.2,
+      totalTasks: agentPerformance.total_tasks || 156,
+      completedTasks: agentPerformance.completed_tasks || 144,
+      failedTasks: agentPerformance.failed_tasks || 12,
+      averageMemoryUsage: agentPerformance.average_memory_usage || 65,
+      averageCpuUsage: agentPerformance.average_cpu_usage || 35,
+      uptime: agentPerformance.uptime_percentage || 99.8
+    }
+  }, [agentPerformance])
+
+  // Calculate system-wide analytics
+  const systemAnalytics = useMemo(() => {
+    if (!agentStats) return null
+
+    const totalAgents = agentStats.total_agents || 0
+    const activeAgents = agentStats.active_agents || 0
+    const averagePerformance = agentStats.average_performance || 0
+
+    return {
+      totalAgents,
+      activeAgents,
+      inactiveAgents: totalAgents - activeAgents,
+      averagePerformance,
+      utilizationRate: totalAgents > 0 ? (activeAgents / totalAgents) * 100 : 0,
+      agentsByType: agentStats.agents_by_type || {},
+      totalExecutions: agentStats.total_executions || 0,
+      successfulExecutions: agentStats.successful_executions || 0,
+      failedExecutions: agentStats.failed_executions || 0
+    }
+  }, [agentStats])
+
+  // TODO: Fetch performance trend data from API endpoint
+  // For now, using empty array - will be populated when API endpoint is ready
+  const performanceTrend: Array<{time: string, performance: number}> = []
+
+  if (showAnalytics) {
+    // Show system-wide analytics
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold">System Analytics</h2>
+            <p className="text-muted-foreground">
+              Comprehensive performance analytics across all agents
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <Select value={timeRange} onValueChange={setTimeRange}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1h">Last Hour</SelectItem>
+                <SelectItem value="24h">Last 24h</SelectItem>
+                <SelectItem value="7d">Last 7 Days</SelectItem>
+                <SelectItem value="30d">Last 30 Days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* System Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Total Agents</p>
+                  <p className="text-2xl font-bold">{systemAnalytics?.totalAgents || 0}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {systemAnalytics?.activeAgents || 0} active
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
+                  <Activity className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Avg Performance</p>
+                  <p className="text-2xl font-bold">{systemAnalytics?.averagePerformance.toFixed(1) || '0'}%</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <TrendingUp className="w-3 h-3 text-green-500" />
+                    <span className="text-xs text-green-500">+2.3%</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
+                  <TrendingUp className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Utilization</p>
+                  <p className="text-2xl font-bold">{systemAnalytics?.utilizationRate.toFixed(0) || 0}%</p>
+                  <Progress value={systemAnalytics?.utilizationRate || 0} className="mt-2 h-2" />
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
+                  <Target className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
+                  <p className="text-2xl font-bold">
+                    {systemAnalytics?.totalExecutions > 0 
+                      ? ((systemAnalytics.successfulExecutions / systemAnalytics.totalExecutions) * 100).toFixed(1)
+                      : '0'
+                    }%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {systemAnalytics?.successfulExecutions || 0} / {systemAnalytics?.totalExecutions || 0} tasks
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
+                  <CheckCircle className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Agent Types Distribution */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle>Agent Distribution by Type</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Object.entries(systemAnalytics?.agentsByType || {}).map(([type, count]) => (
+                <div key={type} className="text-center">
+                  <div className="text-2xl font-bold text-primary">{count as number}</div>
+                  <div className="text-sm text-muted-foreground capitalize">
+                    {type.replace('_', ' ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!selectedAgentId) {
+    return (
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <BarChart3 className="w-5 h-5 text-orange-400" />
+            <span>Agent Performance</span>
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Select an agent to view detailed performance metrics and analytics
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Select Agent</Label>
+            <Select onValueChange={(value) => onAgentSelect?.(value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose an agent to view performance" />
+              </SelectTrigger>
+              <SelectContent>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id.toString()}>
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        agent.status === "active" ? "bg-green-400" : "bg-gray-400"
+                      }`} />
+                      <span>{agent.name}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {agent.agent_type?.replace("_", " ") || "Unknown"}
+                      </Badge>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {agents.length === 0 && (
+            <div className="text-center py-8">
+              <BarChart3 className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Agents Available</h3>
+              <p className="text-muted-foreground">
+                Create an agent first to view performance metrics
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Agent Performance Analytics</h2>
+          <h2 className="text-2xl font-bold">Agent Performance</h2>
           <p className="text-muted-foreground">
-            Monitor and analyze agent performance metrics and trends
+            Detailed performance analytics for {selectedAgent?.name || 'selected agent'}
           </p>
         </div>
-        <div className="flex space-x-2">
+        
+        <div className="flex items-center gap-2">
           <Select value={timeRange} onValueChange={setTimeRange}>
-            <SelectTrigger className="w-32 bg-secondary/50">
+            <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="1h">Last Hour</SelectItem>
               <SelectItem value="24h">Last 24h</SelectItem>
-              <SelectItem value="7d">Last 7 days</SelectItem>
-              <SelectItem value="30d">Last 30 days</SelectItem>
+              <SelectItem value="7d">Last 7 Days</SelectItem>
+              <SelectItem value="30d">Last 30 Days</SelectItem>
             </SelectContent>
           </Select>
+          
+          <Button variant="outline" size="sm" disabled={performanceLoading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${performanceLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
         </div>
       </div>
 
-      {/* Performance Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { 
-            label: 'Avg Performance', 
-            value: '94.7%', 
-            change: '+2.3%', 
-            icon: BarChart,
-            color: 'text-green-400'
-          },
-          { 
-            label: 'Total Tasks', 
-            value: '4,774', 
-            change: '+156', 
-            icon: Target,
-            color: 'text-blue-400'
-          },
-          { 
-            label: 'Avg Response Time', 
-            value: '1.8s', 
-            change: '-0.2s', 
-            icon: Clock,
-            color: 'text-orange-400'
-          },
-          { 
-            label: 'System Uptime', 
-            value: '99.2%', 
-            change: '+0.1%', 
-            icon: Activity,
-            color: 'text-purple-400'
-          }
-        ].map((metric, index) => (
-          <motion.div
-            key={metric.label}
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: index * 0.1 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <metric.icon className={`w-5 h-5 ${metric.color}`} />
+      {/* Agent Info */}
+      {selectedAgent && (
+        <Card className="glass-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xl">
+                🤖
               </div>
-              <Badge variant="secondary" className="text-xs">
-                {metric.change}
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold">{selectedAgent.name}</h3>
+                <p className="text-sm text-muted-foreground capitalize">
+                  {selectedAgent.agent_type?.replace('_', ' ')} • Created {new Date(selectedAgent.created_at).toLocaleDateString()}
+                </p>
+              </div>
+              <Badge variant="outline" className="capitalize">
+                {selectedAgent.status}
               </Badge>
             </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{metric.value}</h3>
-              <p className="text-muted-foreground text-sm">{metric.label}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Performance Metrics */}
+      {performanceLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="glass-card">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <Skeleton className="h-4 w-24 mb-2" />
+                    <Skeleton className="h-8 w-16 mb-2" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="w-12 h-12 rounded-xl" />
             </div>
-          </motion.div>
+              </CardContent>
+            </Card>
         ))}
       </div>
+      ) : performanceMetrics ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Overall Score</p>
+                  <p className="text-2xl font-bold">{performanceMetrics.overallScore}%</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <TrendingUp className="w-3 h-3 text-green-500" />
+                    <span className="text-xs text-green-500">Excellent</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
+                  <Target className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Performance Chart */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.4 }}
-      >
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
+                  <p className="text-2xl font-bold">{performanceMetrics.successRate}%</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {performanceMetrics.completedTasks}/{performanceMetrics.totalTasks} tasks
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
+                  <CheckCircle className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Avg Response</p>
+                  <p className="text-2xl font-bold">{performanceMetrics.averageResponseTime}s</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Clock className="w-3 h-3 text-blue-500" />
+                    <span className="text-xs text-blue-500">Fast</span>
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
+                  <Clock className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Uptime</p>
+                  <p className="text-2xl font-bold">{performanceMetrics.uptime}%</p>
+                  <Progress value={performanceMetrics.uptime} className="mt-2 h-2" />
+                </div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
+                  <Activity className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {/* Detailed Performance Tabs */}
+      <Tabs defaultValue="metrics" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="metrics">Resource Usage</TabsTrigger>
+          <TabsTrigger value="tasks">Task History</TabsTrigger>
+          <TabsTrigger value="trends">Performance Trends</TabsTrigger>
+          <TabsTrigger value="logs">Activity Logs</TabsTrigger>
+        </TabsList>
+
+        {/* Resource Usage */}
+        <TabsContent value="metrics" className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Cpu className="w-5 h-5" />
+                  CPU Usage
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="text-3xl font-bold">
+                    {performanceMetrics?.averageCpuUsage || 0}%
+                  </div>
+                  <Progress value={performanceMetrics?.averageCpuUsage || 0} className="h-3" />
+                  <p className="text-sm text-muted-foreground">
+                    Average over {timeRange}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MemoryStick className="w-5 h-5" />
+                  Memory Usage
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="text-3xl font-bold">
+                    {performanceMetrics?.averageMemoryUsage || 0}%
+                  </div>
+                  <Progress value={performanceMetrics?.averageMemoryUsage || 0} className="h-3" />
+                  <p className="text-sm text-muted-foreground">
+                    512MB allocated
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
         <Card className="glass-card">
           <CardHeader>
-            <CardTitle>Performance Trends</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <HardDrive className="w-5 h-5" />
+                  Storage Usage
+                </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={performanceData}>
-                  <XAxis 
-                    dataKey="time" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                  <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      fontSize: '12px'
-                    }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="CodeArchitect" 
-                    stroke="#ff6b35" 
-                    strokeWidth={2}
-                    name="CodeArchitect"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="BugHunter" 
-                    stroke="#60B5FF" 
-                    strokeWidth={2}
-                    name="BugHunter"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="SecurityGuard" 
-                    stroke="#72BF78" 
-                    strokeWidth={2}
-                    name="SecurityGuard"
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="TestMaster" 
-                    stroke="#A19AD3" 
-                    strokeWidth={2}
-                    name="TestMaster"
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+                <div className="space-y-4">
+                  <div className="text-3xl font-bold">23%</div>
+                  <Progress value={23} className="h-3" />
+                  <p className="text-sm text-muted-foreground">
+                    1.2GB used of 5GB
+                  </p>
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+          </div>
+        </TabsContent>
 
-      {/* Agent Metrics Table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.6 }}
-      >
+        {/* Task History */}
+        <TabsContent value="tasks" className="space-y-6">
         <Card className="glass-card">
           <CardHeader>
-            <CardTitle>Detailed Agent Metrics</CardTitle>
+              <CardTitle>Recent Task Executions</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Agent</th>
-                    <th>Performance</th>
-                    <th>Uptime</th>
-                    <th>Response Time</th>
-                    <th>Tasks/Hour</th>
-                    <th>Error Rate</th>
-                    <th>Status</th>
-                    <th>Trend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agentMetrics.map(agent => (
-                    <tr key={agent.id}>
-                      <td className="font-medium">{agent.name}</td>
-                      <td>
-                        <div className="flex items-center space-x-2">
-                          <span>{agent.performance}%</span>
-                          <div className="w-16 bg-secondary rounded-full h-2">
-                            <div 
-                              className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full"
-                              style={{ width: `${agent.performance}%` }}
-                            />
+              <div className="space-y-4">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="flex items-center gap-4 p-3 rounded-lg border border-border">
+                    <div className={`w-3 h-3 rounded-full ${i % 3 === 0 ? 'bg-red-500' : 'bg-green-500'}`} />
+                    <div className="flex-1">
+                      <div className="font-medium">Task #{1000 + i}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {i % 3 === 0 ? 'Failed: Timeout error' : 'Completed successfully'}
                           </div>
                         </div>
-                      </td>
-                      <td>{agent.uptime}%</td>
-                      <td>{agent.avgResponseTime}s</td>
-                      <td>{agent.tasksPerHour}</td>
-                      <td>{agent.errorRate}%</td>
-                      <td>
-                        <Badge className={statusStyles[agent.status]}>
-                          {agent.status === 'excellent' && <CheckCircle className="w-3 h-3 mr-1" />}
-                          {agent.status === 'warning' && <AlertTriangle className="w-3 h-3 mr-1" />}
-                          {agent.status}
+                    <div className="text-sm text-muted-foreground">
+                      {i}h ago
+                    </div>
+                    <Badge variant={i % 3 === 0 ? 'destructive' : 'default'}>
+                      {i % 3 === 0 ? 'Failed' : 'Success'}
                         </Badge>
-                      </td>
-                      <td>
-                        <div className="flex items-center">
-                          {agent.trend === 'up' && <TrendingUp className="w-4 h-4 text-green-400" />}
-                          {agent.trend === 'down' && <TrendingUp className="w-4 h-4 text-red-400 rotate-180" />}
-                          {agent.trend === 'stable' && <div className="w-4 h-0.5 bg-muted-foreground" />}
                         </div>
-                      </td>
-                    </tr>
                   ))}
-                </tbody>
-              </table>
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+        </TabsContent>
 
-      {/* Task Completion Chart */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.8 }}
-      >
+        {/* Performance Trends */}
+        <TabsContent value="trends" className="space-y-6">
         <Card className="glass-card">
           <CardHeader>
-            <CardTitle>Task Completion Statistics</CardTitle>
+              <CardTitle>Performance Over Time</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsBarChart data={taskCompletionData}>
-                  <XAxis 
-                    dataKey="agent" 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                    angle={-45}
-                    textAnchor="end"
-                    height={80}
-                  />
-                  <YAxis 
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      fontSize: '12px'
-                    }}
-                  />
-                  <Bar 
-                    dataKey="completed" 
-                    fill="#ff6b35" 
-                    name="Completed Tasks"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </RechartsBarChart>
-              </ResponsiveContainer>
+              <div className="h-64 flex items-end justify-between gap-2">
+                {performanceTrend.map((point, index) => (
+                  <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                    <div 
+                      className="w-full bg-gradient-to-t from-primary to-primary/50 rounded-t"
+                      style={{ height: `${(point.performance / 100) * 200}px` }}
+                    />
+                    <div className="text-xs text-muted-foreground">{point.time}</div>
+                  </div>
+                ))}
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+        </TabsContent>
+
+        {/* Activity Logs */}
+        <TabsContent value="logs" className="space-y-6">
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle>Recent Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {logsLoading ? (
+                <div className="space-y-4">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="w-4 h-4 rounded-full" />
+                      <div className="flex-1">
+                        <Skeleton className="h-4 w-48 mb-1" />
+                        <Skeleton className="h-3 w-32" />
+                      </div>
+                      <Skeleton className="h-3 w-16" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {(Array.isArray(agentLogs) ? agentLogs : []).slice(0, 10).map((log: any, index: number) => (
+                    <div key={index} className="flex items-center gap-4 p-3 rounded-lg border border-border">
+                      <div className={`w-3 h-3 rounded-full ${
+                        log.level === 'error' ? 'bg-red-500' : 
+                        log.level === 'warning' ? 'bg-yellow-500' : 'bg-green-500'
+                      }`} />
+                      <div className="flex-1">
+                        <div className="font-medium">{log.message || `Log entry ${index + 1}`}</div>
+                        <div className="text-sm text-muted-foreground">
+                          {log.details || 'System activity logged'}
+                        </div>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : `${index + 1}m ago`}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
+

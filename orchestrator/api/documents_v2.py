@@ -22,6 +22,8 @@ import uuid
 
 # Import database and dependencies
 from database.database import get_db
+from database.models import Document as DocumentModel
+from sqlalchemy import desc
 
 logger = logging.getLogger(__name__)
 
@@ -93,34 +95,34 @@ async def upload_document(
         content = await file.read()
         file_size = len(content)
         
-        # Generate unique document ID
-        doc_id = str(uuid.uuid4())
+        # Save to real database
+        doc = DocumentModel(
+            filename=file.filename,
+            original_filename=file.filename,
+            file_type=file.content_type or "application/octet-stream",
+            file_size=file_size,
+            status="uploaded" if not auto_process else "processing",
+            description=description,
+            tags=tags.split(",") if tags else [],
+            created_by="api"
+        )
         
-        # Mock document storage - in real implementation, would save to storage
-        document_data = {
-            "id": doc_id,
-            "filename": file.filename,
-            "size": file_size,
-            "content_type": file.content_type or "application/octet-stream",
-            "status": "uploaded",
-            "upload_time": datetime.utcnow(),
-            "processing_status": "pending" if auto_process else "uploaded",
-            "description": description,
-            "tags": tags.split(",") if tags else [],
-            "content": content
-        }
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
         
-        # In real implementation, would save to database
-        logger.info(f"Uploaded document: {file.filename} (ID: {doc_id}, Size: {file_size} bytes)")
+        # TODO: Save actual file content to storage (filesystem/S3)
+        # For now, just log it
+        logger.info(f"Uploaded document: {file.filename} (ID: {doc.id}, Size: {file_size} bytes)")
         
         return DocumentUploadResponse(
-            id=doc_id,
-            filename=file.filename,
+            id=str(doc.id),
+            filename=doc.filename,
             size=file_size,
-            content_type=file.content_type or "application/octet-stream",
-            status="uploaded",
-            upload_time=datetime.utcnow(),
-            processing_status="pending" if auto_process else "uploaded"
+            content_type=doc.file_type,
+            status=doc.status,
+            upload_time=doc.upload_date,
+            processing_status=doc.status
         )
         
     except Exception as e:
@@ -153,50 +155,24 @@ async def preprocess_document(
     try:
         doc_id = request.document_id
         
-        # Mock preprocessing - in real implementation, would process actual document
-        preprocessing_result = {
-            "document_id": doc_id,
-            "status": "completed",
-            "processing_time": "2.3s",
-            "timestamp": datetime.utcnow().isoformat(),
-            
-            "extracted_content": {
-                "text_length": 15420,
-                "paragraphs": 45,
-                "sentences": 234,
-                "words": 2890,
-                "language": "en"
-            },
-            
-            "metadata": {
-                "title": "Sample Document",
-                "author": "John Doe",
-                "creation_date": "2024-01-15",
-                "last_modified": "2024-01-20",
-                "page_count": 12,
-                "file_format": "PDF"
-            } if request.extract_metadata else None,
-            
-            "embeddings": {
-                "model": "text-embedding-ada-002",
-                "dimensions": 1536,
-                "chunks": 23,
-                "embedding_time": "1.2s"
-            } if request.generate_embeddings else None,
-            
-            "analysis": {
-                "readability_score": 8.2,
-                "sentiment": "neutral",
-                "key_topics": ["technology", "innovation", "business"],
-                "entities": ["OpenAI", "Microsoft", "AI"],
-                "summary": "This document discusses the latest developments in artificial intelligence..."
-            },
-            
-            "preprocessing_options": request.preprocessing_options or {}
-        }
+        # Check if document exists
+        doc = db.query(DocumentModel).filter(DocumentModel.id == int(doc_id)).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
         
-        logger.info(f"Preprocessed document: {doc_id}")
-        return preprocessing_result
+        # Update status to processing
+        doc.status = "processing"
+        db.commit()
+        
+        # TODO: Implement actual document preprocessing
+        # For now, return a minimal response indicating the feature is not implemented
+        logger.info(f"Document preprocessing requested for: {doc_id}")
+        return {
+            "document_id": doc_id,
+            "status": "not_implemented",
+            "message": "Document preprocessing not yet implemented. This would extract text, generate embeddings, and analyze content.",
+            "timestamp": datetime.utcnow().isoformat()
+        }
         
     except Exception as e:
         logger.error(f"Error preprocessing document {request.document_id}: {e}")
@@ -224,23 +200,37 @@ async def list_documents(
     - `limit`: Maximum number of records to return
     """
     try:
-        # Mock document list - in real implementation, would query database
-        documents = [
-            DocumentResponse(
-                id=f"doc-{i}",
-                filename=f"document_{i}.pdf",
-                size=1024 * (i + 1),
-                content_type="application/pdf",
-                status="processed",
-                upload_time=datetime.utcnow(),
-                processed_time=datetime.utcnow(),
-                metadata={"pages": i + 1, "author": "User"},
-                content_preview=f"This is a preview of document {i}..."
-            )
-            for i in range(skip, min(skip + limit, 10))
-        ]
+        # Query real database
+        query = db.query(DocumentModel)
         
-        return documents
+        # Apply filters
+        if status:
+            query = query.filter(DocumentModel.status == status)
+        if content_type:
+            query = query.filter(DocumentModel.file_type == content_type)
+        
+        # Get total count
+        total = query.count()
+        
+        # Apply pagination and get results
+        documents = query.order_by(desc(DocumentModel.upload_date)).offset(skip).limit(limit).all()
+        
+        # Convert to response model
+        result = []
+        for doc in documents:
+            result.append(DocumentResponse(
+                id=str(doc.id),
+                filename=doc.filename,
+                size=doc.file_size or 0,
+                content_type=doc.file_type or "unknown",
+                status=doc.status,
+                upload_time=doc.upload_date,
+                processed_time=doc.processed_date,
+                metadata=doc.doc_metadata or {},
+                content_preview=doc.description or ""
+            ))
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
@@ -257,20 +247,23 @@ async def get_document(
     Retrieves detailed information about a specific document.
     """
     try:
-        # Mock document retrieval - in real implementation, would query database
-        if not document_id:
+        # Query real database
+        doc = db.query(DocumentModel).filter(DocumentModel.id == int(document_id)).first()
+        
+        if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         
+        # Convert to response model
         document = DocumentResponse(
-            id=document_id,
-            filename="sample_document.pdf",
-            size=2048,
-            content_type="application/pdf",
-            status="processed",
-            upload_time=datetime.utcnow(),
-            processed_time=datetime.utcnow(),
-            metadata={"pages": 5, "author": "Sample Author"},
-            content_preview="This is a sample document preview..."
+            id=str(doc.id),
+            filename=doc.filename,
+            size=doc.file_size or 0,
+            content_type=doc.file_type or "unknown",
+            status=doc.status,
+            upload_time=doc.upload_date,
+            processed_time=doc.processed_date,
+            metadata=doc.doc_metadata or {},
+            content_preview=doc.description or ""
         )
         
         return document
@@ -292,7 +285,15 @@ async def delete_document(
     Permanently deletes a document and all associated data.
     """
     try:
-        # Mock document deletion - in real implementation, would delete from storage and database
+        # Delete from real database
+        doc = db.query(DocumentModel).filter(DocumentModel.id == int(document_id)).first()
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        db.delete(doc)
+        db.commit()
+        
         logger.info(f"Deleted document: {document_id}")
         return {"message": f"Document {document_id} deleted successfully"}
         
@@ -312,17 +313,23 @@ async def reprocess_document(
     Reprocesses an existing document with new options or updated algorithms.
     """
     try:
-        # Mock reprocessing - in real implementation, would reprocess actual document
-        result = {
-            "document_id": document_id,
-            "status": "reprocessing_started",
-            "timestamp": datetime.utcnow().isoformat(),
-            "estimated_completion": "2-3 minutes",
-            "options": options or {}
-        }
+        # Check if document exists
+        doc = db.query(DocumentModel).filter(DocumentModel.id == int(document_id)).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
         
-        logger.info(f"Started reprocessing document: {document_id}")
-        return result
+        # Update status
+        doc.status = "processing"
+        db.commit()
+        
+        logger.info(f"Document reprocessing requested for: {document_id}")
+        # TODO: Implement actual reprocessing
+        return {
+            "document_id": document_id,
+            "status": "not_implemented",
+            "message": "Document reprocessing not yet implemented",
+            "timestamp": datetime.utcnow().isoformat()
+        }
         
     except Exception as e:
         logger.error(f"Error reprocessing document {document_id}: {e}")
@@ -347,21 +354,24 @@ async def get_document_content(
     - `markdown`: Markdown formatted content
     """
     try:
-        # Mock content retrieval - in real implementation, would get actual content
-        content_data = {
+        # Check if document exists
+        doc = db.query(DocumentModel).filter(DocumentModel.id == int(document_id)).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # TODO: Implement actual content retrieval from storage
+        return {
             "document_id": document_id,
             "format": format,
-            "content": "This is the extracted content of the document...",
+            "status": "not_implemented",
+            "message": "Content retrieval not yet implemented. Document metadata available via GET /documents/{id}",
             "metadata": {
-                "extraction_method": "OCR + NLP",
-                "confidence_score": 0.95,
-                "language": "en",
-                "word_count": 1250
+                "filename": doc.filename,
+                "upload_date": doc.upload_date.isoformat() if doc.upload_date else None,
+                "status": doc.status
             } if include_metadata else None,
             "timestamp": datetime.utcnow().isoformat()
         }
-        
-        return content_data
         
     except Exception as e:
         logger.error(f"Error getting content for document {document_id}: {e}")
