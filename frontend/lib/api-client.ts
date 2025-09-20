@@ -127,15 +127,33 @@ class ApiClient {
   }
 
   async createAgent(data: any) {
-    throw new Error('Create agent endpoint not implemented')
+    const response = await this.request('/api/agents/', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: data.name,
+        agent_type: data.type || data.agent_type,
+        description: data.description,
+        configuration: data.configuration || {},
+        skills: data.skills || [],
+        patterns: data.patterns || []
+      })
+    })
+    return response
   }
 
   async updateAgent(id: string, data: any) {
-    throw new Error('Update agent endpoint not implemented')
+    const response = await this.request(`/api/agents/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+    return response
   }
 
   async deleteAgent(id: string) {
-    throw new Error('Delete agent endpoint not implemented')
+    const response = await this.request(`/api/agents/${id}`, {
+      method: 'DELETE'
+    })
+    return response
   }
 
   async startAgent(id: string) {
@@ -205,12 +223,12 @@ class ApiClient {
   }
 
   async getAgentSkills(agentId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/')
+    const response = await this.request(`/api/agents/${agentId}/skills`)
     return response
   }
 
   async addSkillToAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/', {
+    const response = await this.request('/api/skills/agents/' + agentId + '/', {
       method: 'POST',
       body: JSON.stringify([parseInt(skillId)])
     })
@@ -218,16 +236,16 @@ class ApiClient {
   }
 
   async removeSkillFromAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/' + skillId, {
+    const response = await this.request('/api/skills/agents/' + agentId + '/' + skillId, {
       method: 'DELETE'
     })
     return response
   }
 
   async createSkill(skillData: any) {
-    const response = await this.request('/api/skills/', {
+    const response = await this.request('/api/skills/single', {
       method: 'POST',
-      body: JSON.stringify([skillData])
+      body: JSON.stringify(skillData)
     })
     return response
   }
