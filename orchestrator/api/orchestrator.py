@@ -109,12 +109,17 @@ async def analyze_task(
     db: Session = Depends(get_db)
 ):
     """
-    Analyze and break down a complex task into subtasks
+    Analyze and break down a complex task into subtasks using REAL LLM
+    NO MOCK DATA - This uses actual GPT-4 for decomposition
     """
     try:
         task_id = analysis_data.get("task_id")
         analysis_depth = analysis_data.get("analysis_depth", "standard")
         breakdown_strategy = analysis_data.get("breakdown_strategy", "hierarchical")
+        task_description = analysis_data.get("description", "")
+        task_type = analysis_data.get("type", "general")
+        complexity = analysis_data.get("complexity", "medium")
+        requirements = analysis_data.get("requirements", [])
         
         if not task_id:
             raise HTTPException(status_code=400, detail="Task ID is required")
@@ -125,40 +130,70 @@ async def analyze_task(
         ).first()
         
         if not workflow:
-            raise HTTPException(status_code=404, detail="Task not found")
-        
-        # Simulate task analysis and breakdown
-        subtasks = [
-            {
-                "subtask_id": f"{task_id}_document_extraction",
-                "description": "Extract and parse document content",
-                "agent_type": "document_processor",
-                "priority": "high",
-                "dependencies": [],
-                "estimated_duration": "30-60 seconds"
-            },
-            {
-                "subtask_id": f"{task_id}_analysis",
-                "description": "Analyze extracted content",
-                "agent_type": "analyst",
-                "priority": "high", 
-                "dependencies": [f"{task_id}_document_extraction"],
-                "estimated_duration": "60-120 seconds"
-            },
-            {
-                "subtask_id": f"{task_id}_synthesis",
-                "description": "Synthesize results and recommendations",
-                "agent_type": "synthesizer",
-                "priority": "medium",
-                "dependencies": [f"{task_id}_analysis"],
-                "estimated_duration": "30-90 seconds"
+            # Get task description from workflow if not provided
+            if not task_description:
+                raise HTTPException(status_code=404, detail="Task not found and no description provided")
+            
+            # Create a new workflow for this task
+            workflow_data = {
+                "name": f"Task: {task_description[:50]}...",
+                "description": task_description,
+                "category": "orchestrated_task",
+                "config": {
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "complexity": complexity,
+                    "requirements": requirements
+                }
             }
-        ]
+            
+            workflow = Workflow(
+                name=workflow_data["name"],
+                description=workflow_data["description"],
+                workflow_definition=workflow_data,
+                status="active",
+                created_by="orchestrator"
+            )
+            db.add(workflow)
+            db.commit()
+            db.refresh(workflow)
+        else:
+            # Get description from workflow if not provided
+            if not task_description:
+                task_description = workflow.description or workflow.workflow_definition.get("description", "Task to be analyzed")
         
-        # Update workflow with subtasks
+        # Import the REAL task decomposer
+        from core.real_task_decomposer import get_decomposer
+        
+        # Get the decomposer instance
+        decomposer = get_decomposer()
+        
+        # Perform REAL decomposition using LLM
+        logger.info(f"Performing REAL task decomposition for: {task_description[:100]}")
+        
+        decomposition_result = await decomposer.decompose_task(
+            task_description=task_description,
+            task_type=task_type,
+            complexity=complexity,
+            requirements=requirements,
+            max_subtasks=7 if complexity == "high" else 5 if complexity == "medium" else 3
+        )
+        
+        # Extract subtasks from the REAL decomposition
+        subtasks = decomposition_result.get("subtasks", [])
+        
+        # Update workflow with REAL subtasks
         workflow_def = workflow.workflow_definition
         workflow_def["subtasks"] = subtasks
         workflow_def["analysis_completed"] = True
+        workflow_def["is_real_decomposition"] = True  # Mark as REAL, not mock
+        workflow_def["decomposition_metadata"] = {
+            "llm_model": decomposition_result.get("llm_model"),
+            "tokens_used": decomposition_result.get("tokens_used"),
+            "decomposition_time": decomposition_result.get("decomposition_time"),
+            "execution_strategy": decomposition_result.get("execution_strategy"),
+            "complexity_assessment": decomposition_result.get("complexity_assessment")
+        }
         workflow.workflow_definition = workflow_def
         
         db.commit()
@@ -168,7 +203,8 @@ async def analyze_task(
             "type": "task_analyzed",
             "task_id": task_id,
             "subtasks_count": len(subtasks),
-            "status": "analyzed"
+            "status": "analyzed",
+            "is_real": True  # Indicate this is REAL decomposition
         })
         
         return {
@@ -178,7 +214,12 @@ async def analyze_task(
             "breakdown_strategy": breakdown_strategy,
             "subtasks": subtasks,
             "total_subtasks": len(subtasks),
-            "message": "Task analysis completed successfully"
+            "execution_strategy": decomposition_result.get("execution_strategy"),
+            "total_estimated_time": decomposition_result.get("total_estimated_time"),
+            "complexity_assessment": decomposition_result.get("complexity_assessment"),
+            "is_real_decomposition": True,  # Proof this is NOT mock data
+            "llm_model_used": decomposition_result.get("llm_model"),
+            "message": "Task analysis completed using REAL LLM decomposition"
         }
         
     except HTTPException:
