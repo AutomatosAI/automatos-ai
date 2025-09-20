@@ -135,7 +135,7 @@ class ApiClient {
   }
 
   async deleteAgent(id: string) {
-    throw new Error('Delete agent endpoint not implemented')
+    const response = await this.request(`/api/agents/${id}`, { method: 'DELETE' }); return response
   }
 
   async startAgent(id: string) {
@@ -205,12 +205,12 @@ class ApiClient {
   }
 
   async getAgentSkills(agentId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/')
+    const response = await this.request('/api/skills/agents/' + agentId + '/')
     return response
   }
 
   async addSkillToAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/', {
+    const response = await this.request('/api/skills/agents/' + agentId + '/', {
       method: 'POST',
       body: JSON.stringify([parseInt(skillId)])
     })
@@ -218,7 +218,7 @@ class ApiClient {
   }
 
   async removeSkillFromAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents' + agentId + '/' + skillId, {
+    const response = await this.request('/api/skills/agents/' + agentId + '/' + skillId, {
       method: 'DELETE'
     })
     return response

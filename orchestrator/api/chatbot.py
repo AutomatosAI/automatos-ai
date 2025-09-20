@@ -16,7 +16,7 @@ from datetime import datetime
 
 from database.database import get_db
 from database.models import Agent, Document, Skill
-from services.llm_provider import LLMService, LLMProvider
+from services.llm_provider import LLMManager, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def get_llm_service():
                 status_code=501,
                 detail="No LLM API keys configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
             )
-        llm_service = LLMService.create_default()
+        llm_service = LLMManager.create_default()
     return llm_service
 
 @router.post("/message")
