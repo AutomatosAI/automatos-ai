@@ -180,7 +180,13 @@ export function RealAgentCreateModal({ open, onClose }: RealAgentCreateModalProp
     }
 
     try {
-      await createAgentMutation.mutateAsync({
+    console.log('🟡 Calling mutateAsync with:', {
+      name: formData.name,
+      agent_type: formData.type,
+      description: formData.description,
+      config: formData
+    });
+      const result = await createAgentMutation.mutateAsync({
         name: formData.name,
         agent_type: formData.type,
         description: formData.description,
@@ -206,9 +212,20 @@ export function RealAgentCreateModal({ open, onClose }: RealAgentCreateModalProp
         auto_start: true,
         capabilities: [],
       })
-      onClose()
+      console.log('🟢 SUCCESS! Result:', result);
+    onClose();
+    console.log('🔵 onClose called!');
+      onClose() // Close modal after successful creation
+      toast.success('Agent created successfully!')
     } catch (error) {
-      console.error('Failed to create agent:', error)
+      console.error('❌ CREATE FAILED:', error);
+   console.error('Error details:', {
+     message: error?.message,
+     response: error?.response,
+     data: error?.data
+   });;
+   alert('AGENT CREATE ERROR: ' + (error?.message || JSON.stringify(error)));
+   throw error; // Re-throw to see in console
     }
   }
 

@@ -127,7 +127,7 @@ export const agentQueryKeys = {
 export function useAgents() {
   return useQuery({
     queryKey: agentQueryKeys.agents,
-    queryFn: apiClient.getAgents,
+    queryFn: () => apiClient.getAgents(),
     refetchInterval: 30000, // Refetch every 30 seconds
     staleTime: 15000, // Consider data stale after 15 seconds
   })
@@ -147,7 +147,7 @@ export function useAgent(agentId: string | null) {
 export function useAgentStats() {
   return useQuery({
     queryKey: agentQueryKeys.agentStats,
-    queryFn: apiClient.getAgentStats,
+    queryFn: () => apiClient.getAgentStats(),
     refetchInterval: 30000,
     staleTime: 15000,
   })
@@ -157,7 +157,7 @@ export function useAgentStats() {
 export function useAgentTypes() {
   return useQuery({
     queryKey: agentQueryKeys.agentTypes,
-    queryFn: apiClient.getAgentTypes,
+    queryFn: () => apiClient.getAgentTypes(),
     staleTime: 5 * 60 * 1000, // Agent types don't change often
   })
 }
@@ -214,7 +214,7 @@ export function useAgentLogs(agentId: string | null) {
 export function useCoordinationStatus() {
   return useQuery({
     queryKey: agentQueryKeys.coordinationStatus,
-    queryFn: apiClient.getAgentCoordination,
+    queryFn: () => apiClient.getAgentCoordination(),
     refetchInterval: 15000,
   })
 }

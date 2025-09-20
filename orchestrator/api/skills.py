@@ -1,3 +1,4 @@
+from datetime import datetime
 
 """
 Skills Management API
@@ -454,4 +455,138 @@ async def create_skills_bulk(
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating skills bulk: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/", response_model=List[SkillResponse])
+async def create_skills(
+    skills_data: List[SkillCreate],
+    db: Session = Depends(get_db)
+):
+    """Create one or more skills"""
+    try:
+        created_skills = []
+        for skill_data in skills_data:
+            # Check if skill with same name exists
+            existing = db.query(Skill).filter(Skill.name == skill_data.name).first()
+            if existing:
+                logger.warning(f"Skill '{skill_data.name}' already exists")
+                continue
+                
+            skill = Skill(
+                name=skill_data.name,
+                description=skill_data.description,
+                skill_type=skill_data.skill_type,
+                category=skill_data.category,
+                implementation=skill_data.implementation,
+                parameters=skill_data.parameters,
+                is_active=True
+            )
+            db.add(skill)
+            created_skills.append(skill)
+        
+        db.commit()
+        
+        # Refresh from DB to get timestamps
+        for skill in created_skills:
+            db.refresh(skill)
+        
+        # Return simple dict response to avoid serialization issues
+        return [
+            {
+                "id": skill.id,
+                "name": skill.name,
+                "description": skill.description or "",
+                "skill_type": skill.skill_type,
+                "category": skill.category,
+                "implementation": skill.implementation or "",
+                "parameters": skill.parameters or {},
+                "performance_data": skill.performance_data or {},
+                "is_active": skill.is_active if skill.is_active is not None else True,
+                "created_at": skill.created_at.isoformat() if skill.created_at else datetime.now().isoformat(),
+                "updated_at": skill.updated_at.isoformat() if skill.updated_at else datetime.now().isoformat(),
+                "created_by": skill.created_by or ""
+            } for skill in created_skills
+        ]
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating skills: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/", response_model=List[SkillResponse])
+async def get_all_skills(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get all skills"""
+    try:
+        skills = db.query(Skill).offset(skip).limit(limit).all()
+        
+        return [
+            SkillResponse(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                skill_type=skill.skill_type,
+                category=skill.category,
+                implementation=skill.implementation,
+                parameters=skill.parameters,
+                performance_data=skill.performance_data,
+                is_active=skill.is_active,
+                created_at=skill.created_at,
+                updated_at=skill.updated_at,
+                created_by=skill.created_by
+            ) for skill in skills
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error getting skills: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/single", response_model=SkillResponse)
+async def create_single_skill(
+    skill_data: SkillCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a single skill"""
+    try:
+        # Check if skill exists
+        existing = db.query(Skill).filter(Skill.name == skill_data.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Skill '{skill_data.name}' already exists")
+            
+        skill = Skill(
+            name=skill_data.name,
+            description=skill_data.description,
+            skill_type=skill_data.skill_type,
+            category=skill_data.category,
+            implementation=skill_data.implementation,
+            parameters=skill_data.parameters,
+            is_active=True
+        )
+        db.add(skill)
+        db.commit()
+        db.refresh(skill)
+        
+        return SkillResponse(
+            id=skill.id,
+            name=skill.name,
+            description=skill.description or "",
+            skill_type=skill.skill_type,
+            category=skill.category,
+            implementation=skill.implementation or "",
+            parameters=skill.parameters or {},
+            performance_data=skill.performance_data or {},
+            is_active=skill.is_active,
+            created_at=skill.created_at or datetime.now(),
+            updated_at=skill.updated_at or datetime.now(),
+            created_by=skill.created_by or ""
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating skill: {e}")
         raise HTTPException(status_code=500, detail=str(e))

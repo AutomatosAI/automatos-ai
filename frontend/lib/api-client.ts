@@ -227,7 +227,7 @@ class ApiClient {
   async createSkill(skillData: any) {
     const response = await this.request('/api/skills/', {
       method: 'POST',
-      body: JSON.stringify(skillData)
+      body: JSON.stringify([skillData])
     })
     return response
   }

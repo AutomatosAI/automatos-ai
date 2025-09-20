@@ -179,7 +179,7 @@ export const documentQueryKeys = {
 export function useDocuments() {
   return useQuery({
     queryKey: documentQueryKeys.documents,
-    queryFn: apiClient.getDocuments,
+    queryFn: () => apiClient.getDocuments(),
     refetchInterval: 30000, // Refetch every 30 seconds
     staleTime: 15000, // Consider data stale after 15 seconds
   })
@@ -199,7 +199,7 @@ export function useDocument(documentId: string | null) {
 export function useDocumentStats() {
   return useQuery({
     queryKey: documentQueryKeys.documentStats,
-    queryFn: apiClient.getDocumentStats,
+    queryFn: () => apiClient.getDocumentStats(),
     refetchInterval: 30000,
     staleTime: 15000,
   })
@@ -209,7 +209,7 @@ export function useDocumentStats() {
 export function useDocumentCategories() {
   return useQuery({
     queryKey: documentQueryKeys.documentCategories,
-    queryFn: apiClient.getDocumentCategories,
+    queryFn: () => apiClient.getDocumentCategories(),
     staleTime: 5 * 60 * 1000, // Categories don't change often
   })
 }

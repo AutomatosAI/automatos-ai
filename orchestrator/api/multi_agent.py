@@ -573,21 +573,8 @@ async def learn_behavior(
     Enables agents to learn from behavior patterns and improve performance.
     """
     try:
-        learning_result = {
-            "learning_id": f"learn_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-            "status": "completed",
-            "behaviors_analyzed": 150,
-            "patterns_identified": 12,
-            "improvements_suggested": 8,
-            "learning_metrics": {
-                "pattern_recognition_accuracy": 0.89,
-                "behavior_prediction_score": 0.82,
-                "adaptation_rate": 0.75
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        return learning_result
+        # NOT IMPLEMENTED - No real ML model available
+        raise HTTPException(status_code=501, detail="Behavior learning not yet implemented - requires ML model integration")
         
     except Exception as e:
         logger.error(f"Error in behavior learning: {e}")
@@ -603,27 +590,3 @@ async def adaptive_optimization(
     
     Performs adaptive optimization of multi-agent systems based on real-time performance.
     """
-    try:
-        optimization_result = {
-            "optimization_id": f"opt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-            "status": "completed",
-            "optimization_type": "adaptive",
-            "agents_optimized": request.get("agent_count", 5),
-            "performance_improvements": {
-                "efficiency_gain": "18%",
-                "response_time_reduction": "22%",
-                "resource_utilization": "15% better"
-            },
-            "adaptive_parameters": {
-                "learning_rate": 0.01,
-                "adaptation_threshold": 0.85,
-                "convergence_criteria": 0.95
-            },
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        return optimization_result
-        
-    except Exception as e:
-        logger.error(f"Error in adaptive optimization: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to perform adaptive optimization: {str(e)}")

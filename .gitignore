@@ -46,3 +46,39 @@ Thumbs.db
 dist/
 build/
 orchestrator/.env
+
+# No SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+frontend/.vercel
+
+# Memory backups
+orchestrator/memory_backups/
+*.faiss
+
+# Documentation files (auto-generated)
+*_ISSUES.md
+*_ENDPOINTS.md
+*_RESULTS.md
+*_MAPPING.md
+
+# Backup files
+*.backup
+*.bak
+*_backup*
+*_copy*
+
+# Cache files
+*.cache
+.cache/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+/tmp/

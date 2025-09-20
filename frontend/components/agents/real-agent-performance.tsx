@@ -580,7 +580,7 @@ export function RealAgentPerformance({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {(agentLogs || []).slice(0, 10).map((log: any, index: number) => (
+                  {(Array.isArray(agentLogs) ? agentLogs : []).slice(0, 10).map((log: any, index: number) => (
                     <div key={index} className="flex items-center gap-4 p-3 rounded-lg border border-border">
                       <div className={`w-3 h-3 rounded-full ${
                         log.level === 'error' ? 'bg-red-500' : 

@@ -22,6 +22,7 @@ from datetime import datetime
 # Import database and dependencies
 from database.database import get_db
 from database.models import Agent
+from sqlalchemy import Table, MetaData, text
 from services.orchestrator_service import EnhancedOrchestratorService
 
 logger = logging.getLogger(__name__)
@@ -453,63 +454,27 @@ async def get_agent_performance(
     agent_id: int,
     db: Session = Depends(get_db)
 ):
-    """
-    ## 📊 Get Agent Performance Metrics
-    
-    Retrieves comprehensive performance metrics for an agent including:
-    - Task completion rates
-    - Response times
-    - Quality scores
-    - Collaboration effectiveness
-    """
+    """Get Agent Performance Metrics from real task data"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Mock performance data - would be calculated from actual task history
+        # Get real task statistics
+        total_tasks = db.execute(text("SELECT COUNT(*) FROM tasks WHERE assigned_to = :agent_id"), {"agent_id": agent_id}).fetchone()[0] or 0
+        completed_tasks = db.execute(text("SELECT COUNT(*) FROM tasks WHERE assigned_to = :agent_id AND status = 'completed'"), {"agent_id": agent_id}).fetchone()[0] or 0
+        in_progress_tasks = db.execute(text("SELECT COUNT(*) FROM tasks WHERE assigned_to = :agent_id AND status = 'in_progress'"), {"agent_id": agent_id}).fetchone()[0] or 0
+        
+        completion_rate = round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0
+        
         performance_metrics = {
             "agent_id": agent_id,
             "agent_name": agent.name,
-            "period": "last_30_days",
-            
-            "task_metrics": {
-                "total_tasks": 45,
-                "completed_tasks": 42,
-                "failed_tasks": 3,
-                "completion_rate": 93.3,
-                "average_completion_time": "2.5 hours"
-            },
-            
-            "quality_metrics": {
-                "average_quality_score": 8.7,
-                "user_satisfaction": 9.1,
-                "error_rate": 2.2,
-                "revision_requests": 5
-            },
-            
-            "collaboration_metrics": {
-                "multi_agent_tasks": 15,
-                "collaboration_success_rate": 96.7,
-                "communication_efficiency": 8.9,
-                "conflict_resolution": 9.2
-            },
-            
-            "efficiency_metrics": {
-                "resource_utilization": 78.5,
-                "response_time": "150ms",
-                "throughput": "12 tasks/day",
-                "uptime": 99.8
-            },
-            
-            "learning_metrics": {
-                "skill_improvement": 12.5,
-                "adaptation_rate": 8.3,
-                "knowledge_retention": 94.2,
-                "pattern_recognition": 87.6
-            },
-            
-            "timestamp": datetime.utcnow().isoformat()
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "in_progress_tasks": in_progress_tasks,
+            "completion_rate": completion_rate,
+            "status": agent.status
         }
         
         return performance_metrics
@@ -517,8 +482,8 @@ async def get_agent_performance(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting performance for agent {agent_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {str(e)}")
+        logger.error(f"Error getting agent performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
 async def get_agent_skills(

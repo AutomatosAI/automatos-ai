@@ -284,7 +284,7 @@ export function AgentRoster() {
               <div className="mb-4">
                 <p className="text-xs text-muted-foreground mb-2">Primary Skills</p>
                 <div className="flex flex-wrap gap-1">
-                  {agent.skills && agent.skills.slice(0, 3).map((skill: any) => (
+                  {agent.skills agent.skills && agent.skills.sliceagent.skills && agent.skills.slice Array.isArray(agent.skills) ? agent.skills.slice(0, 3).map((skill: any) => (
                     <Badge key={skill.id} variant="secondary" className="text-xs">
                       {skill.name ? skill.name.replace('_', ' ') : 'Unknown Skill'}
                     </Badge>

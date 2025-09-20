@@ -323,15 +323,16 @@ export function RealAgentRoster({
                   {agent.skills && agent.skills.length > 0 && (
                     <div className="mb-4">
                       <div className="flex flex-wrap gap-1">
-                        {agent.skills.slice(0, 3).map((skill: any) => (
+                        {agent.skills && Array.isArray(agent.skills) && agent.skills.slice(0, 3).map((skill: any) => (
                           <Badge key={skill.id} variant="secondary" className="text-xs">
                             {skill.name}
                           </Badge>
                         ))}
-                        {agent.skills.length > 3 && (
+                        {agent.skills && Array.isArray(agent.skills) && agent.skills.length > 3 && (
                           <Badge variant="secondary" className="text-xs">
                             +{agent.skills.length - 3} more
                           </Badge>
+                        )}
                         )}
                       </div>
                     </div>

@@ -270,7 +270,7 @@ export function RealAgentDetailsPanel({ agent, open, onClose, onConfigure }: Rea
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {displayLogs && displayLogs.slice ? displayLogs.slice(0, 5).map((log: any, index: number) => (
+                      {Array.isArray(displayLogs) ? displayLogs.slice(0, 5).map((log: any, index: number) => (
                         <div key={index} className="flex items-start gap-3">
                           <div className="p-1 rounded bg-muted">
                             <Activity className="w-3 h-3" />
