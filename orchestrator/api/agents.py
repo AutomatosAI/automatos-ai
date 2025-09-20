@@ -218,7 +218,7 @@ async def get_available_agents(
                 "type": agent.agent_type,
                 "status": agent.status,
                 "current_load": 0,  # Would be calculated from active tasks
-                "max_capacity": agent.configuration.get("max_concurrent_tasks", 5),
+                "max_capacity": agent.configuration.get("max_concurrent_tasks", 5) if agent.configuration else 5,
                 "availability": "available",
                 "skills": [],  # Would be populated from agent_skills relationship
                 "last_active": agent.updated_at.isoformat()
