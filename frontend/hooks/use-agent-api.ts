@@ -226,7 +226,7 @@ export function useCreateAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.createAgent,
+    mutationFn: (data) => apiClient.createAgent(data),
     onSuccess: (data) => {
       // Invalidate and refetch agent queries
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -268,7 +268,7 @@ export function useDeleteAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.deleteAgent,
+    mutationFn: (id) => apiClient.deleteAgent(id),
     onSuccess: (data, agentId) => {
       // Remove from cache and invalidate lists
       queryClient.removeQueries({ queryKey: agentQueryKeys.agent(agentId) })
@@ -350,7 +350,7 @@ export function useCoordinateAgents() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.coordinateAgents,
+    mutationFn: (data) => apiClient.coordinateAgents(data),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.coordinationStatus })
       toast.success('Agent coordination initiated!')
@@ -366,7 +366,7 @@ export function useCoordinateAgents() {
 // Collaborative reasoning
 export function useCollaborativeReasoning() {
   return useMutation({
-    mutationFn: apiClient.collaborativeReasoning,
+    mutationFn: (data) => apiClient.collaborativeReasoning(data),
     onSuccess: (data) => {
       toast.success('Collaborative reasoning completed!')
       return data
@@ -383,7 +383,7 @@ export function useStartAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.startAgent,
+    mutationFn: (id) => apiClient.startAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -401,7 +401,7 @@ export function useStopAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.stopAgent,
+    mutationFn: (id) => apiClient.stopAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -419,7 +419,7 @@ export function usePauseAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: apiClient.pauseAgent,
+    mutationFn: (id) => apiClient.pauseAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
