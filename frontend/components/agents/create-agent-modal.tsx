@@ -111,22 +111,57 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     }))
   }
 
-  const handleCreate = () => {
-    // Create agent logic here
-    console.log('Creating agent:', agentData)
-    onClose()
-    // Reset form
-    setAgentData({
-      name: '',
-      type: '',
-      description: '',
-      skills: [],
-      specializations: [],
-      maxConcurrentTasks: 3,
-      priority: 'normal',
-      autoStart: true
-    })
-    setStep(1)
+  const handleCreate = async () => {
+    try {
+      console.log('Creating agent:', agentData)
+      
+      // Call the API to create the agent
+      const response = await fetch('/api/agents/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: agentData.name,
+          agent_type: agentData.type,
+          description: agentData.description,
+          configuration: {
+            skills: agentData.skills,
+            specializations: agentData.specializations,
+            maxConcurrentTasks: agentData.maxConcurrentTasks,
+            priority: agentData.priority,
+            autoStart: agentData.autoStart
+          }
+        })
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to create agent')
+      }
+      
+      const newAgent = await response.json()
+      console.log('Agent created successfully:', newAgent)
+      
+      onSuccess() // Notify parent component
+      onClose()
+      
+      // Reset form
+      setAgentData({
+        name: '',
+        type: '',
+        description: '',
+        skills: [],
+        specializations: [],
+        maxConcurrentTasks: 3,
+        priority: 'normal',
+        autoStart: true
+      })
+      setStep(1)
+    } catch (error) {
+      console.error('Failed to create agent:', error)
+      alert(`Failed to create agent: ${error.message}`)
+    }
   }
 
   const selectedType = agentTypes.find(type => type.type === agentData.type)
