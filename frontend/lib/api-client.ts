@@ -1,5 +1,6 @@
 /**
- * Fixed API Client - only calls endpoints that actually exist
+ * API Client - Only calls endpoints that actually exist based on test results
+ * Base URL: http://206.81.0.227:8000
  */
 
 interface ApiResponse<T = any> {
@@ -20,7 +21,7 @@ class ApiClient {
   private defaultHeaders: Record<string, string>
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    this.baseUrl = (typeof window !== 'undefined' && (window as any).env?.NEXT_PUBLIC_API_URL) || ''
     this.defaultHeaders = {
       'Content-Type': 'application/json',
     }
@@ -62,7 +63,7 @@ class ApiClient {
     }
   }
 
-  // System endpoints (NO trailing slash) - ONLY EXISTING ENDPOINTS
+  // ===== SYSTEM ENDPOINTS =====
   async getSystemHealth() {
     return this.request('/api/system/health')
   }
@@ -71,51 +72,362 @@ class ApiClient {
     return this.request('/api/system/metrics')
   }
 
-  // REMOVED: getSystemActivities - endpoint doesn't exist
-  async getSystemActivities(limit = 10) {
-    // Return mock data since endpoint doesn't exist
-    console.log('⚠️ Activities endpoint not implemented, returning mock data')
-    return []
+  async getSystemConfig() {
+    return this.request('/api/system/config')
   }
 
-  // Agent endpoints (WITH trailing slash) - WORKING
-  async getAgents() {
-    return this.request('/api/agents')
+  async updateSystemConfig(data: any) {
+    return this.request('/api/system/config', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getSystemConfigKey(key: string) {
+    return this.request(`/api/system/config/${key}`)
+  }
+
+  async updateSystemConfigKey(key: string, value: any) {
+    return this.request(`/api/system/config/${key}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value })
+    })
+  }
+
+  async getSystemRAG() {
+    return this.request('/api/system/rag')
+  }
+
+  async updateSystemRAG(data: any) {
+    return this.request('/api/system/rag', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getSystemRAGConfig(id: string) {
+    return this.request(`/api/system/rag/${id}`)
+  }
+
+  async testSystemRAG(id: string) {
+    return this.request(`/api/system/rag/${id}/test`, {
+      method: 'POST'
+    })
+  }
+
+  async testSystemRoute() {
+    return this.request('/api/system/test-route')
+  }
+
+  async getSystemAgentTypes() {
+    return this.request('/api/system/agent-types')
+  }
+
+  async getSystemAgentStatistics() {
+    return this.request('/api/system/agent-statistics')
+  }
+
+  async getSystemAgentStatus(agentId: string) {
+    return this.request(`/api/system/agent/${agentId}/status`)
+  }
+
+  async executeSystemAgent(agentId: string, data: any) {
+    return this.request(`/api/system/agent/${agentId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getSystemPerformanceBaseline() {
+    return this.request('/api/system/performance-baseline')
+  }
+
+  async updateSystemLearningState(data: any) {
+    return this.request('/api/system/learning-state/update', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async runSystemPerformanceTest(data: any) {
+    return this.request('/api/system/performance-test', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getSystemPerformanceComparison(data: any) {
+    return this.request('/api/system/performance-comparison', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  // ===== AGENT ENDPOINTS =====
+  async getAgents(skip = 0, limit = 100) {
+    return this.request(`/api/agents/?skip=${skip}&limit=${limit}`)
   }
 
   async getAgent(id: string) {
     return this.request(`/api/agents/${id}`)
   }
 
-  // Document endpoints (WITH trailing slash) - NOW ENABLED
+  async createAgent(data: any) {
+    return this.request('/api/agents/', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async updateAgent(id: string, data: any) {
+    return this.request(`/api/agents/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteAgent(id: string) {
+    return this.request(`/api/agents/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async getAvailableAgents() {
+    return this.request('/api/agents/available')
+  }
+
+  async getAgentSkills(agentId: string) {
+    return this.request(`/api/agents/${agentId}/skills`)
+  }
+
+  async updateAgentSkills(agentId: string, skills: any[]) {
+    return this.request(`/api/agents/${agentId}/skills`, {
+      method: 'PUT',
+      body: JSON.stringify(skills)
+    })
+  }
+
+  async getAgentPatterns(agentId: string) {
+    return this.request(`/api/agents/${agentId}/patterns`)
+  }
+
+  async updateAgentPatterns(agentId: string, patterns: any[]) {
+    return this.request(`/api/agents/${agentId}/patterns`, {
+      method: 'PUT',
+      body: JSON.stringify(patterns)
+    })
+  }
+
+  async getAgentPerformance(agentId: string) {
+    return this.request(`/api/agents/${agentId}/performance`)
+  }
+
+  // ===== WORKFLOW ENDPOINTS =====
+  async getWorkflows() {
+    return this.request('/api/workflows')
+  }
+
+  async createWorkflow(data: any) {
+    return this.request('/api/workflows', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getActiveWorkflows() {
+    return this.request('/api/workflows/active')
+  }
+
+  async getWorkflowStatsDashboard() {
+    return this.request('/api/workflows/stats/dashboard')
+  }
+
+  async getWorkflowLiveProgress(workflowId: string) {
+    return this.request(`/api/workflows/${workflowId}/live-progress`)
+  }
+
+  async executeWorkflowAdvanced(workflowId: string, data: any) {
+    return this.request(`/api/workflows/${workflowId}/execute-advanced`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async executeWorkflow(workflowId: string, data: any) {
+    return this.request(`/api/workflows/${workflowId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async executeWorkflowDirect(data: any) {
+    return this.request('/api/workflows/execute', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getWorkflowExecutions() {
+    return this.request('/api/workflows/executions/')
+  }
+
+  async getWorkflowExecution(executionId: string) {
+    return this.request(`/api/workflows/executions/${executionId}`)
+  }
+
+  async getWorkflowExecutionResults(executionId: string) {
+    return this.request(`/api/workflows/executions/${executionId}/results`)
+  }
+
+  async getRecommendedWorkflowTemplates() {
+    return this.request('/api/workflows/templates/recommended')
+  }
+
+  // ===== DOCUMENT ENDPOINTS =====
+  async uploadDocument(file: File, metadata?: any) {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (metadata) {
+      formData.append('metadata', JSON.stringify(metadata))
+    }
+    
+    return fetch(`${this.baseUrl}/api/documents/upload`, {
+      method: 'POST',
+      body: formData
+    }).then(response => response.json())
+  }
+
+  async preprocessDocument(data: any) {
+    return this.request('/api/documents/preprocess', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
   async getDocuments() {
     return this.request('/api/documents/')
   }
 
   async getDocument(id: string) {
-    return this.request(`/api/documents/${id}/`)
+    return this.request(`/api/documents/${id}`)
   }
 
-  // Workflow endpoints (WITH trailing slash) - HAS DATABASE ISSUES
-  async getWorkflows() {
-    try {
-      return this.request('/api/workflows/')
-    } catch (error) {
-      console.error('⚠️ Workflows endpoint has database issues, returning empty array')
-      return []
-    }
+  async updateDocument(id: string, data: any) {
+    return this.request(`/api/documents/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
   }
 
-  async getWorkflow(id: string) {
-    try {
-      return this.request(`/api/workflows/${id}/`)
-    } catch (error) {
-      console.error('⚠️ Workflow endpoint has database issues')
-      throw error
-    }
+  async deleteDocument(id: string) {
+    return this.request(`/api/documents/${id}`, {
+      method: 'DELETE'
+    })
   }
 
-  // Stub methods for hooks that expect them - return mock data or throw not implemented
+  async reprocessDocument(id: string) {
+    return this.request(`/api/documents/${id}/reprocess`, {
+      method: 'POST'
+    })
+  }
+
+  async getDocumentContent(id: string) {
+    return this.request(`/api/documents/${id}/content`)
+  }
+
+  // ===== SKILLS ENDPOINTS =====
+  async getSkills() {
+    return this.request('/api/skills/')
+  }
+
+  async createSkill(data: any) {
+    return this.request('/api/skills/', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getSkill(id: string) {
+    return this.request(`/api/skills/${id}`)
+  }
+
+  async updateSkill(id: string, data: any) {
+    return this.request(`/api/skills/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteSkill(id: string) {
+    return this.request(`/api/skills/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async getSkillCategories() {
+    return this.request('/api/skills/categories')
+  }
+
+  async createSkillsBulk(skillsData: any[]) {
+    return this.request('/api/skills/bulk', {
+      method: 'POST',
+      body: JSON.stringify(skillsData)
+    })
+  }
+
+  async getAgentSkillsFromSkillsAPI(agentId: string) {
+    return this.request(`/api/skills/agents/${agentId}/`)
+  }
+
+  async addSkillToAgent(agentId: string, skillId: string) {
+    return this.request(`/api/skills/agents/${agentId}/`, {
+      method: 'POST',
+      body: JSON.stringify([parseInt(skillId)])
+    })
+  }
+
+  async removeSkillFromAgent(agentId: string, skillId: string) {
+    return this.request(`/api/skills/agents/${agentId}/${skillId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  // ===== CHATBOT ENDPOINTS =====
+  async sendChatbotQuery(message: string, context?: any) {
+    return this.request('/api/chatbot/query', {
+      method: 'POST',
+      body: JSON.stringify({ message, context })
+    })
+  }
+
+  async getChatbotSuggestions() {
+    return this.request('/api/chatbot/suggestions')
+  }
+
+  async executeChatbotAction(data: any) {
+    return this.request('/api/chatbot/execute', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async getChatbotHistory(sessionId: string) {
+    return this.request(`/api/chatbot/history/${sessionId}`)
+  }
+
+  async sendChatbotFeedback(data: any) {
+    return this.request('/api/chatbot/feedback', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  // ===== LEGACY METHODS (for backward compatibility) =====
+  async getSystemActivities(limit = 10) {
+    console.log('⚠️ Activities endpoint not implemented, returning mock data')
+    return []
+  }
+
   async getAgentLogs(id: string) {
     console.log('⚠️ Agent logs endpoint not implemented')
     return []
@@ -126,36 +438,6 @@ class ApiClient {
     return { status: 'active', performance: 85 }
   }
 
-  async createAgent(data: any) {
-    const response = await this.request('/api/agents/', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: data.name,
-        agent_type: data.type || data.agent_type,
-        description: data.description,
-        configuration: data.configuration || {},
-        skills: data.skills || [],
-        patterns: data.patterns || []
-      })
-    })
-    return response
-  }
-
-  async updateAgent(id: string, data: any) {
-    const response = await this.request(`/api/agents/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    })
-    return response
-  }
-
-  async deleteAgent(id: string) {
-    const response = await this.request(`/api/agents/${id}`, {
-      method: 'DELETE'
-    })
-    return response
-  }
-
   async startAgent(id: string) {
     throw new Error('Start agent endpoint not implemented')
   }
@@ -164,33 +446,17 @@ class ApiClient {
     throw new Error('Stop agent endpoint not implemented')
   }
 
-  async uploadDocument(file: File, metadata?: any) {
-    throw new Error('Upload document endpoint not implemented')
-  }
-
-  async deleteDocument(id: string) {
-    throw new Error('Delete document endpoint not implemented')
-  }
-
   async getDocumentAnalytics() {
     console.log('⚠️ Document analytics endpoint not implemented')
     return { totalDocuments: 0, totalSize: 0 }
   }
 
-  async createWorkflow(data: any) {
-    return this.request('/api/workflows', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
   async runWorkflow(id: string, inputs?: any) {
-    throw new Error('Run workflow endpoint not implemented')
+    return this.executeWorkflow(id, inputs || {})
   }
 
   async getWorkflowTemplates() {
-    console.log('⚠️ Workflow templates endpoint not implemented')
-    return []
+    return this.getRecommendedWorkflowTemplates()
   }
 
   async getPerformanceAnalytics(timeRange: string) {
@@ -209,83 +475,32 @@ class ApiClient {
   }
 
   async getSettings() {
-    console.log('⚠️ Settings endpoint not implemented')
-    return {}
+    return this.getSystemConfig()
   }
 
   async updateSettings(data: any) {
-    throw new Error('Update settings endpoint not implemented')
-  }
-  // Skills API methods
-  async getSkills() {
-    const response = await this.request('/api/skills/')
-    return response
+    return this.updateSystemConfig(data)
   }
 
-  async getAgentSkills(agentId: string) {
-    const response = await this.request('/api/skills/agents/' + agentId + '/')
-    return response
-  }
 
-  async addSkillToAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents/' + agentId + '/', {
-      method: 'POST',
-      body: JSON.stringify([parseInt(skillId)])
-    })
-    return response
-  }
-
-  async removeSkillFromAgent(agentId: string, skillId: string) {
-    const response = await this.request('/api/skills/agents/' + agentId + '/' + skillId, {
-      method: 'DELETE'
-    })
-    return response
-  }
-
-  async createSkill(skillData: any) {
-    const response = await this.request('/api/skills/single', {
-      method: 'POST',
-      body: JSON.stringify(skillData)
-    })
-    return response
-  }
-
-  async createSkillsBulk(skillsData: any[]) {
-    const response = await this.request('/api/skills/bulk', {
-      method: 'POST',
-      body: JSON.stringify(skillsData)
-    })
-    return response
-  }
-
-  // Chat API methods
   async sendChatMessage(message: string, context?: any) {
-    const response = await this.request('/api/chat/message', {
-      method: 'POST',
-      body: JSON.stringify({ message, context })
-    })
-    return response
+    return this.sendChatbotQuery(message, context)
   }
 
   async testChat() {
-    const response = await this.request('/api/chat/test')
-    return response
+    return this.testSystemRoute()
   }
 
-  // Document Processing API methods
   async processDocument(documentId: string) {
-    const response = await this.request(`/api/documents/${documentId}/process`, {
-      method: 'POST'
-    })
-    return response
+    return this.reprocessDocument(documentId)
   }
 
-  // Analytics API methods (return null if not implemented)
+  // Analytics methods that return null if not implemented
   async getAnalyticsOverview() {
     try {
       return await this.request('/api/documents/analytics/overview')
     } catch {
-      return null // Backend endpoint doesn't exist yet
+      return null
     }
   }
 
@@ -293,7 +508,7 @@ class ApiClient {
     try {
       return await this.request('/api/documents/analytics/search-patterns')
     } catch {
-      return null // Backend endpoint doesn't exist yet
+      return null
     }
   }
 
@@ -301,7 +516,7 @@ class ApiClient {
     try {
       return await this.request('/api/documents/processing/pipeline')
     } catch {
-      return null // Backend endpoint doesn't exist yet
+      return null
     }
   }
 
@@ -309,7 +524,7 @@ class ApiClient {
     try {
       return await this.request('/api/documents/processing/live')
     } catch {
-      return null // Backend endpoint doesn't exist yet
+      return null
     }
   }
 
@@ -319,21 +534,27 @@ class ApiClient {
         method: 'POST'
       })
     } catch {
-      return null // Backend endpoint doesn't exist yet
+      return null
     }
   }
 
   async getDocumentChunks(documentId: string) {
-    const response = await this.request(`/api/documents/${documentId}/chunks`)
-    return response
+    try {
+      return await this.request(`/api/documents/${documentId}/chunks`)
+    } catch {
+      return null
+    }
   }
 
   async searchDocument(documentId: string, query: string) {
-    const response = await this.request(`/api/documents/${documentId}/search`, {
-      method: 'POST',
-      body: JSON.stringify({ query })
-    })
-    return response
+    try {
+      return await this.request(`/api/documents/${documentId}/search`, {
+        method: 'POST',
+        body: JSON.stringify({ query })
+      })
+    } catch {
+      return null
+    }
   }
 }
 
