@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Union,  Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
+from uuid import uuid4
 
 # DEPRECATED: This module is deprecated. Use `automatos-ai/orchestrator/models.py` instead.
 # Keeping this file as a shim to avoid breaking external imports during transition.
@@ -689,3 +690,107 @@ class ToolCredentialsDB(Base):
 # Update reference
 ToolCredentialsPydantic = ToolCredentials
 ToolCredentials = ToolCredentialsDB
+
+# ============================================================================
+# PRD-04: Inter-Agent Communication & Collaboration Models
+# ============================================================================
+
+class AgentMessage(Base):
+    """Tracks messages exchanged between agents"""
+    __tablename__ = 'agent_messages'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    from_agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    to_agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    message_type = Column(String(50), nullable=False)
+    content = Column(JSON, nullable=False)
+    priority = Column(Integer, default=5)
+    status = Column(String(50), default='sent')  # sent, delivered, read, acknowledged
+    requires_ack = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    delivered_at = Column(DateTime)
+    read_at = Column(DateTime)
+    acknowledged_at = Column(DateTime)
+
+class SharedContext(Base):
+    """Shared memory spaces for agent teams"""
+    __tablename__ = 'shared_contexts'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    name = Column(String(255))
+    team_id = Column(String(255))
+    context_data = Column(JSON, nullable=False)
+    version = Column(Integer, default=1)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey('agents.id'))
+
+class ContextPermission(Base):
+    """Permissions for shared contexts"""
+    __tablename__ = 'context_permissions'
+    
+    id = Column(Integer, primary_key=True)
+    context_id = Column(String(255), ForeignKey('shared_contexts.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    permission_level = Column(String(50), default='read')  # read, write, admin
+    granted_at = Column(DateTime, default=func.now())
+    granted_by = Column(Integer, ForeignKey('agents.id'))
+
+class CollaborationSession(Base):
+    """Records of multi-agent collaborative problem solving"""
+    __tablename__ = 'collaboration_sessions'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    problem_id = Column(Integer, ForeignKey('tasks.id'))
+    problem_description = Column(Text)
+    team_agents = Column(JSON)  # Array of agent IDs
+    strategy = Column(String(50), default='ensemble')  # ensemble, hierarchical, specialized, consensus
+    shared_context_id = Column(String(255), ForeignKey('shared_contexts.id'))
+    status = Column(String(50), default='pending')  # pending, active, completed, failed
+    result = Column(JSON)
+    consensus_data = Column(JSON)
+    metrics = Column(JSON)  # Performance metrics
+    started_at = Column(DateTime, default=func.now())
+    completed_at = Column(DateTime)
+
+class CollaborationProposal(Base):
+    """Individual agent proposals during collaboration"""
+    __tablename__ = 'collaboration_proposals'
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(255), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id'))
+    proposal_type = Column(String(50))  # solution, insight, feedback
+    proposal_content = Column(JSON, nullable=False)
+    confidence = Column(Float, default=0.5)
+    tokens_used = Column(Integer)
+    execution_time = Column(Float)
+    created_at = Column(DateTime, default=func.now())
+
+class ConsensusVote(Base):
+    """Voting records for consensus building"""
+    __tablename__ = 'consensus_votes'
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(255), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    proposal_id = Column(Integer, ForeignKey('collaboration_proposals.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id'))
+    vote_weight = Column(Float, default=1.0)
+    vote_value = Column(String(50))  # approve, reject, abstain
+    reasoning = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+
+class MessageBroadcast(Base):
+    """Tracking for team broadcast messages"""
+    __tablename__ = 'message_broadcasts'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    from_agent_id = Column(Integer, ForeignKey('agents.id'))
+    team_agents = Column(JSON)  # Array of agent IDs
+    message_type = Column(String(50))
+    content = Column(JSON)
+    priority = Column(Integer, default=5)
+    delivered_to = Column(JSON)  # Array of successfully delivered agent IDs
+    failed_deliveries = Column(JSON)  # Array of failed agent IDs
+    created_at = Column(DateTime, default=func.now())
+

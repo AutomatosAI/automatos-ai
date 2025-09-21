@@ -182,3 +182,4 @@ Once database is initialized:
 - Want to reset to clean state
 
 The schema uses `CREATE TABLE IF NOT EXISTS` so it's safe to run multiple times.
+

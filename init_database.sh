@@ -74,3 +74,4 @@ else
     echo "Check the errors above and fix any issues"
     exit 1
 fi
+

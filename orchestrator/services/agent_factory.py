@@ -643,12 +643,15 @@ if __name__ == "__main__":
             # Test 1: Create a Code Architect agent
             print("\n1. Creating Code Architect agent...")
             architect = await factory.create_agent(
-                name="CodeMaster",
-                agent_type=AgentType.CODE_ARCHITECT,
-                skills=["code_analysis", "api_design", "system_design"],
+                metadata=AgentMetadata(
+                    name="CodeMaster",
+                    agent_type="code_architect",
+                    description="Expert in code architecture and design",
+                    skills=["code_analysis", "api_design", "system_design"]
+                ),
                 auto_verify=True
             )
-            print(f"✓ Created: {architect.name} (ID: {architect.agent_id})")
+            print(f"✓ Created: {architect.metadata.name} (ID: {architect.agent_id})")
             
             # Test 2: Execute a real task
             print("\n2. Executing code review task...")
@@ -682,12 +685,15 @@ if __name__ == "__main__":
             # Test 3: Create a Security Expert
             print("\n3. Creating Security Expert agent...")
             security_expert = await factory.create_agent(
-                name="SecGuardian",
-                agent_type=AgentType.SECURITY_EXPERT,
-                skills=["security_audit", "penetration_testing"],
+                metadata=AgentMetadata(
+                    name="SecGuardian",
+                    agent_type="security_expert",
+                    description="Expert in security auditing and testing",
+                    skills=["security_audit", "penetration_testing"]
+                ),
                 auto_verify=True
             )
-            print(f"✓ Created: {security_expert.name} (ID: {security_expert.agent_id})")
+            print(f"✓ Created: {security_expert.metadata.name} (ID: {security_expert.agent_id})")
             
             # Test 4: Security analysis task
             print("\n4. Executing security analysis...")
