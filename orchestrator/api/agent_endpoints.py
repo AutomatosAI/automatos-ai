@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 
 from sqlalchemy.orm import Session
-from database.connection import get_db
+from database.database import get_db
 from database.models import (
     Agent, AgentCreate, AgentResponse,
     AgentType, AgentStatus

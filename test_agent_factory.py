@@ -17,7 +17,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'orchestrator'))
 
 from orchestrator.services.agent_factory import (
-    AgentFactory, AgentType, create_specialized_agent
+    AgentFactory, create_specialized_agent
 )
 
 
@@ -52,49 +52,49 @@ async def main():
         print("\n→ Creating Code Architect agent...")
         start = time.time()
         
-        code_agent = await factory.create_agent(
-            name="CodeArchitect-001",
-            agent_type=AgentType.CODE_ARCHITECT,
-            skills=["code_analysis", "system_design", "api_design"],
-            auto_verify=True
-        )
+        code_agent = await factory.create_agent({
+            "name": "CodeArchitect-001",
+            "agent_type": "code_architect",
+            "skills": ["code_analysis", "system_design", "api_design"],
+            "description": "Expert code architect agent"
+        })
         
         creation_time = time.time() - start
         agents.append(code_agent)
         
         print(f"  ✓ Agent created in {creation_time:.2f}s")
         print(f"    ID: {code_agent.agent_id}")
-        print(f"    Skills: {', '.join(code_agent.skills)}")
+        print(f"    Skills: {', '.join(code_agent.metadata.skills)}")
         print(f"    LLM: {code_agent.llm_manager.config.model}")
         
         # Create Data Analyst
         print("\n→ Creating Data Analyst agent...")
         start = time.time()
         
-        data_agent = await factory.create_agent(
-            name="DataAnalyst-001",
-            agent_type=AgentType.DATA_ANALYST,
-            skills=["data_processing", "statistics", "visualization"],
-            auto_verify=True
-        )
+        data_agent = await factory.create_agent({
+            "name": "DataAnalyst-001",
+            "agent_type": "data_analyst",
+            "skills": ["data_processing", "statistics", "visualization"],
+            "description": "Expert data analyst agent"
+        })
         
         creation_time = time.time() - start
         agents.append(data_agent)
         
         print(f"  ✓ Agent created in {creation_time:.2f}s")
         print(f"    ID: {data_agent.agent_id}")
-        print(f"    Skills: {', '.join(data_agent.skills)}")
+        print(f"    Skills: {', '.join(data_agent.metadata.skills)}")
         
         # Create Security Expert
         print("\n→ Creating Security Expert agent...")
         start = time.time()
         
-        security_agent = await factory.create_agent(
-            name="SecurityExpert-001",
-            agent_type=AgentType.SECURITY_EXPERT,
-            skills=["security_audit"],
-            auto_verify=True
-        )
+        security_agent = await factory.create_agent({
+            "name": "SecurityExpert-001",
+            "agent_type": "security_expert",
+            "skills": ["security_audit"],
+            "description": "Expert security agent"
+        })
         
         creation_time = time.time() - start
         agents.append(security_agent)
@@ -127,7 +127,7 @@ async def main():
         """
         
         start = time.time()
-        code_result = await factory.execute_task(code_agent, code_task)
+        code_result = await factory.execute_with_prompt(code_agent, code_task)
         exec_time = time.time() - start
         
         if code_result["status"] == "success":
@@ -150,10 +150,9 @@ async def main():
         """
         
         start = time.time()
-        data_result = await factory.execute_task(
+        data_result = await factory.execute_with_prompt(
             data_agent,
-            data_task,
-            context={"quarter": "Q3", "decline_percentage": 15}
+            data_task
         )
         exec_time = time.time() - start
         
@@ -173,7 +172,7 @@ async def main():
         """
         
         start = time.time()
-        sec_result = await factory.execute_task(security_agent, security_task)
+        sec_result = await factory.execute_with_prompt(security_agent, security_task)
         exec_time = time.time() - start
         
         if sec_result["status"] == "success":
@@ -192,12 +191,12 @@ async def main():
         
         # First task
         task1 = "Remember that our project is called 'AutomataOS' and uses Python."
-        result1 = await factory.execute_task(code_agent, task1)
+        result1 = await factory.execute_with_prompt(code_agent, task1)
         print(f"  Task 1: {'✓' if result1['status'] == 'success' else '✗'}")
         
         # Second task using memory
         task2 = "What programming language does our project use? (use your memory)"
-        result2 = await factory.execute_task(code_agent, task2, use_memory=True)
+        result2 = await factory.execute_with_prompt(code_agent, task2)
         print(f"  Task 2: {'✓' if result2['status'] == 'success' else '✗'}")
         
         if result2["status"] == "success":
@@ -211,7 +210,7 @@ async def main():
         
         for agent in agents:
             status = await factory.get_agent_status(agent.agent_id)
-            print(f"\n→ {agent.name}:")
+            print(f"\n→ {agent.metadata.name}:")
             print(f"  Status: {status['agent']['lifecycle_state']}")
             print(f"  Executions: {status['runtime']['execution_count']}")
             print(f"  Total tokens: {status['runtime']['total_tokens_used']}")

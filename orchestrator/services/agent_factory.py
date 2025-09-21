@@ -42,8 +42,8 @@ class AgentLifecycle(Enum):
 
 # Default LLM configuration for agents
 DEFAULT_LLM_CONFIG = {
-    "provider": "anthropic",  # Claude as default
-    "model": "claude-3-sonnet-20240229",
+    "provider": "openai",  # Use environment default
+    "model": "gpt-4",
     "temperature": 0.7,
     "max_tokens": 2000,
     "context_window": 8192
@@ -208,7 +208,7 @@ class AgentFactory:
                 model=llm_config_dict["model"],
                 temperature=llm_config_dict["temperature"],
                 max_tokens=llm_config_dict["max_tokens"],
-                api_key=None  # Uses environment variable
+                # api_key will be loaded from environment
             )
             
             llm_manager = LLMManager(llm_config)
@@ -358,9 +358,9 @@ class AgentFactory:
                         
                         # Store in memory
                         memory_entry = {
-                            "task": task_description[:200],  # Truncate for storage
+                            "task": prompt[:200],  # Truncate for storage
                             "response": response.content[:500],  # Truncate for storage
-                            "summary": f"Executed: {task_description[:100]}",
+                            "summary": f"Executed: {prompt[:100]}",
                             "timestamp": datetime.now().isoformat(),
                             "tokens": tokens_used,
                             "execution_time": execution_time
@@ -380,8 +380,8 @@ class AgentFactory:
                             "result": response.content,
                             "agent": {
                                 "id": agent_runtime.agent_id,
-                                "name": agent_runtime.name,
-                                "type": agent_runtime.agent_type.value
+                                "name": agent_runtime.metadata.name,
+                                "type": agent_runtime.metadata.agent_type
                             },
                             "execution": {
                                 "time": execution_time,
@@ -415,8 +415,8 @@ class AgentFactory:
                 "error": f"Task execution failed after {max_retries} attempts: {last_error}",
                 "agent": {
                     "id": agent_runtime.agent_id,
-                    "name": agent_runtime.name,
-                    "type": agent_runtime.agent_type.value
+                    "name": agent_runtime.metadata.name,
+                    "type": agent_runtime.metadata.agent_type
                 }
             }
             
@@ -446,10 +446,10 @@ class AgentFactory:
         skill_enhancements = []
         
         for skill in new_skills:
-            if skill in SKILL_PROMPTS and skill not in agent.skills:
+            if skill in SKILL_PROMPTS and skill not in agent.metadata.skills:
                 skill_enhancements.append(SKILL_PROMPTS[skill])
-                agent.skills.append(skill)
-                self.logger.info(f"Applied skill '{skill}' to agent '{agent.name}'")
+                agent.metadata.skills.append(skill)
+                self.logger.info(f"Applied skill '{skill}' to agent '{agent.metadata.name}'")
         
         if skill_enhancements:
             # Append to existing system prompt
@@ -458,7 +458,7 @@ class AgentFactory:
             agent.system_prompt += "".join(skill_enhancements)
             
             self.logger.info(
-                f"Enhanced agent '{agent.name}' with {len(skill_enhancements)} new skills"
+                f"Enhanced agent '{agent.metadata.name}' with {len(skill_enhancements)} new skills"
             )
         
         return agent
@@ -479,7 +479,7 @@ class AgentFactory:
                     "status": "inactive",
                     "agent": {
                         "id": db_agent.id,
-                        "name": db_agent.name,
+                        "name": db_agent.metadata.name,
                         "type": db_agent.agent_type,
                         "database_status": db_agent.status,
                         "created_at": db_agent.created_at.isoformat() if db_agent.created_at else None
@@ -500,10 +500,10 @@ class AgentFactory:
             "status": "active",
             "agent": {
                 "id": agent_runtime.agent_id,
-                "name": agent_runtime.name,
-                "type": agent_runtime.agent_type.value,
+                "name": agent_runtime.metadata.name,
+                "type": agent_runtime.metadata.agent_type,
                 "lifecycle_state": agent_runtime.lifecycle_state.value,
-                "skills": agent_runtime.skills
+                "skills": agent_runtime.metadata.skills
             },
             "runtime": {
                 "created_at": agent_runtime.created_at.isoformat(),
@@ -524,13 +524,13 @@ class AgentFactory:
         """
         test_results = {
             "agent_id": agent.agent_id,
-            "agent_name": agent.name,
+            "agent_name": agent.metadata.name,
             "timestamp": datetime.now().isoformat(),
             "tests": []
         }
         
         # Test 1: Basic response
-        test1 = await self.execute_task(
+        test1 = await self.execute_with_prompt(
             agent,
             "What are your primary capabilities?",
             use_memory=False
@@ -543,18 +543,18 @@ class AgentFactory:
         })
         
         # Test 2: Skill-specific task
-        if agent.skills:
-            skill_task = f"Demonstrate your {agent.skills[0]} capability with a brief example."
-            test2 = await self.execute_task(agent, skill_task)
+        if agent.metadata.skills:
+            skill_task = f"Demonstrate your {agent.metadata.skills[0]} capability with a brief example."
+            test2 = await self.execute_with_prompt(agent, skill_task)
             test_results["tests"].append({
-                "name": f"skill_test_{agent.skills[0]}",
+                "name": f"skill_test_{agent.metadata.skills[0]}",
                 "success": test2["status"] == "success",
                 "execution_time": test2.get("execution", {}).get("time"),
                 "tokens": test2.get("execution", {}).get("tokens_used")
             })
         
         # Test 3: Context handling
-        test3 = await self.execute_task(
+        test3 = await self.execute_with_prompt(
             agent,
             "Analyze this context and provide insights",
             context={"data": "test", "value": 42, "items": ["a", "b", "c"]}
@@ -610,9 +610,9 @@ async def create_specialized_agent(
         result = {
             "agent": {
                 "id": agent.agent_id,
-                "name": agent.name,
+                "name": agent.metadata.name,
                 "type": agent.agent_type.value,
-                "skills": agent.skills,
+                "skills": agent.metadata.skills,
                 "status": "created"
             }
         }
@@ -666,7 +666,7 @@ if __name__ == "__main__":
                     return x / y
             """
             
-            result = await factory.execute_task(architect, code_task)
+            result = await factory.execute_with_prompt(architect, code_task)
             
             if result["status"] == "success":
                 print(f"✓ Task executed successfully")
@@ -693,7 +693,7 @@ if __name__ == "__main__":
             print("\n4. Executing security analysis...")
             security_task = "What are the top 3 security vulnerabilities in web applications?"
             
-            sec_result = await factory.execute_task(security_expert, security_task)
+            sec_result = await factory.execute_with_prompt(security_expert, security_task)
             
             if sec_result["status"] == "success":
                 print(f"✓ Security analysis completed")
