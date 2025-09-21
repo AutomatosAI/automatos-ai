@@ -467,6 +467,165 @@ CREATE TRIGGER update_workflows_updated_at BEFORE UPDATE ON workflows
 -- PERMISSIONS
 -- =====================================================
 
+-- =====================================================
+-- MEMORY & KNOWLEDGE SYSTEM TABLES (PRD-05)
+-- =====================================================
+
+-- Enhanced memory items table with vector embeddings
+CREATE TABLE IF NOT EXISTS memory_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    memory_type VARCHAR(50) NOT NULL CHECK (memory_type IN ('experience', 'knowledge', 'skill', 'pattern', 'feedback')),
+    memory_level VARCHAR(50) NOT NULL DEFAULT 'short_term' CHECK (memory_level IN ('working', 'short_term', 'long_term', 'collective')),
+    importance FLOAT DEFAULT 0.5 CHECK (importance >= 0 AND importance <= 1),
+    embedding vector(384),  -- OpenAI text-embedding-3-small dimension
+    access_count INTEGER DEFAULT 0,
+    last_access TIMESTAMP DEFAULT NOW(),
+    decay_rate FLOAT DEFAULT 0.1,
+    associations UUID[],  -- Array of related memory IDs
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    -- Performance tracking fields
+    success_rate FLOAT DEFAULT 0.0,
+    usage_in_solutions INTEGER DEFAULT 0,
+    average_retrieval_time FLOAT DEFAULT 0.0
+);
+
+-- Create indexes for efficient retrieval
+CREATE INDEX IF NOT EXISTS idx_memory_items_agent_id ON memory_items(agent_id);
+CREATE INDEX IF NOT EXISTS idx_memory_items_memory_level ON memory_items(memory_level);
+CREATE INDEX IF NOT EXISTS idx_memory_items_memory_type ON memory_items(memory_type);
+CREATE INDEX IF NOT EXISTS idx_memory_items_importance ON memory_items(importance DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_items_created_at ON memory_items(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_items_embedding ON memory_items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Knowledge graph nodes
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,  -- NULL for collective knowledge
+    concept VARCHAR(255) NOT NULL,
+    description TEXT,
+    node_type VARCHAR(50) NOT NULL,
+    embedding vector(384),
+    importance FLOAT DEFAULT 0.5 CHECK (importance >= 0 AND importance <= 1),
+    confidence FLOAT DEFAULT 0.5 CHECK (confidence >= 0 AND confidence <= 1),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create indexes for knowledge nodes
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_agent_id ON knowledge_nodes(agent_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_concept ON knowledge_nodes(concept);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_node_type ON knowledge_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Knowledge graph edges
+CREATE TABLE IF NOT EXISTS knowledge_edges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_node_id UUID NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    to_node_id UUID NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+    relationship VARCHAR(100) NOT NULL,
+    strength FLOAT DEFAULT 0.5 CHECK (strength >= 0 AND strength <= 1),
+    evidence_count INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(from_node_id, to_node_id, relationship)
+);
+
+-- Create indexes for knowledge edges
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_from_node ON knowledge_edges(from_node_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_to_node ON knowledge_edges(to_node_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_edges_relationship ON knowledge_edges(relationship);
+
+-- Learning outcomes tracking
+CREATE TABLE IF NOT EXISTS learning_outcomes (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    task_type VARCHAR(255),
+    learned_pattern TEXT,
+    success_rate_before FLOAT,
+    success_rate_after FLOAT,
+    execution_time_before FLOAT,
+    execution_time_after FLOAT,
+    confidence FLOAT DEFAULT 0.5 CHECK (confidence >= 0 AND confidence <= 1),
+    application_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create indexes for learning outcomes
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_agent_id ON learning_outcomes(agent_id);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_task_type ON learning_outcomes(task_type);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_created_at ON learning_outcomes(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_confidence ON learning_outcomes(confidence DESC);
+
+-- =====================================================
+-- MEMORY SYSTEM HELPER FUNCTIONS
+-- =====================================================
+
+-- Function to calculate cosine similarity between vectors
+CREATE OR REPLACE FUNCTION cosine_similarity(a vector(384), b vector(384))
+RETURNS FLOAT AS $$
+BEGIN
+    RETURN 1 - (a <=> b);  -- pgvector's <=> operator returns cosine distance
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Function to get memory statistics for an agent
+CREATE OR REPLACE FUNCTION get_memory_stats(p_agent_id INTEGER)
+RETURNS TABLE (
+    memory_level VARCHAR(50),
+    count BIGINT,
+    avg_importance FLOAT,
+    avg_access_count FLOAT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        m.memory_level,
+        COUNT(*) as count,
+        AVG(m.importance) as avg_importance,
+        AVG(m.access_count::FLOAT) as avg_access_count
+    FROM memory_items m
+    WHERE m.agent_id = p_agent_id
+    GROUP BY m.memory_level;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to prune old working memories (should be called periodically)
+CREATE OR REPLACE FUNCTION prune_old_memories()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM memory_items
+    WHERE memory_level = 'working'
+    AND created_at < NOW() - INTERVAL '5 minutes';
+    
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Initial system-level knowledge nodes for collective learning
+INSERT INTO knowledge_nodes (agent_id, concept, node_type, description, importance, confidence)
+VALUES 
+    (NULL, 'task_decomposition', 'system_pattern', 'Breaking complex tasks into manageable subtasks', 0.9, 0.95),
+    (NULL, 'parallel_execution', 'system_pattern', 'Executing independent tasks simultaneously', 0.85, 0.9),
+    (NULL, 'error_recovery', 'system_pattern', 'Strategies for recovering from failures', 0.95, 0.85),
+    (NULL, 'context_optimization', 'system_pattern', 'Optimizing prompt context for better results', 0.8, 0.9)
+ON CONFLICT DO NOTHING;
+
+-- Create initial knowledge relationships
+INSERT INTO knowledge_edges (from_node_id, to_node_id, relationship, strength)
+SELECT 
+    (SELECT id FROM knowledge_nodes WHERE concept = 'task_decomposition'),
+    (SELECT id FROM knowledge_nodes WHERE concept = 'parallel_execution'),
+    'enables',
+    0.9
+WHERE EXISTS (SELECT 1 FROM knowledge_nodes WHERE concept = 'task_decomposition')
+  AND EXISTS (SELECT 1 FROM knowledge_nodes WHERE concept = 'parallel_execution')
+ON CONFLICT DO NOTHING;
+
 -- Grant necessary permissions (adjust user as needed)
 -- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO automatos_user;
 -- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO automatos_user;
@@ -483,4 +642,8 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 
 INSERT INTO schema_versions (version, description) 
 VALUES ('1.0.0', 'Complete initial schema with all PRD tables')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO schema_versions (version, description) 
+VALUES ('1.1.0', 'Added PRD-05 Memory & Knowledge System tables')
 ON CONFLICT DO NOTHING;
