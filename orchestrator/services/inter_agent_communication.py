@@ -541,6 +541,42 @@ class SharedContextManager:
         """Get a shared context by ID"""
         return self.contexts.get(context_id)
     
+    async def store_context(
+        self,
+        context_id: str,
+        data: Dict[str, Any],
+        agent_id: int = None
+    ) -> Dict[str, Any]:
+        """
+        Store context data (compatibility method for memory system integration).
+        
+        Args:
+            context_id: Context ID
+            data: Data to store
+            agent_id: Agent storing the data
+            
+        Returns:
+            Storage result
+        """
+        context = self.contexts.get(context_id)
+        if not context:
+            # Create new context if it doesn't exist
+            context = SharedContext(
+                id=context_id,
+                team_agents=[agent_id] if agent_id else [],
+                context_data=data
+            )
+            self.contexts[context_id] = context
+            return {"status": "success", "action": "created", "context_id": context_id}
+        else:
+            # Update existing context
+            return await self.update_shared_context(
+                context_id=context_id,
+                agent=agent_id if agent_id else 0,
+                updates=data,
+                merge_strategy="override"
+            )
+    
     async def merge_proposals(
         self,
         context_id: str,

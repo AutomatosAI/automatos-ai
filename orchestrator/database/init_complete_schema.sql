@@ -647,3 +647,41 @@ ON CONFLICT DO NOTHING;
 INSERT INTO schema_versions (version, description) 
 VALUES ('1.1.0', 'Added PRD-05 Memory & Knowledge System tables')
 ON CONFLICT DO NOTHING;
+
+-- =====================================================
+-- PRD-05 MEMORY SYSTEM FIXES
+-- Applied during initial setup to prevent issues
+-- =====================================================
+
+-- Fix 1: Add missing columns to learning_outcomes table
+ALTER TABLE learning_outcomes ADD COLUMN IF NOT EXISTS task_type VARCHAR(100);
+ALTER TABLE learning_outcomes ADD COLUMN IF NOT EXISTS success_rate_before FLOAT;
+ALTER TABLE learning_outcomes ADD COLUMN IF NOT EXISTS success_rate_after FLOAT;
+ALTER TABLE learning_outcomes ADD COLUMN IF NOT EXISTS execution_time_before FLOAT;
+ALTER TABLE learning_outcomes ADD COLUMN IF NOT EXISTS execution_time_after FLOAT;
+
+-- Fix 2: Update vector dimensions from 1536 to 384 for OpenAI text-embedding-3-small
+-- Only alter if the column exists and has wrong dimensions
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns 
+               WHERE table_name = 'knowledge_nodes' AND column_name = 'embedding') THEN
+        ALTER TABLE knowledge_nodes ALTER COLUMN embedding TYPE vector(384);
+    END IF;
+END $$;
+
+-- Fix 3: Add embedding column to memory_items table (384 dimensions for OpenAI)
+ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(384);
+ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS memory_level VARCHAR(50) DEFAULT 'working';
+ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id);
+
+-- Fix 4: Create performance indexes for memory operations
+CREATE INDEX IF NOT EXISTS idx_memory_items_embedding ON memory_items USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_learning_outcomes_task_type ON learning_outcomes(task_type);
+CREATE INDEX IF NOT EXISTS idx_memory_items_agent_memory_level ON memory_items(agent_id, memory_level);
+
+-- Update schema version for PRD-05 fixes
+INSERT INTO schema_versions (version, description) 
+VALUES ('1.1.1', 'PRD-05 Memory System Fixes: columns, vectors, indexes')
+ON CONFLICT DO NOTHING;

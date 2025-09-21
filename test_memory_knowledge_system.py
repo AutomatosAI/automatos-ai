@@ -34,8 +34,8 @@ from orchestrator.services.memory_knowledge_system import (
 )
 from orchestrator.services.agent_factory import AgentFactory
 from orchestrator.services.inter_agent_communication import SharedContextManager
-from orchestrator.database.connection import get_async_db_engine
-from orchestrator.config import get_config
+from orchestrator.database.database import engine
+from orchestrator.config import Config
 
 # Configure logging
 logging.basicConfig(
@@ -49,12 +49,13 @@ class MemorySystemVerifier:
     """Comprehensive verification of memory and knowledge systems"""
     
     def __init__(self):
-        config = get_config()
+        config = Config()
         
         # Initialize memory system with real connections
         self.memory_system = HierarchicalMemorySystem(
             redis_host=config.REDIS_HOST,
             redis_port=config.REDIS_PORT,
+            redis_password=getattr(config, 'REDIS_PASSWORD', None),
             postgres_url=config.DATABASE_URL,
             openai_api_key=config.OPENAI_API_KEY
         )

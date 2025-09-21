@@ -65,7 +65,7 @@ class MemoryItem(Base):
     last_access = Column(DateTime, default=datetime.now)
     decay_rate = Column(Float, default=0.1)
     associations = Column(ARRAY(String), default=[])  # Related memory IDs
-    metadata = Column(JSON, default={})
+    meta_data = Column('metadata', JSON, default={})
     created_at = Column(DateTime, default=datetime.now)
     
     # Performance tracking
@@ -86,7 +86,7 @@ class KnowledgeNode(Base):
     embedding = Column(Vector(384))
     importance = Column(Float, default=0.5)
     confidence = Column(Float, default=0.5)
-    metadata = Column(JSON, default={})
+    meta_data = Column('metadata', JSON, default={})
     created_at = Column(DateTime, default=datetime.now)
 
 
@@ -130,18 +130,26 @@ class HierarchicalMemorySystem:
         self,
         redis_host: str = "localhost",
         redis_port: int = 6379,
+        redis_password: str = None,
         postgres_url: str = None,
         openai_api_key: str = None
     ):
         # Redis for working memory with TTL
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            decode_responses=True
-        )
+        redis_kwargs = {
+            "host": redis_host,
+            "port": redis_port,
+            "decode_responses": True
+        }
+        if redis_password:
+            redis_kwargs["password"] = redis_password
+        
+        self.redis_client = redis.Redis(**redis_kwargs)
         
         # PostgreSQL with pgvector for persistent memory
         if postgres_url:
+            # Convert postgresql:// to postgresql+asyncpg:// for async support
+            if postgres_url.startswith("postgresql://"):
+                postgres_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
             self.engine = create_async_engine(postgres_url, echo=False)
             self.async_session = sessionmaker(
                 self.engine, class_=AsyncSession, expire_on_commit=False
@@ -492,7 +500,7 @@ class HierarchicalMemorySystem:
                     # Mark source memories as consolidated
                     for memory in pattern["memories"]:
                         memory.memory_level = MemoryLevel.LONG_TERM
-                        memory.metadata["consolidated"] = True
+                        memory.meta_data["consolidated"] = True
                     
                     logger.info(f"Consolidated {len(pattern['memories'])} memories into knowledge pattern")
             
@@ -1051,7 +1059,7 @@ class LearningEngine:
             
             if knowledge_domain:
                 pattern_query = pattern_query.filter(
-                    MemoryItem.metadata["pattern_type"].astext == knowledge_domain
+                    MemoryItem.meta_data["pattern_type"].astext == knowledge_domain
                 )
             
             result = await session.execute(pattern_query)
@@ -1067,7 +1075,7 @@ class LearningEngine:
                     importance=pattern.importance * 0.9,  # Slightly lower for transferred knowledge
                     embedding=pattern.embedding,
                     metadata={
-                        **pattern.metadata,
+                        **pattern.meta_data,
                         "transferred_from": from_agent_id,
                         "transfer_date": datetime.now().isoformat()
                     }
@@ -1094,7 +1102,7 @@ class LearningEngine:
                     importance=memory.importance * 0.85,
                     embedding=memory.embedding,
                     metadata={
-                        **memory.metadata,
+                        **memory.meta_data,
                         "transferred_from": from_agent_id
                     }
                 )
