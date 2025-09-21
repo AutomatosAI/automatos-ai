@@ -7,6 +7,7 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -716,7 +717,7 @@ class SharedContext(Base):
     """Shared memory spaces for agent teams"""
     __tablename__ = 'shared_contexts'
     
-    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     name = Column(String(255))
     team_id = Column(String(255))
     context_data = Column(JSON, nullable=False)
@@ -740,12 +741,12 @@ class CollaborationSession(Base):
     """Records of multi-agent collaborative problem solving"""
     __tablename__ = 'collaboration_sessions'
     
-    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     problem_id = Column(Integer, ForeignKey('tasks.id'))
     problem_description = Column(Text)
     team_agents = Column(JSON)  # Array of agent IDs
     strategy = Column(String(50), default='ensemble')  # ensemble, hierarchical, specialized, consensus
-    shared_context_id = Column(String(255), ForeignKey('shared_contexts.id'))
+    shared_context_id = Column(UUID(as_uuid=True), ForeignKey('shared_contexts.id'))
     status = Column(String(50), default='pending')  # pending, active, completed, failed
     result = Column(JSON)
     consensus_data = Column(JSON)
@@ -758,7 +759,7 @@ class CollaborationProposal(Base):
     __tablename__ = 'collaboration_proposals'
     
     id = Column(Integer, primary_key=True)
-    session_id = Column(String(255), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    session_id = Column(UUID(as_uuid=True), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
     agent_id = Column(Integer, ForeignKey('agents.id'))
     proposal_type = Column(String(50))  # solution, insight, feedback
     proposal_content = Column(JSON, nullable=False)
@@ -772,7 +773,7 @@ class ConsensusVote(Base):
     __tablename__ = 'consensus_votes'
     
     id = Column(Integer, primary_key=True)
-    session_id = Column(String(255), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    session_id = Column(UUID(as_uuid=True), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
     proposal_id = Column(Integer, ForeignKey('collaboration_proposals.id', ondelete='CASCADE'))
     agent_id = Column(Integer, ForeignKey('agents.id'))
     vote_weight = Column(Float, default=1.0)
