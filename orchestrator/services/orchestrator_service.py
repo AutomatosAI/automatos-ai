@@ -10,6 +10,30 @@ import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
+<<<<<<< HEAD
+=======
+from sqlalchemy import and_, or_
+import numpy as np
+import networkx as nx
+
+# Import models and database
+from models import Task, User, TaskCreate, TaskUpdate, TaskResponse
+from database.database import get_db
+
+# Import memory and reasoning systems
+from memory.manager import AdvancedMemoryManager
+from memory.memory_types import MemoryType
+from reasoning.manager import ReasoningSystemManager
+
+# Import multi-agent systems
+from multi_agent.collaborative_reasoning import CollaborativeReasoningEngine
+from multi_agent.coordination_manager import CoordinationManager
+from multi_agent.behavior_monitor import EmergentBehaviorMonitor
+from multi_agent.optimization_engine import MultiAgentOptimizer
+
+# Import field theory integration
+from field_theory.field_manager import FieldContextManager, FieldType
+>>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 

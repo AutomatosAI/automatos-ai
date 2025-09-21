@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 -- PostgreSQL pgvector Extension Initialization
 -- This script enables the pgvector extension for vector similarity search
 
@@ -9,3 +10,7 @@ DO $$
 BEGIN
     RAISE NOTICE 'pgvector extension enabled successfully';
 END $$;
+=======
+-- Initialize pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+>>>>>>> origin/main

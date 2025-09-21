@@ -102,10 +102,10 @@ export function RealMetricCards({
 
   // Calculate real metrics from API data
   const activeAgents = agents?.filter((a: any) => a.status === 'active').length || 0
-  const totalAgents = Array.isArray(agents) ? agents.length : 0
-  const documentsProcessed = Array.isArray(documents) ? documents.length : 0
-  const runningWorkflows = Array.isArray(workflows) ? workflows.filter((w: any) => w.status === "running").length : 0
-  const totalWorkflows = Array.isArray(workflows) ? workflows.length : 0
+  const totalAgents = agents?.length || 0
+  const documentsProcessed = documents?.length || 0
+  const runningWorkflows = workflows?.filter((w: any) => w.status === 'running').length || 0
+  const totalWorkflows = workflows?.length || 0
   const apiCalls = systemMetrics?.api_calls_count || 0
 
   const metrics = [

@@ -11,7 +11,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
-from typing import Union,  Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 from database.models import PriorityLevel
@@ -44,11 +44,6 @@ class Agent(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
     
-    # Enhanced agent fields for better management
-    priority_level = Column(String(50), default='medium')  # 'low', 'medium', 'high', 'critical'
-    max_concurrent_tasks = Column(Integer, default=5)  # Maximum concurrent tasks
-    auto_start = Column(Boolean, default=False)  # Auto-start on system boot
-    
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
     emergence_score = Column(Float, nullable=True)  # Emergence metric
@@ -73,10 +68,6 @@ class Skill(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     skill_type = Column(String(100), nullable=False)  # 'cognitive', 'technical', 'communication'
-    
-    # Enhanced skill categorization
-    category = Column(String(100), nullable=False, default='development')  # 'development', 'security', 'infrastructure', 'analytics'
-    
     implementation = Column(Text)  # Code or configuration
     parameters = Column(JSON)  # Skill parameters
     performance_data = Column(JSON)  # Usage statistics
@@ -117,12 +108,6 @@ class Workflow(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
-    
-    # Enhanced workflow fields for better management
-    priority = Column(String(50), nullable=True)  # 'low', 'medium', 'high', 'critical'
-    expected_duration = Column(Integer, nullable=True)  # Expected duration in minutes
-    complexity_score = Column(Float, nullable=True)  # Workflow complexity score
-    success_rate = Column(Float, nullable=True)  # Historical success rate
     
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
@@ -201,31 +186,14 @@ class AgentStatus(str, Enum):
     TRAINING = "training"
 
 class AgentType(str, Enum):
-    CODE_ARCHITECT = "code_architect"
-    SECURITY_EXPERT = "security_expert"
-    PERFORMANCE_OPTIMIZER = "performance_optimizer"
-    DATA_ANALYST = "data_analyst"
-    INFRASTRUCTURE_MANAGER = "infrastructure_manager"
     CUSTOM = "custom"
     SYSTEM = "system"
     SPECIALIZED = "specialized"
-
-class PriorityLevel(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
 
 class SkillType(str, Enum):
     COGNITIVE = "cognitive"
     TECHNICAL = "technical"
     COMMUNICATION = "communication"
-
-class SkillCategory(str, Enum):
-    DEVELOPMENT = "development"
-    SECURITY = "security"
-    INFRASTRUCTURE = "infrastructure"
-    ANALYTICS = "analytics"
 
 class WorkflowStatus(str, Enum):
     DRAFT = "draft"
@@ -245,8 +213,8 @@ class AgentCreate(BaseModel):
     agent_type: AgentType
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
-    priority_level: Optional[PriorityLevel] = PriorityLevel.MEDIUM
-    max_concurrent_tasks: Optional[int] = Field(default=5, ge=1, le=100)
+    priority_level: Optional[PriorityLevel] = None
+    max_concurrent_tasks: Optional[int] = 5
     auto_start: Optional[bool] = False
 
 class AgentUpdate(BaseModel):
@@ -255,9 +223,6 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
-    priority_level: Optional[PriorityLevel] = None
-    max_concurrent_tasks: Optional[int] = Field(default=None, ge=1, le=100)
-    auto_start: Optional[bool] = None
 
 class AgentResponse(BaseModel):
     id: int
@@ -267,9 +232,6 @@ class AgentResponse(BaseModel):
     status: str
     configuration: Optional[Dict[str, Any]]
     performance_metrics: Optional[Dict[str, Any]] = None
-    priority_level: str
-    max_concurrent_tasks: int
-    auto_start: bool
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
@@ -279,14 +241,12 @@ class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     skill_type: SkillType
-    category: SkillCategory
     implementation: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
 class SkillUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    category: Optional[SkillCategory] = None
     implementation: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
@@ -296,7 +256,6 @@ class SkillResponse(BaseModel):
     name: str
     description: Optional[str]
     skill_type: str
-    category: str
     implementation: Optional[str]
     parameters: Optional[Dict[str, Any]]
     performance_data: Optional[Dict[str, Any]]
@@ -565,16 +524,15 @@ class TaskResponse(BaseModel):
 
 class MemoryItemCreate(BaseModel):
     session_id: str
-    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
+    content: Dict[str, Any]
     memory_type: str = "working_data"
     importance: Optional[float] = 0.5
     tags: Optional[List[str]] = []
-    context: Optional[Dict] = None
 
 class MemoryItemResponse(BaseModel):
     id: str
     session_id: str
-    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
+    content: Dict[str, Any]
     memory_type: str
     memory_level: str
     importance: float
@@ -584,13 +542,13 @@ class MemoryItemResponse(BaseModel):
     last_access: datetime
 
 class ExternalKnowledgeCreate(BaseModel):
-    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
+    content: Dict[str, Any]
     source: str = "external"
     knowledge_metadata: Optional[Dict[str, Any]] = None
 
 class ExternalKnowledgeResponse(BaseModel):
     id: int
-    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
+    content: Dict[str, Any]
     source: str
     knowledge_metadata: Optional[Dict[str, Any]]
     access_count: int
@@ -663,48 +621,3 @@ class IntegrationAnalysisDB(Base):
     recommendations = Column(JSON)  # Integration improvement recommendations
     confidence_level = Column(Float, nullable=True)
     created_at = Column(DateTime, default=func.now())
-
-# Enhanced Pydantic Models for API Documentation
-class StatusEnum(str, Enum):
-    """API response status values"""
-    SUCCESS = "success"
-    ERROR = "error"
-    WARNING = "warning"
-    PENDING = "pending"
-    COMPLETED = "completed"
-
-class APIResponse(BaseModel):
-    """Standardized API response format"""
-    status: StatusEnum = Field(..., description="Response status indicator")
-    data: Optional[Dict[str, Any]] = Field(None, description="Response payload data")
-    message: str = Field(..., description="Human-readable response message")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "success",
-                "data": {"result": "Operation completed successfully"},
-                "message": "Request processed successfully",
-                "timestamp": "2024-08-09T10:00:00Z"
-            }
-        }
-
-class ErrorResponse(BaseModel):
-    """Standardized error response format"""
-    status: str = Field("error", description="Always 'error' for error responses")
-    error_code: Optional[str] = Field(None, description="Machine-readable error code")
-    error_message: str = Field(..., description="Human-readable error description")
-    details: Optional[Dict[str, Any]] = Field(None, description="Additional error details")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Error timestamp")
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "error",
-                "error_code": "VALIDATION_ERROR",
-                "error_message": "Invalid input parameters provided",
-                "details": {"field": "agent_id", "issue": "Agent ID not found"},
-                "timestamp": "2024-08-09T10:00:00Z"
-            }
-        }

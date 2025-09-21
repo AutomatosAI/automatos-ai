@@ -10,10 +10,9 @@ REST API endpoints for multi-agent system functionality including:
 - Multi-objective optimization for agent systems
 """
 
-import os
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -21,16 +20,9 @@ from datetime import datetime
 # Import database and dependencies
 from database.database import get_db
 from services.orchestrator_service import EnhancedOrchestratorService
-# from main import require_api_key  # Circular import - will define locally
+from main import require_api_key
 
 logger = logging.getLogger(__name__)
-
-# Simple API key auth dependency (local copy to avoid circular import)
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 # Pydantic Models for API
 class CollaborativeReasoningRequest(BaseModel):
@@ -399,8 +391,7 @@ async def rebalance_agents(
 async def get_reasoning_statistics():
     """Get collaborative reasoning statistics and performance metrics"""
     try:
-        # stats = orchestrator_service.collaborative_reasoning.get_reasoning_statistics()
-        stats = {"status": "disabled"}
+        stats = orchestrator_service.collaborative_reasoning.get_reasoning_statistics()
         
         return {
             "status": "success",
@@ -561,32 +552,3 @@ async def realtime_behavior_monitoring(websocket: WebSocket):
             }))
         except:
             pass
-
-@router.post("/behavior/learn", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
-async def learn_behavior(
-    request: Dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
-):
-    """
-    ## 🧠 Agent Behavior Learning
-    
-    Enables agents to learn from behavior patterns and improve performance.
-    """
-    try:
-        # NOT IMPLEMENTED - No real ML model available
-        raise HTTPException(status_code=501, detail="Behavior learning not yet implemented - requires ML model integration")
-        
-    except Exception as e:
-        logger.error(f"Error in behavior learning: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to learn behavior: {str(e)}")
-
-@router.post("/optimization/adaptive", response_model=Dict[str, Any], dependencies=[Depends(require_api_key)])
-async def adaptive_optimization(
-    request: Dict[str, Any] = Body(...),
-    db: Session = Depends(get_db)
-):
-    """
-    ## 🔄 Adaptive Multi-Agent Optimization
-    
-    Performs adaptive optimization of multi-agent systems based on real-time performance.
-    """

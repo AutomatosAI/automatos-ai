@@ -18,11 +18,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from database.database import get_db
-<<<<<<< HEAD
-from database.models import Tool, ToolCredentials, ToolConfiguration, ToolUsageLog
-=======
 from models import Tool, ToolCredentials, ToolConfiguration, ToolUsageLog
->>>>>>> origin/main
 from utils.logging_adapter import set_request_id
 import uuid
 

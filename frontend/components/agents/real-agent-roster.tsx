@@ -49,18 +49,6 @@ const agentTypeIcons: Record<string, string> = {
   custom: '🤖'
 }
 
-<<<<<<< HEAD
-=======
-// Real agent data from API - no more mock data
-interface RealAgent extends Agent {
-  performance?: number
-  tasksCompleted?: number
-  specializations?: string[]
-  lastActive?: string
-  avatar?: string
-}
-
->>>>>>> origin/main
 const statusStyles: Record<string, string> = {
   active: 'bg-green-500/10 text-green-400 border-green-500/20',
   idle: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
@@ -75,7 +63,7 @@ const statusIcons: Record<string, any> = {
   maintenance: Settings
 }
 
-interface AgentRosterProps {
+interface RealAgentRosterProps {
   agents: any[]
   loading: boolean
   searchTerm: string
@@ -85,7 +73,7 @@ interface AgentRosterProps {
   onRefresh: () => void
 }
 
-export function AgentRoster({
+export function RealAgentRoster({
   agents,
   loading,
   searchTerm,
@@ -93,14 +81,13 @@ export function AgentRoster({
   selectedAgentId,
   onAgentSelect,
   onRefresh
-}: AgentRosterProps) {
+}: RealAgentRosterProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
 
   // API mutations
   const updateAgentMutation = useUpdateAgent()
   const deleteAgentMutation = useDeleteAgent()
 
-<<<<<<< HEAD
   // Filter agents based on search and status
   const filteredAgents = useMemo(() => {
     return agents.filter(agent => {
@@ -124,41 +111,6 @@ export function AgentRoster({
       })
       toast.success('Agent started successfully')
       onRefresh()
-=======
-  // Context menu handlers
-  const handleViewDetails = (agentId: string) => {
-    console.log('View details for agent:', agentId)
-    // You can implement a modal or navigate to a details page
-    alert(`Viewing details for agent ${agentId}`)
-  }
-
-  const handleConfigure = (agentId: string) => {
-    console.log('Configure agent:', agentId)
-    // Navigate to configuration tab or open configuration modal
-    // For now, we'll show an alert
-    alert(`Opening configuration for agent ${agentId}. This would typically switch to the Configuration tab.`)
-  }
-
-  const handleToggleStatus = async (agentId: number, currentStatus: string) => {
-    try {
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
-      const updatedAgent = await apiClient.request(`/api/agents/${agentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
-      })
-      console.log('Agent status updated:', updatedAgent)
-      
-      // Update the local state
-      setAgents(prevAgents => 
-        prevAgents.map((agent: any) => 
-          agent.id === agentId ? { ...agent, status: newStatus } : agent
-        )
-      )
-      
-      alert(`Agent status changed to ${newStatus}`)
-      
->>>>>>> origin/main
     } catch (error) {
       toast.error('Failed to start agent')
     }
@@ -190,15 +142,6 @@ export function AgentRoster({
       toast.error('Failed to delete agent')
     }
   }
-<<<<<<< HEAD
-=======
-  
-  const filteredAgents = agents.filter(agent =>
-    (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
-  )
->>>>>>> origin/main
 
   if (loading) {
     return (
@@ -376,39 +319,22 @@ export function AgentRoster({
                     {agent.description || 'No description available'}
                   </p>
 
-<<<<<<< HEAD
                   {/* Skills */}
                   {agent.skills && agent.skills.length > 0 && (
                     <div className="mb-4">
                       <div className="flex flex-wrap gap-1">
-                        {agent.skills && Array.isArray(agent.skills) && agent.skills.slice(0, 3).map((skill: any) => (
+                        {agent.skills.slice(0, 3).map((skill: any) => (
                           <Badge key={skill.id} variant="secondary" className="text-xs">
                             {skill.name}
                           </Badge>
                         ))}
-                        {agent.skills && Array.isArray(agent.skills) && agent.skills.length > 3 && (
+                        {agent.skills.length > 3 && (
                           <Badge variant="secondary" className="text-xs">
                             +{agent.skills.length - 3} more
                           </Badge>
                         )}
-                        )}
                       </div>
                     </div>
-=======
-              {/* Skills Preview */}
-              <div className="mb-4">
-                <p className="text-xs text-muted-foreground mb-2">Primary Skills</p>
-                <div className="flex flex-wrap gap-1">
-                  {agent.skills && agent.skills.slice(0, 3).map((skill: any) => (
-                    <Badge key={skill.id} variant="secondary" className="text-xs">
-                      {skill.name ? skill.name.replace('_', ' ') : 'Unknown Skill'}
-                    </Badge>
-                  ))}
-                  {agent.skills && agent.skills.length > 3 && (
-                    <Badge variant="secondary" className="text-xs">
-                      +{agent.skills.length - 3} more
-                    </Badge>
->>>>>>> origin/main
                   )}
 
                   {/* Performance Indicator */}
