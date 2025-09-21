@@ -2,7 +2,6 @@
 
 """
 Permissions Management API Routes
-==================================
 
 Role-based access control for agent-tool permissions with assignment management,
 security validation, and audit logging.
@@ -17,11 +16,8 @@ import logging
 from pydantic import BaseModel, Field
 
 from database.database import get_db
-<<<<<<< HEAD
 from database.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
-=======
 from models import Tool, Agent, AgentToolPermission, PermissionAuditLog
->>>>>>> origin/main
 from utils.logging_adapter import set_request_id
 import uuid
 
