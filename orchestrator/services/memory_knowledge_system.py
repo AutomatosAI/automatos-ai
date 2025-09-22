@@ -1165,7 +1165,11 @@ class LearningEngine:
                     "task_type": task_type,
                     "learning_curve": [],
                     "improvement": 0,
-                    "current_success_rate": 0.5
+                    "current_success_rate": 0.5,
+                    "average_success_rate": 0.0,
+                    "average_execution_time": 0.0,
+                    "total_learning_events": 0,
+                    "confidence": 0.0
                 }
             
             # Build learning curve
@@ -1199,6 +1203,64 @@ class LearningEngine:
                 "total_learning_events": len(outcomes),
                 "confidence": outcomes[-1].confidence if outcomes else 0
             }
+    
+    async def transfer_learning(
+        self,
+        from_agent_id: int,
+        to_agent_id: int,
+        knowledge_domain: str = None
+    ) -> Dict[str, Any]:
+        """
+        Transfer learning outcomes and knowledge from one agent to another.
+        
+        Args:
+            from_agent_id: Source agent ID
+            to_agent_id: Target agent ID
+            knowledge_domain: Optional domain filter
+            
+        Returns:
+            Dictionary with transfer results
+        """
+        async with self.session_maker() as session:
+            transferred = {
+                "patterns": 0,
+                "memories": 0,
+                "strategies": 0
+            }
+            
+            # Step 1: Transfer learning outcomes
+            query = select(LearningOutcome).filter(
+                LearningOutcome.agent_id == from_agent_id
+            )
+            
+            if knowledge_domain:
+                query = query.filter(LearningOutcome.task_type == knowledge_domain)
+            
+            query = query.filter(LearningOutcome.confidence > 0.7)
+            
+            result = await session.execute(query)
+            outcomes = result.scalars().all()
+            
+            for outcome in outcomes:
+                new_outcome = LearningOutcome(
+                    agent_id=to_agent_id,
+                    task_type=outcome.task_type,
+                    learned_pattern=outcome.learned_pattern,
+                    success_rate_before=0.5,  # Reset baseline for new agent
+                    success_rate_after=outcome.success_rate_after * 0.9,
+                    execution_time_before=0,
+                    execution_time_after=outcome.execution_time_after,
+                    confidence=outcome.confidence * 0.8
+                )
+                session.add(new_outcome)
+                transferred["strategies"] += 1
+            
+            await session.commit()
+            
+            logger.info(f"Transferred knowledge from agent {from_agent_id} to {to_agent_id}: "
+                       f"{transferred['strategies']} strategies")
+        
+        return transferred
 
 
 # Integration with existing systems

@@ -670,10 +670,8 @@ BEGIN
     END IF;
 END $$;
 
--- Fix 3: Add embedding column to memory_items table (384 dimensions for OpenAI)
-ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(384);
-ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS memory_level VARCHAR(50) DEFAULT 'working';
-ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id);
+-- Fix 3: Ensure memory_items table has correct structure (handled by main table definition)
+-- The memory_items table is properly defined above with all required columns
 
 -- Fix 4: Create performance indexes for memory operations
 CREATE INDEX IF NOT EXISTS idx_memory_items_embedding ON memory_items USING ivfflat (embedding vector_cosine_ops);
