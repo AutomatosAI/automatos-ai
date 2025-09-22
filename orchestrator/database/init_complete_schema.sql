@@ -672,7 +672,6 @@ END $$;
 
 -- Fix 3: Ensure memory_items table has correct structure (handled by main table definition)
 -- The memory_items table is properly defined above with all required columns
-
 -- Fix 4: Create performance indexes for memory operations
 CREATE INDEX IF NOT EXISTS idx_memory_items_embedding ON memory_items USING ivfflat (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes USING ivfflat (embedding vector_cosine_ops);
