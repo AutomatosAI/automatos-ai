@@ -65,7 +65,7 @@ class MemoryItem(Base):
     last_access = Column(DateTime, default=datetime.now)
     decay_rate = Column(Float, default=0.1)
     associations = Column(ARRAY(String), default=[])  # Related memory IDs
-    metadata = Column(JSON, default={})
+    meta_data = Column('metadata', JSON, default={})
     created_at = Column(DateTime, default=datetime.now)
     
     # Performance tracking
@@ -86,7 +86,7 @@ class KnowledgeNode(Base):
     embedding = Column(Vector(384))
     importance = Column(Float, default=0.5)
     confidence = Column(Float, default=0.5)
-    metadata = Column(JSON, default={})
+    meta_data = Column('metadata', JSON, default={})
     created_at = Column(DateTime, default=datetime.now)
 
 
@@ -130,18 +130,26 @@ class HierarchicalMemorySystem:
         self,
         redis_host: str = "localhost",
         redis_port: int = 6379,
+        redis_password: str = None,
         postgres_url: str = None,
         openai_api_key: str = None
     ):
         # Redis for working memory with TTL
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            decode_responses=True
-        )
+        redis_kwargs = {
+            "host": redis_host,
+            "port": redis_port,
+            "decode_responses": True
+        }
+        if redis_password:
+            redis_kwargs["password"] = redis_password
+        
+        self.redis_client = redis.Redis(**redis_kwargs)
         
         # PostgreSQL with pgvector for persistent memory
         if postgres_url:
+            # Convert postgresql:// to postgresql+asyncpg:// for async support
+            if postgres_url.startswith("postgresql://"):
+                postgres_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
             self.engine = create_async_engine(postgres_url, echo=False)
             self.async_session = sessionmaker(
                 self.engine, class_=AsyncSession, expire_on_commit=False
@@ -492,7 +500,7 @@ class HierarchicalMemorySystem:
                     # Mark source memories as consolidated
                     for memory in pattern["memories"]:
                         memory.memory_level = MemoryLevel.LONG_TERM
-                        memory.metadata["consolidated"] = True
+                        memory.meta_data["consolidated"] = True
                     
                     logger.info(f"Consolidated {len(pattern['memories'])} memories into knowledge pattern")
             
@@ -1051,7 +1059,7 @@ class LearningEngine:
             
             if knowledge_domain:
                 pattern_query = pattern_query.filter(
-                    MemoryItem.metadata["pattern_type"].astext == knowledge_domain
+                    MemoryItem.meta_data["pattern_type"].astext == knowledge_domain
                 )
             
             result = await session.execute(pattern_query)
@@ -1067,7 +1075,7 @@ class LearningEngine:
                     importance=pattern.importance * 0.9,  # Slightly lower for transferred knowledge
                     embedding=pattern.embedding,
                     metadata={
-                        **pattern.metadata,
+                        **pattern.meta_data,
                         "transferred_from": from_agent_id,
                         "transfer_date": datetime.now().isoformat()
                     }
@@ -1094,7 +1102,7 @@ class LearningEngine:
                     importance=memory.importance * 0.85,
                     embedding=memory.embedding,
                     metadata={
-                        **memory.metadata,
+                        **memory.meta_data,
                         "transferred_from": from_agent_id
                     }
                 )
@@ -1157,7 +1165,11 @@ class LearningEngine:
                     "task_type": task_type,
                     "learning_curve": [],
                     "improvement": 0,
-                    "current_success_rate": 0.5
+                    "current_success_rate": 0.5,
+                    "average_success_rate": 0.0,
+                    "average_execution_time": 0.0,
+                    "total_learning_events": 0,
+                    "confidence": 0.0
                 }
             
             # Build learning curve
@@ -1191,6 +1203,64 @@ class LearningEngine:
                 "total_learning_events": len(outcomes),
                 "confidence": outcomes[-1].confidence if outcomes else 0
             }
+    
+    async def transfer_learning(
+        self,
+        from_agent_id: int,
+        to_agent_id: int,
+        knowledge_domain: str = None
+    ) -> Dict[str, Any]:
+        """
+        Transfer learning outcomes and knowledge from one agent to another.
+        
+        Args:
+            from_agent_id: Source agent ID
+            to_agent_id: Target agent ID
+            knowledge_domain: Optional domain filter
+            
+        Returns:
+            Dictionary with transfer results
+        """
+        async with self.session_maker() as session:
+            transferred = {
+                "patterns": 0,
+                "memories": 0,
+                "strategies": 0
+            }
+            
+            # Step 1: Transfer learning outcomes
+            query = select(LearningOutcome).filter(
+                LearningOutcome.agent_id == from_agent_id
+            )
+            
+            if knowledge_domain:
+                query = query.filter(LearningOutcome.task_type == knowledge_domain)
+            
+            query = query.filter(LearningOutcome.confidence > 0.7)
+            
+            result = await session.execute(query)
+            outcomes = result.scalars().all()
+            
+            for outcome in outcomes:
+                new_outcome = LearningOutcome(
+                    agent_id=to_agent_id,
+                    task_type=outcome.task_type,
+                    learned_pattern=outcome.learned_pattern,
+                    success_rate_before=0.5,  # Reset baseline for new agent
+                    success_rate_after=outcome.success_rate_after * 0.9,
+                    execution_time_before=0,
+                    execution_time_after=outcome.execution_time_after,
+                    confidence=outcome.confidence * 0.8
+                )
+                session.add(new_outcome)
+                transferred["strategies"] += 1
+            
+            await session.commit()
+            
+            logger.info(f"Transferred knowledge from agent {from_agent_id} to {to_agent_id}: "
+                       f"{transferred['strategies']} strategies")
+        
+        return transferred
 
 
 # Integration with existing systems
