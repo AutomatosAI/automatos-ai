@@ -8,7 +8,12 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Activity } from 'lucide-react'
 
-export function ActivityHeatmap() {
+interface ActivityHeatmapProps {
+  activityData?: any
+  agents?: any[]
+}
+
+export function ActivityHeatmap({ activityData = {}, agents = [] }: ActivityHeatmapProps) {
   const [heatmapData, setHeatmapData] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(false)
 

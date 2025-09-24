@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { 
@@ -24,6 +24,13 @@ import {
   Target,
   BarChart3
 } from 'lucide-react'
+
+// Import PRD06 widgets
+import { ContextOptimizationPanel } from './widgets/context-optimization-panel'
+import { LearningProgressChart } from './widgets/learning-progress-chart'
+import { AgentStatusGrid } from './widgets/agent-status-grid'
+import { TaskExecutionTimeline } from './widgets/task-execution-timeline'
+import { ActivityHeatmap } from './widgets/activity-heatmap'
 
 interface DashboardData {
   systemHealth?: {
@@ -71,7 +78,7 @@ interface DashboardData {
   timestamp?: string
 }
 
-export function EnhancedDashboard() {
+export function Dashboard() {
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -80,19 +87,28 @@ export function EnhancedDashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const response = await fetch('/api/analytics/dashboard/overview')
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
+        // Fetch all real data endpoints in parallel
+        const [overview, context, learning, health] = await Promise.all([
+          fetch('/api/analytics/dashboard/overview').then(r => r.json()),
+          fetch('/api/analytics/context').then(r => r.json()),
+          fetch('/api/analytics/learning').then(r => r.json()),
+          fetch('/api/analytics/system/health').then(r => r.json())
+        ])
         
-        const result = await response.json()
-        setData(result)
+        // Combine all real data
+        setData({
+          ...overview,
+          contextMetrics: context,
+          learningMetrics: learning,
+          systemHealth: health
+        })
         setError(null)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data')
@@ -104,9 +120,56 @@ export function EnhancedDashboard() {
 
     fetchData()
     
-    // Auto-refresh every 30 seconds
+    // Set up WebSocket for real-time updates
+    const connectWebSocket = () => {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+        const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`
+        
+        wsRef.current = new WebSocket(wsUrl)
+        
+        wsRef.current.onopen = () => {
+          console.log('Dashboard WebSocket connected')
+        }
+        
+        wsRef.current.onmessage = (event) => {
+          try {
+            const update = JSON.parse(event.data)
+            console.log('Real-time update:', update)
+            
+            // Refresh data on updates
+            if (update.type === 'metrics_update' || update.type === 'agent_update') {
+              fetchData()
+            }
+          } catch (err) {
+            console.error('WebSocket message error:', err)
+          }
+        }
+        
+        wsRef.current.onerror = (error) => {
+          console.error('WebSocket error:', error)
+        }
+        
+        wsRef.current.onclose = () => {
+          console.log('WebSocket disconnected, reconnecting...')
+          setTimeout(connectWebSocket, 5000)
+        }
+      } catch (err) {
+        console.error('WebSocket connection error:', err)
+      }
+    }
+    
+    connectWebSocket()
+    
+    // Fallback polling every 30 seconds
     const interval = setInterval(fetchData, 30000)
-    return () => clearInterval(interval)
+    
+    return () => {
+      clearInterval(interval)
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
   }, [])
 
   if (loading) {
@@ -363,11 +426,73 @@ export function EnhancedDashboard() {
           </motion.div>
         </div>
 
+        {/* PRD06 Widgets Section 1: Context Optimization & Learning Progress */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={inView ? { opacity: 1, x: 0 } : {}}
+            transition={{ duration: 0.8, delay: 0.4 }}
+          >
+            <ContextOptimizationPanel 
+              contextData={data?.contextMetrics || {}}
+              overview={data || {}}
+            />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={inView ? { opacity: 1, x: 0 } : {}}
+            transition={{ duration: 0.8, delay: 0.5 }}
+          >
+            <LearningProgressChart 
+              learningData={data?.learningMetrics || {}}
+              overview={data || {}}
+            />
+          </motion.div>
+        </div>
+
+        {/* PRD06 Widget: Agent Status Grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={inView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.8, delay: 0.6 }}
+        >
+          <AgentStatusGrid 
+            agentMetrics={data?.agentMetrics || {}}
+            agents={data?.agents || []}
+          />
+        </motion.div>
+
+        {/* PRD06 Widgets Section 2: Task Execution & Activity Heatmap */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={inView ? { opacity: 1, x: 0 } : {}}
+            transition={{ duration: 0.8, delay: 0.7 }}
+          >
+            <TaskExecutionTimeline 
+              tasks={data?.recentTasks || []}
+              workflows={data?.workflowMetrics || {}}
+            />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={inView ? { opacity: 1, x: 0 } : {}}
+            transition={{ duration: 0.8, delay: 0.8 }}
+          >
+            <ActivityHeatmap 
+              activityData={data?.activityData || {}}
+              agents={data?.agents || []}
+            />
+          </motion.div>
+        </div>
+
         {/* Database & Service Status */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={inView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8, delay: 0.4 }}
+          transition={{ duration: 0.8, delay: 0.9 }}
           className="bg-gradient-to-br from-gray-800/40 to-gray-900/40 backdrop-blur-sm border border-gray-600/30 rounded-xl p-6"
         >
           <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">

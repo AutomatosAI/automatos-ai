@@ -32,21 +32,22 @@ import {
   Legend
 } from 'recharts'
 
-interface ContextData {
-  total_optimizations: number
-  avg_tokens_saved: number
-  total_tokens_saved: number
-  avg_information_density: number
-  compression_ratio: number
-  optimization_success_rate: number
-  patterns_used: Record<string, number>
-}
-
 interface ContextOptimizationPanelProps {
-  data: ContextData
+  contextData: any
+  overview: any
 }
 
-export function ContextOptimizationPanel({ data }: ContextOptimizationPanelProps) {
+export function ContextOptimizationPanel({ contextData, overview }: ContextOptimizationPanelProps) {
+  // Map API response to expected structure
+  const data = {
+    total_optimizations: contextData?.totalOptimizations || 0,
+    avg_tokens_saved: contextData?.tokensSaved ? Math.floor(contextData.tokensSaved / Math.max(contextData.totalOptimizations, 1)) : 0,
+    total_tokens_saved: contextData?.tokensSaved || 0,
+    avg_information_density: contextData?.efficiency || 0,
+    compression_ratio: contextData?.avgCompressionRatio || 1.0,
+    optimization_success_rate: contextData?.efficiency || 0,
+    patterns_used: contextData?.patterns_used || {}
+  };
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h')
   const [trendData, setTrendData] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(false)

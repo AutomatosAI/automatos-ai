@@ -38,6 +38,13 @@ import { Progress } from '@/components/ui/progress'
 import { ResponsiveContainer, LineChart as RechartsLineChart, Line, XAxis, YAxis, Tooltip, Legend, AreaChart, Area, BarChart as RechartsBarChart, Bar, PieChart as RechartsPieChart, Pie, Cell } from 'recharts'
 import { performanceService, type PerformanceMetrics, type SystemPerformanceData, type CostAnalysisData, type AgentUtilizationData, type SystemAlert } from '@/lib/performance-service'
 
+// Import PRD06 widgets
+import { ContextOptimizationPanel } from '@/components/dashboard/widgets/context-optimization-panel'
+import { LearningProgressChart } from '@/components/dashboard/widgets/learning-progress-chart'
+import { AgentStatusGrid } from '@/components/dashboard/widgets/agent-status-grid'
+import { TaskExecutionTimeline } from '@/components/dashboard/widgets/task-execution-timeline'
+import { ActivityHeatmap } from '@/components/dashboard/widgets/activity-heatmap'
+
 // Performance metrics interface
 interface EnhancedAnalyticsData {
   cost_analysis: {
@@ -475,7 +482,7 @@ export function EnhancedPerformanceAnalytics() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="system" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="system" className="flex items-center space-x-2">
               <Cpu className="w-4 h-4" />
               <span className="hidden sm:inline">System</span>
@@ -495,6 +502,10 @@ export function EnhancedPerformanceAnalytics() {
             <TabsTrigger value="optimization" className="flex items-center space-x-2">
               <Target className="w-4 h-4" />
               <span className="hidden sm:inline">Optimization</span>
+            </TabsTrigger>
+            <TabsTrigger value="prd06" className="flex items-center space-x-2">
+              <Activity className="w-4 h-4" />
+              <span className="hidden sm:inline">PRD06</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1134,6 +1145,73 @@ export function EnhancedPerformanceAnalytics() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          {/* PRD06 Features Tab */}
+          <TabsContent value="prd06" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Context Optimization Panel */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6 }}
+              >
+                <ContextOptimizationPanel 
+                  contextData={enhancedAnalytics?.context_optimization || {}}
+                  overview={enhancedAnalytics || {}}
+                />
+              </motion.div>
+
+              {/* Learning Progress Chart */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6 }}
+              >
+                <LearningProgressChart 
+                  learningData={enhancedAnalytics?.learning_metrics || {}}
+                  overview={enhancedAnalytics || {}}
+                />
+              </motion.div>
+            </div>
+
+            {/* Agent Status Grid */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+            >
+              <AgentStatusGrid 
+                agentMetrics={enhancedAnalytics?.agent_metrics || {}}
+                agents={enhancedAnalytics?.agents || []}
+              />
+            </motion.div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Task Execution Timeline */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+              >
+                <TaskExecutionTimeline 
+                  tasks={enhancedAnalytics?.recent_tasks || []}
+                  workflows={enhancedAnalytics?.workflow_metrics || {}}
+                />
+              </motion.div>
+
+              {/* Activity Heatmap */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+              >
+                <ActivityHeatmap 
+                  activityData={enhancedAnalytics?.activity_patterns || {}}
+                  agents={enhancedAnalytics?.agents || []}
+                />
+              </motion.div>
+            </div>
           </TabsContent>
         </Tabs>
       </motion.div>

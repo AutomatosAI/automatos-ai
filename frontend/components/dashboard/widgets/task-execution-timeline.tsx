@@ -21,10 +21,22 @@ interface TaskData {
 }
 
 interface TaskExecutionTimelineProps {
-  data: TaskData
+  tasks?: any[]
+  workflows?: any
 }
 
-export function TaskExecutionTimeline({ data }: TaskExecutionTimelineProps) {
+export function TaskExecutionTimeline({ tasks = [], workflows = {} }: TaskExecutionTimelineProps) {
+  // Map API response to expected structure
+  const data: TaskData = {
+    total_tasks: workflows?.totalWorkflows || 0,
+    completed_tasks: workflows?.completedWorkflows || 0,
+    failed_tasks: workflows?.totalWorkflows - workflows?.completedWorkflows - workflows?.pendingWorkflows || 0,
+    pending_tasks: workflows?.pendingWorkflows || 0,
+    avg_completion_time: workflows?.avgExecutionTime || 0,
+    decomposition_depth: 3,
+    subtask_success_rate: workflows?.successRate || 0,
+    collaboration_efficiency: workflows?.completionRate || 0
+  };
   const completionRate = data.total_tasks > 0 
     ? (data.completed_tasks / data.total_tasks * 100)
     : 0

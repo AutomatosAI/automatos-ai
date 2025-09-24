@@ -33,10 +33,11 @@ interface Agent {
 }
 
 interface AgentStatusGridProps {
-  agents: Agent[]
+  agentMetrics: any
+  agents?: any[]
 }
 
-export function AgentStatusGrid({ agents }: AgentStatusGridProps) {
+export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridProps) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<'activity' | 'performance' | 'tokens'>('activity')
 
