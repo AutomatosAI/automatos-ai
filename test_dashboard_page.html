@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRD06 Dashboard Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .metric { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+        .loading { background: #fff3e0; color: #f57c00; }
+    </style>
+</head>
+<body>
+    <h1>🚀 PRD06 Dashboard Test</h1>
+    <p>Testing the new analytics API integration...</p>
+    
+    <div id="status" class="metric loading">Loading dashboard data...</div>
+    
+    <div id="metrics"></div>
+    
+    <div id="websocket-status" class="metric loading">Testing WebSocket connection...</div>
+
+    <script>
+        // Test Analytics API
+        async function testDashboardAPI() {
+            try {
+                const response = await fetch('http://206.81.0.227:8000/api/analytics/dashboard/overview');
+                const data = await response.json();
+                
+                document.getElementById('status').innerHTML = '✅ Dashboard API Connected Successfully!';
+                document.getElementById('status').className = 'metric success';
+                
+                // Display metrics
+                const metricsDiv = document.getElementById('metrics');
+                metricsDiv.innerHTML = `
+                    <h2>📊 Real-time Metrics</h2>
+                    <div class="metric">
+                        <h3>System Health</h3>
+                        <p>CPU: ${data.systemHealth.cpuUsage}%</p>
+                        <p>Memory: ${data.systemHealth.memoryUsage}%</p>
+                        <p>Disk: ${data.systemHealth.diskUsage}%</p>
+                        <p>Database: ${data.systemHealth.databaseStatus}</p>
+                        <p>Redis: ${data.systemHealth.redisStatus}</p>
+                    </div>
+                    <div class="metric">
+                        <h3>Agent Metrics</h3>
+                        <p>Active Agents: ${data.agentMetrics.activeAgents}/${data.agentMetrics.totalAgents}</p>
+                        <p>Success Rate: ${data.agentMetrics.successRate}%</p>
+                    </div>
+                    <div class="metric">
+                        <h3>Workflow Metrics</h3>
+                        <p>Total Workflows: ${data.workflowMetrics.totalWorkflows}</p>
+                        <p>Total Executions: ${data.workflowMetrics.totalExecutions}</p>
+                    </div>
+                `;
+                
+            } catch (error) {
+                document.getElementById('status').innerHTML = `❌ API Error: ${error.message}`;
+                document.getElementById('status').className = 'metric error';
+            }
+        }
+        
+        // Test WebSocket
+        function testWebSocket() {
+            try {
+                const ws = new WebSocket('ws://206.81.0.227:8000/ws/dashboard');
+                
+                ws.onopen = function() {
+                    document.getElementById('websocket-status').innerHTML = '✅ WebSocket Connected Successfully!';
+                    document.getElementById('websocket-status').className = 'metric success';
+                };
+                
+                ws.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message:', data);
+                    
+                    if (data.type === 'initial_state') {
+                        document.getElementById('websocket-status').innerHTML = 
+                            '✅ WebSocket Connected - Received initial state data!';
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    document.getElementById('websocket-status').innerHTML = `❌ WebSocket Error: ${error}`;
+                    document.getElementById('websocket-status').className = 'metric error';
+                };
+                
+                ws.onclose = function() {
+                    document.getElementById('websocket-status').innerHTML = '🔌 WebSocket Connection Closed';
+                };
+                
+            } catch (error) {
+                document.getElementById('websocket-status').innerHTML = `❌ WebSocket Error: ${error.message}`;
+                document.getElementById('websocket-status').className = 'metric error';
+            }
+        }
+        
+        // Run tests
+        testDashboardAPI();
+        testWebSocket();
+    </script>
+</body>
+</html>

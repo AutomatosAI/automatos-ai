@@ -3,16 +3,6 @@ const nextConfig = {
   typescript: { 
     ignoreBuildErrors: true 
   },
-  logging: {
-    fetches: {
-      fullUrl: true
-    }
-  },
-  experimental: {
-    logging: {
-      level: 'verbose'
-    }
-  },
   async rewrites() {
     return [
       {

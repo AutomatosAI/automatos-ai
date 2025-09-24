@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a1a; color: white; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .metric-card { background: #2a2a2a; padding: 20px; margin: 10px; border-radius: 8px; display: inline-block; width: 200px; }
+        .metric-value { font-size: 24px; font-weight: bold; color: #4ade80; }
+        .metric-label { color: #9ca3af; margin-top: 5px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #065f46; color: #10b981; }
+        .error { background: #7f1d1d; color: #ef4444; }
+        .info { background: #1e3a8a; color: #3b82f6; }
+        pre { background: #374151; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Automatos AI Dashboard - PRD06 Live Test</h1>
+        
+        <div id="status" class="status info">Testing connection...</div>
+        
+        <h2>📊 Real-Time Metrics</h2>
+        <div id="metrics"></div>
+        
+        <h2>🔧 System Health</h2>
+        <div id="system-health"></div>
+        
+        <h2>📈 Raw API Response</h2>
+        <pre id="raw-data"></pre>
+    </div>
+    
+    <script>
+        const statusDiv = document.getElementById('status');
+        const metricsDiv = document.getElementById('metrics');
+        const systemHealthDiv = document.getElementById('system-health');
+        const rawDataDiv = document.getElementById('raw-data');
+        
+        function log(message, type = 'info') {
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            console.log(message);
+        }
+        
+        async function testDashboard() {
+            try {
+                log('🔄 Fetching dashboard data from PRD06 analytics API...', 'info');
+                
+                const response = await fetch('http://206.81.0.227:8000/api/analytics/dashboard/overview');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                log('✅ Dashboard API connected successfully!', 'success');
+                
+                // Display raw data
+                rawDataDiv.textContent = JSON.stringify(data, null, 2);
+                
+                // Display metrics
+                const metrics = `
+                    <div class="metric-card">
+                        <div class="metric-value">${data.agentMetrics.activeAgents}/${data.agentMetrics.totalAgents}</div>
+                        <div class="metric-label">Active Agents</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.workflowMetrics.totalWorkflows}</div>
+                        <div class="metric-label">Total Workflows</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.workflowMetrics.totalExecutions}</div>
+                        <div class="metric-label">Total Executions</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.agentMetrics.successRate.toFixed(1)}%</div>
+                        <div class="metric-label">Success Rate</div>
+                    </div>
+                `;
+                metricsDiv.innerHTML = metrics;
+                
+                // Display system health
+                const systemHealth = `
+                    <div class="metric-card">
+                        <div class="metric-value">${data.systemHealth.cpuUsage.toFixed(1)}%</div>
+                        <div class="metric-label">CPU Usage</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.systemHealth.memoryUsage.toFixed(1)}%</div>
+                        <div class="metric-label">Memory Usage</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.systemHealth.diskUsage.toFixed(1)}%</div>
+                        <div class="metric-label">Disk Usage</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${data.systemHealth.databaseStatus}</div>
+                        <div class="metric-label">Database Status</div>
+                    </div>
+                `;
+                systemHealthDiv.innerHTML = systemHealth;
+                
+                log('🎉 Dashboard is working perfectly! All PRD06 features are live.', 'success');
+                
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+                console.error('Dashboard test failed:', error);
+            }
+        }
+        
+        // Test WebSocket connection
+        function testWebSocket() {
+            try {
+                log('🔄 Testing WebSocket connection...', 'info');
+                const ws = new WebSocket('ws://206.81.0.227:8000/ws/dashboard');
+                
+                ws.onopen = () => {
+                    log('✅ WebSocket connected successfully!', 'success');
+                };
+                
+                ws.onmessage = (event) => {
+                    log('📡 WebSocket message received: ' + event.data.substring(0, 100) + '...', 'success');
+                };
+                
+                ws.onerror = (error) => {
+                    log('❌ WebSocket error: ' + error, 'error');
+                };
+                
+                ws.onclose = () => {
+                    log('🔌 WebSocket connection closed', 'info');
+                };
+                
+            } catch (error) {
+                log(`❌ WebSocket error: ${error.message}`, 'error');
+            }
+        }
+        
+        // Run tests
+        testDashboard();
+        setTimeout(testWebSocket, 2000);
+        
+        // Refresh every 30 seconds
+        setInterval(testDashboard, 30000);
+    </script>
+</body>
+</html>

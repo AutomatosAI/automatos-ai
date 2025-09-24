@@ -1,421 +1,140 @@
 """
-Dashboard Real-time Update Service
-===================================
-
-Bridges Redis pub/sub events with WebSocket connections for live dashboard updates.
-Listens to agent, task, memory, and collaboration events.
+PRD-06: Real-time Dashboard Updates
+WebSocket handler for live dashboard updates
 """
 
 import asyncio
 import json
 import logging
-from datetime import datetime
-from typing import Dict, Any, Optional, Set
+from typing import Set, Dict, Any
+from fastapi import WebSocket, WebSocketDisconnect
 import redis.asyncio as redis
-from sqlalchemy.orm import Session
-
-from services.websocket_manager import ConnectionManager
-from services.analytics_engine import AnalyticsEngine
-from config import Config
 
 logger = logging.getLogger(__name__)
 
-class DashboardRealtimeService:
+class DashboardWebSocketManager:
     """
-    Service that listens to Redis events and broadcasts dashboard updates
+    Manages WebSocket connections for real-time dashboard updates
     """
     
-    def __init__(
-        self, 
-        connection_manager: ConnectionManager,
-        redis_client: redis.Redis,
-        db_session: Session
-    ):
-        self.connection_manager = connection_manager
-        self.redis = redis_client
-        self.db = db_session
-        self.analytics_engine = AnalyticsEngine(db_session, redis_client)
-        self.active = False
-        self.listeners: Set[asyncio.Task] = set()
-        self.update_queue = asyncio.Queue()
-        self.batch_interval = 1.0  # Batch updates every second
+    def __init__(self, redis_client: redis.Redis = None):
+        self.active_connections: Set[WebSocket] = set()
+        self.redis_client = redis_client
+        self.pubsub = None
+        self.is_running = False
     
-    async def start(self):
-        """Start the real-time update service"""
-        if self.active:
+    async def connect(self, websocket: WebSocket):
+        """Accept a new WebSocket connection"""
+        await websocket.accept()
+        self.active_connections.add(websocket)
+        logger.info(f"Dashboard WebSocket connected. Total connections: {len(self.active_connections)}")
+        
+        # Send initial dashboard state
+        try:
+            from services.analytics_engine import AnalyticsEngine
+            analytics = AnalyticsEngine()
+            initial_data = await analytics.get_dashboard_overview()
+            
+            await websocket.send_json({
+                "type": "initial_state",
+                "data": initial_data
+            })
+        except Exception as e:
+            logger.error(f"Error sending initial state: {e}")
+            await websocket.send_json({
+                "type": "error",
+                "message": "Failed to load initial dashboard data"
+            })
+    
+    async def disconnect(self, websocket: WebSocket):
+        """Remove a WebSocket connection"""
+        self.active_connections.discard(websocket)
+        logger.info(f"Dashboard WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def broadcast_update(self, update: Dict[str, Any]):
+        """Broadcast an update to all connected clients"""
+        if not self.active_connections:
             return
         
-        self.active = True
-        logger.info("Starting Dashboard Real-time Service")
+        message = json.dumps(update)
+        disconnected = set()
         
-        # Start Redis listeners
-        self.listeners.add(asyncio.create_task(self._listen_agent_events()))
-        self.listeners.add(asyncio.create_task(self._listen_task_events()))
-        self.listeners.add(asyncio.create_task(self._listen_memory_events()))
-        self.listeners.add(asyncio.create_task(self._listen_collaboration_events()))
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                logger.warning(f"Failed to send update to WebSocket: {e}")
+                disconnected.add(connection)
         
-        # Start update broadcaster
-        self.listeners.add(asyncio.create_task(self._broadcast_updates()))
-        
-        logger.info("Dashboard Real-time Service started")
+        # Remove disconnected connections
+        for connection in disconnected:
+            self.active_connections.discard(connection)
     
-    async def stop(self):
-        """Stop the real-time update service"""
-        if not self.active:
+    async def start_redis_listener(self):
+        """Start listening to Redis pub/sub for updates"""
+        if not self.redis_client:
+            logger.warning("No Redis client available for real-time updates")
             return
         
-        self.active = False
-        logger.info("Stopping Dashboard Real-time Service")
-        
-        # Cancel all listeners
-        for task in self.listeners:
-            task.cancel()
-        
-        # Wait for tasks to complete
-        await asyncio.gather(*self.listeners, return_exceptions=True)
-        self.listeners.clear()
-        
-        logger.info("Dashboard Real-time Service stopped")
-    
-    async def _listen_agent_events(self):
-        """Listen for agent events from Redis"""
         try:
-            pubsub = self.redis.pubsub()
-            await pubsub.subscribe("agent:*")
+            self.pubsub = self.redis_client.pubsub()
+            await self.pubsub.subscribe("dashboard_updates")
+            self.is_running = True
             
-            async for message in pubsub.listen():
-                if not self.active:
-                    break
-                
-                if message["type"] == "pmessage" or message["type"] == "message":
-                    try:
-                        # Parse agent event
-                        channel = message["channel"].decode() if isinstance(message["channel"], bytes) else message["channel"]
-                        data = json.loads(message["data"]) if isinstance(message["data"], (str, bytes)) else message["data"]
-                        
-                        if "agent:" in channel:
-                            event_type = channel.split(":")[-1]
-                            await self._handle_agent_event(event_type, data)
-                    
-                    except Exception as e:
-                        logger.error(f"Error processing agent event: {e}")
+            logger.info("Started Redis listener for dashboard updates")
             
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Agent event listener error: {e}")
-        finally:
-            await pubsub.unsubscribe()
-            await pubsub.close()
-    
-    async def _listen_task_events(self):
-        """Listen for task events from Redis"""
-        try:
-            pubsub = self.redis.pubsub()
-            await pubsub.subscribe("task:created", "task:assigned", "task:completed", "task:failed")
-            
-            async for message in pubsub.listen():
-                if not self.active:
+            async for message in self.pubsub.listen():
+                if not self.is_running:
                     break
                 
                 if message["type"] == "message":
                     try:
-                        channel = message["channel"].decode() if isinstance(message["channel"], bytes) else message["channel"]
-                        data = json.loads(message["data"]) if isinstance(message["data"], (str, bytes)) else message["data"]
-                        
-                        event_type = channel.split(":")[-1]
-                        await self._handle_task_event(event_type, data)
-                    
+                        update_data = json.loads(message["data"])
+                        await self.broadcast_update(update_data)
                     except Exception as e:
-                        logger.error(f"Error processing task event: {e}")
-            
-        except asyncio.CancelledError:
-            pass
+                        logger.error(f"Error processing Redis message: {e}")
+        
         except Exception as e:
-            logger.error(f"Task event listener error: {e}")
+            logger.error(f"Error in Redis listener: {e}")
         finally:
-            await pubsub.unsubscribe()
-            await pubsub.close()
+            if self.pubsub:
+                await self.pubsub.unsubscribe("dashboard_updates")
+                await self.pubsub.close()
     
-    async def _listen_memory_events(self):
-        """Listen for memory consolidation events from Redis"""
-        try:
-            pubsub = self.redis.pubsub()
-            await pubsub.subscribe("memory:created", "memory:consolidated", "memory:promoted")
-            
-            async for message in pubsub.listen():
-                if not self.active:
-                    break
+    async def stop_redis_listener(self):
+        """Stop the Redis listener"""
+        self.is_running = False
+        if self.pubsub:
+            await self.pubsub.close()
+        logger.info("Stopped Redis listener")
+    
+    async def send_periodic_updates(self):
+        """Send periodic updates to all connected clients"""
+        while self.is_running and self.active_connections:
+            try:
+                from services.analytics_engine import AnalyticsEngine
+                analytics = AnalyticsEngine()
+                metrics = await analytics.get_real_time_metrics()
                 
-                if message["type"] == "message":
-                    try:
-                        channel = message["channel"].decode() if isinstance(message["channel"], bytes) else message["channel"]
-                        data = json.loads(message["data"]) if isinstance(message["data"], (str, bytes)) else message["data"]
-                        
-                        event_type = channel.split(":")[-1]
-                        await self._handle_memory_event(event_type, data)
-                    
-                    except Exception as e:
-                        logger.error(f"Error processing memory event: {e}")
-            
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Memory event listener error: {e}")
-        finally:
-            await pubsub.unsubscribe()
-            await pubsub.close()
-    
-    async def _listen_collaboration_events(self):
-        """Listen for collaboration events from Redis"""
-        try:
-            pubsub = self.redis.pubsub()
-            await pubsub.subscribe("collaboration:started", "collaboration:message", "collaboration:completed")
-            
-            async for message in pubsub.listen():
-                if not self.active:
-                    break
+                await self.broadcast_update({
+                    "type": "periodic_update",
+                    "data": metrics
+                })
                 
-                if message["type"] == "message":
-                    try:
-                        channel = message["channel"].decode() if isinstance(message["channel"], bytes) else message["channel"]
-                        data = json.loads(message["data"]) if isinstance(message["data"], (str, bytes)) else message["data"]
-                        
-                        event_type = channel.split(":")[-1]
-                        await self._handle_collaboration_event(event_type, data)
-                    
-                    except Exception as e:
-                        logger.error(f"Error processing collaboration event: {e}")
-            
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Collaboration event listener error: {e}")
-        finally:
-            await pubsub.unsubscribe()
-            await pubsub.close()
-    
-    async def _handle_agent_event(self, event_type: str, data: Dict[str, Any]):
-        """Process agent events and queue updates"""
-        update = {
-            "type": "agent_update",
-            "event": event_type,
-            "data": {
-                "agent_id": data.get("agent_id"),
-                "agent_name": data.get("agent_name"),
-                "status": data.get("status"),
-                "tokens_used": data.get("tokens_used", 0),
-                "execution_time": data.get("execution_time", 0),
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-        await self.update_queue.put(update)
-        
-        # If critical event, get fresh metrics
-        if event_type in ["execution_completed", "status_changed"]:
-            await self._queue_metric_refresh("agents")
-    
-    async def _handle_task_event(self, event_type: str, data: Dict[str, Any]):
-        """Process task events and queue updates"""
-        update = {
-            "type": "task_update",
-            "event": event_type,
-            "data": {
-                "task_id": data.get("task_id"),
-                "task_name": data.get("task_name"),
-                "status": event_type,
-                "agent_id": data.get("agent_id"),
-                "subtask_count": data.get("subtask_count", 0),
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-        await self.update_queue.put(update)
-        
-        # Queue metric refresh for task metrics
-        await self._queue_metric_refresh("tasks")
-    
-    async def _handle_memory_event(self, event_type: str, data: Dict[str, Any]):
-        """Process memory events and queue updates"""
-        update = {
-            "type": "memory_update",
-            "event": event_type,
-            "data": {
-                "memory_id": data.get("memory_id"),
-                "memory_level": data.get("memory_level"),
-                "importance": data.get("importance", 0),
-                "agent_id": data.get("agent_id"),
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-        await self.update_queue.put(update)
-        
-        # Queue metric refresh for memory metrics
-        if event_type in ["consolidated", "promoted"]:
-            await self._queue_metric_refresh("memory")
-    
-    async def _handle_collaboration_event(self, event_type: str, data: Dict[str, Any]):
-        """Process collaboration events and queue updates"""
-        update = {
-            "type": "collaboration_update",
-            "event": event_type,
-            "data": {
-                "session_id": data.get("session_id"),
-                "participants": data.get("participants", []),
-                "session_type": data.get("session_type"),
-                "status": event_type,
-                "timestamp": datetime.now().isoformat()
-            }
-        }
-        
-        await self.update_queue.put(update)
-        
-        # Queue metric refresh for collaboration metrics
-        await self._queue_metric_refresh("collaboration")
-    
-    async def _queue_metric_refresh(self, metric_type: str):
-        """Queue a metric refresh update"""
-        update = {
-            "type": "metric_refresh",
-            "metric": metric_type,
-            "timestamp": datetime.now().isoformat()
-        }
-        await self.update_queue.put(update)
-    
-    async def _broadcast_updates(self):
-        """Batch and broadcast updates to connected clients"""
-        batch = []
-        last_broadcast = datetime.now()
-        
-        try:
-            while self.active:
-                try:
-                    # Collect updates for batching
-                    timeout = self.batch_interval - (datetime.now() - last_broadcast).total_seconds()
-                    if timeout <= 0:
-                        timeout = 0.1
-                    
-                    update = await asyncio.wait_for(
-                        self.update_queue.get(),
-                        timeout=timeout
-                    )
-                    batch.append(update)
-                    
-                except asyncio.TimeoutError:
-                    pass
+                # Wait 30 seconds before next update
+                await asyncio.sleep(30)
                 
-                # Broadcast if we have updates and interval has passed
-                if batch and (datetime.now() - last_broadcast).total_seconds() >= self.batch_interval:
-                    # Process metric refreshes
-                    metrics_to_refresh = set()
-                    events = []
-                    
-                    for update in batch:
-                        if update["type"] == "metric_refresh":
-                            metrics_to_refresh.add(update["metric"])
-                        else:
-                            events.append(update)
-                    
-                    # Get fresh metrics if needed
-                    fresh_metrics = {}
-                    if metrics_to_refresh:
-                        fresh_metrics = await self._get_fresh_metrics(metrics_to_refresh)
-                    
-                    # Broadcast combined update
-                    broadcast_data = {
-                        "type": "dashboard_batch_update",
-                        "events": events,
-                        "metrics": fresh_metrics,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    
-                    await self.connection_manager.broadcast(broadcast_data)
-                    
-                    # Clear batch and reset timer
-                    batch.clear()
-                    last_broadcast = datetime.now()
-                    
-                    logger.debug(f"Broadcasted {len(events)} events and {len(fresh_metrics)} metric updates")
-        
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Broadcast error: {e}")
+            except Exception as e:
+                logger.error(f"Error in periodic updates: {e}")
+                await asyncio.sleep(30)
     
-    async def _get_fresh_metrics(self, metric_types: Set[str]) -> Dict[str, Any]:
-        """Get fresh metrics for specified types"""
-        metrics = {}
-        
-        try:
-            if "agents" in metric_types:
-                agent_metrics = await self.analytics_engine.get_agent_metrics()
-                metrics["agents"] = {
-                    "total": len(agent_metrics),
-                    "active": len([a for a in agent_metrics if a.status == "active"]),
-                    "total_executions": sum(a.execution_count for a in agent_metrics),
-                    "total_tokens": sum(a.total_tokens_used for a in agent_metrics)
-                }
-            
-            if "tasks" in metric_types:
-                task_metrics = await self.analytics_engine.get_task_metrics()
-                metrics["tasks"] = {
-                    "total": task_metrics.total_tasks,
-                    "completed": task_metrics.completed_tasks,
-                    "pending": task_metrics.pending_tasks,
-                    "avg_completion_time": task_metrics.avg_completion_time
-                }
-            
-            if "memory" in metric_types:
-                memory_metrics = await self.analytics_engine.get_memory_metrics()
-                metrics["memory"] = {
-                    "total": memory_metrics.total_memories,
-                    "consolidation_rate": memory_metrics.consolidation_rate,
-                    "knowledge_nodes": memory_metrics.knowledge_nodes,
-                    "growth_rate": memory_metrics.memory_growth_rate
-                }
-            
-            if "collaboration" in metric_types:
-                collab_metrics = await self.analytics_engine.get_collaboration_metrics()
-                metrics["collaboration"] = {
-                    "active_sessions": collab_metrics.active_sessions,
-                    "total_sessions": collab_metrics.total_sessions,
-                    "success_rate": collab_metrics.collaboration_success_rate
-                }
-            
-        except Exception as e:
-            logger.error(f"Error getting fresh metrics: {e}")
-        
-        return metrics
+    async def get_connection_count(self) -> int:
+        """Get the number of active connections"""
+        return len(self.active_connections)
 
+# Global WebSocket manager instance
+websocket_manager = DashboardWebSocketManager()
 
-# Global instance
-dashboard_realtime_service: Optional[DashboardRealtimeService] = None
-
-async def initialize_realtime_service(
-    connection_manager: ConnectionManager,
-    redis_client: redis.Redis,
-    db_session: Session
-) -> DashboardRealtimeService:
-    """Initialize the dashboard real-time service"""
-    global dashboard_realtime_service
-    
-    if not dashboard_realtime_service:
-        dashboard_realtime_service = DashboardRealtimeService(
-            connection_manager,
-            redis_client,
-            db_session
-        )
-        await dashboard_realtime_service.start()
-    
-    return dashboard_realtime_service
-
-async def shutdown_realtime_service():
-    """Shutdown the dashboard real-time service"""
-    global dashboard_realtime_service
-    
-    if dashboard_realtime_service:
-        await dashboard_realtime_service.stop()
-        dashboard_realtime_service = None
-
+async def get_websocket_manager() -> DashboardWebSocketManager:
+    """Get the global WebSocket manager instance"""
+    return websocket_manager

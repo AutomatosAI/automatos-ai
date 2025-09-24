@@ -678,7 +678,113 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_embedding ON knowledge_nodes USIN
 CREATE INDEX IF NOT EXISTS idx_learning_outcomes_task_type ON learning_outcomes(task_type);
 CREATE INDEX IF NOT EXISTS idx_memory_items_agent_memory_level ON memory_items(agent_id, memory_level);
 
--- Update schema version for PRD-05 fixes
+-- =====================================================
+-- PRD-06 DASHBOARD & ANALYTICS TABLES
+-- Real-time monitoring and analytics support
+-- =====================================================
+
+-- Dashboard configurations
+CREATE TABLE IF NOT EXISTS dashboard_configs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    config_name VARCHAR(255) NOT NULL,
+    layout JSONB DEFAULT '{}',
+    widgets JSONB DEFAULT '[]',
+    refresh_rate INTEGER DEFAULT 30,
+    is_default BOOLEAN DEFAULT false,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Analytics snapshots for historical data
+CREATE TABLE IF NOT EXISTS analytics_snapshots (
+    id SERIAL PRIMARY KEY,
+    snapshot_type VARCHAR(50) NOT NULL,
+    metrics JSONB NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    INDEX idx_analytics_snapshots_type_time (snapshot_type, timestamp)
+);
+
+-- Alert configurations
+CREATE TABLE IF NOT EXISTS alert_configs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    metric_type VARCHAR(100) NOT NULL,
+    threshold_value FLOAT NOT NULL,
+    comparison_operator VARCHAR(10) NOT NULL CHECK (comparison_operator IN ('>', '<', '>=', '<=', '=', '!=')),
+    alert_channel VARCHAR(50) DEFAULT 'dashboard',
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Custom metrics definitions
+CREATE TABLE IF NOT EXISTS custom_metrics (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    metric_name VARCHAR(255) NOT NULL,
+    calculation_query TEXT,
+    visualization_type VARCHAR(50) DEFAULT 'line',
+    refresh_interval INTEGER DEFAULT 60,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Real-time system metrics
+CREATE TABLE IF NOT EXISTS system_metrics (
+    id SERIAL PRIMARY KEY,
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value FLOAT NOT NULL,
+    metric_unit VARCHAR(20),
+    recorded_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_system_metrics_name_time (metric_name, recorded_at)
+);
+
+-- Agent performance tracking for analytics
+CREATE TABLE IF NOT EXISTS agent_performance_tracking (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER REFERENCES agents(id),
+    task_id INTEGER REFERENCES tasks(id),
+    execution_time FLOAT NOT NULL,
+    tokens_used INTEGER DEFAULT 0,
+    success BOOLEAN NOT NULL,
+    error_message TEXT,
+    context_optimization_applied BOOLEAN DEFAULT false,
+    memory_items_created INTEGER DEFAULT 0,
+    collaboration_sessions INTEGER DEFAULT 0,
+    recorded_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_agent_performance_agent_time (agent_id, recorded_at),
+    INDEX idx_agent_performance_success (success, recorded_at)
+);
+
+-- Context optimization metrics
+CREATE TABLE IF NOT EXISTS context_optimization_metrics (
+    id SERIAL PRIMARY KEY,
+    original_tokens INTEGER NOT NULL,
+    optimized_tokens INTEGER NOT NULL,
+    compression_ratio FLOAT GENERATED ALWAYS AS (optimized_tokens::FLOAT / original_tokens) STORED,
+    tokens_saved INTEGER GENERATED ALWAYS AS (original_tokens - optimized_tokens) STORED,
+    optimization_type VARCHAR(50) NOT NULL,
+    pattern_used VARCHAR(100),
+    execution_time FLOAT,
+    recorded_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_context_opt_time (recorded_at),
+    INDEX idx_context_opt_type (optimization_type)
+);
+
+-- Learning progress tracking
+CREATE TABLE IF NOT EXISTS learning_progress_tracking (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER REFERENCES agents(id),
+    knowledge_items INTEGER DEFAULT 0,
+    memory_consolidations INTEGER DEFAULT 0,
+    performance_improvement FLOAT DEFAULT 0.0,
+    knowledge_transfers INTEGER DEFAULT 0,
+    recorded_at TIMESTAMP DEFAULT NOW(),
+    INDEX idx_learning_progress_agent_time (agent_id, recorded_at)
+);
+
+-- Update schema version for PRD-06
 INSERT INTO schema_versions (version, description) 
-VALUES ('1.1.1', 'PRD-05 Memory System Fixes: columns, vectors, indexes')
+VALUES ('1.2.0', 'PRD-06 Dashboard & Analytics: monitoring, alerts, real-time metrics')
 ON CONFLICT DO NOTHING;

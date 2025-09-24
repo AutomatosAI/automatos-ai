@@ -43,6 +43,13 @@ from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
 
+# Import Dashboard Integration (PRD-06)
+from api.dashboard_integration import (
+    register_dashboard_routes,
+    startup_dashboard,
+    shutdown_dashboard
+)
+
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
 from utils.logging_adapter import (
@@ -67,14 +74,23 @@ async def lifespan(app: FastAPI):
     try:
         init_database()
         logger.info("Database initialized successfully")
+        
+        # Initialize Dashboard Services (PRD-06)
+        await startup_dashboard(app)
+        logger.info("Dashboard services initialized successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize services: {e}")
         raise
     
     yield
     
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
+    
+    # Shutdown Dashboard Services (PRD-06)
+    await shutdown_dashboard(app)
+    logger.info("Dashboard services shutdown complete")
 
 # Create FastAPI app with enhanced documentation
 app = FastAPI(
@@ -275,6 +291,9 @@ app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
+
+# Register Dashboard Routes (PRD-06)
+register_dashboard_routes(app)
 
 # Include legacy routes (from existing api_routes.py)
 try:

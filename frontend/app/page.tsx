@@ -1,10 +1,10 @@
 import { MainLayout } from '@/components/layout/main-layout'
-import { EnhancedDashboard } from '@/components/dashboard/enhanced-dashboard'
+import { Dashboard } from '@/components/dashboard/dashboard'
 
 export default function Home() {
   return (
     <MainLayout>
-      <EnhancedDashboard />
+      <Dashboard />
     </MainLayout>
   )
 }
