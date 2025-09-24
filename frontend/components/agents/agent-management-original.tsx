@@ -19,6 +19,9 @@ import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
 import { useAgents, useAgentStats } from '@/hooks/use-agent-api'
 
 export function AgentManagement() {
+  // Fetch agents and stats data
+  const { data: agents = [], isLoading: agentsLoading } = useAgents()
+  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [ref, inView] = useInView({
