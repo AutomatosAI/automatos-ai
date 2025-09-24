@@ -6,7 +6,7 @@ import { useInView } from 'react-intersection-observer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AgentRoster } from './agent-roster'
 import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
-import { AgentDetailPanel } from '@/components/agents/agent-detail-panel'
+import { AgentDetailsPanel } from '@/components/agents/agent-details-panel'
 import { AgentRunsPanel } from '@/components/agents/agent-runs-panel'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentPerformance } from './agent-performance'
@@ -16,8 +16,12 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
+import { useAgents, useAgentStats } from '@/hooks/use-agent-api'
 
 export function AgentManagement() {
+  // Fetch agents and stats data
+  const { data: agents = [], isLoading: agentsLoading } = useAgents()
+  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [ref, inView] = useInView({
@@ -206,7 +210,13 @@ export function AgentManagement() {
           </TabsList>
 
           <TabsContent value="multi-agent" className="space-y-6">
-            <AgentPerformance />
+            <AgentPerformance 
+              agents={agents}
+              agentStats={agentStats}
+              selectedAgentId={selectedAgentId}
+              onAgentSelect={setSelectedAgentId}
+              showAnalytics={true}
+            />
           </TabsContent>
 
           <TabsContent value="roster" className="space-y-6">
@@ -251,7 +261,7 @@ export function AgentManagement() {
 
       {/* Agent Detail Panel */}
       {selectedAgentId && (
-        <AgentDetailPanel 
+        <AgentDetailsPanel 
           agentId={selectedAgentId}
           onClose={() => setSelectedAgentId(null)}
         />
