@@ -22,13 +22,13 @@ import {
 } from 'lucide-react'
 
 // Import all tab components
-import { RealAgentRoster } from './real-agent-roster'
-import { RealAgentSkills } from './real-agent-skills'
-import { RealAgentConfiguration } from './real-agent-configuration'
-import { RealAgentCoordination } from './real-agent-coordination'
-import { RealAgentPerformance } from './real-agent-performance'
-import { CreateAgentModal } from './create-agent-modal'
-import { RealAgentDetailsPanel } from './real-agent-details-panel'
+import { AgentRoster } from './agent-roster'
+import { AgentSkills } from './agent-skills'
+import { AgentConfiguration } from './agent-configuration'
+import { AgentCoordination } from './agent-coordination'
+import { AgentPerformance } from './agent-performance'
+import { AgentCreateModal } from './agent-create-modal'
+import { AgentDetailsPanel } from './agent-details-panel'
 
 // API hooks for real data
 import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
@@ -251,7 +251,7 @@ export function EnhancedAgentManagement() {
 
           {/* Agent Roster Tab */}
           <TabsContent value="roster" className="space-y-6">
-            <RealAgentRoster
+            <AgentRoster
               agents={agents}
               loading={agentsLoading}
               searchTerm={searchTerm}
@@ -264,7 +264,7 @@ export function EnhancedAgentManagement() {
 
           {/* Skills Tab */}
           <TabsContent value="skills" className="space-y-6">
-            <RealAgentSkills
+            <AgentSkills
               agents={agents}
               selectedAgentId={selectedAgentId}
               onAgentSelect={setSelectedAgentId}
@@ -273,7 +273,7 @@ export function EnhancedAgentManagement() {
 
           {/* Configuration Tab */}
           <TabsContent value="configuration" className="space-y-6">
-            <RealAgentConfiguration
+            <AgentConfiguration
               agents={agents}
               selectedAgentId={selectedAgentId}
               onAgentSelect={setSelectedAgentId}
@@ -282,7 +282,7 @@ export function EnhancedAgentManagement() {
 
           {/* Coordination Tab */}
           <TabsContent value="coordination" className="space-y-6">
-            <RealAgentCoordination
+            <AgentCoordination
               agents={agents}
               selectedAgentId={selectedAgentId}
             />
@@ -290,7 +290,7 @@ export function EnhancedAgentManagement() {
 
           {/* Performance Tab */}
           <TabsContent value="performance" className="space-y-6">
-            <RealAgentPerformance
+            <AgentPerformance
               onAgentSelect={setSelectedAgentId}
               agents={agents}
               agentStats={agentStats}
@@ -300,7 +300,7 @@ export function EnhancedAgentManagement() {
 
           {/* Analytics Tab */}
           <TabsContent value="analytics" className="space-y-6">
-            <RealAgentPerformance
+            <AgentPerformance
               onAgentSelect={setSelectedAgentId}
               agents={agents}
               agentStats={agentStats}
@@ -313,7 +313,7 @@ export function EnhancedAgentManagement() {
 
       {/* Agent Details Panel */}
       {mounted && selectedAgentId && (
-        <RealAgentDetailsPanel
+        <AgentDetailsPanel
           agent={agents.find(a => a.id === selectedAgentId) || null} open={!!selectedAgentId}
           onClose={() => setSelectedAgentId(null)}
           onConfigure={() => {
@@ -324,7 +324,7 @@ export function EnhancedAgentManagement() {
       )}
 
       {/* Create Agent Modal */}
-      <CreateAgentModal
+      <AgentCreateModal
         open={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSuccess={() => {

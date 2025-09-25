@@ -38,7 +38,7 @@ const agentTypeIcons: Record<string, string> = {
 }
 
 // Real agent data from API - no more mock data
-interface RealAgent extends Agent {
+interface AgentWithPerformance extends Agent {
   performance?: number
   tasksCompleted?: number
   specializations?: string[]

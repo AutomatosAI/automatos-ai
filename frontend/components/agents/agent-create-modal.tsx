@@ -38,7 +38,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { useCreateAgent } from '@/hooks/use-agent-api'
 
-interface RealAgentCreateModalProps {
+interface AgentCreateModalProps {
   open: boolean
   onClose: () => void
 }
@@ -58,7 +58,7 @@ interface AgentTemplate {
   badge?: string
 }
 
-export function RealAgentCreateModal({ open, onClose }: RealAgentCreateModalProps) {
+export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
   const [step, setStep] = useState(1)
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplate | null>(null)
   const [formData, setFormData] = useState({
