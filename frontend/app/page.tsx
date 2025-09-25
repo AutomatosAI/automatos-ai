@@ -1,10 +1,10 @@
 import { MainLayout } from '@/components/layout/main-layout'
-import { SimpleDashboard } from '@/components/dashboard/simple-dashboard'
+import { Dashboard } from '@/components/dashboard/dashboard'
 
 export default function Home() {
   return (
     <MainLayout>
-      <SimpleDashboard />
+      <Dashboard />
     </MainLayout>
   )
 }
