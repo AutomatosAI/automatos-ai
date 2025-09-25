@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useSystemActivities } from '@/hooks/use-api'
 
 interface ActivityItem {
   id: string
@@ -30,12 +31,9 @@ interface ActivityItem {
   metadata?: Record<string, any>
 }
 
-interface ActivityFeedProps {
-  activities: any
-  isLoading: boolean
-}
-
-export function ActivityFeed({ activities, isLoading }: ActivityFeedProps) {
+export function ActivityFeed() {
+  // Use real API hook
+  const { data: activities, isLoading } = useSystemActivities()
   const getActivityIcon = (type: string, status: string) => {
     if (status === 'error') return AlertCircle
     if (status === 'success') return CheckCircle
@@ -112,39 +110,8 @@ export function ActivityFeed({ activities, isLoading }: ActivityFeedProps) {
   }
 
   // Process real activities data
-  const processedActivities: ActivityItem[] = activities?.data || []
-
-  // If no real data, create some example activities based on system state
-  const fallbackActivities: ActivityItem[] = [
-    {
-      id: '1',
-      type: 'system',
-      title: 'System initialization completed',
-      description: 'All services are running normally',
-      timestamp: new Date().toISOString(),
-      status: 'success'
-    },
-    {
-      id: '2', 
-      type: 'agent',
-      title: 'Agent orchestration active',
-      description: '904 agents currently managed',
-      timestamp: new Date(Date.now() - 300000).toISOString(),
-      status: 'info'
-    },
-    {
-      id: '3',
-      type: 'system',
-      title: 'Dashboard connected to APIs',
-      description: 'Real-time data streaming active',
-      timestamp: new Date(Date.now() - 600000).toISOString(),
-      status: 'success'
-    }
-  ]
-
-  const displayActivities = processedActivities.length > 0 
-    ? processedActivities.slice(0, 8) 
-    : fallbackActivities
+  const processedActivities: ActivityItem[] = activities || []
+  const displayActivities = processedActivities.slice(0, 8)
 
   return (
     <Card className="glass-card">

@@ -34,7 +34,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { apiClient } from '@/lib/api'
+// API hooks
+import { useAgent, useUpdateAgentConfig } from '@/hooks/use-agent-api'
 
 interface AgentStatusControlModalProps {
   agentId: number | null
@@ -95,88 +96,32 @@ export function AgentStatusControlModal({
   onClose, 
   onStatusChanged 
 }: AgentStatusControlModalProps) {
-  const [loading, setLoading] = useState(false)
-  const [updating, setUpdating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [impactAnalysis, setImpactAnalysis] = useState<AgentImpactAnalysis | null>(null)
   const [targetStatus, setTargetStatus] = useState<string>('')
   const [shutdownType, setShutdownType] = useState<string>('graceful')
   const [confirmations, setConfirmations] = useState<string[]>([])
 
-  useEffect(() => {
-    if (open && agentId) {
-      loadImpactAnalysis()
-    }
-  }, [open, agentId, targetStatus])
+  // API hooks
+  const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentId?.toString())
+  const updateAgentMutation = useUpdateAgentConfig()
 
-  const loadImpactAnalysis = async () => {
-    if (!agentId || !targetStatus) return
-    
-    setLoading(true)
-    setError(null)
-    
-    try {
-      // Try to fetch real impact analysis
-      const analysis = await apiClient.request<AgentImpactAnalysis>(`/api/agents/${agentId}/impact-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_status: targetStatus })
-      })
-      
-      setImpactAnalysis(analysis)
-    } catch (err) {
-      console.log('API not available, using mock data')
-      
-      // Generate mock impact analysis for demonstration
-      const mockAnalysis: AgentImpactAnalysis = {
-        agent_id: agentId,
-        agent_name: `Agent-${agentId}`,
-        current_status: currentStatus,
-        proposed_status: targetStatus,
-        impact_analysis: {
-          active_workflows: [
-            {
-              id: 1,
-              name: 'Code Analysis Pipeline',
-              priority: 'high',
-              estimated_completion: '15 minutes',
-              status: 'running'
-            },
-            {
-              id: 2,
-              name: 'Security Audit Process',
-              priority: 'medium',
-              estimated_completion: '45 minutes',
-              status: 'queued'
-            }
-          ],
-          queued_tasks: Math.floor(Math.random() * 20) + 5,
-          dependent_agents: [
-            {
-              id: 101,
-              name: 'DocumentProcessor',
-              dependency_type: 'workflow_coordination'
-            },
-            {
-              id: 102,
-              name: 'SecurityValidator',
-              dependency_type: 'skill_sharing'
-            }
-          ],
-          system_impact: {
-            performance_degradation: targetStatus === 'inactive' ? 15 : 5,
-            availability_impact: targetStatus === 'inactive' ? 'High' : 'Low',
-            recovery_time_estimate: targetStatus === 'inactive' ? '5-10 minutes' : '1-2 minutes'
-          },
-          recommendations: generateRecommendations(currentStatus, targetStatus)
-        }
-      }
-      
-      setImpactAnalysis(mockAnalysis)
-    } finally {
-      setLoading(false)
+  // Generate impact analysis based on current agent data
+  const impactAnalysis: AgentImpactAnalysis | null = agent && targetStatus ? {
+    agent_id: agentId!,
+    agent_name: agent.name || `Agent-${agentId}`,
+    current_status: currentStatus,
+    proposed_status: targetStatus,
+    impact_analysis: {
+      active_workflows: agent.active_workflows || [],
+      queued_tasks: agent.queued_tasks || 0,
+      dependent_agents: agent.dependent_agents || [],
+      system_impact: {
+        performance_degradation: targetStatus === 'inactive' ? 15 : 5,
+        availability_impact: targetStatus === 'inactive' ? 'High' : 'Low',
+        recovery_time_estimate: targetStatus === 'inactive' ? '5-10 minutes' : '1-2 minutes'
+      },
+      recommendations: generateRecommendations(currentStatus, targetStatus)
     }
-  }
+  } : null
 
   const generateRecommendations = (current: string, target: string): Array<{ type: 'warning' | 'info' | 'critical', message: string }> => {
     const recommendations = []
@@ -254,9 +199,6 @@ export function AgentStatusControlModal({
   const handleConfirmStatusChange = async () => {
     if (!agentId || !targetStatus) return
     
-    setUpdating(true)
-    setError(null)
-    
     try {
       const payload: any = { 
         status: targetStatus 
@@ -266,10 +208,9 @@ export function AgentStatusControlModal({
         payload.shutdown_type = shutdownType
       }
       
-      await apiClient.request(`/api/agents/${agentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      await updateAgentMutation.mutateAsync({
+        agentId: agentId.toString(),
+        config: payload
       })
       
       if (onStatusChanged) {
@@ -280,9 +221,6 @@ export function AgentStatusControlModal({
       
     } catch (err) {
       console.error('Error updating agent status:', err)
-      setError(err instanceof Error ? err?.message : 'Failed to update agent status')
-    } finally {
-      setUpdating(false)
     }
   }
 
@@ -406,12 +344,12 @@ export function AgentStatusControlModal({
             {/* Impact Analysis */}
             {targetStatus && (
               <>
-                {loading ? (
+                {agentLoading ? (
                   <Card className="bg-secondary/30 border-border/30">
                     <CardContent className="py-8">
                       <div className="text-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                        <p className="text-muted-foreground">Analyzing impact...</p>
+                        <p className="text-muted-foreground">Loading agent data...</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -597,14 +535,14 @@ export function AgentStatusControlModal({
                       </Button>
                       <Button 
                         onClick={handleConfirmStatusChange}
-                        disabled={!canProceed() || updating}
+                        disabled={!canProceed() || updateAgentMutation.isPending}
                         className={`${
                           targetStatus === 'inactive' ? 'bg-red-600 hover:bg-red-700' : 
                           targetStatus === 'maintenance' ? 'bg-yellow-600 hover:bg-yellow-700' :
                           'bg-primary hover:bg-primary/90'
                         }`}
                       >
-                        {updating ? (
+                        {updateAgentMutation.isPending ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
                             Updating...
@@ -624,12 +562,14 @@ export function AgentStatusControlModal({
                       </Button>
                     </div>
 
-                    {error && (
+                    {(agentError || updateAgentMutation.error) && (
                       <Card className="bg-red-500/10 border-red-500/20">
                         <CardContent className="py-4">
                           <div className="flex items-center space-x-2">
                             <AlertTriangle className="w-5 h-5 text-red-400" />
-                            <p className="text-red-400 text-sm">{error}</p>
+                            <p className="text-red-400 text-sm">
+                              {agentError?.message || updateAgentMutation.error?.message || 'An error occurred'}
+                            </p>
                           </div>
                         </CardContent>
                       </Card>

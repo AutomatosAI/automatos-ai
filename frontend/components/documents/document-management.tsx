@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { 
@@ -31,7 +31,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
-import { apiClient, Document } from '@/lib/api'
+// API hooks
+import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -70,205 +71,79 @@ const typeIcons: Record<string, any> = {
 export function DocumentManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
-  // Real data state
-  const [realDocuments, setRealDocuments] = useState<BackendDocument[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [stats, setStats] = useState([
-    {
-      label: 'Total Documents',
-      value: '0',
-      change: '+0 this month',
-      icon: FileText,
-      color: 'text-blue-400'
-    },
-    {
-      label: 'Processed',
-      value: '0',
-      change: '0% success rate',
-      icon: Database,
-      color: 'text-green-400'
-    },
-    {
-      label: 'Storage Used',
-      value: '0 GB',
-      change: '+0 GB this week',
-      icon: FolderOpen,
-      color: 'text-orange-400'
-    },
-    {
-      label: 'Vector Chunks',
-      value: '0',
-      change: '+0 chunks',
-      icon: Database,
-      color: 'text-purple-400'
-    }
-  ])
+  // API hooks
+  const { data: documents = [], isLoading: loading, error } = useDocuments()
+  const { data: documentStats } = useDocumentStats()
+  const uploadDocumentMutation = useUploadDocument()
+  const deleteDocumentMutation = useDeleteDocument()
+  
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   })
 
-  // Fetch real documents from API
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      try {
-        setLoading(true)
-        const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-        setRealDocuments(documents)
-        
-        // Calculate real stats from backend data
-        const totalDocs = documents.length
-        const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
-        const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
-        const sizeInMB = totalSizeBytes / (1024 * 1024)
-        const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
-        
-        setStats([
-          {
-            label: 'Total Documents',
-            value: totalDocs.toString(),
-            change: `+${Math.max(0, totalDocs - 2)} this month`,
-            icon: FileText,
-            color: 'text-blue-400'
-          },
-          {
-            label: 'Processed',
-            value: processedDocs.toString(),
-            change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
-            icon: Database,
-            color: 'text-green-400'
-          },
-          {
-            label: 'Storage Used',
-            value: sizeDisplay,
-            change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
-            icon: FolderOpen,
-            color: 'text-orange-400'
-          },
-          {
-            label: 'Vector Chunks',
-            value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
-            change: '',
-            icon: Database,
-            color: 'text-purple-400'
-          }
-        ])
-        
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch documents')
-        console.error('Error fetching documents:', err)
-      } finally {
-        setLoading(false)
+  // Calculate stats from real API data
+  const stats = useMemo(() => {
+    const totalDocs = documents.length
+    const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
+    const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
+    const sizeInMB = totalSizeBytes / (1024 * 1024)
+    const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
+    
+    return [
+      {
+        label: 'Total Documents',
+        value: totalDocs.toString(),
+        change: `+${Math.max(0, totalDocs - 2)} this month`,
+        icon: FileText,
+        color: 'text-blue-400'
+      },
+      {
+        label: 'Processed',
+        value: processedDocs.toString(),
+        change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
+        icon: Database,
+        color: 'text-green-400'
+      },
+      {
+        label: 'Storage Used',
+        value: sizeDisplay,
+        change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
+        icon: FolderOpen,
+        color: 'text-orange-400'
+      },
+      {
+        label: 'Vector Chunks',
+        value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
+        change: '',
+        icon: Database,
+        color: 'text-purple-400'
       }
-    }
-
-    fetchDocuments()
-  }, [])
+    ]
+  }, [documents])
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return
 
-    setIsUploading(true)
-    setUploadProgress(0)
-
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-
-        // Simulate upload progress
-        const interval = setInterval(() => {
-          setUploadProgress(prev => {
-            if (prev >= 90) {
-              clearInterval(interval)
-              return 90
-            }
-            return prev + 10
-          })
-        }, 200)
-
-        // Upload to backend API (multipart/form-data -> /api/documents/upload)
-        const uploadRes = await apiClient.uploadDocument(file, { description: '', tags: [] })
-
-        clearInterval(interval)
-        setUploadProgress(100)
-
-        console.log('Upload result:', uploadRes)
-
-        // Small delay to show completion
-        await new Promise(resolve => setTimeout(resolve, 500))
+        await uploadDocumentMutation.mutateAsync({ 
+          file, 
+          metadata: { description: '', tags: [] } 
+        })
       }
-
-      // Reset state after successful upload and refresh documents
-      setTimeout(async () => {
-        setIsUploading(false)
-        setUploadProgress(0)
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ''
-        }
-        
-        // Refresh documents list
-        try {
-          const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-          if (Array.isArray(documents)) {
-            setRealDocuments(documents)
-            
-            // Recalculate stats
-            const totalDocs = documents.length
-            const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
-            
-            // Calculate total storage (bytes)
-            const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
-            const sizeInMB = totalSizeBytes / (1024 * 1024)
-            const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
-            
-            setStats([
-              {
-                label: 'Total Documents',
-                value: totalDocs.toString(),
-                change: `+${Math.max(0, totalDocs - 2)} this month`,
-                icon: FileText,
-                color: 'text-blue-400'
-              },
-              {
-                label: 'Processed',
-                value: processedDocs.toString(),
-                change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
-                icon: Database,
-                color: 'text-green-400'
-              },
-              {
-                label: 'Storage Used',
-                value: sizeDisplay,
-                change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
-                icon: FolderOpen,
-                color: 'text-orange-400'
-              },
-              {
-                label: 'Vector Chunks',
-                value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
-                change: '',
-                icon: Database,
-                color: 'text-purple-400'
-              }
-            ])
-          }
-        } catch (error) {
-          console.error('Error refreshing documents:', error)
-        }
-      }, 1000)
-
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
     } catch (error) {
+      // Error handled by mutation hook
       console.error('Upload error:', error)
-      setIsUploading(false)
-      setUploadProgress(0)
-      setError('Failed to upload document. Please try again.')
     }
   }
 
@@ -302,8 +177,13 @@ export function DocumentManagement() {
   // Core User Functions - Following Testing Rules
   const handleViewDetails = async (documentId: number) => {
     try {
-      const document = await apiClient.request<BackendDocument>(`/api/documents/${documentId}`)
-      alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+      // Find document in current list
+      const document = documents.find(doc => doc.id === documentId)
+      if (document) {
+        alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+      } else {
+        alert('Document not found')
+      }
     } catch (error) {
       console.error('Error viewing document details:', error)
       alert('Error loading document details')
@@ -332,24 +212,14 @@ export function DocumentManagement() {
     }
     
     try {
-      await apiClient.request(`/api/documents/${documentId}`, {
-        method: 'DELETE'
-      })
-      
-      // Refresh documents list after deletion
-      const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-      if (Array.isArray(documents)) {
-        setRealDocuments(documents)
-      }
-      
-      alert('Document deleted successfully')
+      await deleteDocumentMutation.mutateAsync(documentId.toString())
     } catch (error) {
+      // Error handled by mutation hook
       console.error('Error deleting document:', error)
-      alert('Error deleting document')
     }
   }
 
-  const filteredDocuments = realDocuments.filter(doc =>
+  const filteredDocuments = documents.filter(doc =>
     (doc.filename || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -384,10 +254,10 @@ export function DocumentManagement() {
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
+          disabled={uploadDocumentMutation.isPending}
         >
-          <Upload className={`w-4 h-4 mr-2 ${isUploading ? 'animate-spin' : ''}`} />
-          {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload Documents'}
+          <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isPending ? 'animate-spin' : ''}`} />
+          {uploadDocumentMutation.isPending ? 'Uploading...' : 'Upload Documents'}
         </Button>
       </motion.div>
 
@@ -629,18 +499,17 @@ export function DocumentManagement() {
                 >
                   <Upload className={`w-12 h-12 mx-auto mb-4 ${
                     dragActive ? 'text-primary' : 'text-muted-foreground'
-                  } ${isUploading ? 'animate-bounce' : ''}`} />
+                  } ${uploadDocumentMutation.isPending ? 'animate-bounce' : ''}`} />
                   
-                  {isUploading ? (
+                  {uploadDocumentMutation.isPending ? (
                     <div className="space-y-4">
                       <h3 className="text-lg font-semibold">Uploading...</h3>
                       <div className="w-full bg-secondary rounded-full h-2">
                         <div 
-                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${uploadProgress}%` }}
+                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
                         />
                       </div>
-                      <p className="text-sm text-muted-foreground">{uploadProgress}% complete</p>
+                      <p className="text-sm text-muted-foreground">Processing files...</p>
                     </div>
                   ) : (
                     <>
@@ -653,7 +522,7 @@ export function DocumentManagement() {
                       <Button 
                         className="gradient-accent hover:opacity-90"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
+                        disabled={uploadDocumentMutation.isPending}
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         Choose Files

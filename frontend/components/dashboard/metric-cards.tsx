@@ -15,6 +15,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useAgents, useDocuments, useWorkflows, useSystemMetrics } from '@/hooks/use-api'
 
 interface MetricCardProps {
   title: string
@@ -65,21 +66,14 @@ function MetricCard({ title, value, change, changeType, icon: Icon, gradient, ba
   )
 }
 
-interface MetricCardsProps {
-  agents: any
-  documents: any
-  workflows: any
-  systemMetrics: any
-  isLoading: boolean
-}
-
-export function MetricCards({ 
-  agents, 
-  documents, 
-  workflows, 
-  systemMetrics, 
-  isLoading 
-}: MetricCardsProps) {
+export function MetricCards() {
+  // Use real API hooks
+  const { data: agents, isLoading: agentsLoading } = useAgents()
+  const { data: documents, isLoading: documentsLoading } = useDocuments()
+  const { data: workflows, isLoading: workflowsLoading } = useWorkflows()
+  const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
+  
+  const isLoading = agentsLoading || documentsLoading || workflowsLoading || metricsLoading
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

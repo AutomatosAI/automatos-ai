@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { apiClient } from '@/lib/api'
+import { useAgents, useWorkflows, useDocuments } from '@/hooks/use-api'
 
 interface ActivityData {
   time: string;
@@ -15,114 +15,65 @@ interface ActivityData {
 
 export function ActivityChart() {
   const [data, setData] = useState<ActivityData[]>([])
-  const [loading, setLoading] = useState(true)
+  
+  // Use real API hooks
+  const { data: agents, isLoading: agentsLoading } = useAgents()
+  const { data: workflows, isLoading: workflowsLoading } = useWorkflows()
+  const { data: documents, isLoading: documentsLoading } = useDocuments()
+  
+  const loading = agentsLoading || workflowsLoading || documentsLoading
 
-  const generateRealTimeData = async () => {
-    try {
-      // Get current system metrics
-      const systemMetrics = await apiClient.getSystemMetrics()
-      
-      // Get current counts
-      let agentCount = 0
-      let workflowCount = 0
-      let documentCount = 0
-      
-      try {
-        const agents = await apiClient.getAgents()
-        agentCount = agents.filter(agent => agent.status === 'active').length
-      } catch (err) {
-        agentCount = 0  // NO FAKE DATA
-      }
-      
-      try {
-        const workflows = await apiClient.getWorkflows()
-        workflowCount = workflows.filter(workflow => workflow.status === 'active').length
-      } catch (err) {
-        workflowCount = 0  // NO FAKE DATA
-      }
-      
-      try {
-        const documents = await apiClient.getDocuments()
-        documentCount = documents.length
-      } catch (err) {
-        documentCount = 0  // NO FAKE DATA  
-      }
+  const generateRealTimeData = () => {
+    // Calculate current counts from real data
+    const agentCount = agents?.filter((agent: any) => agent.status === 'active').length || 0
+    const workflowCount = workflows?.filter((workflow: any) => workflow.status === 'active').length || 0
+    const documentCount = documents?.length || 0
 
-      const now = new Date()
-      const newDataPoint: ActivityData = {
-        time: now.toLocaleTimeString('en-US', { 
-          hour12: false, 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        }),
-        agents: agentCount,
-        workflows: workflowCount,
-        documents: documentCount
-      }
-
-      setData(prevData => {
-        const newData = [...prevData, newDataPoint]
-        // Keep only last 20 data points
-        return newData.slice(-20)
-      })
-      
-    } catch (error) {
-      console.error('Error generating activity data:', error)
-      
-      // Fallback to simulated data if API fails
-      const now = new Date()
-      const newDataPoint: ActivityData = {
-        time: now.toLocaleTimeString('en-US', { 
-          hour12: false, 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        }),
-        agents: 0,
-        workflows: 0,
-        documents: 0
-      }
-
-      setData(prevData => {
-        const newData = [...prevData, newDataPoint]
-        return newData.slice(-20)
-      })
+    const now = new Date()
+    const newDataPoint: ActivityData = {
+      time: now.toLocaleTimeString('en-US', { 
+        hour12: false, 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      }),
+      agents: agentCount,
+      workflows: workflowCount,
+      documents: documentCount
     }
+
+    setData(prevData => {
+      const newData = [...prevData, newDataPoint]
+      // Keep only last 20 data points
+      return newData.slice(-20)
+    })
   }
 
   useEffect(() => {
-    // Initialize with some historical data
-    const initializeData = async () => {
-      setLoading(true)
-      
-      // Generate initial data points
-      const initialData: ActivityData[] = []
-      const now = new Date()
-      
-      for (let i = 19; i >= 0; i--) {
-        const time = new Date(now.getTime() - i * 60000) // Every minute
-        initialData.push({
-          time: time.toLocaleTimeString('en-US', { 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          }),
+    // Initialize with empty data points
+    const initialData: ActivityData[] = []
+    const now = new Date()
+    
+    for (let i = 19; i >= 0; i--) {
+      const time = new Date(now.getTime() - i * 60000) // Every minute
+      initialData.push({
+        time: time.toLocaleTimeString('en-US', { 
+          hour12: false, 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }),
         agents: 0,
         workflows: 0,
         documents: 0
-        })
-      }
-      
-      setData(initialData)
-      setLoading(false)
+      })
     }
-
-    initializeData()
+    
+    setData(initialData)
 
     // Update data every 30 seconds
     const interval = setInterval(generateRealTimeData, 30000)
     
     return () => clearInterval(interval)
-  }, [])
+  }, [agents, workflows, documents])
 
   if (loading) {
     return (

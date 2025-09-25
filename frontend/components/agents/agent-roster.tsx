@@ -25,7 +25,7 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { apiClient, Agent } from '@/lib/api'
+import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
 
 // Agent type icons mapping
 const agentTypeIcons: Record<string, string> = {
@@ -38,7 +38,18 @@ const agentTypeIcons: Record<string, string> = {
 }
 
 // Real agent data from API - no more mock data
-interface AgentWithPerformance extends Agent {
+interface AgentWithPerformance {
+  id: string
+  name: string
+  agent_type: string
+  status: string
+  description?: string
+  created_at?: string
+  skills?: Array<{ id: string; name: string }>
+  performance_metrics?: {
+    success_rate?: number
+    tasks_completed?: number
+  }
   performance?: number
   tasksCompleted?: number
   specializations?: string[]
@@ -58,31 +69,30 @@ const statusIcons: Record<string, any> = {
   maintenance: AlertCircle
 }
 
-export function AgentRoster() {
-  const [searchTerm, setSearchTerm] = useState('')
+interface AgentRosterProps {
+  agents: any[]
+  loading: boolean
+  searchTerm: string
+  statusFilter: string
+  onAgentSelect: (agentId: string | null) => void
+  selectedAgentId: string | null
+  onRefresh: () => void
+}
+
+export function AgentRoster({ 
+  agents, 
+  loading, 
+  searchTerm, 
+  statusFilter, 
+  onAgentSelect, 
+  selectedAgentId, 
+  onRefresh 
+}: AgentRosterProps) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Fetch agents from API
-  useEffect(() => {
-    const fetchAgents = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getAgents()
-        setAgents(data)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch agents')
-        console.error('Error fetching agents:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchAgents()
-  }, [])
+  
+  // Use real API hooks for agent actions
+  const startAgentMutation = useStartAgent()
+  const stopAgentMutation = useStopAgent()
 
   // Context menu handlers
   const handleViewDetails = (agentId: string) => {
@@ -98,36 +108,31 @@ export function AgentRoster() {
     alert(`Opening configuration for agent ${agentId}. This would typically switch to the Configuration tab.`)
   }
 
-  const handleToggleStatus = async (agentId: number, currentStatus: string) => {
+  const handleToggleStatus = async (agentId: string, currentStatus: string) => {
     try {
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
-      const updatedAgent = await apiClient.request(`/api/agents/${agentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
-      })
-      console.log('Agent status updated:', updatedAgent)
+      if (currentStatus === 'active') {
+        await stopAgentMutation.mutateAsync(agentId)
+      } else {
+        await startAgentMutation.mutateAsync(agentId)
+      }
       
-      // Update the local state
-      setAgents(prevAgents => 
-        prevAgents.map((agent: any) => 
-          agent.id === agentId ? { ...agent, status: newStatus } : agent
-        )
-      )
-      
-      alert(`Agent status changed to ${newStatus}`)
+      // Refresh the agents list
+      onRefresh()
       
     } catch (error) {
       console.error('Error updating agent status:', error)
-      alert(`Error updating agent status: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   
-  const filteredAgents = agents.filter(agent =>
-    (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
-  )
+  const filteredAgents = agents.filter(agent => {
+    const matchesSearch = (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
+    
+    const matchesStatus = statusFilter === 'all' || agent.status === statusFilter
+    
+    return matchesSearch && matchesStatus
+  })
 
   if (loading) {
     return (
@@ -135,18 +140,6 @@ export function AgentRoster() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading agents...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
-          <p className="text-red-500 mb-2">Error loading agents</p>
-          <p className="text-sm text-muted-foreground">{error}</p>
         </div>
       </div>
     )
@@ -184,7 +177,7 @@ export function AgentRoster() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
-              onClick={() => setSelectedAgent(agent.id.toString())}
+              onClick={() => onAgentSelect(agent.id.toString())}
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-4">

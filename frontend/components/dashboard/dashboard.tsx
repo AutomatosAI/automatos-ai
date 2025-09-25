@@ -25,6 +25,9 @@ import {
   BarChart3
 } from 'lucide-react'
 
+// Import API hooks
+import { useSystemHealth, useSystemMetrics, useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
+
 // Import PRD06 widgets
 import { ContextOptimizationPanel } from './widgets/context-optimization-panel'
 import { LearningProgressChart } from './widgets/learning-progress-chart'
@@ -82,101 +85,88 @@ export function Dashboard() {
     threshold: 0.1,
   })
 
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  // Use real API hooks
+  const { data: systemHealth, isLoading: healthLoading, error: healthError } = useSystemHealth()
+  const { data: systemMetrics, isLoading: metricsLoading, error: metricsError } = useSystemMetrics()
+  const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents()
+  const { data: documents, isLoading: documentsLoading, error: documentsError } = useDocuments()
+  const { data: workflows, isLoading: workflowsLoading, error: workflowsError } = useWorkflows()
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        
-        // Use mock data for now since API endpoints don't exist
-        const mockData: DashboardData = {
-          systemHealth: {
-            cpuUsage: 45,
-            memoryUsage: 67,
-            diskUsage: 23,
-            databaseStatus: 'healthy',
-            redisStatus: 'healthy',
-            uptime: '7d 12h 34m'
-          },
-          agentMetrics: {
-            activeAgents: 12,
-            totalAgents: 15,
-            successRate: 94.5,
-            avgExecutionTime: 2.3,
-            totalTokensUsed: 125000,
-            recentExecutions: 45
-          },
-          workflowMetrics: {
-            totalWorkflows: 8,
-            completedWorkflows: 6,
-            pendingWorkflows: 2,
-            completionRate: 75,
-            successRate: 88.5,
-            recentWorkflows: 3
-          },
-          contextMetrics: {
-            tokensSaved: 45000,
-            avgCompressionRatio: 2.3,
-            totalOptimizations: 156,
-            efficiency: 87.2
-          },
-          learningMetrics: {
-            totalMemoryItems: 1250,
-            recentMemoryItems: 45,
-            knowledgeNodes: 890,
-            activeCollaborations: 8,
-            totalCollaborations: 23,
-            knowledgeGrowth: 12.5,
-            memoryConsolidations: 34,
-            avgImprovement: 15.8
-          },
-          timestamp: new Date().toISOString()
-        }
+  // Calculate loading and error states
+  const loading = healthLoading || metricsLoading || agentsLoading || documentsLoading || workflowsLoading
+  const error = healthError || metricsError || agentsError || documentsError || workflowsError
 
-        setData(mockData)
-        setError(null)
-      } catch (err) {
-        console.error('Error fetching dashboard data:', err)
-        setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
-      } finally {
-        setLoading(false)
-      }
+  // Process real data into dashboard format
+  const data: DashboardData | null = React.useMemo(() => {
+    if (!systemHealth || !systemMetrics || !agents || !documents || !workflows) {
+      return null
     }
 
-    fetchData()
+    // Calculate agent metrics from real data
+    const activeAgents = agents.filter((agent: any) => agent.status === 'active').length
+    const totalAgents = agents.length
+    const successRate = agents.length > 0 
+      ? agents.reduce((sum: number, agent: any) => sum + (agent.success_rate || 0), 0) / agents.length
+      : 0
+    const avgExecutionTime = agents.length > 0
+      ? agents.reduce((sum: number, agent: any) => sum + (agent.avg_execution_time || 0), 0) / agents.length
+      : 0
+    const totalTokensUsed = agents.reduce((sum: number, agent: any) => sum + (agent.total_tokens_used || 0), 0)
+    const recentExecutions = agents.reduce((sum: number, agent: any) => sum + (agent.execution_count || 0), 0)
 
-    // Set up polling for real-time updates
-    const interval = setInterval(fetchData, 30000) // Update every 30 seconds
+    // Calculate workflow metrics from real data
+    const completedWorkflows = workflows.filter((workflow: any) => workflow.status === 'completed').length
+    const pendingWorkflows = workflows.filter((workflow: any) => workflow.status === 'pending').length
+    const totalWorkflows = workflows.length
+    const completionRate = totalWorkflows > 0 ? (completedWorkflows / totalWorkflows) * 100 : 0
+    const workflowSuccessRate = totalWorkflows > 0
+      ? workflows.reduce((sum: number, workflow: any) => sum + (workflow.success_rate || 0), 0) / totalWorkflows
+      : 0
 
-    // Set up WebSocket connection for real-time updates (when available)
-    try {
-      wsRef.current = new WebSocket('ws://localhost:8080/ws')
-      wsRef.current.onmessage = (event) => {
-        try {
-          const newData = JSON.parse(event.data)
-          setData(newData)
-        } catch (err) {
-          console.error('Error parsing WebSocket data:', err)
-        }
-      }
-      wsRef.current.onerror = (error) => {
-        console.log('WebSocket connection failed, using polling instead')
-      }
-    } catch (err) {
-      console.log('WebSocket not available, using polling instead')
+    return {
+      systemHealth: {
+        cpuUsage: systemMetrics.cpu?.average_usage || 0,
+        memoryUsage: systemMetrics.memory?.percent || 0,
+        diskUsage: systemMetrics.disk?.usage_percent || 0,
+        databaseStatus: systemHealth.database?.status || 'unknown',
+        redisStatus: systemHealth.redis?.status || 'unknown',
+        uptime: systemHealth.uptime || 'unknown'
+      },
+      agentMetrics: {
+        activeAgents,
+        totalAgents,
+        successRate,
+        avgExecutionTime,
+        totalTokensUsed,
+        recentExecutions
+      },
+      workflowMetrics: {
+        totalWorkflows,
+        completedWorkflows,
+        pendingWorkflows,
+        completionRate,
+        successRate: workflowSuccessRate,
+        recentWorkflows: pendingWorkflows
+      },
+      contextMetrics: {
+        tokensSaved: systemMetrics.context_optimization?.tokens_saved || 0,
+        avgCompressionRatio: systemMetrics.context_optimization?.compression_ratio || 1.0,
+        totalOptimizations: systemMetrics.context_optimization?.total_optimizations || 0,
+        efficiency: systemMetrics.context_optimization?.efficiency || 0
+      },
+      learningMetrics: {
+        totalMemoryItems: systemMetrics.learning?.total_memories || 0,
+        recentMemoryItems: systemMetrics.learning?.recent_memories || 0,
+        knowledgeNodes: systemMetrics.learning?.knowledge_nodes || 0,
+        activeCollaborations: systemMetrics.learning?.active_collaborations || 0,
+        totalCollaborations: systemMetrics.learning?.total_collaborations || 0,
+        knowledgeGrowth: systemMetrics.learning?.knowledge_growth || 0,
+        memoryConsolidations: systemMetrics.learning?.memory_consolidations || 0,
+        avgImprovement: systemMetrics.learning?.avg_improvement || 0
+      },
+      timestamp: new Date().toISOString()
     }
-    
-    return () => {
-      clearInterval(interval)
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-    }
-  }, [])
+  }, [systemHealth, systemMetrics, agents, documents, workflows])
 
   if (loading) {
     return (
@@ -328,7 +318,7 @@ export function Dashboard() {
               </h2>
               <ContextOptimizationPanel 
                 contextData={data?.contextMetrics || {}}
-                overview={{}}
+                overview={systemMetrics || {}}
               />
             </motion.div>
 
@@ -343,7 +333,7 @@ export function Dashboard() {
                 <Users className="w-6 h-6 text-blue-400" />
                 Agent Status
               </h2>
-              <AgentStatusGrid data={data?.agentMetrics || {}} />
+              <AgentStatusGrid agentMetrics={data?.agentMetrics || {}} agents={agents || []} />
             </motion.div>
           </div>
 
@@ -360,7 +350,7 @@ export function Dashboard() {
                 <Brain className="w-6 h-6 text-green-400" />
                 Learning Progress
               </h2>
-              <LearningProgressChart data={data?.learningMetrics || {}} />
+              <LearningProgressChart learningData={data?.learningMetrics || {}} overview={systemMetrics || {}} />
             </motion.div>
 
             {/* Task Execution Timeline */}
@@ -374,7 +364,7 @@ export function Dashboard() {
                 <Target className="w-6 h-6 text-purple-400" />
                 Task Timeline
               </h2>
-              <TaskExecutionTimeline data={data?.workflowMetrics || {}} />
+              <TaskExecutionTimeline tasks={[]} workflows={data?.workflowMetrics || {}} />
             </motion.div>
           </div>
         </div>
@@ -390,7 +380,7 @@ export function Dashboard() {
             <BarChart3 className="w-6 h-6 text-primary" />
             Activity Heatmap
           </h2>
-          <ActivityHeatmap data={data || {}} />
+          <ActivityHeatmap activityData={systemMetrics || {}} agents={agents || []} />
         </motion.div>
 
         {/* System Health */}

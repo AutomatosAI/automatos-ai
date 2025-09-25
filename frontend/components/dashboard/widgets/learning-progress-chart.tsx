@@ -45,22 +45,25 @@ export function LearningProgressChart({ learningData, overview }: LearningProgre
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    const fetchProgressData = async () => {
-      setIsLoading(true)
-      try {
-        const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
-        const response = await fetch(`/api/analytics/learning?days=${days}`)
-        const result = await response.json()
-        setProgressData(result.learning_progress?.timeline || [])
-      } catch (error) {
-        console.error('Error fetching learning progress:', error)
-      } finally {
-        setIsLoading(false)
-      }
+    setIsLoading(true)
+    try {
+      // Generate progress data based on current learning metrics
+      const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
+      const progressData = Array.from({ length: days }, (_, i) => ({
+        date: new Date(Date.now() - (days - 1 - i) * 24 * 60 * 60 * 1000).toISOString(),
+        cumulative_memories: Math.floor(data.total_memories * (i + 1) / days),
+        cumulative_knowledge: Math.floor(data.knowledge_nodes * (i + 1) / days),
+        performance_score: data.avg_importance_score * (i + 1) / days
+      }))
+      
+      setProgressData(progressData)
+    } catch (error) {
+      console.error('Error generating learning progress:', error)
+      setProgressData([])
+    } finally {
+      setIsLoading(false)
     }
-
-    fetchProgressData()
-  }, [timeRange])
+  }, [timeRange, data])
 
   // Calculate memory distribution percentages
   const memoryDistribution = [

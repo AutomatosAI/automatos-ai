@@ -25,17 +25,14 @@ import {
   MemoryStick,
   Zap
 } from 'lucide-react'
+import { useSystemMetrics } from '@/hooks/use-api'
 
-interface PerformanceChartProps {
-  systemMetrics: any
-  isLoading: boolean
-}
-
-export function PerformanceChart({ systemMetrics, isLoading }: PerformanceChartProps) {
+export function PerformanceChart() {
+  // Use real API hook
+  const { data: systemMetrics, isLoading } = useSystemMetrics()
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'api_calls' | 'response_time'>('cpu')
 
-  // Generate mock time series data based on real current values
-  // In production, this would come from your time-series database
+  // Generate time series data based on real current values
   const generateTimeSeriesData = (currentValue: number, dataPoints: number = 24) => {
     const data = []
     const now = new Date()
@@ -43,9 +40,8 @@ export function PerformanceChart({ systemMetrics, isLoading }: PerformanceChartP
     for (let i = dataPoints - 1; i >= 0; i--) {
       const timestamp = new Date(now.getTime() - (i * 60 * 60 * 1000)) // Hourly data points
       
-      // Generate realistic fluctuations around the current value
-      const variation = (Math.random() - 0.5) * 20 // ±10 variation
-      const value = Math.max(0, Math.min(100, currentValue + variation))
+      // Use current value for all data points (in production, this would come from time-series DB)
+      const value = currentValue
       
       data.push({
         time: timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -53,11 +49,6 @@ export function PerformanceChart({ systemMetrics, isLoading }: PerformanceChartP
         value: Math.round(value * 100) / 100,
         timestamp: timestamp.getTime()
       })
-    }
-    
-    // Ensure the last data point matches the current value
-    if (data.length > 0) {
-      data[data.length - 1].value = currentValue
     }
     
     return data
@@ -107,7 +98,7 @@ export function PerformanceChart({ systemMetrics, isLoading }: PerformanceChartP
       color: '#f59e0b',
       icon: Activity,
       threshold: 1000,
-      current: 150 || 0
+      current: systemMetrics?.api_calls_per_minute || 0
     },
     response_time: {
       name: 'Response Time',
@@ -115,7 +106,7 @@ export function PerformanceChart({ systemMetrics, isLoading }: PerformanceChartP
       color: '#8b5cf6',
       icon: Clock,
       threshold: 1000,
-      current: 245 || 0
+      current: systemMetrics?.avg_response_time || 0
     }
   }
 

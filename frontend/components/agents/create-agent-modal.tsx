@@ -24,6 +24,9 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+// API hooks
+import { useCreateAgent } from '@/hooks/use-agent-api'
+
 interface CreateAgentModalProps {
   open: boolean
   onClose: () => void
@@ -102,6 +105,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     autoStart: true
   })
 
+  // API hook
+  const createAgentMutation = useCreateAgent()
+
   const handleSkillToggle = (skill: string) => {
     setAgentData(prev => ({
       ...prev,
@@ -113,35 +119,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
   const handleCreate = async () => {
     try {
-      console.log('Creating agent:', agentData)
-      
-      // Call the API to create the agent
-      const response = await fetch('/api/agents/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: agentData.name,
-          agent_type: agentData.type,
-          description: agentData.description,
-          configuration: {
-            skills: agentData.skills,
-            specializations: agentData.specializations,
-            maxConcurrentTasks: agentData.maxConcurrentTasks,
-            priority: agentData.priority,
-            autoStart: agentData.autoStart
-          }
-        })
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Failed to create agent')
+      const agentPayload = {
+        name: agentData.name,
+        agent_type: agentData.type,
+        description: agentData.description,
+        configuration: {
+          skills: agentData.skills,
+          specializations: agentData.specializations,
+          maxConcurrentTasks: agentData.maxConcurrentTasks,
+          priority: agentData.priority,
+          autoStart: agentData.autoStart
+        }
       }
       
-      const newAgent = await response.json()
-      console.log('Agent created successfully:', newAgent)
+      await createAgentMutation.mutateAsync(agentPayload)
       
       onSuccess() // Notify parent component
       onClose()
@@ -160,7 +151,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       setStep(1)
     } catch (error) {
       console.error('Failed to create agent:', error)
-      alert(`Failed to create agent: ${error.message}`)
     }
   }
 
@@ -450,10 +440,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      disabled={!agentData.name || !agentData.type}
+                      disabled={!agentData.name || !agentData.type || createAgentMutation.isPending}
                       className="gradient-accent hover:opacity-90"
                     >
-                      Create Agent
+                      {createAgentMutation.isPending ? 'Creating...' : 'Create Agent'}
                     </Button>
                   )}
                 </div>
