@@ -23,7 +23,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["📄 Document Processing"])
 
 # Initialize real services
-document_manager = DocumentManager()
+import os
+from config import Config
+
+# Initialize configuration
+config = Config()
+
+# Database configuration
+db_config = {
+    "database": config.POSTGRES_DB,
+    "user": config.POSTGRES_USER,
+    "password": config.POSTGRES_PASSWORD,
+    "host": config.POSTGRES_HOST,
+    "port": config.POSTGRES_PORT
+}
+openai_api_key = config.OPENAI_API_KEY
+
+# Initialize real services
+document_manager = DocumentManager(db_config, openai_api_key)
 context_manager = None  # Will initialize on first use
 
 async def get_context_manager():

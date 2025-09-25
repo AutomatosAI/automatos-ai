@@ -59,27 +59,6 @@
   .card-glow:hover {
     box-shadow: 0 0 40px rgba(255, 107, 53, 0.2);
   }
-
-  .glass-card {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-  }
-
-  .metric-card {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 1.5rem;
-    transition: all 0.3s ease;
-  }
-
-  .metric-card:hover {
-    border-color: rgba(255, 107, 53, 0.3);
-    box-shadow: 0 0 20px rgba(255, 107, 53, 0.1);
-  }
 }
 
 html {

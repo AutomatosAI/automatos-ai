@@ -6,7 +6,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { fieldTheoryClient } from '@/lib/api/field-theory-client'
+import { apiClient } from "@/lib/api-client"
 
 export function useFieldOperations() {
   const [isLoading, setIsLoading] = useState(false)
@@ -22,7 +22,7 @@ export function useFieldOperations() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.updateField({
+    const response = await apiClient.updateField({
       session_id: sessionId,
       context,
       field_type: fieldType,
@@ -48,7 +48,7 @@ export function useFieldOperations() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.propagateField({
+    const response = await apiClient.propagateField({
       session_id: sessionId,
       steps,
       alpha,
@@ -73,7 +73,7 @@ export function useFieldOperations() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.optimizeField({
+    const response = await apiClient.optimizeField({
       session_id: sessionId,
       objectives,
       constraints,
@@ -112,7 +112,7 @@ export function useFieldInteractions() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.modelFieldInteractions({
+    const response = await apiClient.modelFieldInteractions({
       session_id_1: sessionId1,
       session_id_2: sessionId2,
       interaction_type: interactionType,
@@ -137,7 +137,7 @@ export function useFieldInteractions() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.dynamicFieldManagement({
+    const response = await apiClient.dynamicFieldManagement({
       session_id: sessionId,
       time_delta: timeDelta,
       learning_rate: learningRate,
@@ -172,7 +172,7 @@ export function useFieldContext() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.getFieldContext(sessionId)
+    const response = await apiClient.getFieldContext(sessionId)
 
     if (response.error) {
       setError(response.error)
@@ -188,7 +188,7 @@ export function useFieldContext() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.clearFieldContext(sessionId)
+    const response = await apiClient.clearFieldContext(sessionId)
 
     if (response.error) {
       setError(response.error)
@@ -229,10 +229,10 @@ export function useFieldStatistics() {
 
     try {
       const [fieldStats, fieldStates, interactions, health] = await Promise.all([
-        fieldTheoryClient.getFieldStatistics(),
-        fieldTheoryClient.getFieldStates(),
-        fieldTheoryClient.getFieldInteractions(),
-        fieldTheoryClient.healthCheck(),
+        apiClient.getFieldStatistics(),
+        apiClient.getFieldStates(),
+        apiClient.getFieldInteractions(),
+        apiClient.healthCheck(),
       ])
 
       setStatistics({
@@ -274,7 +274,7 @@ export function useBatchFieldOperations() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.batchUpdateFields(requests)
+    const response = await apiClient.batchUpdateFields(requests)
 
     if (response.error) {
       setError(response.error)
@@ -295,7 +295,7 @@ export function useBatchFieldOperations() {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.batchPropagateFields(requests)
+    const response = await apiClient.batchPropagateFields(requests)
 
     if (response.error) {
       setError(response.error)
