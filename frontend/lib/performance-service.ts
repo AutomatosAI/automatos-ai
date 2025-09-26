@@ -5,7 +5,7 @@
  * Service layer for performance monitoring with real backend integration
  */
 
-import { apiClient } from './api';
+import { apiClient } from "./api-client";
 
 export interface PerformanceMetrics {
   systemUptime: number;

@@ -36,7 +36,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 
 // Types for real-time workflow execution
 interface AgentActivity {

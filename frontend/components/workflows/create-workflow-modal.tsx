@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client"
 
 export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [step, setStep] = React.useState(1)

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client"
 
 export function CodeGraphPanel() {
   const [project, setProject] = useState('automatos-ai')

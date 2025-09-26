@@ -23,7 +23,7 @@ import { Badge } from '@/components/ui/badge'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { apiClient, RAGConfig } from '@/lib/api'
+import { apiClient, RAGConfig } from "@/lib/api-client'
 
 export function RAGConfiguration() {
   const [configs, setConfigs] = useState<RAGConfig[]>([])

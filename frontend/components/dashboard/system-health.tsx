@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Server, CheckCircle, AlertCircle } from 'lucide-react'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 
 export function SystemHealth() {
   const [healthData, setHealthData] = useState(null)

@@ -5,7 +5,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { apiClient } from '@/lib/api-client'
+import { apiClient } from "@/lib/api-client'
 
 // Query keys for React Query
 export const synthesisQueryKeys = {

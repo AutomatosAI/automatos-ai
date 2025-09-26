@@ -5,7 +5,7 @@
  * Service layer for workflow management with real backend integration
  */
 
-import { apiClient, type Workflow, type WorkflowExecution } from './api';
+import { apiClient, type WorkflowExecution } from "./api-client";
 
 export interface WorkflowStats {
   activeWorkflows: number;

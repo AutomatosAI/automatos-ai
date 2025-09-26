@@ -23,7 +23,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 
 interface WorkflowStep {
   name: string;

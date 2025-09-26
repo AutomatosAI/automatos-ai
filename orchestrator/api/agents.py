@@ -39,12 +39,14 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
             created_at=skill.created_at,
             updated_at=skill.updated_at
         ) for skill in agent.skills] if agent.skills else [],
-        priority_level=getattr(agent, 'priority_level', 'medium'),
-        max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5),
-        auto_start=getattr(agent, 'auto_start', False),
+        priority_level=getattr(agent, 'priority_level', 'medium') or 'medium',
+        max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5) or 5,
+        auto_start=getattr(agent, 'auto_start', False) or False,
         created_at=agent.created_at,
-        updated_at=agent.updated_at
-    )
+        updated_at=agent.updated_at or agent.created_at,
+        performance_metrics=agent.performance_metrics or {},
+        created_by=agent.created_by,
+)
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
 # from main import require_api_key

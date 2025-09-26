@@ -27,7 +27,7 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 import { LiveProgressPanel } from './live-progress-panel'
 
 interface ActiveWorkflow {

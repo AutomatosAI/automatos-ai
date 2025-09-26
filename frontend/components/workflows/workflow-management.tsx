@@ -43,7 +43,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { workflowService, type WorkflowWithMetrics, type WorkflowStats } from '@/lib/workflow-service'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
 
 // Real data will be loaded from backend
