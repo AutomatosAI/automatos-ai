@@ -4,284 +4,331 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { AgentRoster } from './agent-roster'
-import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
-import { AgentDetailsPanel } from '@/components/agents/agent-details-panel'
-import { AgentRunsPanel } from '@/components/agents/agent-runs-panel'
-import { AgentConfiguration } from './agent-configuration'
-import { AgentPerformance } from './agent-performance'
-import { AgentSkills } from './agent-skills'
-import { CreateAgentModal } from './create-agent-modal'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Plus, Bot, Settings, BarChart, Users, Zap, Brain } from 'lucide-react'
-import { useAgents, useAgentStats } from '@/hooks/use-agent-api'
+import { Input } from '@/components/ui/input'
+import { 
+  Plus, 
+  Bot, 
+  Settings, 
+  BarChart, 
+  Users, 
+  Zap, 
+  Brain,
+  Search,
+  Filter,
+  RefreshCw
+} from 'lucide-react'
+
+// Import all tab components
+import { AgentRoster } from './agent-roster'
+import { AgentSkills } from './agent-skills'
+import { AgentConfiguration } from './agent-configuration'
+import { AgentCoordination } from './agent-coordination'
+import { AgentPerformance } from './agent-performance'
+import { CreateAgentModal } from './create-agent-modal'
+import { AgentDetailsModal } from './agent-details-modal'
+
+// API hooks for real data
+import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
 
 export function AgentManagement() {
-  // Fetch agents and stats data
-  const { data: agents = [], isLoading: agentsLoading } = useAgents()
-  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
+  const [activeTab, setActiveTab] = useState('roster')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  // Auto-select first agent when agents are loaded
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   })
 
-  const [stats, setStats] = useState([
+  // Fetch real data from APIs
+  const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents()
+  // Auto-select first agent when agents are loaded
+  useEffect(() => {
+    if (agents && agents.length > 0 && !selectedAgentId) {
+      setSelectedAgentId(agents[0].id.toString())
+    }
+  }, [agents, selectedAgentId])
+  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
+  const { data: agentTypes = [] } = useAgentTypes()
+
+  // Calculate real statistics from actual data
+  const stats = [
     {
       label: 'Total Agents',
-      value: 'Loading...',
-      change: 'Loading...',
+      value: agentStats?.total_agents || agents.length || '0',
+      change: agentStats?.total_agents ? `${agentStats.total_agents} agents` : '0 agents',
       icon: Bot,
       color: 'text-orange-400'
     },
     {
       label: 'Active Agents',
-      value: 'Loading...',
-      change: 'Loading...',
+      value: agentStats?.active_agents || agents.filter((a: any) => a.status === 'active').length || '0',
+      change: agentStats?.active_agents && agentStats?.total_agents ? `${Math.round((agentStats.active_agents / agentStats.total_agents) * 100)}% online` : '0% online',
       icon: Zap,
       color: 'text-green-400'
     },
     {
       label: 'Agent Types',
-      value: 'Loading...',
-      change: 'Loading...',
+      value: agentStats?.agents_by_type ? Object.keys(agentStats.agents_by_type).length : agentTypes.length || '0',
+      change: agentStats?.agents_by_type ? `${Object.keys(agentStats.agents_by_type).length} types` : '0 types',
       icon: Settings,
       color: 'text-blue-400'
     },
     {
       label: 'Avg Performance',
-      value: 'Loading...',
-      change: 'Loading...',
+      value: `${agentStats?.average_performance?.toFixed(1) || '0.0'}%`,
+      change: agentStats?.average_performance ? (agentStats.average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
       icon: BarChart,
       color: 'text-purple-400'
     }
-  ])
+  ]
 
-  // Fetch real agent data
-  useEffect(() => {
-    const fetchAgentStats = async () => {
-      try {
-        console.log('Fetching agent stats...')
-        const response = await fetch('/api/agents/')
-        const agents = await response.json()
-        console.log('Agent data received:', agents.length, 'agents')
-        
-        if (Array.isArray(agents)) {
-          const totalAgents = agents.length
-          const activeAgents = agents.filter(agent => agent.status === 'active').length
-          const agentTypes = new Set(agents.map(agent => agent.agent_type)).size
-          const utilization = totalAgents > 0 ? Math.round((activeAgents / totalAgents) * 100) : 0
-          
-          setStats([
-            {
-              label: 'Total Agents',
-              value: totalAgents.toString(),
-              change: '+3 this week',
-              icon: Bot,
-              color: 'text-orange-400'
-            },
-            {
-              label: 'Active Agents',
-              value: activeAgents.toString(),
-              change: `${utilization}% utilization`,
-              icon: Zap,
-              color: 'text-green-400'
-            },
-            {
-              label: 'Agent Types',
-              value: agentTypes.toString(),
-              change: 'Multiple types',
-              icon: Settings,
-              color: 'text-blue-400'
-            },
-            {
-              label: 'Avg Performance',
-              value: '95.0%',
-              change: '+2.1% this month',
-              icon: BarChart,
-              color: 'text-purple-400'
-            }
-          ])
-        }
-      } catch (error) {
-        console.error('Error fetching agent stats:', error)
-      }
-    }
-
-    fetchAgentStats()
-  }, [])
+  // Handle refresh
+  const handleRefresh = async () => {
+    await refetchAgents()
+  }
 
   return (
-    <div className="space-y-8">
+    <div ref={ref} className="space-y-6">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.5 }}
-        className="flex justify-between items-center"
+        className="flex justify-between items-start"
       >
         <div>
-          <h1 className="text-4xl font-bold mb-2">Agent Management</h1>
-          <p className="text-muted-foreground">
-            Manage your AI agents, skills, and coordination settings
+          <h1 className="text-3xl font-bold gradient-text">Agent Management</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage your AI agents, skills, and coordination strategies
           </p>
         </div>
-        <Button 
-          onClick={() => setShowCreateModal(true)}
-          className="bg-primary hover:bg-primary/90"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Agent
-        </Button>
+        
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+            {agentsLoading ? 'Loading...' : `${agents.length} Agents`}
+          </Badge>
+          
+          <Button 
+            onClick={handleRefresh} 
+            variant="outline" 
+            size="sm"
+            disabled={agentsLoading}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${agentsLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          
+          <Button 
+            onClick={() => setShowCreateModal(true)}
+            className="bg-brand-primary hover:bg-brand-primary/90"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Create Agent
+          </Button>
+        </div>
       </motion.div>
 
-      {/* Stats Cards */}
+      {/* Statistics Cards */}
       <motion.div
-        ref={ref}
         initial={{ opacity: 0, y: 20 }}
         animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5, delay: 0.2 }}
+        transition={{ duration: 0.6, delay: 0.1 }}
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
       >
         {stats.map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
-          >
-            <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-center space-x-4">
-                  <div className={`w-12 h-12 rounded-lg bg-secondary/50 flex items-center justify-center`}>
-                    <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-2xl font-bold">{stat.value}</h3>
-                      <Badge variant="secondary" className="text-xs">
-                        {stat.change}
-                      </Badge>
-                    </div>
-                    <p className="text-muted-foreground text-sm mt-1">{stat.label}</p>
+          <Card key={stat.label} className="glass-card">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-muted-foreground mb-1">
+                    {stat.label}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-2xl font-bold">
+                      {statsLoading ? '...' : stat.value}
+                    </p>
+                    <p className={`text-xs ${stat.color}`}>
+                      {stat.change}
+                    </p>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
+                  <stat.icon className="w-5 h-5 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </motion.div>
 
-      {/* Agent Management Tabs */}
+      {/* Search and Filters */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5, delay: 0.4 }}
+        transition={{ duration: 0.6, delay: 0.2 }}
+        className="flex flex-col sm:flex-row gap-4"
       >
-        <Tabs defaultValue="multi-agent" className="space-y-6">
-          <TabsList className="grid grid-cols-6 lg:grid-cols-6 glass-card">
-            <TabsTrigger value="multi-agent" className="flex items-center space-x-2">
-              <Brain className="w-4 h-4" />
-              <span>Multi-Agent</span>
-            </TabsTrigger>
-            <TabsTrigger value="roster" className="flex items-center space-x-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+          <Input
+            placeholder="Search agents by name, type, or skills..."
+            value={searchTerm}
+            onChange={(e: any) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        
+        <div className="flex gap-2">
+          <Button
+            variant={statusFilter === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setStatusFilter('all')}
+          >
+            All
+          </Button>
+          <Button
+            variant={statusFilter === 'active' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setStatusFilter('active')}
+          >
+            Active
+          </Button>
+          <Button
+            variant={statusFilter === 'idle' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setStatusFilter('idle')}
+          >
+            Idle
+          </Button>
+        </div>
+      </motion.div>
+
+      {/* Main Tabs */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={inView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.6, delay: 0.3 }}
+      >
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+            <TabsTrigger value="roster" className="flex items-center gap-2">
               <Users className="w-4 h-4" />
-              <span>Roster</span>
+              <span className="hidden sm:inline">Agent Roster</span>
             </TabsTrigger>
-            <TabsTrigger value="skills" className="flex items-center space-x-2">
-              <Zap className="w-4 h-4" />
-              <span>Skills</span>
-            </TabsTrigger>
-            <TabsTrigger value="config" className="flex items-center space-x-2">
-              <Settings className="w-4 h-4" />
-              <span>Config</span>
-            </TabsTrigger>
-            <TabsTrigger value="coordination" className="flex items-center space-x-2">
+            <TabsTrigger value="skills" className="flex items-center gap-2">
               <Brain className="w-4 h-4" />
-              <span>Coordination</span>
+              <span className="hidden sm:inline">Skills</span>
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center space-x-2">
+            <TabsTrigger value="configuration" className="flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              <span className="hidden sm:inline">Configuration</span>
+            </TabsTrigger>
+            <TabsTrigger value="coordination" className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              <span className="hidden sm:inline">Coordination</span>
+            </TabsTrigger>
+            <TabsTrigger value="performance" className="flex items-center gap-2">
               <BarChart className="w-4 h-4" />
-              <span>Analytics</span>
+              <span className="hidden sm:inline">Performance</span>
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="flex items-center gap-2">
+              <BarChart className="w-4 h-4" />
+              <span className="hidden sm:inline">Analytics</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="multi-agent" className="space-y-6">
-            <AgentPerformance 
+          {/* Agent Roster Tab */}
+          <TabsContent value="roster" className="space-y-6">
+            <AgentRoster
+              agents={agents}
+              loading={agentsLoading}
+              searchTerm={searchTerm}
+              statusFilter={statusFilter}
+              onAgentSelect={setSelectedAgentId}
+              selectedAgentId={selectedAgentId}
+              onRefresh={handleRefresh}
+            />
+          </TabsContent>
+
+          {/* Skills Tab */}
+          <TabsContent value="skills" className="space-y-6">
+            <AgentSkills
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              onAgentSelect={setSelectedAgentId}
+            />
+          </TabsContent>
+
+          {/* Configuration Tab */}
+          <TabsContent value="configuration" className="space-y-6">
+            <AgentConfiguration
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+              onAgentSelect={setSelectedAgentId}
+            />
+          </TabsContent>
+
+          {/* Coordination Tab */}
+          <TabsContent value="coordination" className="space-y-6">
+            <AgentCoordination
+              agents={agents}
+              selectedAgentId={selectedAgentId}
+            />
+          </TabsContent>
+
+          {/* Performance Tab */}
+          <TabsContent value="performance" className="space-y-6">
+            <AgentPerformance
+              onAgentSelect={setSelectedAgentId}
               agents={agents}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
+            />
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics" className="space-y-6">
+            <AgentPerformance
               onAgentSelect={setSelectedAgentId}
+              agents={agents}
+              agentStats={agentStats}
+              selectedAgentId={selectedAgentId}
               showAnalytics={true}
             />
-          </TabsContent>
-
-          <TabsContent value="roster" className="space-y-6">
-            <AgentRoster 
-              agents={agents}
-              loading={agentsLoading}
-              searchTerm=""
-              statusFilter="all"
-              onAgentSelect={setSelectedAgentId}
-              selectedAgentId={selectedAgentId}
-              onRefresh={() => {}}
-            />
-          </TabsContent>
-
-          <TabsContent value="skills" className="space-y-6">
-            <AgentSkills 
-              agents={agents}
-              selectedAgentId={selectedAgentId}
-              onAgentSelect={setSelectedAgentId}
-            />
-          </TabsContent>
-
-          <TabsContent value="config" className="space-y-6">
-            <AgentConfiguration 
-              agents={agents}
-              selectedAgentId={selectedAgentId} 
-              onAgentSelect={setSelectedAgentId}
-            />
-          </TabsContent>
-
-          <TabsContent value="coordination" className="space-y-6">
-            <div className="text-center py-12">
-              <Brain className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-semibold mb-2">Agent Coordination</h3>
-              <p className="text-muted-foreground">
-                Multi-agent coordination features coming soon
-              </p>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-6">
-            <div className="text-center py-12">
-              <BarChart className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-semibold mb-2">Agent Analytics</h3>
-              <p className="text-muted-foreground">
-                Detailed agent analytics coming soon
-              </p>
-            </div>
           </TabsContent>
         </Tabs>
       </motion.div>
 
-      {/* Create Agent Modal */}
-      <CreateAgentModal 
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-      />
-
-      {/* Agent Detail Panel */}
-      {selectedAgentId && (
-        <AgentDetailsPanel 
-          agentId={selectedAgentId}
+      {/* Agent Details Modal */}
+      {mounted && selectedAgentId && (
+        <AgentDetailsModal
+          agentId={Number(selectedAgentId)}
+          open={!!selectedAgentId}
           onClose={() => setSelectedAgentId(null)}
         />
       )}
+
+      {/* Create Agent Modal */}
+      <CreateAgentModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSuccess={() => {
+          setShowCreateModal(false)
+          handleRefresh()
+        }}
+      />
     </div>
   )
 }
