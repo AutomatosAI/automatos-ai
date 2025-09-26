@@ -7,7 +7,12 @@ import asyncio
 import json
 import logging
 from typing import Set, Dict, Any
-from fastapi import WebSocket, WebSocketDisconnect
+try:
+    from fastapi import WebSocket, WebSocketDisconnect
+except ImportError:
+    # Define placeholders for type hints if fastapi is not available
+    WebSocket = object
+    WebSocketDisconnect = Exception
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
@@ -74,6 +79,7 @@ class DashboardWebSocketManager:
         """Start listening to Redis pub/sub for updates"""
         if not self.redis_client:
             logger.warning("No Redis client available for real-time updates")
+            self.is_running = False
             return
         
         try:
@@ -96,10 +102,14 @@ class DashboardWebSocketManager:
         
         except Exception as e:
             logger.error(f"Error in Redis listener: {e}")
+            self.is_running = False
         finally:
             if self.pubsub:
-                await self.pubsub.unsubscribe("dashboard_updates")
-                await self.pubsub.close()
+                try:
+                    await self.pubsub.unsubscribe("dashboard_updates")
+                    await self.pubsub.close()
+                except Exception as e:
+                    logger.error(f"Error closing Redis pubsub: {e}")
     
     async def stop_redis_listener(self):
         """Stop the Redis listener"""

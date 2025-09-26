@@ -162,63 +162,81 @@ class AnalyticsEngine:
     async def _get_context_metrics(self) -> Dict[str, Any]:
         """Get context optimization metrics from the database"""
         try:
-            # Try to fetch real metrics from the database if available
+            # Safe database query with error handling
             try:
                 # Check if the context_optimization_metrics table exists
-                from sqlalchemy import text, func
+                from sqlalchemy import text, func, exc
                 
-                # Query to count total optimizations
-                total_optimizations_query = text("""
-                    SELECT COUNT(*) 
-                    FROM context_optimization_metrics
-                    WHERE created_at > NOW() - INTERVAL '30 days'
-                """)
-                
-                # Query to sum total tokens saved
-                tokens_saved_query = text("""
-                    SELECT COALESCE(SUM(tokens_saved), 0)
-                    FROM context_optimization_metrics
-                    WHERE created_at > NOW() - INTERVAL '30 days'
-                """)
-                
-                # Query to get average compression ratio
-                avg_compression_query = text("""
-                    SELECT COALESCE(AVG(compression_ratio), 1.0)
-                    FROM context_optimization_metrics
-                    WHERE created_at > NOW() - INTERVAL '30 days'
-                """)
-                
-                # Execute queries and get metrics
-                total_optimizations = self.db.execute(total_optimizations_query).scalar() or 0
-                tokens_saved = self.db.execute(tokens_saved_query).scalar() or 0
-                avg_compression = self.db.execute(avg_compression_query).scalar() or 1.0
-                
-                # Calculate efficiency based on tokens saved and compression ratio
-                # Higher efficiency means more tokens saved with better compression
-                efficiency = 0.0
-                if total_optimizations > 0:
-                    efficiency = min(((tokens_saved / max(1, total_optimizations)) * avg_compression) / 1000, 1.0) * 100
-                
-                # Return real metrics
-                return {
-                    "tokensSaved": tokens_saved,
-                    "avgCompressionRatio": avg_compression,
-                    "totalOptimizations": total_optimizations,
-                    "efficiency": efficiency
-                }
-                
+                # Safer approach to check if table exists
+                try:
+                    # Query to count total optimizations with safer SQL
+                    total_optimizations_query = text("""
+                        SELECT COUNT(*) 
+                        FROM information_schema.tables 
+                        WHERE table_name = 'context_optimization_metrics'
+                    """)
+                    
+                    table_exists = self.db.execute(total_optimizations_query).scalar() or 0
+                    
+                    if table_exists > 0:
+                        # Table exists, get real metrics
+                        tokens_saved_query = text("""
+                            SELECT COALESCE(SUM(tokens_saved), 0)
+                            FROM context_optimization_metrics
+                        """)
+                        
+                        total_optimizations_query = text("""
+                            SELECT COUNT(*)
+                            FROM context_optimization_metrics
+                        """)
+                        
+                        avg_compression_query = text("""
+                            SELECT COALESCE(AVG(compression_ratio), 1.0)
+                            FROM context_optimization_metrics
+                        """)
+                        
+                        tokens_saved = self.db.execute(tokens_saved_query).scalar() or 0
+                        total_optimizations = self.db.execute(total_optimizations_query).scalar() or 0
+                        avg_compression = self.db.execute(avg_compression_query).scalar() or 1.0
+                        
+                        efficiency = 0.0
+                        if total_optimizations > 0:
+                            efficiency = min(((tokens_saved / max(1, total_optimizations)) * avg_compression) / 1000, 1.0) * 100
+                            
+                        return {
+                            "tokensSaved": tokens_saved,
+                            "avgCompressionRatio": avg_compression,
+                            "totalOptimizations": total_optimizations,
+                            "efficiency": efficiency
+                        }
+                    else:
+                        # Table doesn't exist, return zeros
+                        return {
+                            "tokensSaved": 0, 
+                            "avgCompressionRatio": 1.0,
+                            "totalOptimizations": 0,
+                            "efficiency": 0.0
+                        }
+                except exc.SQLAlchemyError as sql_error:
+                    # SQL error occurred, return zeros
+                    logger.warning(f"SQL error checking context metrics table: {sql_error}")
+                    return {
+                        "tokensSaved": 0, 
+                        "avgCompressionRatio": 1.0,
+                        "totalOptimizations": 0,
+                        "efficiency": 0.0
+                    }
+                    
             except Exception as db_error:
-                # Database query failed, log error and fall back to placeholders
+                # Database query failed, log error and return zeros
                 logger.warning(f"Failed to query context metrics from database: {db_error}")
-                # Generate some reasonable placeholder values
-                import random
                 return {
-                    "tokensSaved": random.randint(500, 5000),
-                    "avgCompressionRatio": round(random.uniform(1.1, 2.5), 2),
-                    "totalOptimizations": random.randint(10, 100),
-                    "efficiency": round(random.uniform(30.0, 85.0), 1)
+                    "tokensSaved": 0, 
+                    "avgCompressionRatio": 1.0,
+                    "totalOptimizations": 0,
+                    "efficiency": 0.0
                 }
-            
+                
         except Exception as e:
             logger.error(f"Error getting context metrics: {e}")
             return {
@@ -316,19 +334,18 @@ class AnalyticsEngine:
                 }
                 
             except Exception as db_error:
-                # Database query failed, log error and fall back to placeholders
+                # Database query failed, log error and return zeros
                 logger.warning(f"Failed to query learning metrics from database: {db_error}")
-                # Generate some reasonable placeholder values
-                import random
+                # Return zeros for consistent error handling
                 return {
-                    "totalMemoryItems": random.randint(500, 2000),
-                    "recentMemoryItems": random.randint(50, 200),
-                    "knowledgeNodes": random.randint(200, 800),
-                    "activeCollaborations": random.randint(5, 20),
-                    "totalCollaborations": random.randint(50, 200),
-                    "knowledgeGrowth": round(random.uniform(5.0, 25.0), 1),
-                    "memoryConsolidations": random.randint(20, 100),
-                    "avgImprovement": round(random.uniform(0.1, 0.4), 2)
+                    "totalMemoryItems": 0,
+                    "recentMemoryItems": 0,
+                    "knowledgeNodes": 0,
+                    "activeCollaborations": 0,
+                    "totalCollaborations": 0,
+                    "knowledgeGrowth": 0,
+                    "memoryConsolidations": 0,
+                    "avgImprovement": 0.0
                 }
             
         except Exception as e:

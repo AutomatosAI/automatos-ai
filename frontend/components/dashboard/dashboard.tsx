@@ -175,7 +175,7 @@ export function Dashboard() {
         diskUsage: systemMetrics?.disk?.percent || 0,
         databaseStatus: systemHealth?.services?.database || 'unknown',
         redisStatus: systemHealth?.services?.redis || 'unknown',
-        uptime: systemHealth?.uptime || 'unknown'
+        uptime: systemHealth?.metrics?.uptime || 'unknown'
       },
       agentMetrics: {
         activeAgents,
