@@ -35,6 +35,15 @@ import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
 
 export function AgentManagement() {
   const [activeTab, setActiveTab] = useState('roster')
+  
+  // Debug log active tab changes
+  useEffect(() => {
+    console.log('Active tab changed:', activeTab)
+    if (activeTab === 'configuration' && !selectedAgentId && agents?.length > 0) {
+      // Auto-select first agent when entering configuration tab with no agent selected
+      setSelectedAgentId(agents[0].id.toString())
+    }
+  }, [activeTab, agents, selectedAgentId])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
@@ -42,6 +51,8 @@ export function AgentManagement() {
 
   useEffect(() => {
     setMounted(true)
+    // Make sure viewDetailsAgentId starts as null
+    setViewDetailsAgentId(null)
   }, [])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')

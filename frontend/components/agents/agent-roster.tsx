@@ -213,7 +213,7 @@ export function AgentRoster({
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={(e) => {
                       e.stopPropagation(); // Prevent card click
-                      handleViewDetails(agent.id);
+                      handleViewDetails(agent.id.toString());
                     }}>
                       <Eye className="w-4 h-4 mr-2" />
                       View Details

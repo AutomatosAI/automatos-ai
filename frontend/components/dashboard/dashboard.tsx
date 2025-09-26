@@ -172,9 +172,9 @@ export function Dashboard() {
       systemHealth: {
         cpuUsage: systemMetrics?.cpu?.average_usage || 0,
         memoryUsage: systemMetrics?.memory?.percent || 0,
-        diskUsage: systemMetrics?.disk?.usage_percent || 0,
-        databaseStatus: systemHealth?.database?.status || 'unknown',
-        redisStatus: systemHealth?.redis?.status || 'unknown',
+        diskUsage: systemMetrics?.disk?.percent || 0,
+        databaseStatus: systemHealth?.services?.database || 'unknown',
+        redisStatus: systemHealth?.services?.redis || 'unknown',
         uptime: systemHealth?.uptime || 'unknown'
       },
       agentMetrics: {
