@@ -249,12 +249,12 @@ async def get_agent_performance(
         factory = get_agent_factory()
         
         # Get agent status
-        status = await factory.get_agent_status(agent_id)
+        agent_status = await factory.get_agent_status(agent_id)
         
-        if status["status"] == "not_found":
+        if agent_status["status"] == "not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=status.get("error")
+                detail=agent_status.get("error")
             )
         
         # Add performance data
@@ -291,15 +291,15 @@ async def get_agent_status_endpoint(agent_id: int):
     """
     try:
         factory = get_agent_factory()
-        status = await factory.get_agent_status(agent_id)
+        agent_status = await factory.get_agent_status(agent_id)
         
-        if status["status"] == "not_found":
+        if agent_status["status"] == "not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=status.get("error")
+                detail=agent_status.get("error")
             )
         
-        return status
+        return agent_status
         
     except HTTPException:
         raise
@@ -387,8 +387,8 @@ async def create_agent_batch(
                     auto_verify=auto_verify
                 )
                 
-                status = await factory.get_agent_status(agent.agent_id)
-                created_agents.append(status)
+                agent_status = await factory.get_agent_status(agent.agent_id)
+                created_agents.append(agent_status)
                 
             except Exception as e:
                 errors.append({
