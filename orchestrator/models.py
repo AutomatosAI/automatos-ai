@@ -254,15 +254,15 @@ class SkillUpdate(BaseModel):
 class SkillResponse(BaseModel):
     id: int
     name: str
-    description: Optional[str]
+    description: Optional[str] = None
     skill_type: str
-    implementation: Optional[str]
-    parameters: Optional[Dict[str, Any]]
-    performance_data: Optional[Dict[str, Any]]
-    is_active: bool
+    implementation: Optional[str] = ""
+    parameters: Optional[Dict[str, Any]] = None
+    performance_data: Optional[Dict[str, Any]] = {}
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str] = None
+    created_by: Optional[str] = ""
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

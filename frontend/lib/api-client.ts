@@ -341,7 +341,7 @@ class ApiClient {
   }
 
   async createSkill(data: any) {
-    return this.request('/api/skills/', {
+    return this.request('/api/skills/single', {
       method: 'POST',
       body: JSON.stringify(data)
     })

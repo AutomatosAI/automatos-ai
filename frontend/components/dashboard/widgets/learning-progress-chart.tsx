@@ -28,17 +28,21 @@ interface LearningProgressChartProps {
 }
 
 export function LearningProgressChart({ learningData, overview }: LearningProgressChartProps) {
+  // Ensure we have objects and not null
+  const safeLearningData = learningData || {}
+  const safeOverview = overview || {}
+  
   // Map API response to expected structure
   const data = {
-    total_memories: learningData?.totalMemoryItems || 0,
-    working_memory_count: learningData?.recentMemoryItems || 0,
-    short_term_count: Math.floor((learningData?.totalMemoryItems || 0) * 0.3),
-    long_term_count: Math.floor((learningData?.totalMemoryItems || 0) * 0.5),
-    consolidation_rate: learningData?.memoryConsolidations || 0,
-    knowledge_nodes: learningData?.knowledgeNodes || 0,
-    knowledge_edges: learningData?.totalCollaborations || 0,
-    avg_importance_score: learningData?.avgImprovement || 0,
-    memory_growth_rate: learningData?.knowledgeGrowth || 0
+    total_memories: safeLearningData.totalMemoryItems || 0,
+    working_memory_count: safeLearningData.recentMemoryItems || 0,
+    short_term_count: Math.floor((safeLearningData.totalMemoryItems || 0) * 0.3),
+    long_term_count: Math.floor((safeLearningData.totalMemoryItems || 0) * 0.5),
+    consolidation_rate: safeLearningData.memoryConsolidations || 0,
+    knowledge_nodes: safeLearningData.knowledgeNodes || 0,
+    knowledge_edges: safeLearningData.totalCollaborations || 0,
+    avg_importance_score: safeLearningData.avgImprovement || 0,
+    memory_growth_rate: safeLearningData.knowledgeGrowth || 0
   };
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [progressData, setProgressData] = useState<any[]>([])

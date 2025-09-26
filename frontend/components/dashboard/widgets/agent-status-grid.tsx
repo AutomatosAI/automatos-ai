@@ -40,16 +40,31 @@ interface AgentStatusGridProps {
 export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridProps) {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<'activity' | 'performance' | 'tokens'>('activity')
+  
+  // Ensure we're working with an array and all agents have required properties
+  const safeAgents = Array.isArray(agents) ? agents.map(agent => ({
+    agent_id: agent?.agent_id || '',
+    name: agent?.name || 'Unknown Agent',
+    agent_type: agent?.agent_type || 'unknown',
+    execution_count: agent?.execution_count || 0,
+    total_tokens_used: agent?.total_tokens_used || 0,
+    success_rate: agent?.success_rate || 0,
+    avg_execution_time: agent?.avg_execution_time || 0,
+    status: agent?.status || 'unknown',
+    memory_items_count: agent?.memory_items_count || 0,
+    collaboration_count: agent?.collaboration_count || 0,
+    last_active: agent?.last_active || null
+  })) : []
 
   // Sort agents based on selected criteria
-  const sortedAgents = [...agents].sort((a, b) => {
+  const sortedAgents = [...safeAgents].sort((a, b) => {
     switch (sortBy) {
       case 'activity':
-        return b.execution_count - a.execution_count
+        return (b.execution_count || 0) - (a.execution_count || 0)
       case 'performance':
-        return b.success_rate - a.success_rate
+        return (b.success_rate || 0) - (a.success_rate || 0)
       case 'tokens':
-        return b.total_tokens_used - a.total_tokens_used
+        return (b.total_tokens_used || 0) - (a.total_tokens_used || 0)
       default:
         return 0
     }
@@ -229,25 +244,27 @@ export function AgentStatusGrid({ agentMetrics, agents = [] }: AgentStatusGridPr
           <div className="grid grid-cols-4 gap-4 text-center">
             <div>
               <p className="text-2xl font-bold text-green-500">
-                {agents.filter(a => a.status === 'active').length}
+                {safeAgents.filter(a => a.status === 'active').length}
               </p>
               <p className="text-xs text-muted-foreground">Active</p>
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {agents.reduce((sum, a) => sum + a.execution_count, 0)}
+                {safeAgents.reduce((sum, a) => sum + (a.execution_count || 0), 0)}
               </p>
               <p className="text-xs text-muted-foreground">Total Executions</p>
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {(agents.reduce((sum, a) => sum + a.success_rate, 0) / agents.length).toFixed(1)}%
+                {safeAgents.length > 0 ? 
+                  (safeAgents.reduce((sum, a) => sum + (a.success_rate || 0), 0) / safeAgents.length).toFixed(1) : 
+                  '0.0'}%
               </p>
               <p className="text-xs text-muted-foreground">Avg Success</p>
             </div>
             <div>
               <p className="text-2xl font-bold">
-                {(agents.reduce((sum, a) => sum + a.total_tokens_used, 0) / 1000).toFixed(1)}k
+                {(safeAgents.reduce((sum, a) => sum + (a.total_tokens_used || 0), 0) / 1000).toFixed(1)}k
               </p>
               <p className="text-xs text-muted-foreground">Total Tokens</p>
             </div>

@@ -54,16 +54,20 @@ interface TrendDataPoint {
 
 export function ContextOptimizationPanel({ contextData, overview }: ContextOptimizationPanelProps) {
   // Map API response to expected structure with proper defaults
+  // Ensure contextData is an object, not null or undefined
+  const safeContextData = contextData || {}
+  const safeOverview = overview || {}
+  
   const data = {
-    total_optimizations: contextData?.totalOptimizations || 0,
-    avg_tokens_saved: contextData?.tokensSaved && contextData?.totalOptimizations 
-      ? Math.floor(contextData.tokensSaved / Math.max(contextData.totalOptimizations, 1)) 
+    total_optimizations: safeContextData.totalOptimizations || 0,
+    avg_tokens_saved: safeContextData.tokensSaved != null && safeContextData.totalOptimizations != null
+      ? Math.floor(safeContextData.tokensSaved / Math.max(safeContextData.totalOptimizations, 1)) 
       : 0,
-    total_tokens_saved: contextData?.tokensSaved || 0,
-    avg_information_density: contextData?.efficiency || 0,
-    compression_ratio: contextData?.avgCompressionRatio || 1.0,
-    optimization_success_rate: contextData?.efficiency || 0,
-    patterns_used: contextData?.patterns_used || {}
+    total_tokens_saved: safeContextData.tokensSaved || 0,
+    avg_information_density: safeContextData.efficiency || 0,
+    compression_ratio: safeContextData.avgCompressionRatio || 1.0,
+    optimization_success_rate: safeContextData.efficiency || 0,
+    patterns_used: safeContextData.patterns_used || {}
   }
 
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h')

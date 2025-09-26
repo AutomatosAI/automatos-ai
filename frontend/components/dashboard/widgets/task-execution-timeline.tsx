@@ -26,16 +26,20 @@ interface TaskExecutionTimelineProps {
 }
 
 export function TaskExecutionTimeline({ tasks = [], workflows = {} }: TaskExecutionTimelineProps) {
-  // Map API response to expected structure
+  // Ensure we have valid data objects
+  const safeWorkflows = workflows || {}
+  const safeTasks = Array.isArray(tasks) ? tasks : []
+  
+  // Map API response to expected structure with safer null handling
   const data: TaskData = {
-    total_tasks: workflows?.totalWorkflows || 0,
-    completed_tasks: workflows?.completedWorkflows || 0,
-    failed_tasks: workflows?.totalWorkflows - workflows?.completedWorkflows - workflows?.pendingWorkflows || 0,
-    pending_tasks: workflows?.pendingWorkflows || 0,
-    avg_completion_time: workflows?.avgExecutionTime || 0,
+    total_tasks: safeWorkflows.totalWorkflows || 0,
+    completed_tasks: safeWorkflows.completedWorkflows || 0,
+    failed_tasks: Math.max(0, (safeWorkflows.totalWorkflows || 0) - (safeWorkflows.completedWorkflows || 0) - (safeWorkflows.pendingWorkflows || 0)),
+    pending_tasks: safeWorkflows.pendingWorkflows || 0,
+    avg_completion_time: safeWorkflows.avgExecutionTime || 0,
     decomposition_depth: 3,
-    subtask_success_rate: workflows?.successRate || 0,
-    collaboration_efficiency: workflows?.completionRate || 0
+    subtask_success_rate: safeWorkflows.successRate || 0,
+    collaboration_efficiency: safeWorkflows.completionRate || 0
   };
   const completionRate = data.total_tasks > 0 
     ? (data.completed_tasks / data.total_tasks * 100)

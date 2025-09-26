@@ -107,7 +107,7 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
       // Format the skill data correctly
       const formattedData = {
         name: skillData.name,
-        description: skillData.description,
+        description: skillData.description || "",
         skill_type: skillData.skill_type,
         category: skillData.category,
         difficulty: "intermediate", // Default difficulty level
@@ -116,6 +116,7 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
         parameters: skillData.parameters || {}
       }
       
+      // Submit to the single skill creation endpoint
       await createSkillMutation.mutateAsync(formattedData)
       toast.success(`Skill ${skillData.name} created successfully`)
       onSuccess()

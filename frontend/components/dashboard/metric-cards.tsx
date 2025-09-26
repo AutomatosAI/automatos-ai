@@ -94,12 +94,16 @@ export function MetricCards() {
     )
   }
 
-  // Calculate real metrics from API data
-  const activeAgents = agents?.filter((a: any) => a.status === 'active').length || 0
-  const totalAgents = agents?.length || 0
-  const documentsProcessed = documents?.length || 0
-  const runningWorkflows = workflows?.filter((w: any) => w.status === 'running').length || 0
-  const totalWorkflows = workflows?.length || 0
+  // Calculate real metrics from API data - safely handle missing/null data
+  const agentsArray = Array.isArray(agents) ? agents : []
+  const workflowsArray = Array.isArray(workflows) ? workflows : []
+  const documentsArray = Array.isArray(documents) ? documents : []
+  
+  const activeAgents = agentsArray.filter((a: any) => a?.status === 'active').length || 0
+  const totalAgents = agentsArray.length || 0
+  const documentsProcessed = documentsArray.length || 0
+  const runningWorkflows = workflowsArray.filter((w: any) => w?.status === 'running').length || 0
+  const totalWorkflows = workflowsArray.length || 0
   const apiCalls = systemMetrics?.api_calls_count || 0
 
   const metrics = [

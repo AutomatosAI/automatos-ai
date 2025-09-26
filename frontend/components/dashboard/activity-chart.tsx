@@ -24,10 +24,14 @@ export function ActivityChart() {
   const loading = agentsLoading || workflowsLoading || documentsLoading
 
   const generateRealTimeData = () => {
-    // Calculate current counts from real data
-    const agentCount = agents?.filter((agent: any) => agent.status === 'active').length || 0
-    const workflowCount = workflows?.filter((workflow: any) => workflow.status === 'active').length || 0
-    const documentCount = documents?.length || 0
+    // Calculate current counts from real data - safely handle missing/null data
+    const agentsArray = Array.isArray(agents) ? agents : []
+    const workflowsArray = Array.isArray(workflows) ? workflows : []
+    const documentsArray = Array.isArray(documents) ? documents : []
+    
+    const agentCount = agentsArray.filter((agent: any) => agent?.status === 'active').length || 0
+    const workflowCount = workflowsArray.filter((workflow: any) => workflow?.status === 'active').length || 0
+    const documentCount = documentsArray.length || 0
 
     const now = new Date()
     const newDataPoint: ActivityData = {

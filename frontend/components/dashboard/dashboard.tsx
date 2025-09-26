@@ -98,39 +98,84 @@ export function Dashboard() {
 
   // Process real data into dashboard format
   const data: DashboardData | null = React.useMemo(() => {
-    if (!systemHealth || !systemMetrics || !agents || !documents || !workflows) {
-      return null
+    if (!systemHealth && !systemMetrics && !agents && !documents && !workflows) {
+      // Return default empty data structure instead of null
+      return {
+        systemHealth: {
+          cpuUsage: 0,
+          memoryUsage: 0,
+          diskUsage: 0,
+          databaseStatus: 'unknown',
+          redisStatus: 'unknown',
+          uptime: 'unknown'
+        },
+        agentMetrics: {
+          activeAgents: 0,
+          totalAgents: 0,
+          successRate: 0,
+          avgExecutionTime: 0,
+          totalTokensUsed: 0,
+          recentExecutions: 0
+        },
+        workflowMetrics: {
+          totalWorkflows: 0,
+          completedWorkflows: 0,
+          pendingWorkflows: 0,
+          completionRate: 0,
+          successRate: 0,
+          recentWorkflows: 0
+        },
+        contextMetrics: {
+          tokensSaved: 0,
+          avgCompressionRatio: 1.0,
+          totalOptimizations: 0,
+          efficiency: 0
+        },
+        learningMetrics: {
+          totalMemoryItems: 0,
+          recentMemoryItems: 0,
+          knowledgeNodes: 0,
+          activeCollaborations: 0,
+          totalCollaborations: 0,
+          knowledgeGrowth: 0,
+          memoryConsolidations: 0,
+          avgImprovement: 0
+        },
+        timestamp: new Date().toISOString()
+      }
     }
 
-    // Calculate agent metrics from real data
-    const activeAgents = agents.filter((agent: any) => agent.status === 'active').length
-    const totalAgents = agents.length
-    const successRate = agents.length > 0 
-      ? agents.reduce((sum: number, agent: any) => sum + (agent.success_rate || 0), 0) / agents.length
+    // Calculate agent metrics from real data - safely handle missing/null data
+    const agentsArray = Array.isArray(agents) ? agents : []
+    const activeAgents = agentsArray.filter((agent: any) => agent?.status === 'active').length
+    const totalAgents = agentsArray.length
+    const successRate = agentsArray.length > 0 
+      ? agentsArray.reduce((sum: number, agent: any) => sum + (agent?.success_rate || 0), 0) / agentsArray.length
       : 0
-    const avgExecutionTime = agents.length > 0
-      ? agents.reduce((sum: number, agent: any) => sum + (agent.avg_execution_time || 0), 0) / agents.length
+    const avgExecutionTime = agentsArray.length > 0
+      ? agentsArray.reduce((sum: number, agent: any) => sum + (agent?.avg_execution_time || 0), 0) / agentsArray.length
       : 0
-    const totalTokensUsed = agents.reduce((sum: number, agent: any) => sum + (agent.total_tokens_used || 0), 0)
-    const recentExecutions = agents.reduce((sum: number, agent: any) => sum + (agent.execution_count || 0), 0)
+    const totalTokensUsed = agentsArray.reduce((sum: number, agent: any) => sum + (agent?.total_tokens_used || 0), 0)
+    const recentExecutions = agentsArray.reduce((sum: number, agent: any) => sum + (agent?.execution_count || 0), 0)
 
-    // Calculate workflow metrics from real data
-    const completedWorkflows = workflows.filter((workflow: any) => workflow.status === 'completed').length
-    const pendingWorkflows = workflows.filter((workflow: any) => workflow.status === 'pending').length
-    const totalWorkflows = workflows.length
+    // Calculate workflow metrics from real data - safely handle missing/null data
+    const workflowsArray = Array.isArray(workflows) ? workflows : []
+    const completedWorkflows = workflowsArray.filter((workflow: any) => workflow?.status === 'completed').length
+    const pendingWorkflows = workflowsArray.filter((workflow: any) => workflow?.status === 'pending').length
+    const totalWorkflows = workflowsArray.length
     const completionRate = totalWorkflows > 0 ? (completedWorkflows / totalWorkflows) * 100 : 0
     const workflowSuccessRate = totalWorkflows > 0
-      ? workflows.reduce((sum: number, workflow: any) => sum + (workflow.success_rate || 0), 0) / totalWorkflows
+      ? workflowsArray.reduce((sum: number, workflow: any) => sum + (workflow?.success_rate || 0), 0) / totalWorkflows
       : 0
 
     return {
       systemHealth: {
-        cpuUsage: systemMetrics.cpu?.average_usage || 0,
-        memoryUsage: systemMetrics.memory?.percent || 0,
-        diskUsage: systemMetrics.disk?.usage_percent || 0,
-        databaseStatus: systemHealth.database?.status || 'unknown',
-        redisStatus: systemHealth.redis?.status || 'unknown',
-        uptime: systemHealth.uptime || 'unknown'
+        cpuUsage: systemMetrics?.cpu?.average_usage || 0,
+        memoryUsage: systemMetrics?.memory?.percent || 0,
+        diskUsage: systemMetrics?.disk?.usage_percent || 0,
+        databaseStatus: systemHealth?.database?.status || 'unknown',
+        redisStatus: systemHealth?.redis?.status || 'unknown',
+        uptime: systemHealth?.uptime || 'unknown'
       },
       agentMetrics: {
         activeAgents,
@@ -149,20 +194,20 @@ export function Dashboard() {
         recentWorkflows: pendingWorkflows
       },
       contextMetrics: {
-        tokensSaved: systemMetrics.context_optimization?.tokens_saved || 0,
-        avgCompressionRatio: systemMetrics.context_optimization?.compression_ratio || 1.0,
-        totalOptimizations: systemMetrics.context_optimization?.total_optimizations || 0,
-        efficiency: systemMetrics.context_optimization?.efficiency || 0
+        tokensSaved: systemMetrics?.context_optimization?.tokens_saved || 0,
+        avgCompressionRatio: systemMetrics?.context_optimization?.compression_ratio || 1.0,
+        totalOptimizations: systemMetrics?.context_optimization?.total_optimizations || 0,
+        efficiency: systemMetrics?.context_optimization?.efficiency || 0
       },
       learningMetrics: {
-        totalMemoryItems: systemMetrics.learning?.total_memories || 0,
-        recentMemoryItems: systemMetrics.learning?.recent_memories || 0,
-        knowledgeNodes: systemMetrics.learning?.knowledge_nodes || 0,
-        activeCollaborations: systemMetrics.learning?.active_collaborations || 0,
-        totalCollaborations: systemMetrics.learning?.total_collaborations || 0,
-        knowledgeGrowth: systemMetrics.learning?.knowledge_growth || 0,
-        memoryConsolidations: systemMetrics.learning?.memory_consolidations || 0,
-        avgImprovement: systemMetrics.learning?.avg_improvement || 0
+        totalMemoryItems: systemMetrics?.learning?.total_memories || 0,
+        recentMemoryItems: systemMetrics?.learning?.recent_memories || 0,
+        knowledgeNodes: systemMetrics?.learning?.knowledge_nodes || 0,
+        activeCollaborations: systemMetrics?.learning?.active_collaborations || 0,
+        totalCollaborations: systemMetrics?.learning?.total_collaborations || 0,
+        knowledgeGrowth: systemMetrics?.learning?.knowledge_growth || 0,
+        memoryConsolidations: systemMetrics?.learning?.memory_consolidations || 0,
+        avgImprovement: systemMetrics?.learning?.avg_improvement || 0
       },
       timestamp: new Date().toISOString()
     }
