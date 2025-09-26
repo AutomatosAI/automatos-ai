@@ -74,3 +74,4 @@ DO $$
 BEGIN
     RAISE NOTICE 'Dashboard tables created successfully for Automatos AI';
 END $$;
+

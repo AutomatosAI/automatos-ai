@@ -270,7 +270,7 @@ class AnalyticsEngine:
                 # Query to get knowledge nodes
                 knowledge_nodes_query = text("""
                     SELECT COUNT(*) 
-                    FROM knowledge_graph_nodes
+                    FROM knowledge_nodes
                 """)
                 
                 # Query to get active collaborations
@@ -304,9 +304,9 @@ class AnalyticsEngine:
                 # Calculate knowledge growth (percentage increase in last 30 days)
                 knowledge_growth_query = text("""
                     SELECT 
-                        (COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM knowledge_graph_nodes 
+                        (COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM knowledge_nodes 
                                                    WHERE created_at < NOW() - INTERVAL '30 days'), 0)) - 100 
-                    FROM knowledge_graph_nodes 
+                    FROM knowledge_nodes 
                     WHERE created_at > NOW() - INTERVAL '30 days'
                 """)
                 

@@ -1,5 +1,5 @@
--- Create missing tables for dashboard functionality
--- This fixes the database errors appearing in dashboard logs
+-- Dashboard Tables for Automatos AI
+-- Fixes missing tables required by the dashboard
 
 -- 1. Context Optimization Metrics table
 CREATE TABLE IF NOT EXISTS context_optimization_metrics (
@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS memory_items (
     last_accessed TIMESTAMP WITH TIME ZONE
 );
 
--- 3. Knowledge Graph Nodes table
-CREATE TABLE IF NOT EXISTS knowledge_graph_nodes (
+-- 3. Knowledge Nodes table (corrected name from knowledge_graph_nodes)
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
     id SERIAL PRIMARY KEY,
     node_type VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
@@ -65,6 +65,6 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_agent_id ON memory_items(agent_id);
 CREATE INDEX IF NOT EXISTS idx_memory_items_memory_level ON memory_items(memory_level);
 CREATE INDEX IF NOT EXISTS idx_memory_items_created_at ON memory_items(created_at);
 CREATE INDEX IF NOT EXISTS idx_context_metrics_created_at ON context_optimization_metrics(created_at);
-CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_created_at ON knowledge_graph_nodes(created_at);
+CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_created_at ON knowledge_nodes(created_at);
 CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_status ON collaboration_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_memory_consolidations_agent_id ON memory_consolidations(agent_id);

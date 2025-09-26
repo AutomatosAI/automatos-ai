@@ -261,10 +261,10 @@ async def get_agent_performance(
         performance = {
             "agent_id": agent_id,
             "period": period,
-            "status": status["status"],
-            "runtime": status.get("runtime"),
-            "metrics": status.get("metrics", {}),
-            "llm_info": status.get("llm")
+            "status": agent_status["status"],
+            "runtime": agent_status.get("runtime"),
+            "metrics": agent_status.get("metrics", {}),
+            "llm_info": agent_status.get("llm")
         }
         
         # In production, you would query performance data from database
