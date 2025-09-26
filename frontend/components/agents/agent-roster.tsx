@@ -27,7 +27,6 @@ import {
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
-import { AgentDetailsModal } from './agent-details-modal'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
@@ -80,6 +79,7 @@ interface AgentRosterProps {
   searchTerm: string
   statusFilter: string
   onAgentSelect: (agentId: string | null) => void
+  onViewDetails: (agentId: string | null) => void
   selectedAgentId: string | null
   onRefresh: () => void
 }
@@ -90,11 +90,11 @@ export function AgentRoster({
   searchTerm, 
   statusFilter, 
   onAgentSelect, 
+  onViewDetails,
   selectedAgentId, 
   onRefresh 
 }: AgentRosterProps) {
   // Modal states
-  const [detailsModalAgentId, setDetailsModalAgentId] = useState<number | null>(null)
   const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
   const [statusModalAgentId, setStatusModalAgentId] = useState<number | null>(null)
   const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
@@ -106,7 +106,7 @@ export function AgentRoster({
 
   // Context menu handlers
   const handleViewDetails = (agentId: string) => {
-    setDetailsModalAgentId(Number(agentId))
+    onViewDetails(agentId) // Use the dedicated View Details handler
   }
 
   const handleConfigure = (agentId: string) => {
@@ -187,11 +187,10 @@ export function AgentRoster({
           return (
             <motion.div
               key={agent.id}
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
-              onClick={() => onAgentSelect(agent.id.toString())}
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
@@ -345,22 +344,6 @@ export function AgentRoster({
           </p>
         </motion.div>
       )}
-
-      {/* Agent Details Modal */}
-      <AgentDetailsModal
-        agentId={detailsModalAgentId}
-        open={detailsModalAgentId !== null}
-        onClose={() => setDetailsModalAgentId(null)}
-        onEdit={(agentId) => {
-          setDetailsModalAgentId(null);
-          setConfigModalAgentId(agentId);
-        }}
-        onToggleStatus={handleStatusChange}
-        onDelete={(agentId) => {
-          setDetailsModalAgentId(null);
-          setDeleteModalAgentId(agentId);
-        }}
-      />
 
       {/* Agent Configuration Modal */}
       <AgentConfigurationModal

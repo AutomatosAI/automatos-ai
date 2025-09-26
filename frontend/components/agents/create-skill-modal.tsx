@@ -61,24 +61,19 @@ const skillCategories = [
     description: 'Software development and programming'
   },
   {
-    category: 'analysis',
-    name: 'Analysis',
+    category: 'security',
+    name: 'Security',
+    description: 'Security and compliance'
+  },
+  {
+    category: 'infrastructure',
+    name: 'Infrastructure',
+    description: 'Infrastructure and operations'
+  },
+  {
+    category: 'analytics',
+    name: 'Analytics',
     description: 'Data analysis and insights'
-  },
-  {
-    category: 'communication',
-    name: 'Communication',
-    description: 'Messaging and interaction'
-  },
-  {
-    category: 'technical',
-    name: 'Technical',
-    description: 'Technical operations and systems'
-  },
-  {
-    category: 'management',
-    name: 'Management',
-    description: 'Project and resource management'
   }
 ]
 

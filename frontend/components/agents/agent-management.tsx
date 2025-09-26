@@ -37,7 +37,7 @@ export function AgentManagement() {
   const [activeTab, setActiveTab] = useState('roster')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  // Auto-select first agent when agents are loaded
+  const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -52,12 +52,6 @@ export function AgentManagement() {
 
   // Fetch real data from APIs
   const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents()
-  // Auto-select first agent when agents are loaded
-  useEffect(() => {
-    if (agents && agents.length > 0 && !selectedAgentId) {
-      setSelectedAgentId(agents[0].id.toString())
-    }
-  }, [agents, selectedAgentId])
   const { data: agentStats, isLoading: statsLoading } = useAgentStats()
   const { data: agentTypes = [] } = useAgentTypes()
 
@@ -257,6 +251,7 @@ export function AgentManagement() {
               searchTerm={searchTerm}
               statusFilter={statusFilter}
               onAgentSelect={setSelectedAgentId}
+              onViewDetails={setViewDetailsAgentId}
               selectedAgentId={selectedAgentId}
               onRefresh={handleRefresh}
             />
@@ -291,7 +286,6 @@ export function AgentManagement() {
           {/* Performance Tab */}
           <TabsContent value="performance" className="space-y-6">
             <AgentPerformance
-              onAgentSelect={setSelectedAgentId}
               agents={agents}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
@@ -301,7 +295,6 @@ export function AgentManagement() {
           {/* Analytics Tab */}
           <TabsContent value="analytics" className="space-y-6">
             <AgentPerformance
-              onAgentSelect={setSelectedAgentId}
               agents={agents}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
@@ -311,12 +304,13 @@ export function AgentManagement() {
         </Tabs>
       </motion.div>
 
-      {/* Agent Details Modal */}
-      {mounted && selectedAgentId && (
+
+      {/* Agent Details Modal - ONLY opens when View Details is clicked */}
+      {mounted && viewDetailsAgentId && (
         <AgentDetailsModal
-          agentId={Number(selectedAgentId)}
-          open={!!selectedAgentId}
-          onClose={() => setSelectedAgentId(null)}
+          agentId={Number(viewDetailsAgentId)}
+          open={!!viewDetailsAgentId}
+          onClose={() => setViewDetailsAgentId(null)}
         />
       )}
 

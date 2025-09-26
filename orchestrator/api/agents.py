@@ -38,7 +38,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
             is_active=skill.is_active,
             created_at=skill.created_at,
             updated_at=skill.updated_at
-        ) for skill in agent.skills] if agent.skills else [],
+        ).model_dump() for skill in agent.skills] if agent.skills else [],
         priority_level=getattr(agent, 'priority_level', 'medium') or 'medium',
         max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5) or 5,
         auto_start=getattr(agent, 'auto_start', False) or False,
@@ -343,7 +343,7 @@ async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
             is_active=skill.is_active,
             created_at=skill.created_at,
             updated_at=skill.updated_at
-        ) for skill in agent.skills] if agent.skills else []
+        ).model_dump() for skill in agent.skills] if agent.skills else []
         
         return {"data": skills}
     except HTTPException:
