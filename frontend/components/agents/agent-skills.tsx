@@ -18,13 +18,21 @@ import {
   Settings,
   BarChart,
   Filter,
-  Tag
+  Tag,
+  MoreVertical,
+  Eye
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu'
 import { 
   Select,
   SelectContent,
@@ -36,7 +44,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'react-hot-toast'
 
 // API hooks
-import { useSkills, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
+import { 
+  useSkills, 
+  useAgentSkills, 
+  useAddSkillToAgent, 
+  useRemoveSkillFromAgent,
+  useDeleteSkill,
+  useUpdateSkill
+} from '@/hooks/use-agent-api'
 
 import { CreateSkillModal } from "./create-skill-modal"
 const skillCategories = {
@@ -110,6 +125,8 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   // API mutations
   const addSkillMutation = useAddSkillToAgent()
   const removeSkillMutation = useRemoveSkillFromAgent()
+  const updateSkillMutation = useUpdateSkill()
+  const deleteSkillMutation = useDeleteSkill()
 
   // Get selected agent
   const selectedAgent = selectedAgentId ? agents.find(a => a.id === selectedAgentId) : null
@@ -167,6 +184,36 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
       toast.success('Skill removed from agent successfully')
     } catch (error) {
       toast.error('Failed to remove skill from agent')
+    }
+  }
+  
+  // Handle viewing skill details
+  const handleViewSkillDetails = (skill: any) => {
+    // For now, just show a toast with basic information
+    toast.success(`Viewing details for skill: ${skill.name}`)
+    // In the future, this could open a modal with full skill details
+  }
+  
+  // Handle skill configuration/editing
+  const handleConfigureSkill = (skill: any) => {
+    // This would open a modal to edit the skill
+    // For now, just show a toast as a placeholder
+    toast.success(`Configuring skill: ${skill.name}`)
+  }
+  
+  // Handle skill deletion
+  const handleDeleteSkill = async (skillId: string) => {
+    if (!skillId) return
+    
+    if (!confirm('Are you sure you want to delete this skill? This action cannot be undone.')) {
+      return
+    }
+    
+    try {
+      await deleteSkillMutation.mutateAsync(skillId)
+      toast.success('Skill deleted successfully')
+    } catch (error) {
+      toast.error('Failed to delete skill')
     }
   }
 
@@ -337,26 +384,60 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                           </div>
                         </div>
                         
-                        {selectedAgentId && (
-                          <Button
-                            size="sm"
-                            variant={hasSkill ? "destructive" : "default"}
-                            onClick={() => hasSkill ? handleRemoveSkill(skill.id) : handleAddSkill(skill.id)}
-                            disabled={addSkillMutation.isPending || removeSkillMutation.isPending}
-                          >
-                            {hasSkill ? (
-                              <>
-                                <Trash2 className="w-4 h-4 mr-1" />
-                                Remove
-                              </>
-                            ) : (
-                              <>
-                                <Plus className="w-4 h-4 mr-1" />
-                                Add
-                              </>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreVertical className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewSkillDetails(skill);
+                            }}>
+                              <Eye className="w-4 h-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            
+                            <DropdownMenuItem onClick={(e) => {
+                              e.stopPropagation();
+                              handleConfigureSkill(skill);
+                            }}>
+                              <Settings className="w-4 h-4 mr-2" />
+                              Configure
+                            </DropdownMenuItem>
+                            
+                            {selectedAgentId && (
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                hasSkill ? handleRemoveSkill(skill.id) : handleAddSkill(skill.id);
+                              }}>
+                                {hasSkill ? (
+                                  <>
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Remove from Agent
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Add to Agent
+                                  </>
+                                )}
+                              </DropdownMenuItem>
                             )}
-                          </Button>
-                        )}
+                            
+                            <DropdownMenuItem 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSkill(skill.id);
+                              }}
+                              className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete Skill
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </CardHeader>
                     
@@ -414,15 +495,49 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                             </div>
                           </div>
                           
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleRemoveSkill(skill.id)}
-                            disabled={removeSkillMutation.isPending}
-                          >
-                            <Trash2 className="w-4 h-4 mr-1" />
-                            Remove
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewSkillDetails(skill);
+                              }}>
+                                <Eye className="w-4 h-4 mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleConfigureSkill(skill);
+                              }}>
+                                <Settings className="w-4 h-4 mr-2" />
+                                Configure
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveSkill(skill.id);
+                              }}>
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Remove from Agent
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuItem 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteSkill(skill.id);
+                                }}
+                                className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete Skill
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </CardHeader>
                       

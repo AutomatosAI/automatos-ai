@@ -104,11 +104,26 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
 
     setIsSubmitting(true)
     try {
-      await createSkillMutation.mutateAsync(skillData)
+      // Format the skill data correctly
+      const formattedData = {
+        name: skillData.name,
+        description: skillData.description,
+        skill_type: skillData.skill_type,
+        category: skillData.category,
+        difficulty: "intermediate", // Default difficulty level
+        is_active: true,
+        implementation: skillData.implementation || "",
+        parameters: skillData.parameters || {}
+      }
+      
+      await createSkillMutation.mutateAsync(formattedData)
+      toast.success(`Skill ${skillData.name} created successfully`)
       onSuccess()
       resetForm()
-    } catch (error) {
+      handleClose()
+    } catch (error: any) {
       console.error('Error creating skill:', error)
+      toast.error(`Failed to create skill: ${error?.message || 'Unknown error'}`)
     } finally {
       setIsSubmitting(false)
     }

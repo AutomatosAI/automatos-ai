@@ -208,10 +208,12 @@ export function AgentStatusControlModal({
         payload.shutdown_type = shutdownType
       }
       
+      // Use the updateAgentConfig mutation with proper error handling
       await updateAgentMutation.mutateAsync({
         agentId: agentId.toString(),
         config: payload
       })
+      // Note: Error handling is done via the mutation's onError configuration
       
       if (onStatusChanged) {
         onStatusChanged(agentId, targetStatus)

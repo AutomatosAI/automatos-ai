@@ -93,9 +93,29 @@ export function AgentConfiguration({
     if (!selectedAgentId) return
 
     try {
+      // Sanitize the configuration data to handle null/undefined values
+      const sanitizedConfig = Object.entries(configData).reduce((acc: any, [key, value]) => {
+        // Skip undefined values
+        if (value === undefined) return acc;
+        
+        // For falsy values like 0, false, or empty string, preserve them
+        // But replace null with appropriate defaults
+        if (value === null) {
+          // Assign appropriate defaults for common fields
+          if (key === 'priority_level') acc[key] = 'medium';
+          else if (key === 'max_concurrent_tasks') acc[key] = 5;
+          else if (key === 'retry_attempts') acc[key] = 3;
+          // For other fields, skip null values
+        } else {
+          acc[key] = value;
+        }
+        
+        return acc;
+      }, {});
+
       await updateConfigMutation.mutateAsync({
         agentId: selectedAgentId,
-        config: configData
+        config: sanitizedConfig
       })
       setHasUnsavedChanges(false)
     } catch (error) {
@@ -118,8 +138,25 @@ export function AgentConfiguration({
           <Settings className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold mb-2">Select an Agent</h3>
           <p className="text-muted-foreground">
-            Choose an agent to configure its settings and parameters
+            Choose an agent from the dropdown above to configure its settings
           </p>
+          <div className="mt-6 max-w-md mx-auto">
+            <Select
+              value={selectedAgentId || ''}
+              onValueChange={(value) => onAgentSelect(value)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select an agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
     )
@@ -149,9 +186,26 @@ export function AgentConfiguration({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Agent Configuration</h2>
-          <p className="text-muted-foreground">
-            Configure settings and parameters for {agent?.name}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-muted-foreground">
+              Configure settings and parameters for
+            </p>
+            <Select
+              value={selectedAgentId || ''}
+              onValueChange={(value) => onAgentSelect(value)}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Select an agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">

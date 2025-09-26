@@ -336,7 +336,7 @@ export function AgentDetailsModal({
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-green-400">
-                            {agentStats?.success_rate ? 
+                            {agentStats?.success_rate != null ? 
                               `${(agentStats.success_rate * 100).toFixed(1)}%` : 
                               'N/A'
                             }
@@ -351,7 +351,7 @@ export function AgentDetailsModal({
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-purple-400">
-                            {agentStats?.avg_response_time ? 
+                            {agentStats?.avg_response_time != null ? 
                               `${agentStats.avg_response_time}ms` : 
                               'N/A'
                             }
@@ -379,12 +379,12 @@ export function AgentDetailsModal({
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>Success Rate</span>
-                            <span>{agentStats?.success_rate ? 
+                            <span>{agentStats?.success_rate != null ? 
                               `${(agentStats.success_rate * 100).toFixed(1)}%` : 'N/A'}
                             </span>
                           </div>
                           <Progress 
-                            value={agentStats?.success_rate ? 
+                            value={agentStats?.success_rate != null ? 
                               agentStats.success_rate * 100 : 0} 
                             className="h-2"
                           />
@@ -414,16 +414,19 @@ export function AgentDetailsModal({
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>CPU Usage</span>
-                            <span>{agentStats?.cpu_usage || 0}%</span>
+                            <span>{agent?.resource_usage?.cpu_percent || 0}%</span>
                           </div>
-                          <Progress value={agentStats?.cpu_usage || 0} className="h-2" />
+                          <Progress value={agent?.resource_usage?.cpu_percent || 0} className="h-2" />
                         </div>
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>Memory Usage</span>
-                            <span>{agentStats?.memory_usage || 0} MB</span>
+                            <span>{agent?.resource_usage?.memory_mb || 0} MB</span>
                           </div>
-                          <Progress value={(agentStats?.memory_usage || 0) / 10.24} className="h-2" />
+                          <Progress 
+                            value={Math.min((agent?.resource_usage?.memory_mb || 0) / 80, 100)} 
+                            className="h-2" 
+                          />
                         </div>
                       </CardContent>
                     </Card>
@@ -439,22 +442,22 @@ export function AgentDetailsModal({
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Users className="w-8 h-8 text-blue-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agentStats?.active_workflows || 0}</p>
+                          <p className="text-2xl font-bold">{agent?.current_workload?.active_workflows || 0}</p>
                           <p className="text-sm text-muted-foreground">Active Workflows</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Clock className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agentStats?.queued_tasks || 0}</p>
+                          <p className="text-2xl font-bold">{agent?.current_workload?.queued_tasks || 0}</p>
                           <p className="text-sm text-muted-foreground">Queued Tasks</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Database className="w-8 h-8 text-green-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agentStats?.processing_capacity || 0}</p>
+                          <p className="text-2xl font-bold">{agent?.current_workload?.processing_capacity || 0}</p>
                           <p className="text-sm text-muted-foreground">Capacity</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <TrendingUp className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agentStats?.current_utilization || 0}%</p>
+                          <p className="text-2xl font-bold">{agent?.current_workload?.current_utilization || 0}%</p>
                           <p className="text-sm text-muted-foreground">Utilization</p>
                         </div>
                       </div>

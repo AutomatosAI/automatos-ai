@@ -5,9 +5,7 @@ import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AgentRoster } from './agent-roster'
-import { AgentsTable2 } from '@/components/agents2/AgentsTable2'
-import { AgentDetailsPanel } from '@/components/agents/agent-details-panel'
-import { AgentRunsPanel } from '@/components/agents/agent-runs-panel'
+import { AgentDetailsPanel } from '@/components/agents/agent-details-model'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentPerformance } from './agent-performance'
 import { AgentSkills } from './agent-skills'
@@ -28,10 +26,6 @@ export function AgentManagement() {
     triggerOnce: true,
     threshold: 0.1,
   })
-
-  // Fetch agents and stats data
-  const { data: agents = [], isLoading: agentsLoading } = useAgents()
-  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
 
   const [stats, setStats] = useState([
     {
@@ -232,7 +226,11 @@ export function AgentManagement() {
           </TabsContent>
 
           <TabsContent value="config" className="space-y-6">
-            <AgentConfiguration />
+            <AgentConfiguration 
+              agents={agents}
+              selectedAgentId={selectedAgentId} 
+              onAgentSelect={setSelectedAgentId}
+            />
           </TabsContent>
 
           <TabsContent value="coordination" className="space-y-6">

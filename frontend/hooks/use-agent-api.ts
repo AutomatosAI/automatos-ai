@@ -469,3 +469,40 @@ export function useCreateSkillsBulk() {
     },
   })
 }
+
+// Update a skill
+export function useUpdateSkill() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => apiClient.updateSkill(id, data),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] })
+      queryClient.invalidateQueries({ queryKey: ['skills', variables.id] })
+      toast.success('Skill updated successfully!')
+      return data
+    },
+    onError: (error) => {
+      toast.error(`Failed to update skill: ${error.message}`)
+      throw error
+    },
+  })
+}
+
+// Delete a skill
+export function useDeleteSkill() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (skillId: string) => apiClient.deleteSkill(skillId),
+    onSuccess: (data, skillId) => {
+      queryClient.invalidateQueries({ queryKey: ['skills'] })
+      toast.success('Skill deleted successfully!')
+      return data
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete skill: ${error.message}`)
+      throw error
+    },
+  })
+}

@@ -438,6 +438,25 @@ export function AgentConfigurationModal({
                         </div>
                       </div>
                       
+                      <div className="space-y-3">
+                        <Label>Retry Attempts</Label>
+                        <div className="space-y-2">
+                          <Slider
+                            value={[formData.retry_attempts || 3]}
+                            onValueChange={(value) => updateFormData('retry_attempts', value[0])}
+                            max={10}
+                            min={0}
+                            step={1}
+                            className="w-full"
+                          />
+                          <div className="flex justify-between text-sm text-muted-foreground">
+                            <span>0</span>
+                            <span className="font-medium">{formData.retry_attempts || 3} attempts</span>
+                            <span>10</span>
+                          </div>
+                        </div>
+                      </div>
+                      
                       <Separator />
                       
                       <div className="space-y-4">
@@ -519,6 +538,49 @@ export function AgentConfigurationModal({
                             <span>100%</span>
                           </div>
                         </div>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <Label className="flex items-center space-x-2">
+                          <Network className="w-4 h-4" />
+                          <span>Network Bandwidth (Mbps)</span>
+                        </Label>
+                        <div className="space-y-2">
+                          <Slider
+                            value={[formData.network_bandwidth || 100]}
+                            onValueChange={(value) => updateFormData('network_bandwidth', value[0])}
+                            max={1000}
+                            min={10}
+                            step={10}
+                            className="w-full"
+                          />
+                          <div className="flex justify-between text-sm text-muted-foreground">
+                            <span>10 Mbps</span>
+                            <span className="font-medium">{formData.network_bandwidth || 100} Mbps</span>
+                            <span>1000 Mbps</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label>Logging Level</Label>
+                        <Select 
+                          value={formData.logging_level || 'info'} 
+                          onValueChange={(value) => updateFormData('logging_level', value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="debug">Debug</SelectItem>
+                            <SelectItem value="info">Info</SelectItem>
+                            <SelectItem value="warning">Warning</SelectItem>
+                            <SelectItem value="error">Error</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Controls the verbosity of agent logs
+                        </p>
                       </div>
                     </CardContent>
                   </Card>

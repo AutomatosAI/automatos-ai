@@ -14,7 +14,8 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  Bot
+  Bot,
+  Trash2
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,10 @@ import {
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
+import { AgentDetailsModal } from './agent-details-modal'
+import { AgentConfigurationModal } from './agent-configuration-modal'
+import { AgentStatusControlModal } from './agent-status-control-modal'
+import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
 
 // Agent type icons mapping
 const agentTypeIcons: Record<string, string> = {
@@ -88,7 +93,12 @@ export function AgentRoster({
   selectedAgentId, 
   onRefresh 
 }: AgentRosterProps) {
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  // Modal states
+  const [detailsModalAgentId, setDetailsModalAgentId] = useState<number | null>(null)
+  const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
+  const [statusModalAgentId, setStatusModalAgentId] = useState<number | null>(null)
+  const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
+  const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
   
   // Use real API hooks for agent actions
   const startAgentMutation = useStartAgent()
@@ -96,24 +106,28 @@ export function AgentRoster({
 
   // Context menu handlers
   const handleViewDetails = (agentId: string) => {
-    console.log('View details for agent:', agentId)
-    // You can implement a modal or navigate to a details page
-    alert(`Viewing details for agent ${agentId}`)
+    setDetailsModalAgentId(Number(agentId))
   }
 
   const handleConfigure = (agentId: string) => {
-    console.log('Configure agent:', agentId)
-    // Navigate to configuration tab or open configuration modal
-    // For now, we'll show an alert
-    alert(`Opening configuration for agent ${agentId}. This would typically switch to the Configuration tab.`)
+    setConfigModalAgentId(Number(agentId))
   }
 
   const handleToggleStatus = async (agentId: string, currentStatus: string) => {
+    setStatusModalAgentId(Number(agentId))
+    setCurrentAgentStatus(currentStatus)
+  }
+  
+  const handleDelete = (agentId: string) => {
+    setDeleteModalAgentId(Number(agentId))
+  }
+  
+  const handleStatusChange = async (agentId: number, newStatus: string) => {
     try {
-      if (currentStatus === 'active') {
-        await stopAgentMutation.mutateAsync(agentId)
-      } else {
-        await startAgentMutation.mutateAsync(agentId)
+      if (newStatus === 'inactive') {
+        await stopAgentMutation.mutateAsync(agentId.toString())
+      } else if (newStatus === 'active') {
+        await startAgentMutation.mutateAsync(agentId.toString())
       }
       
       // Refresh the agents list
@@ -198,15 +212,24 @@ export function AgentRoster({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleViewDetails(agent.id)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleViewDetails(agent.id);
+                    }}>
                       <Eye className="w-4 h-4 mr-2" />
                       View Details
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleConfigure(agent.id)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleConfigure(agent.id);
+                    }}>
                       <Settings className="w-4 h-4 mr-2" />
                       Configure
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleToggleStatus(agent.id, agent.status)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleToggleStatus(agent.id, agent.status);
+                    }}>
                       {agent.status === 'active' ? (
                         <>
                           <Pause className="w-4 h-4 mr-2" />
@@ -219,6 +242,16 @@ export function AgentRoster({
                         </>
                       )}
                     </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        handleDelete(agent.id);
+                      }}
+                      className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -229,12 +262,12 @@ export function AgentRoster({
                   <StatusIcon className="w-3 h-3 mr-1" />
                   {agent.status || 'active'}
                 </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {agent.performance_metrics?.success_rate ? 
-                    `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
-                    'N/A'
-                  }
-                </span>
+                  <span className="text-sm text-muted-foreground">
+                    {agent.performance_metrics?.success_rate != null ? 
+                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
+                      'N/A'
+                    }
+                  </span>
               </div>
 
               {/* Performance Bar */}
@@ -242,7 +275,7 @@ export function AgentRoster({
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
                   <span>Success Rate</span>
                   <span>
-                    {agent.performance_metrics?.success_rate ? 
+                    {agent.performance_metrics?.success_rate != null ? 
                       `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
                       'N/A'
                     }
@@ -252,7 +285,7 @@ export function AgentRoster({
                   <div 
                     className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
                     style={{ 
-                      width: `${agent.performance_metrics?.success_rate ? 
+                      width: `${agent.performance_metrics?.success_rate != null ? 
                         agent.performance_metrics.success_rate * 100 : 0}%` 
                     }}
                   />
@@ -312,6 +345,51 @@ export function AgentRoster({
           </p>
         </motion.div>
       )}
+
+      {/* Agent Details Modal */}
+      <AgentDetailsModal
+        agentId={detailsModalAgentId}
+        open={detailsModalAgentId !== null}
+        onClose={() => setDetailsModalAgentId(null)}
+        onEdit={(agentId) => {
+          setDetailsModalAgentId(null);
+          setConfigModalAgentId(agentId);
+        }}
+        onToggleStatus={handleStatusChange}
+        onDelete={(agentId) => {
+          setDetailsModalAgentId(null);
+          setDeleteModalAgentId(agentId);
+        }}
+      />
+
+      {/* Agent Configuration Modal */}
+      <AgentConfigurationModal
+        agentId={configModalAgentId}
+        open={configModalAgentId !== null}
+        onClose={() => setConfigModalAgentId(null)}
+        onSave={(agentId, config) => {
+          onRefresh();
+        }}
+      />
+
+      {/* Agent Status Control Modal */}
+      <AgentStatusControlModal
+        agentId={statusModalAgentId}
+        currentStatus={currentAgentStatus}
+        open={statusModalAgentId !== null}
+        onClose={() => setStatusModalAgentId(null)}
+        onStatusChanged={handleStatusChange}
+      />
+
+      {/* Agent Confirm Delete Modal */}
+      <AgentConfirmDeleteModal
+        agentId={deleteModalAgentId}
+        open={deleteModalAgentId !== null}
+        onClose={() => setDeleteModalAgentId(null)}
+        onDeleted={() => {
+          onRefresh();
+        }}
+      />
     </div>
   )
 }
