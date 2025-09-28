@@ -15,88 +15,42 @@ const API_PREFIX = "/api"
 // Import real API client
 import { apiClient } from "@/lib/api-client"
 
-// OLD MOCK CLIENT - REPLACED
-// /* const apiClient = {
-//   async request(endpoint: string, options: RequestInit = {}) {
-//     const url = `${API_BASE}${API_PREFIX}${endpoint}`
-//     const response = await fetch(url, {
-//       headers: {
-//         'Content-Type': 'application/json',
-//         ...options.headers,
-//       },
-//       ...options,
-//     })
-// 
-//     if (!response.ok) {
-//       throw new Error(`API Error: ${response.status} ${response.statusText}`)
-//     }
-// 
-//     return response.json()
-//   },
-// 
-//   // Agent endpoints
-//   getAgents: () => apiClient.request('/agents'),
-//   getAgent: (id: string) => apiClient.request(`/agents/${id}`),
-//   getAgentStats: () => apiClient.request('/agents/stats'),
-//   getAgentTypes: () => apiClient.request('/agents/types'),
-//   createAgent: (data: any) => apiClient.request('/agents', {
-//     method: 'POST',
-//     body: JSON.stringify(data),
-//   }),
-//   updateAgent: (id: string, data: any) => apiClient.request(`/agents/${id}`, {
-//     method: 'PUT',
-//     body: JSON.stringify(data),
-//   }),
-//   deleteAgent: (id: string) => apiClient.request(`/agents/${id}`, {
-//     method: 'DELETE',
-//   }),
-// 
-//   // Skills endpoints
-//   getSkills: () => apiClient.request('/skills'),
-//   getAgentSkills: (agentId: string) => apiClient.request(`/agents/${agentId}/skills`),
-//   addSkillToAgent: (agentId: string, skillId: string) => apiClient.request(`/agents/${agentId}/skills`, {
-//     method: 'POST',
-//     body: JSON.stringify({ skill_id: skillId }),
-//   }),
-//   removeSkillFromAgent: (agentId: string, skillId: string) => apiClient.request(`/agents/${agentId}/skills/${skillId}`, {
-//     method: 'DELETE',
-//   }),
-// 
-//   // Configuration endpoints
-//   getAgentConfig: (agentId: string) => apiClient.request(`/agents/${agentId}/configuration`),
-//   updateAgentConfig: (agentId: string, config: any) => apiClient.request(`/agents/${agentId}/configuration`, {
-//     method: 'PUT',
-//     body: JSON.stringify(config),
-//   }),
-// 
-//   // Coordination endpoints
-//   getAgentCoordination: () => apiClient.request('/multi-agent/coordination/status'),
-//   coordinateAgents: (data: any) => apiClient.request('/multi-agent/coordination/coordinate', {
-//     method: 'POST',
-//     body: JSON.stringify(data),
-//   }),
-//   collaborativeReasoning: (data: any) => apiClient.request('/multi-agent/reasoning/collaborative', {
-//     method: 'POST',
-//     body: JSON.stringify(data),
-//   }),
-// 
-//   // Performance endpoints
-//   getAgentPerformance: (agentId: string) => apiClient.request(`/agents/${agentId}/performance`),
-//   getAgentLogs: (agentId: string) => apiClient.request(`/agents/${agentId}/logs`),
-//   getAgentMetrics: (agentId: string) => apiClient.request(`/agents/${agentId}/metrics`),
-// 
-//   // Execution endpoints
-//   startAgent: (agentId: string) => apiClient.request(`/agents/${agentId}/start`, {
-//     method: 'POST',
-//   }),
-//   stopAgent: (agentId: string) => apiClient.request(`/agents/${agentId}/stop`, {
-//     method: 'POST',
-//   }),
-//   pauseAgent: (agentId: string) => apiClient.request(`/agents/${agentId}/pause`, {
-//     method: 'POST',
-//   }),
-// }
-// END MOCK CLIENT - USING REAL API CLIENT NOW */
+// Agent API client using main API client
+const agentApiClient = {
+  // Agent endpoints
+  getAgents: () => agentApiClient.getAgents(),
+  getAgent: (id: string) => agentApiClient.getAgent(id),
+  getAgentStats: () => agentApiClient.getAgentStats(),
+  getAgentTypes: () => agentApiClient.getAgentTypes(),
+  createAgent: (data: any) => agentApiClient.createAgent(data),
+  updateAgent: (id: string, data: any) => agentApiClient.updateAgent(id, data),
+  deleteAgent: (id: string) => agentApiClient.deleteAgent(id),
+
+  // Skills endpoints
+  getSkills: () => agentApiClient.getSkills(),
+  getAgentSkills: (agentId: string) => agentApiClient.getAgentSkills(agentId),
+  addSkillToAgent: (agentId: string, skillId: string) => agentApiClient.addSkillToAgent(agentId, skillId),
+  removeSkillFromAgent: (agentId: string, skillId: string) => agentApiClient.removeSkillFromAgent(agentId, skillId),
+
+  // Configuration endpoints
+  getAgentConfig: (agentId: string) => agentApiClient.getAgentConfig(agentId),
+  updateAgentConfig: (agentId: string, config: any) => agentApiClient.updateAgentConfig(agentId, config),
+
+  // Coordination endpoints
+  getAgentCoordination: () => agentApiClient.getAgentCoordination(),
+  coordinateAgents: (data: any) => agentApiClient.coordinateAgents(data),
+  collaborativeReasoning: (data: any) => agentApiClient.collaborativeReasoning(data),
+
+  // Performance endpoints
+  getAgentPerformance: (agentId: string) => agentApiClient.getAgentPerformance(agentId),
+  getAgentLogs: (agentId: string) => agentApiClient.getAgentLogs(agentId),
+  getAgentMetrics: (agentId: string) => agentApiClient.getAgentMetrics(agentId),
+
+  // Execution endpoints
+  startAgent: (agentId: string) => agentApiClient.startAgent(agentId),
+  stopAgent: (agentId: string) => agentApiClient.stopAgent(agentId),
+  pauseAgent: (agentId: string) => agentApiClient.pauseAgent(agentId),
+}
 
 // Query keys for React Query
 export const agentQueryKeys = {
@@ -127,7 +81,7 @@ export const agentQueryKeys = {
 export function useAgents() {
   return useQuery({
     queryKey: agentQueryKeys.agents,
-    queryFn: () => apiClient.getAgents(),
+    queryFn: () => agentApiClient.getAgents(),
     refetchInterval: 30000, // Refetch every 30 seconds
     staleTime: 15000, // Consider data stale after 15 seconds
   })
@@ -137,7 +91,7 @@ export function useAgents() {
 export function useAgent(agentId: string | null) {
   return useQuery({
     queryKey: agentQueryKeys.agent(agentId!),
-    queryFn: () => apiClient.getAgent(agentId!),
+    queryFn: () => agentApiClient.getAgent(agentId!),
     enabled: !!agentId,
     refetchInterval: 10000,
   })
@@ -147,7 +101,7 @@ export function useAgent(agentId: string | null) {
 export function useAgentStats() {
   return useQuery({
     queryKey: agentQueryKeys.agentStats,
-    queryFn: () => apiClient.getAgentStats(),
+    queryFn: () => agentApiClient.getAgentStats(),
     refetchInterval: 30000,
     staleTime: 15000,
   })
@@ -157,7 +111,7 @@ export function useAgentStats() {
 export function useAgentTypes() {
   return useQuery({
     queryKey: agentQueryKeys.agentTypes,
-    queryFn: () => apiClient.getAgentTypes(),
+    queryFn: () => agentApiClient.getAgentTypes(),
     staleTime: 5 * 60 * 1000, // Agent types don't change often
   })
 }
@@ -166,7 +120,7 @@ export function useAgentTypes() {
 export function useSkills() {
   return useQuery({
     queryKey: agentQueryKeys.skills,
-    queryFn: () => apiClient.getSkills(),
+    queryFn: () => agentApiClient.getSkills(),
     staleTime: 2 * 60 * 1000, // Skills don't change very often
   })
 }
@@ -175,7 +129,7 @@ export function useSkills() {
 export function useAgentSkills(agentId: string | null) {
   return useQuery({
     queryKey: agentQueryKeys.agentSkills(agentId!),
-    queryFn: () => apiClient.getAgentSkills(agentId!),
+    queryFn: () => agentApiClient.getAgentSkills(agentId!),
     enabled: !!agentId,
     refetchInterval: 30000,
   })
@@ -185,7 +139,7 @@ export function useAgentSkills(agentId: string | null) {
 export function useAgentConfig(agentId: string | null) {
   return useQuery({
     queryKey: agentQueryKeys.agentConfig(agentId!),
-    queryFn: () => apiClient.getAgentConfig(agentId!),
+    queryFn: () => agentApiClient.getAgentConfig(agentId!),
     enabled: !!agentId,
   })
 }
@@ -194,7 +148,7 @@ export function useAgentConfig(agentId: string | null) {
 export function useAgentPerformance(agentId: string | null) {
   return useQuery({
     queryKey: agentQueryKeys.agentPerformance(agentId!),
-    queryFn: () => apiClient.getAgentPerformance(agentId!),
+    queryFn: () => agentApiClient.getAgentPerformance(agentId!),
     enabled: !!agentId,
     refetchInterval: 10000,
   })
@@ -204,7 +158,7 @@ export function useAgentPerformance(agentId: string | null) {
 export function useAgentLogs(agentId: string | null) {
   return useQuery({
     queryKey: agentQueryKeys.agentLogs(agentId!),
-    queryFn: () => apiClient.getAgentLogs(agentId!),
+    queryFn: () => agentApiClient.getAgentLogs(agentId!),
     enabled: !!agentId,
     refetchInterval: 5000, // More frequent for logs
   })
@@ -214,7 +168,7 @@ export function useAgentLogs(agentId: string | null) {
 export function useCoordinationStatus() {
   return useQuery({
     queryKey: agentQueryKeys.coordinationStatus,
-    queryFn: () => apiClient.getAgentCoordination(),
+    queryFn: () => agentApiClient.getAgentCoordination(),
     refetchInterval: 15000,
   })
 }
@@ -226,7 +180,7 @@ export function useCreateAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (data) => apiClient.createAgent(data),
+    mutationFn: (data) => agentApiClient.createAgent(data),
     onSuccess: (data) => {
       // Invalidate and refetch agent queries
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -247,7 +201,7 @@ export function useUpdateAgent() {
   
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => 
-      apiClient.updateAgent(id, data),
+      agentApiClient.updateAgent(id, data),
     onSuccess: (data, variables) => {
       // Invalidate specific agent and list
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(variables.id) })
@@ -268,7 +222,7 @@ export function useDeleteAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (id) => apiClient.deleteAgent(id),
+    mutationFn: (id) => agentApiClient.deleteAgent(id),
     onSuccess: (data, agentId) => {
       // Remove from cache and invalidate lists
       queryClient.removeQueries({ queryKey: agentQueryKeys.agent(agentId) })
@@ -290,7 +244,7 @@ export function useAddSkillToAgent() {
   
   return useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
-      apiClient.addSkillToAgent(agentId, skillId),
+      agentApiClient.addSkillToAgent(agentId, skillId),
     onSuccess: (data, variables) => {
       // Invalidate agent skills and agent data
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agentSkills(variables.agentId) })
@@ -310,7 +264,7 @@ export function useRemoveSkillFromAgent() {
   
   return useMutation({
     mutationFn: ({ agentId, skillId }: { agentId: string; skillId: string }) =>
-      apiClient.removeSkillFromAgent(agentId, skillId),
+      agentApiClient.removeSkillFromAgent(agentId, skillId),
     onSuccess: (data, variables) => {
       // Invalidate agent skills and agent data
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agentSkills(variables.agentId) })
@@ -330,7 +284,7 @@ export function useUpdateAgentConfig() {
   
   return useMutation({
     mutationFn: ({ agentId, config }: { agentId: string; config: any }) =>
-      apiClient.updateAgentConfig(agentId, config),
+      agentApiClient.updateAgentConfig(agentId, config),
     onSuccess: (data, variables) => {
       // Invalidate agent config and agent data
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agentConfig(variables.agentId) })
@@ -350,7 +304,7 @@ export function useCoordinateAgents() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (data) => apiClient.coordinateAgents(data),
+    mutationFn: (data) => agentApiClient.coordinateAgents(data),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.coordinationStatus })
       toast.success('Agent coordination initiated!')
@@ -366,7 +320,7 @@ export function useCoordinateAgents() {
 // Collaborative reasoning
 export function useCollaborativeReasoning() {
   return useMutation({
-    mutationFn: (data) => apiClient.collaborativeReasoning(data),
+    mutationFn: (data) => agentApiClient.collaborativeReasoning(data),
     onSuccess: (data) => {
       toast.success('Collaborative reasoning completed!')
       return data
@@ -383,7 +337,7 @@ export function useStartAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (id) => apiClient.startAgent(id),
+    mutationFn: (id) => agentApiClient.startAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -401,7 +355,7 @@ export function useStopAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (id) => apiClient.stopAgent(id),
+    mutationFn: (id) => agentApiClient.stopAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -419,7 +373,7 @@ export function usePauseAgent() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (id) => apiClient.pauseAgent(id),
+    mutationFn: (id) => agentApiClient.pauseAgent(id),
     onSuccess: (data, agentId) => {
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agents })
@@ -439,7 +393,7 @@ export function useCreateSkill() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (skillData) => apiClient.createSkill(skillData),
+    mutationFn: (skillData) => agentApiClient.createSkill(skillData),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['skills'] })
       toast.success('Skill created successfully!')
@@ -457,7 +411,7 @@ export function useCreateSkillsBulk() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (skillsData) => apiClient.createSkillsBulk(skillsData),
+    mutationFn: (skillsData) => agentApiClient.createSkillsBulk(skillsData),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['skills'] })
       toast.success(`Created ${data.length} skills successfully!`)
@@ -475,7 +429,7 @@ export function useUpdateSkill() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => apiClient.updateSkill(id, data),
+    mutationFn: ({ id, data }: { id: string; data: any }) => agentApiClient.updateSkill(id, data),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['skills'] })
       queryClient.invalidateQueries({ queryKey: ['skills', variables.id] })
@@ -494,7 +448,7 @@ export function useDeleteSkill() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (skillId: string) => apiClient.deleteSkill(skillId),
+    mutationFn: (skillId: string) => agentApiClient.deleteSkill(skillId),
     onSuccess: (data, skillId) => {
       queryClient.invalidateQueries({ queryKey: ['skills'] })
       toast.success('Skill deleted successfully!')

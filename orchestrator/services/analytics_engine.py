@@ -289,8 +289,8 @@ class AnalyticsEngine:
                 # Query to get memory consolidations
                 consolidations_query = text("""
                     SELECT COUNT(*) 
-                    FROM memory_consolidations 
-                    WHERE created_at > NOW() - INTERVAL '30 days'
+                    FROM learning_progress_tracking 
+                    WHERE recorded_at > NOW() - INTERVAL '30 days'
                 """)
                 
                 # Execute queries and get metrics
@@ -314,9 +314,9 @@ class AnalyticsEngine:
                 
                 # Calculate average improvement
                 improvement_query = text("""
-                    SELECT COALESCE(AVG(improvement_score), 0.0) 
-                    FROM memory_consolidations 
-                    WHERE created_at > NOW() - INTERVAL '30 days'
+                    SELECT COALESCE(AVG(performance_improvement), 0.0) 
+                    FROM learning_progress_tracking 
+                    WHERE recorded_at > NOW() - INTERVAL '30 days'
                 """)
                 
                 avg_improvement = self.db.execute(improvement_query).scalar() or 0.0

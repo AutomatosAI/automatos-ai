@@ -346,7 +346,7 @@ class DocumentResponse(BaseModel):
     file_type: Optional[str]
     file_size: Optional[int]
     status: str
-    chunk_count: int
+    chunk_count: Optional[int]
     tags: Optional[List[str]]
     description: Optional[str]
     upload_date: datetime
