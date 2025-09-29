@@ -6,7 +6,8 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { Header } from './header'
-import { ChatWidget } from '../chat-widget'
+// ChatWidget removed to prevent errors
+// import { ChatWidget } from '../chat-widget'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -58,12 +59,14 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
       
       {/* Chat Widget - Only show on non-chat pages */}
+      {/* ChatWidget removed to prevent errors
       {pathname !== '/chat' && (
         <ChatWidget 
           position="bottom-right"
           context={chatContext}
         />
       )}
+      */}
     </div>
   )
 }

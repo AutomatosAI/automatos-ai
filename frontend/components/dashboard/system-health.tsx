@@ -1,35 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Server, CheckCircle, AlertCircle } from 'lucide-react'
-import { apiClient } from "@/lib/api-client'
+import { useSystemHealth } from '@/hooks/use-system-config-api'
+import dynamic from 'next/dynamic'
+
+// Client-side only component to avoid hydration issues with time
+const TimeDisplay = dynamic(() => Promise.resolve(({ timestamp }: { timestamp: string }) => {
+  return <span>{timestamp ? new Date(timestamp).toLocaleTimeString() : 'Unknown'}</span>;
+}), { ssr: false });
 
 export function SystemHealth() {
-  const [healthData, setHealthData] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    const fetchHealthData = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getSystemHealth()
-        setHealthData(data)
-        setError(null)
-      } catch (err) {
-        console.error('Failed to fetch health data:', err)
-        setError(err.message)
-        setHealthData(null)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchHealthData()
-    const interval = setInterval(fetchHealthData, 30000)
-    return () => clearInterval(interval)
-  }, [])
+  const { data: healthData, isLoading: loading, error } = useSystemHealth()
 
   if (loading) {
     return (
@@ -44,7 +26,7 @@ export function SystemHealth() {
     return (
       <div className="glass-card p-6">
         <h3 className="text-lg font-semibold mb-4">System Health</h3>
-        <div className="text-red-400">Error: {error}</div>
+        <div className="text-red-400">Error: {error.message || 'Unknown error'}</div>
       </div>
     )
   }
@@ -63,7 +45,7 @@ export function SystemHealth() {
             <div className="font-medium">Status: {healthData?.status}</div>
             <div className="text-sm text-muted-foreground">Version: {healthData?.version}</div>
             <div className="text-sm text-muted-foreground">
-              Last checked: {healthData?.timestamp ? new Date(healthData.timestamp).toLocaleTimeString() : 'Unknown'}
+              Last checked: <TimeDisplay timestamp={healthData?.timestamp} />
             </div>
           </div>
         </div>

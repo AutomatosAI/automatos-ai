@@ -23,50 +23,41 @@ import { Badge } from '@/components/ui/badge'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { apiClient, RAGConfig } from "@/lib/api-client'
+import { useSystemRAG, useTestSystemRAG } from '@/hooks/use-rag-api'
+
+interface RAGConfig {
+  id: number
+  name: string
+  description?: string
+  [key: string]: any
+}
 
 export function RAGConfiguration() {
-  const [configs, setConfigs] = useState<RAGConfig[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [selectedConfig, setSelectedConfig] = useState<RAGConfig | null>(null)
   const [testQuery, setTestQuery] = useState('')
   const [testResults, setTestResults] = useState<any>(null)
-  const [testLoading, setTestLoading] = useState(false)
+  
+  // Use existing hooks
+  const { data: ragData, isLoading: loading, error: ragError } = useSystemRAG()
+  const testMutation = useTestSystemRAG()
+  
+  const configs = ragData?.configs || []
+  const error = ragError?.message || null
 
   useEffect(() => {
-    fetchConfigs()
-  }, [])
-
-  const fetchConfigs = async () => {
-    try {
-      setLoading(true)
-      const data = await apiClient.getRAGConfigs()
-      setConfigs(data)
-      if (data.length > 0 && !selectedConfig) {
-        setSelectedConfig(data[0])
-      }
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch RAG configurations')
-      console.error('Error fetching RAG configs:', err)
-    } finally {
-      setLoading(false)
+    if (configs.length > 0 && !selectedConfig) {
+      setSelectedConfig(configs[0])
     }
-  }
+  }, [configs])
 
   const handleTestConfig = async (configId: number) => {
     if (!testQuery.trim()) return
 
     try {
-      setTestLoading(true)
-      const results = await apiClient.testRAGConfig(configId, testQuery)
+      const results = await testMutation.mutateAsync(configId.toString())
       setTestResults(results)
     } catch (err) {
-      console.error('Error testing RAG config:', err)
       setTestResults({ error: err instanceof Error ? err.message : 'Test failed' })
-    } finally {
-      setTestLoading(false)
     }
   }
 
@@ -299,10 +290,10 @@ export function RAGConfiguration() {
                   />
                   <Button
                     onClick={() => handleTestConfig(selectedConfig.id)}
-                    disabled={!testQuery.trim() || testLoading}
+                    disabled={!testQuery.trim() || testMutation.isPending}
                     className="w-full"
                   >
-                    {testLoading ? (
+                    {testMutation.isPending ? (
                       <>
                         <Clock className="w-4 h-4 mr-2 animate-spin" />
                         Testing...

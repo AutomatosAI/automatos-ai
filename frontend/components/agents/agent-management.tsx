@@ -35,7 +35,16 @@ import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
 
 export function AgentManagement() {
   const [activeTab, setActiveTab] = useState('roster')
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
+  const [mounted, setMounted] = useState(false)
   
+  // Fetch real data from APIs
+  const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents()
+  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
+  const { data: agentTypes = [] } = useAgentTypes()
+
   // Debug log active tab changes
   useEffect(() => {
     console.log('Active tab changed:', activeTab)
@@ -44,10 +53,6 @@ export function AgentManagement() {
       setSelectedAgentId(agents[0].id.toString())
     }
   }, [activeTab, agents, selectedAgentId])
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
-  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -60,11 +65,6 @@ export function AgentManagement() {
     triggerOnce: true,
     threshold: 0.1,
   })
-
-  // Fetch real data from APIs
-  const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents()
-  const { data: agentStats, isLoading: statsLoading } = useAgentStats()
-  const { data: agentTypes = [] } = useAgentTypes()
 
   // Calculate real statistics from actual data
   const stats = [

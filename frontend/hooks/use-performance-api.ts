@@ -5,7 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 
 // Query keys for React Query
 export const performanceQueryKeys = {
@@ -64,6 +64,14 @@ export function usePerformanceAnalytics(timeRange: string = '24h') {
     queryKey: ['performance', 'analytics', timeRange],
     queryFn: () => apiClient.getPerformanceAnalytics(timeRange),
     refetchInterval: 60000,
+    retry: (failureCount, error: any) => {
+      // Only retry 3 times
+      return failureCount < 3;
+    },
+    onError: (error: any) => {
+      console.error('Failed to fetch performance analytics:', error);
+      // Toast notification for user is handled in API client
+    }
   })
 }
 

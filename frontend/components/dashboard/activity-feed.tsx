@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useSystemActivities } from '@/hooks/use-api'
+import { useSystemActivities } from '@/hooks/use-system-config-api'
 
 interface ActivityItem {
   id: string
@@ -109,8 +109,8 @@ export function ActivityFeed() {
     )
   }
 
-  // Process real activities data
-  const processedActivities: ActivityItem[] = activities || []
+  // Process real activities data - ensure it's always an array
+  const processedActivities: ActivityItem[] = Array.isArray(activities) ? activities : []
   const displayActivities = processedActivities.slice(0, 8)
 
   return (

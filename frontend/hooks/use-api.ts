@@ -41,12 +41,7 @@ export function useSystemMetrics() {
     queryKey: systemQueryKeys.metrics,
     queryFn: async () => {
       try {
-        return {
-          responseTime: [15, 12, 18, 14, 13, 16, 17],
-          throughput: [24, 28, 30, 25, 32, 29, 26],
-          errorRate: [2, 1, 3, 2, 1, 0, 1],
-          timestamps: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-        }
+        return await apiClient.getSystemMetrics()
       } catch (error) {
         throw error
       }

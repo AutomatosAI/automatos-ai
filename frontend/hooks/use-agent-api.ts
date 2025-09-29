@@ -1,4 +1,6 @@
 
+'use client'
+
 /**
  * Enhanced Agent API hooks for real-time data fetching and mutations
  * Provides React Query integration with automatic caching, retries, and real-time updates
@@ -82,8 +84,8 @@ export function useAgents() {
   return useQuery({
     queryKey: agentQueryKeys.agents,
     queryFn: () => agentApiClient.getAgents(),
-    refetchInterval: 30000, // Refetch every 30 seconds
-    staleTime: 15000, // Consider data stale after 15 seconds
+    refetchInterval: false, // Disable automatic refetching to fix refresh issue
+    staleTime: Infinity // Keep data fresh indefinitely
   })
 }
 

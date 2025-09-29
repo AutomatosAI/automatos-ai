@@ -1,7 +1,6 @@
-
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { 
@@ -27,47 +26,17 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts'
-import { PolicyEditor } from '@/components/context/PolicyEditor'
-import { AssemblyPreview } from '@/components/context/AssemblyPreview'
-import { usePolicy, useAssemble, useUpsertPolicy } from '@/hooks/use-policy'
-import { contextService, type ContextStats, type ContextQuery, type ContextPattern, type ContextSource, type RAGPerformanceData } from '@/lib/context-service'
-import { ConfigureRAGModal } from './configure-rag-modal'
 
-// Real data will be loaded from backend
-const initialContextStats = [
-  {
-    label: 'Context Queries',
-    value: '0',
-    change: 'Loading...',
-    icon: Search,
-    color: 'text-blue-400'
-  },
-  {
-    label: 'Retrieval Success',
-    value: '0%',
-    change: 'Loading...',
-    icon: Target,
-    color: 'text-green-400'
-  },
-  {
-    label: 'Avg Response Time',
-    value: '0s',
-    change: 'Loading...',
-    icon: Zap,
-    color: 'text-orange-400'
-  },
-  {
-    label: 'Vector Embeddings',
-    value: '0',
-    change: 'Loading...',
-    icon: Database,
-    color: 'text-purple-400'
-  }
-]
-
-// Real data will be loaded from backend - initial empty states
-
-// Hardcoded data removed - will be loaded from backend
+// Import all the context hooks
+import {
+  useContextStats,
+  useContextPerformance,
+  useContextSources,
+  useRecentContextQueries,
+  useContextPatterns,
+  useTestContextRAG,
+  useOptimizeContext
+} from '@/hooks/use-context-management-api'
 
 const confidenceColors = {
   high: 'text-green-400',
@@ -84,102 +53,126 @@ const getConfidenceLevel = (confidence: number) => {
 export function ContextEngineering() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('24h')
   const [searchTerm, setSearchTerm] = useState('')
-  const [contextStats, setContextStats] = useState(initialContextStats)
-  const [ragPerformanceData, setRagPerformanceData] = useState<RAGPerformanceData[]>([])
-  const [contextSources, setContextSources] = useState<ContextSource[]>([])
-  const [recentQueries, setRecentQueries] = useState<ContextQuery[]>([])
-  const [contextPatterns, setContextPatterns] = useState<ContextPattern[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [showConfigureModal, setShowConfigureModal] = useState(false)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   })
 
-  // Policy tab state/hooks
-  const POLICY_ID = 'code_assistant'
-  const { data: policyData } = usePolicy(POLICY_ID)
-  const [policy, setPolicy] = useState<any>(null)
-  useEffect(() => {
-    if (policyData && !policy) {
-      // backend may wrap in { policy }
-      // @ts-ignore
-      setPolicy((policyData as any)?.policy || policyData)
+  // Use real API hooks - they will call API and fallback to mock if needed
+  const { data: contextStats, isLoading: statsLoading, refetch: refetchStats } = useContextStats()
+  const { data: performanceData, isLoading: perfLoading } = useContextPerformance()
+  const { data: contextSources, isLoading: sourcesLoading } = useContextSources()
+  const { data: recentQueries, isLoading: queriesLoading } = useRecentContextQueries()
+  const { data: contextPatterns, isLoading: patternsLoading } = useContextPatterns()
+  
+  // Mutations
+  const testRAGMutation = useTestContextRAG()
+  const optimizeMutation = useOptimizeContext()
+  
+  // Combined loading state
+  const loading = statsLoading || perfLoading || sourcesLoading || queriesLoading || patternsLoading
+
+  // Create stats cards from API data ONLY
+  const contextStatsCards = useMemo(() => [
+    {
+      label: 'Context Queries',
+      value: (contextStats as any)?.total_contexts?.toString() || '0',
+      change: (contextStats as any)?.active_contexts ? `${(contextStats as any).active_contexts} active` : 'No activity',
+      icon: Search,
+      color: 'text-blue-400'
+    },
+    {
+      label: 'Retrieval Success',
+      value: `${(((contextStats as any)?.cache_hit_rate || 0) * 100).toFixed(1)}%`,
+      change: (contextStats as any)?.cache_hit_rate ? 'System operational' : 'No RAG activity',
+      icon: Target,
+      color: 'text-green-400'
+    },
+    {
+      label: 'Avg Response Time',
+      value: `${((contextStats as any)?.average_similarity || 0).toFixed(2)}s`,
+      change: 'Real-time measurement',
+      icon: Zap,
+      color: 'text-orange-400'
+    },
+    {
+      label: 'Vector Embeddings',
+      value: (contextStats as any)?.total_embeddings?.toString() || '0',
+      change: `${(contextStats as any)?.total_embeddings || 0} total chunks`,
+      icon: Database,
+      color: 'text-purple-400'
     }
-  }, [policyData])
-  const assemble = useAssemble(POLICY_ID)
-  const upsert = useUpsertPolicy(POLICY_ID)
-  const [testQuery, setTestQuery] = useState('Summarize main ideas from this document')
+  ], [contextStats])
 
-  // Load real data from backend
-  useEffect(() => {
-    loadContextData()
-  }, [])
-
-  const loadContextData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      // Load all context data in parallel
-      const [
-        statsData,
-        performanceData,
-        sourcesData,
-        queriesData,
-        patternsData
-      ] = await Promise.all([
-        contextService.getContextStats(),
-        contextService.getRAGPerformanceData(),
-        contextService.getContextSources(),
-        contextService.getRecentQueries(),
-        contextService.getContextPatterns()
-      ])
-
-      // Update stats with real data
-      setContextStats([
-        {
-          label: 'Context Queries',
-          value: statsData.contextQueries.toLocaleString(),
-          change: `${statsData.contextQueries > 0 ? 'Active' : 'No activity'}`,
-          icon: Search,
-          color: 'text-blue-400'
-        },
-        {
-          label: 'Retrieval Success',
-          value: `${statsData.retrievalSuccess.toFixed(1)}%`,
-          change: statsData.retrievalSuccess > 0 ? 'System operational' : 'No RAG activity',
-          icon: Target,
-          color: 'text-green-400'
-        },
-        {
-          label: 'Avg Response Time',
-          value: statsData.avgResponseTime,
-          change: 'Real-time measurement',
-          icon: Zap,
-          color: 'text-orange-400'
-        },
-        {
-          label: 'Vector Embeddings',
-          value: statsData.vectorEmbeddings.toLocaleString(),
-          change: `${statsData.vectorEmbeddings} total chunks`,
-          icon: Database,
-          color: 'text-purple-400'
-        }
-      ])
-
-      setRagPerformanceData(performanceData)
-      setContextSources(sourcesData)
-      setRecentQueries(queriesData)
-      setContextPatterns(patternsData)
-
-    } catch (err) {
-      console.error('Error loading context data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load context data')
-    } finally {
-      setLoading(false)
+  // Process performance data for charts from API ONLY
+  const ragPerformanceData = useMemo(() => {
+    if ((performanceData as any)?.performance_data) {
+      return (performanceData as any).performance_data.map((item: any) => ({
+        time: item.time || '00:00',
+        queries: item.queries || 0,
+        success_rate: item.success_rate || 0,
+        avg_latency: item.avg_latency || 0
+      }))
     }
+    return []
+  }, [performanceData])
+
+  // Process context sources from API ONLY
+  const contextSourcesData = useMemo(() => {
+    if (contextSources && Array.isArray(contextSources)) {
+      return contextSources.map((source: any) => ({
+        name: source.name || 'Unknown',
+        value: source.count || source.items || 0,
+        color: ['#ff6b35', '#60B5FF', '#72BF78', '#A19AD3', '#FF9149'][Math.floor(Math.random() * 5)]
+      }))
+    }
+    return []
+  }, [contextSources])
+
+  // Process recent queries from API ONLY
+  const recentQueriesData = useMemo(() => {
+    if (recentQueries && Array.isArray(recentQueries)) {
+      return recentQueries.map((query: any) => ({
+        id: query.id || `query-${Date.now()}`,
+        query: query.query_text || query.query || 'Unknown query',
+        agent: query.agent || 'Unknown',
+        confidence: query.confidence || 0,
+        sources: query.sources || 0,
+        responseTime: `${query.latency || 0}ms`,
+        timestamp: query.timestamp || 'Unknown',
+        category: query.category || 'General'
+      }))
+    }
+    return []
+  }, [recentQueries])
+
+  // Process context patterns from API ONLY
+  const contextPatternsData = useMemo(() => {
+    if (contextPatterns && Array.isArray(contextPatterns)) {
+      return contextPatterns.map((pattern: any) => ({
+        id: pattern.id || `pattern-${Date.now()}`,
+        name: pattern.name || 'Unknown Pattern',
+        description: pattern.description || 'No description available',
+        usage: pattern.usage || pattern.count || 0,
+        accuracy: pattern.accuracy || 0,
+        avgSources: pattern.avgSources || 0,
+        category: pattern.category || 'General',
+        status: pattern.status || 'unknown'
+      }))
+    }
+    return []
+  }, [contextPatterns])
+
+  const handleRefresh = async () => {
+    await refetchStats()
+  }
+
+  const handleTestRAG = async () => {
+    await testRAGMutation.mutateAsync(searchTerm)
+  }
+
+  const handleOptimize = async () => {
+    await optimizeMutation.mutateAsync('optimize')
   }
 
   return (
@@ -201,53 +194,26 @@ export function ContextEngineering() {
         </div>
         
         <div className="flex space-x-2">
-          <Button variant="outline" onClick={loadContextData}>
-            <RefreshCw className="w-4 h-4 mr-2" />
+          <Button variant="outline" onClick={handleRefresh} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button 
-            className="gradient-accent hover:opacity-90"
-            onClick={() => setShowConfigureModal(true)}
-          >
+          <Button className="gradient-accent hover:opacity-90">
             <Settings className="w-4 h-4 mr-2" />
             Configure RAG
           </Button>
         </div>
       </motion.div>
 
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading context data...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Error State */}
-      {error && !loading && (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Brain className="h-8 w-8 text-red-400 mx-auto mb-4" />
-            <p className="text-red-400 mb-4">Error loading context data: {error}</p>
-            <Button onClick={loadContextData} variant="outline">
-              Try Again
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Stats Overview */}
-      {!loading && !error && (
-        <motion.div
-          ref={ref}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={inView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8, delay: 0.2 }}
-        >
-          {contextStats.map((stat, index) => (
+      <motion.div
+        ref={ref}
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={inView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.8, delay: 0.2 }}
+      >
+        {contextStatsCards.map((stat, index) => (
           <motion.div
             key={stat.label}
             className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
@@ -261,14 +227,13 @@ export function ContextEngineering() {
               </div>
             </div>
             <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stat.value}</h3>
+              <h3 className="text-2xl font-bold">{loading ? '...' : stat.value}</h3>
               <p className="text-muted-foreground text-sm">{stat.label}</p>
-              <p className="text-xs text-green-400">{stat.change}</p>
+              <p className="text-xs text-green-400">{loading ? 'Loading...' : stat.change}</p>
             </div>
           </motion.div>
         ))}
-        </motion.div>
-      )}
+      </motion.div>
 
       {/* Context Engineering Tabs */}
       <motion.div
@@ -277,7 +242,7 @@ export function ContextEngineering() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="performance" className="flex items-center space-x-2">
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -289,10 +254,6 @@ export function ContextEngineering() {
             <TabsTrigger value="patterns" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
               <span className="hidden sm:inline">Patterns</span>
-            </TabsTrigger>
-            <TabsTrigger value="policy" className="flex items-center space-x-2">
-              <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">Policy</span>
             </TabsTrigger>
             <TabsTrigger value="optimization" className="flex items-center space-x-2">
               <Brain className="w-4 h-4" />
@@ -323,8 +284,104 @@ export function ContextEngineering() {
                 </CardHeader>
                 <CardContent>
                   <div className="h-64">
+                    {loading ? (
+                      <div className="h-full flex items-center justify-center">
+                        <div className="animate-pulse">Loading performance data...</div>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={ragPerformanceData}>
+                          <XAxis 
+                            dataKey="time" 
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                          />
+                          <YAxis 
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--card))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                              fontSize: '12px'
+                            }}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="success_rate" 
+                            stroke="#72BF78" 
+                            strokeWidth={2}
+                            name="Success Rate (%)"
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="avg_latency" 
+                            stroke="#ff6b35" 
+                            strokeWidth={2}
+                            name="Avg Latency (s)"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Context Sources Distribution */}
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Context Sources Distribution</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64">
+                    {loading ? (
+                      <div className="h-full flex items-center justify-center">
+                        <div className="animate-pulse">Loading sources...</div>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={contextSourcesData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {contextSourcesData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Query Volume Chart */}
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle>Query Volume Trends</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-64">
+                  {loading ? (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="animate-pulse">Loading query trends...</div>
+                    </div>
+                  ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={ragPerformanceData}>
+                      <RechartsBarChart data={ragPerformanceData}>
                         <XAxis 
                           dataKey="time" 
                           axisLine={false}
@@ -344,141 +401,18 @@ export function ContextEngineering() {
                             fontSize: '12px'
                           }}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="success_rate" 
-                          stroke="#72BF78" 
-                          strokeWidth={2}
-                          name="Success Rate (%)"
+                        <Bar 
+                          dataKey="queries" 
+                          fill="#60B5FF" 
+                          name="Query Count"
+                          radius={[4, 4, 0, 0]}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="avg_latency" 
-                          stroke="#ff6b35" 
-                          strokeWidth={2}
-                          name="Avg Latency (s)"
-                        />
-                      </LineChart>
+                      </RechartsBarChart>
                     </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Context Sources Distribution */}
-              <Card className="glass-card">
-                <CardHeader>
-                  <CardTitle>Context Sources Distribution</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={contextSources}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {contextSources.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Query Volume Chart */}
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Query Volume Trends</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RechartsBarChart data={ragPerformanceData}>
-                      <XAxis 
-                        dataKey="time" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'hsl(var(--card))',
-                          border: '1px solid hsl(var(--border))',
-                          borderRadius: '8px',
-                          fontSize: '12px'
-                        }}
-                      />
-                      <Bar 
-                        dataKey="queries" 
-                        fill="#60B5FF" 
-                        name="Query Count"
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </RechartsBarChart>
-                  </ResponsiveContainer>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="policy" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="glass-card">
-                <CardHeader>
-                  <CardTitle>Policy Editor</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex gap-2 items-center">
-                      <Input
-                        placeholder="Test query..."
-                        value={testQuery}
-                        onChange={(e) => setTestQuery(e.target.value)}
-                        className="bg-secondary/50 border-secondary focus:border-primary/50"
-                      />
-                      <Button
-                        variant="outline"
-                        onClick={() => assemble.mutate({ q: testQuery })}
-                        disabled={assemble.isPending}
-                      >
-                        Assemble
-                      </Button>
-                      <Button
-                        onClick={() => policy && upsert.mutate({ policy })}
-                        disabled={!policy || upsert.isPending}
-                      >
-                        Save
-                      </Button>
-                    </div>
-                    <PolicyEditor policy={policy || {}} onChange={setPolicy} />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="glass-card">
-                <CardHeader>
-                  <CardTitle>Assembly Preview</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <AssemblyPreview result={assemble.data} />
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
 
           <TabsContent value="queries" className="space-y-6">
@@ -505,42 +439,82 @@ export function ContextEngineering() {
                 <CardTitle>Recent Context Queries</CardTitle>
               </CardHeader>
               <CardContent>
+                {loading ? (
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4].map(i => (
+                      <div key={i} className="animate-pulse">
+                        <div className="h-20 bg-secondary/50 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                ) : recentQueriesData.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    No recent queries available
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {recentQueriesData.map((query, index) => (
+                      <motion.div
+                        key={query.id}
+                        className="p-4 rounded-lg border border-border/50 hover:border-primary/20 transition-all duration-300"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: index * 0.05 }}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm mb-1">{query.query}</p>
+                            <div className="flex items-center space-x-4 text-xs text-muted-foreground">
+                              <span>Agent: {query.agent}</span>
+                              <span>Sources: {query.sources}</span>
+                              <span>Response: {query.responseTime}</span>
+                              <span>{query.timestamp}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="outline" className="text-xs">
+                              {query.category}
+                            </Badge>
+                            <div className={`text-xs font-medium ${confidenceColors[getConfidenceLevel(query.confidence)]}`}>
+                              {(query.confidence * 100).toFixed(1)}%
+                            </div>
+                          </div>
+                        </div>
+                        <div className="w-full bg-secondary rounded-full h-1">
+                          <div 
+                            className="bg-gradient-to-r from-orange-500 to-red-500 h-1 rounded-full transition-all duration-300"
+                            style={{ width: `${query.confidence * 100}%` }}
+                          />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Test RAG System */}
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="w-4 h-4" />
+                  Test Context Retrieval
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 <div className="space-y-4">
-                  {recentQueries.map((query, index) => (
-                    <motion.div
-                      key={query.id}
-                      className="p-4 rounded-lg border border-border/50 hover:border-primary/20 transition-all duration-300"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: index * 0.05 }}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm mb-1">{query.query}</p>
-                          <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                            <span>Agent: {query.agent}</span>
-                            <span>Sources: {query.sources}</span>
-                            <span>Response: {query.responseTime}</span>
-                            <span>{query.timestamp}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Badge variant="outline" className="text-xs">
-                            {query.category}
-                          </Badge>
-                          <div className={`text-xs font-medium ${confidenceColors[getConfidenceLevel(query.confidence)]}`}>
-                            {(query.confidence * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                      </div>
-                      <div className="w-full bg-secondary rounded-full h-1">
-                        <div 
-                          className="bg-gradient-to-r from-orange-500 to-red-500 h-1 rounded-full transition-all duration-300"
-                          style={{ width: `${query.confidence * 100}%` }}
-                        />
-                      </div>
-                    </motion.div>
-                  ))}
+                  <Input
+                    placeholder="Enter a test query..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  <Button 
+                    onClick={handleTestRAG}
+                    disabled={(testRAGMutation as any).isPending || !searchTerm}
+                    className="w-full"
+                  >
+                    {(testRAGMutation as any).isPending ? 'Testing...' : 'Test RAG System'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -549,60 +523,84 @@ export function ContextEngineering() {
           <TabsContent value="patterns" className="space-y-6">
             {/* Context Patterns */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {contextPatterns.map((pattern, index) => (
-                <motion.div
-                  key={pattern.id}
-                  className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg mb-1">{pattern.name}</h3>
-                      <p className="text-sm text-muted-foreground">{pattern.description}</p>
-                    </div>
-                    <Badge 
-                      variant={pattern.status === 'active' ? 'default' : 'secondary'}
-                      className="text-xs"
-                    >
-                      {pattern.status}
-                    </Badge>
+              {loading ? (
+                [1, 2, 3].map(i => (
+                  <div key={i} className="animate-pulse">
+                    <div className="h-48 bg-secondary/50 rounded" />
                   </div>
+                ))
+              ) : contextPatternsData.length === 0 ? (
+                <div className="col-span-full text-center py-8 text-muted-foreground">
+                  No context patterns available
+                </div>
+              ) : (
+                contextPatternsData.map((pattern, index) => (
+                  <motion.div
+                    key={pattern.id}
+                    className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: index * 0.1 }}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-lg mb-1">{pattern.name}</h3>
+                        <p className="text-sm text-muted-foreground">{pattern.description}</p>
+                      </div>
+                      <Badge 
+                        variant={pattern.status === 'active' ? 'default' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {pattern.status}
+                      </Badge>
+                    </div>
 
-                  <div className="grid grid-cols-3 gap-4 mb-4">
-                    <div>
-                      <p className="text-sm font-medium">{pattern.usage}</p>
-                      <p className="text-xs text-muted-foreground">Usage</p>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div>
+                        <p className="text-sm font-medium">{pattern.usage}</p>
+                        <p className="text-xs text-muted-foreground">Usage</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{pattern.accuracy}%</p>
+                        <p className="text-xs text-muted-foreground">Accuracy</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{pattern.avgSources}</p>
+                        <p className="text-xs text-muted-foreground">Avg Sources</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium">{pattern.accuracy}%</p>
-                      <p className="text-xs text-muted-foreground">Accuracy</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{pattern.avgSources}</p>
-                      <p className="text-xs text-muted-foreground">Avg Sources</p>
-                    </div>
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="text-xs">
-                      {pattern.category}
-                    </Badge>
-                    <Button variant="ghost" size="sm">
-                      <Eye className="w-4 h-4 mr-1" />
-                      View Details
-                    </Button>
-                  </div>
-                </motion.div>
-              ))}
+                    <div className="flex items-center justify-between">
+                      <Badge variant="outline" className="text-xs">
+                        {pattern.category}
+                      </Badge>
+                      <Button variant="ghost" size="sm">
+                        <Eye className="w-4 h-4 mr-1" />
+                        View Details
+                      </Button>
+                    </div>
+                  </motion.div>
+                ))
+              )}
             </div>
           </TabsContent>
 
           <TabsContent value="optimization" className="space-y-6">
             <Card className="glass-card">
               <CardHeader>
-                <CardTitle>RAG System Optimization</CardTitle>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Brain className="w-4 h-4" />
+                    RAG System Optimization
+                  </div>
+                  <Button 
+                    size="sm" 
+                    onClick={handleOptimize}
+                    disabled={(optimizeMutation as any).isPending}
+                  >
+                    {(optimizeMutation as any).isPending ? 'Optimizing...' : 'Optimize Patterns'}
+                  </Button>
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
@@ -615,18 +613,6 @@ export function ContextEngineering() {
           </TabsContent>
         </Tabs>
       </motion.div>
-
-      {/* Configure RAG Modal */}
-      <ConfigureRAGModal
-        isOpen={showConfigureModal}
-        onClose={() => setShowConfigureModal(false)}
-        onConfigCreated={(config) => {
-          console.log('RAG configuration created:', config)
-          // Refresh data to show new configuration
-          loadContextData()
-          setShowConfigureModal(false)
-        }}
-      />
     </div>
   )
 }

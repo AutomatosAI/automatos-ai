@@ -4,7 +4,14 @@ import { NextRequest, NextResponse } from 'next/server'
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
 
+// Configuration to disable chatbot API calls
+const CHATBOT_DISABLED = true
+
 export async function GET(request: NextRequest) {
+  // If chatbot is disabled, immediately return empty suggestions
+  if (CHATBOT_DISABLED) {
+    return NextResponse.json([])
+  }
   try {
     const { searchParams } = new URL(request.url)
     const page = searchParams.get('page') || 'dashboard'
@@ -12,7 +19,7 @@ export async function GET(request: NextRequest) {
 
     // Try to get suggestions from the orchestrator backend
     const response = await fetch(
-      `${process.env.API_BASE_URL || 'http://localhost:8002'}/api/chat/suggestions?page=${page}&user_role=${userRole}`,
+      `${process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'}/api/chat/suggestions?page=${page}&user_role=${userRole}`,
       {
         method: 'GET',
         headers: {
@@ -28,7 +35,8 @@ export async function GET(request: NextRequest) {
       throw new Error(`Backend responded with status ${response.status}`)
     }
   } catch (error) {
-    console.error('Chatbot suggestions error:', error)
+    // Log at info level instead of error since we have a fallback
+    console.info('Using fallback chatbot suggestions, API unavailable:', error.message)
     
     // Fallback contextual suggestions based on page
     const { searchParams } = new URL(request.url)

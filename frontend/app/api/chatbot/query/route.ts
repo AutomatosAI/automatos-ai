@@ -1,6 +1,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 
+// Configuration to disable chatbot API calls
+const CHATBOT_DISABLED = true
+
 // Helper function to determine intent from query
 function analyzeIntent(query: string, context: any) {
   const lowerQuery = query.toLowerCase()
@@ -41,7 +44,7 @@ function analyzeIntent(query: string, context: any) {
 
 // Helper function to handle different intents
 async function handleIntent(intent: string, query: string, context: any) {
-  const baseUrl = process.env.API_BASE_URL || 'http://localhost:8002'
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
   
   try {
     switch (intent) {
@@ -108,7 +111,7 @@ async function handleIntent(intent: string, query: string, context: any) {
         break
     }
   } catch (error) {
-    console.error(`Error handling ${intent}:`, error)
+    console.info(`Using fallback for ${intent}, API unavailable:`, error.message)
   }
   
   return null
@@ -116,6 +119,24 @@ async function handleIntent(intent: string, query: string, context: any) {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
+  
+  // If chatbot is disabled, return a simple response
+  if (CHATBOT_DISABLED) {
+    return NextResponse.json({
+      success: false,
+      message: {
+        id: `disabled-${Date.now()}`,
+        content: `Chatbot functionality is temporarily disabled.`,
+        timestamp: new Date().toISOString(),
+        context: {},
+        metadata: {
+          intent: 'disabled',
+          confidence: 1.0,
+          processing_time: 0
+        }
+      }
+    })
+  }
   
   try {
     const body = await request.json()
@@ -149,7 +170,7 @@ export async function POST(request: NextRequest) {
     throw new Error('Intent not handled')
     
   } catch (error) {
-    console.error('Chatbot query error:', error)
+    console.info('Using fallback response for chatbot query:', error.message)
     
     // Return a helpful fallback response
     return NextResponse.json({

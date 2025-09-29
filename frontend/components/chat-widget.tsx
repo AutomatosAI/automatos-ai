@@ -18,6 +18,9 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ChatInterface } from './chat-interface'
 
+// Configuration to disable chatbot UI
+const CHATBOT_DISABLED = true
+
 interface ChatWidgetProps {
   position?: 'bottom-right' | 'bottom-left'
   context?: {
@@ -145,6 +148,11 @@ export function ChatWidget({
   const positionClasses = {
     'bottom-right': 'bottom-4 right-4',
     'bottom-left': 'bottom-4 left-4'
+  }
+
+  // If chatbot is disabled, don't render anything
+  if (CHATBOT_DISABLED) {
+    return null
   }
 
   return (

@@ -1,11 +1,24 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 
+// Configuration to disable chatbot API calls
+const CHATBOT_DISABLED = true
+
 export async function POST(request: NextRequest) {
+  // If chatbot is disabled, return a simple response
+  if (CHATBOT_DISABLED) {
+    return NextResponse.json({
+      success: false,
+      result: 'disabled',
+      message: 'Chatbot functionality is temporarily disabled.',
+      data: { disabled: true }
+    })
+  }
+
   try {
     const body = await request.json()
     const { action, parameters, session_id } = body
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:8002'
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
 
     // Handle different action types by calling appropriate backend endpoints
     switch (action) {
@@ -113,7 +126,7 @@ export async function POST(request: NextRequest) {
     throw new Error(`Backend call failed for action: ${action}`)
     
   } catch (error) {
-    console.error('Chatbot execute error:', error)
+    console.info('Using fallback responses for chatbot execute:', error.message)
     
     // Fallback responses based on action type
     const body = await request.json()

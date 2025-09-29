@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 
 export function useTools() {
   return useQuery({
@@ -18,5 +18,12 @@ export function useToolStatus(id: string) {
   return useQuery({
     queryKey: ['tools', id, 'status'],
     queryFn: () => apiClient.getToolStatus(id)
+  })
+}
+
+export function useToolsHealth() {
+  return useQuery({
+    queryKey: ['tools', 'health'],
+    queryFn: () => apiClient.getToolsHealth()
   })
 }

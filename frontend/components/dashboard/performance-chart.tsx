@@ -25,14 +25,17 @@ import {
   MemoryStick,
   Zap
 } from 'lucide-react'
-import { useSystemMetrics } from '@/hooks/use-api'
+import { useSystemMetrics } from '@/hooks/use-system-config-api'
+import { usePerformanceAnalytics } from '@/hooks/use-performance-api'
 
 export function PerformanceChart() {
-  // Use real API hook
-  const { data: systemMetrics, isLoading } = useSystemMetrics()
+  // Use real API hooks
+  const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
+  const { data: performanceData, isLoading: performanceLoading } = usePerformanceAnalytics('24h')
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'api_calls' | 'response_time'>('cpu')
 
-  // Generate time series data based on real current values
+  // This function is not used anymore as we're getting real data from the API
+  // Kept for reference in case we need to generate test data
   const generateTimeSeriesData = (currentValue: number, dataPoints: number = 24) => {
     const data = []
     const now = new Date()
@@ -40,8 +43,9 @@ export function PerformanceChart() {
     for (let i = dataPoints - 1; i >= 0; i--) {
       const timestamp = new Date(now.getTime() - (i * 60 * 60 * 1000)) // Hourly data points
       
-      // Use current value for all data points (in production, this would come from time-series DB)
-      const value = currentValue
+      // Generate slightly varying data instead of constant
+      const randomVariation = Math.random() * 0.2 - 0.1 // ±10% variation
+      const value = currentValue * (1 + randomVariation)
       
       data.push({
         time: timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -55,25 +59,33 @@ export function PerformanceChart() {
   }
 
   const chartData = useMemo(() => {
-    if (!systemMetrics) {
+    if (!performanceData) {
       return []
     }
-
-    const metrics = systemMetrics
+    
+    // Format the performance data for the chart
+    const formatTimeSeriesData = (dataArray: Array<{ time: string, value: number }>) => {
+      return dataArray.map(item => ({
+        time: new Date(item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        fullTime: new Date(item.time),
+        value: item.value,
+        timestamp: new Date(item.time).getTime()
+      }))
+    }
     
     switch (selectedMetric) {
       case 'cpu':
-        return generateTimeSeriesData(metrics.cpu?.average_usage || 23)
+        return performanceData.cpu_usage ? formatTimeSeriesData(performanceData.cpu_usage) : []
       case 'memory':
-        return generateTimeSeriesData(metrics.memory?.percent || 45)
+        return performanceData.memory_usage ? formatTimeSeriesData(performanceData.memory_usage) : []
       case 'api_calls':
-        return generateTimeSeriesData(metrics.api_calls_per_minute || 150)
+        return performanceData.api_calls ? formatTimeSeriesData(performanceData.api_calls) : []
       case 'response_time':
-        return generateTimeSeriesData(metrics.avg_response_time || 245)
+        return performanceData.response_time ? formatTimeSeriesData(performanceData.response_time) : []
       default:
         return []
     }
-  }, [systemMetrics, selectedMetric])
+  }, [performanceData, selectedMetric])
 
   const metricConfigs = {
     cpu: {
@@ -82,7 +94,7 @@ export function PerformanceChart() {
       color: '#3b82f6',
       icon: Cpu,
       threshold: 80,
-      current: systemMetrics?.cpu?.average_usage || 0
+      current: performanceData?.aggregated?.cpu_average || systemMetrics?.cpu?.average_usage || 0
     },
     memory: {
       name: 'Memory Usage', 
@@ -90,7 +102,7 @@ export function PerformanceChart() {
       color: '#10b981',
       icon: MemoryStick,
       threshold: 85,
-      current: systemMetrics?.memory?.percent || 0
+      current: performanceData?.aggregated?.memory_average || systemMetrics?.memory?.percent || 0
     },
     api_calls: {
       name: 'API Calls',
@@ -98,7 +110,7 @@ export function PerformanceChart() {
       color: '#f59e0b',
       icon: Activity,
       threshold: 1000,
-      current: systemMetrics?.api_calls_per_minute || 0
+      current: performanceData?.aggregated?.api_calls_total ? performanceData.aggregated.api_calls_total / 24 : systemMetrics?.api_calls_per_minute || 0
     },
     response_time: {
       name: 'Response Time',
@@ -106,7 +118,7 @@ export function PerformanceChart() {
       color: '#8b5cf6',
       icon: Clock,
       threshold: 1000,
-      current: systemMetrics?.avg_response_time || 0
+      current: performanceData?.aggregated?.response_time_average || systemMetrics?.avg_response_time || 0
     }
   }
 
@@ -128,6 +140,8 @@ export function PerformanceChart() {
     return null
   }
 
+  const isLoading = metricsLoading || performanceLoading;
+  
   if (isLoading) {
     return (
       <Card className="glass-card">

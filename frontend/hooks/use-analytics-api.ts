@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 
 export const analyticsQueryKeys = {
   successRate: ['analytics', 'success-rate'],
@@ -50,5 +50,54 @@ export function useAllMetrics() {
   return useQuery({
     queryKey: analyticsQueryKeys.allMetrics,
     queryFn: () => apiClient.getAllMetrics()
+  })
+}
+
+export function useCostAnalysis() {
+  return useQuery({
+    queryKey: ['analytics', 'cost-analysis'],
+    queryFn: () => apiClient.getCostAnalysis()
+  })
+}
+
+export function usePerformanceEnhancements() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.allEnhancements,
+    queryFn: () => apiClient.getPerformanceEnhancements()
+  })
+}
+
+export function usePeakUsageAnalysis() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.peakHours,
+    queryFn: () => apiClient.getPeakUsageAnalysis()
+  })
+}
+
+export function useBottleneckDetection() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.bottlenecks,
+    queryFn: () => apiClient.getBottleneckDetection()
+  })
+}
+
+export function usePredictiveAlerts() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.alerts,
+    queryFn: () => apiClient.getPredictiveAlerts()
+  })
+}
+
+export function useAgentRanking() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.ranking,
+    queryFn: () => apiClient.getAgentRanking()
+  })
+}
+
+export function useSLACompliance() {
+  return useQuery({
+    queryKey: analyticsQueryKeys.sla,
+    queryFn: () => apiClient.getSLACompliance()
   })
 }

@@ -15,7 +15,8 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useAgents, useDocuments, useWorkflows, useSystemMetrics } from '@/hooks/use-api'
+import { useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
+import { useSystemMetrics } from '@/hooks/use-system-config-api'
 
 interface MetricCardProps {
   title: string

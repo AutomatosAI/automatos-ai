@@ -5,7 +5,12 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
+
+// Helper function to handle error messages consistently
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // Query keys for React Query
 export const systemConfigQueryKeys = {
@@ -43,6 +48,14 @@ export function useSystemMetrics() {
     queryFn: () => apiClient.getSystemMetrics(),
     refetchInterval: 30000,
     staleTime: 15000,
+    retry: (failureCount, error: any) => {
+      // Only retry 3 times
+      return failureCount < 3;
+    },
+    onError: (error: any) => {
+      console.error('Failed to fetch system metrics:', error);
+      // Toast notification for user is handled in API client
+    }
   })
 }
 
@@ -170,8 +183,9 @@ export function useUpdateSystemConfig() {
       toast.success('System configuration updated!')
       return data
     },
-    onError: (error) => {
-      toast.error(`Failed to update system config: ${error.message}`)
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error(`Failed to update system config: ${errorMessage}`)
       throw error
     },
   })
