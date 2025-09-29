@@ -10,12 +10,18 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import uuid
 from datetime import datetime
+
+# Load .env file BEFORE anything else
+env_path = Path(__file__).parent / '.env'
+load_dotenv(env_path)
 
 # Import database and models
 from database.database import init_database, get_db
