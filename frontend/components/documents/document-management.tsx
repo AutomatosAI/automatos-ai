@@ -34,6 +34,9 @@ import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 // Document modals
 import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
+import { SemanticSearch } from './semantic-search'
+import { DocumentProcessing } from './document-processing'
+import { DocumentAnalytics } from './document-analytics'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 
@@ -138,32 +141,47 @@ export function DocumentManagement() {
   }, [typedDocuments])
 
   const handleFileUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
+    console.log('[DocumentManagement] handleFileUpload called with files:', files)
+    
+    if (!files || files.length === 0) {
+      console.log('[DocumentManagement] No files selected')
+      return
+    }
 
+    console.log('[DocumentManagement] Processing', files.length, 'file(s)')
+    
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
+        console.log('[DocumentManagement] Uploading file:', file.name, 'size:', file.size, 'type:', file.type)
+        
         await uploadDocumentMutation.mutateAsync({ 
           file, 
           metadata: { description: '', tags: [] } 
         })
+        
+        console.log('[DocumentManagement] File uploaded successfully:', file.name)
       }
       
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
+      
+      console.log('[DocumentManagement] All files uploaded successfully')
     } catch (error) {
       // Error handled by mutation hook
-      console.error('Upload error:', error)
+      console.error('[DocumentManagement] Upload error:', error)
     }
   }
 
   const handleUploadClick = () => {
+    console.log('[DocumentManagement] Upload button clicked, triggering file picker')
     fileInputRef.current?.click()
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[DocumentManagement] File input changed, files:', e.target.files)
     handleFileUpload(e.target.files)
   }
 
@@ -178,11 +196,15 @@ export function DocumentManagement() {
   }
 
   const handleDrop = (e: React.DragEvent) => {
+    console.log('[DocumentManagement] File dropped')
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      console.log('[DocumentManagement] Processing dropped files:', e.dataTransfer.files)
       handleFileUpload(e.dataTransfer.files)
+    } else {
+      console.log('[DocumentManagement] No files in drop event')
     }
   }
 
@@ -272,7 +294,10 @@ export function DocumentManagement() {
         
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            console.log('[Header Button] Upload Documents clicked, fileInputRef:', fileInputRef.current)
+            fileInputRef.current?.click()
+          }}
           disabled={uploadDocumentMutation.isLoading}
         >
           <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
@@ -317,10 +342,14 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">Document Library</span>
+              <span className="hidden sm:inline">Library</span>
+            </TabsTrigger>
+            <TabsTrigger value="search" className="flex items-center space-x-2">
+              <Search className="w-4 h-4" />
+              <span className="hidden sm:inline">Search</span>
             </TabsTrigger>
             <TabsTrigger value="upload" className="flex items-center space-x-2">
               <Upload className="w-4 h-4" />
@@ -499,6 +528,22 @@ export function DocumentManagement() {
             </div>
           </TabsContent>
 
+          <TabsContent value="search" className="space-y-6">
+            <SemanticSearch
+              context="documents"
+              onResultSelect={(result) => {
+                // Find and select the document
+                const doc = documents.find(d => d.id === result.document_id)
+                if (doc) {
+                  setSelectedDocument(doc)
+                  setShowDetailsModal(true)
+                }
+              }}
+              showActions={true}
+              maxResults={10}
+            />
+          </TabsContent>
+
           <TabsContent value="upload" className="space-y-6">
             <Card className="glass-card">
               <CardHeader>
@@ -540,7 +585,10 @@ export function DocumentManagement() {
                       </p>
                       <Button 
                         className="gradient-accent hover:opacity-90"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => {
+                          console.log('[Upload Button] Choose Files clicked, fileInputRef:', fileInputRef.current)
+                          fileInputRef.current?.click()
+                        }}
                         disabled={uploadDocumentMutation.isLoading}
                       >
                         <Plus className="w-4 h-4 mr-2" />
@@ -554,17 +602,23 @@ export function DocumentManagement() {
           </TabsContent>
 
           <TabsContent value="processing" className="space-y-6">
-            <div className="p-12 text-center">
-              <div className="text-lg font-semibold">Processing</div>
-              <div className="text-muted-foreground">Processing features coming soon</div>
-            </div>
+            <DocumentProcessing 
+              documents={documents}
+              onDocumentSelect={(docId) => {
+                const doc = documents.find(d => d.id === parseInt(docId))
+                if (doc) {
+                  setSelectedDocument(doc)
+                  setShowDetailsModal(true)
+                }
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="p-12 text-center">
-              <div className="text-lg font-semibold">Analytics</div>
-              <div className="text-muted-foreground">Analytics features coming soon</div>
-            </div>
+            <DocumentAnalytics 
+              documents={documents}
+              documentStats={documentStats}
+            />
           </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">

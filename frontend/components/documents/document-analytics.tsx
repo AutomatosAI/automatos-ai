@@ -20,9 +20,13 @@ import {
   HardDrive, 
   Users,
   Calendar,
-  Zap
+  Zap,
+  Search,
+  Activity
 } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
+import { useUsageAnalytics } from '@/hooks/use-usage-analytics-api'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface DocumentAnalyticsProps {
   documents: any[]
@@ -31,6 +35,9 @@ interface DocumentAnalyticsProps {
 
 export function DocumentAnalytics({ documents, documentStats }: DocumentAnalyticsProps) {
   const [timeRange, setTimeRange] = useState('7d')
+  
+  // Fetch usage analytics from backend
+  const { data: usageData, isLoading: usageLoading } = useUsageAnalytics(timeRange)
 
   // Calculate analytics from real data
   const analytics = {
@@ -224,24 +231,7 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
         </Card>
       </div>
 
-      {/* Categories */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle>Documents by Category</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {Object.entries(analytics.documentsByCategory).map(([category, count]) => (
-              <div key={category} className="text-center">
-                <div className="text-2xl font-bold text-primary">{count}</div>
-                <div className="text-sm text-muted-foreground capitalize">
-                  {category.replace('_', ' ')}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+
 
       {/* Recent Activity */}
       <Card className="glass-card">
@@ -268,6 +258,179 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Usage Analytics Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Popular Searches */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="w-5 h-5 text-blue-400" />
+              Popular Searches (Last {timeRange === '24h' ? '24 Hours' : timeRange === '7d' ? '7 Days' : '30 Days'})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {usageLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : usageData?.popular_search_terms && usageData.popular_search_terms.length > 0 ? (
+              <div className="space-y-3">
+                {usageData.popular_search_terms.map((search, index) => (
+                  <div 
+                    key={index}
+                    className="flex items-center justify-between p-3 rounded-lg bg-secondary/20 border border-border/50"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <Badge variant="outline" className="text-blue-400 bg-blue-500/10">
+                        #{index + 1}
+                      </Badge>
+                      <span className="font-medium">{search.query}</span>
+                    </div>
+                    <Badge className="bg-purple-500/10 text-purple-400">
+                      {search.count} searches
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No search data yet</p>
+                <p className="text-xs mt-1">Start searching documents to see popular queries</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Popular Documents */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-green-400" />
+              Most Accessed Documents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {usageLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : usageData?.popular_documents && usageData.popular_documents.length > 0 ? (
+              <div className="space-y-3">
+                {usageData.popular_documents.map((doc, index) => (
+                  <div 
+                    key={doc.document_id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-secondary/20 border border-border/50"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <Badge variant="outline" className="text-green-400 bg-green-500/10 shrink-0">
+                        #{index + 1}
+                      </Badge>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{doc.filename}</div>
+                        <div className="text-xs text-muted-foreground">{doc.file_type}</div>
+                      </div>
+                    </div>
+                    <Badge className="bg-orange-500/10 text-orange-400 shrink-0">
+                      {doc.view_count} views
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No document access data yet</p>
+                <p className="text-xs mt-1">Documents will appear here once accessed</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Activity Timeline */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-400" />
+            Document Activity Over Time
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {usageLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : usageData?.time_series && usageData.time_series.length > 0 ? (
+            <div className="space-y-4">
+              {/* Simple bar chart visualization */}
+              <div className="grid grid-cols-1 gap-2">
+                {usageData.time_series.map((day, index) => {
+                  const maxCount = Math.max(...usageData.time_series.map(d => d.count))
+                  const percentage = (day.count / maxCount) * 100
+                  
+                  return (
+                    <div key={index} className="flex items-center gap-3">
+                      <div className="text-xs text-muted-foreground w-24">
+                        {day.date ? new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-secondary rounded-full h-6 overflow-hidden">
+                            <div 
+                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 flex items-center justify-end pr-2"
+                              style={{ width: `${Math.max(percentage, 5)}%` }}
+                            >
+                              {day.count > 0 && (
+                                <span className="text-xs font-medium text-white">
+                                  {day.count}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Summary */}
+              {usageData.summary && (
+                <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-border">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-400">
+                      {usageData.summary.total_documents}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Total Documents</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-400">
+                      {usageData.summary.processed_documents}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Processed</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-400">
+                      {usageData.summary.documents_this_period}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">This Period</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>No activity data yet</p>
+              <p className="text-xs mt-1">Activity timeline will appear once documents are uploaded</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

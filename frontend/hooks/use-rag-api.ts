@@ -1,88 +1,143 @@
 /**
- * RAG System API hooks
- * Provides React Query integration for RAG system endpoints
+ * RAG (Retrieval Augmented Generation) API Hook
+ * 
+ * Provides hooks for retrieving optimized context for LLM augmentation
+ * using Maximal Marginal Relevance (MMR) for diversity
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-hot-toast'
-import { apiClient } from "@/lib/api-client'
+import { useMutation, useQuery } from '@tanstack/react-query'
 
-// Query keys for React Query
-export const ragQueryKeys = {
-  systemRAG: ['rag', 'system'] as const,
-  systemRAGConfig: (id: string) => ['rag', 'system', id] as const,
-  contextRAG: (configId: string) => ['rag', 'context', configId] as const,
+export interface RAGChunk {
+  chunk_id: number
+  document_id: number
+  chunk_index: number
+  content: string
+  similarity: number
+  source: {
+    filename: string
+    file_type: string
+    chunk_index: number
+  }
+  tokens: number
+  truncated: boolean
 }
 
-// ============= QUERY HOOKS =============
+export interface RAGRetrievalResponse {
+  query: string
+  chunks: RAGChunk[]
+  context: string
+  total_tokens: number
+  diversity_score: number
+  execution_time_ms: number
+  settings: {
+    max_chunks: number
+    max_tokens: number
+    diversity: number
+    lambda: number
+  }
+}
 
-// Get system RAG
-export function useSystemRAG() {
+export interface RAGRetrievalParams {
+  query: string
+  max_chunks?: number
+  max_tokens?: number
+  diversity?: number
+}
+
+/**
+ * Hook for performing RAG retrieval
+ */
+export function useRAGRetrieval(
+  params: RAGRetrievalParams | null,
+  options?: {
+    enabled?: boolean
+  }
+) {
   return useQuery({
-    queryKey: ragQueryKeys.systemRAG,
-    queryFn: () => apiClient.getSystemRAG(),
-    refetchInterval: 60000,
-    staleTime: 30000,
+    queryKey: ['rag', 'retrieve', params],
+    queryFn: async () => {
+      if (!params || !params.query) {
+        throw new Error('Query is required for RAG retrieval')
+      }
+
+      const searchParams = new URLSearchParams({
+        query: params.query,
+      })
+
+      if (params.max_chunks) {
+        searchParams.append('max_chunks', String(params.max_chunks))
+      }
+      if (params.max_tokens) {
+        searchParams.append('max_tokens', String(params.max_tokens))
+      }
+      if (params.diversity !== undefined) {
+        searchParams.append('diversity', String(params.diversity))
+      }
+
+      // CRITICAL: Call backend directly to bypass Next.js proxy mock data
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const url = `${BACKEND_URL}/api/documents/rag/retrieve?${searchParams.toString()}`
+      console.log('[RAG Retrieval] Calling backend directly:', url)
+      console.log('[RAG Retrieval] Params:', params)
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      console.log('[RAG Retrieval] Response status:', response.status)
+
+      if (!response.ok) {
+        throw new Error(`RAG retrieval failed: ${response.statusText}`)
+      }
+
+      return response.json() as Promise<RAGRetrievalResponse>
+    },
+    enabled: options?.enabled !== false && !!params?.query,
+    staleTime: 30000, // Cache for 30 seconds
+    retry: 2,
   })
 }
 
-// Get system RAG config
-export function useSystemRAGConfig(id: string | null) {
-  return useQuery({
-    queryKey: ragQueryKeys.systemRAGConfig(id!),
-    queryFn: () => apiClient.getSystemRAGConfig(id!),
-    enabled: !!id,
-    refetchInterval: 60000,
-    staleTime: 30000,
-  })
-}
-
-// ============= MUTATION HOOKS =============
-
-// Update system RAG
-export function useUpdateSystemRAG() {
-  const queryClient = useQueryClient()
-  
+/**
+ * Mutation hook for RAG retrieval (when you want manual control)
+ */
+export function useRAGRetrievalMutation() {
   return useMutation({
-    mutationFn: (data: any) => apiClient.updateSystemRAG(data),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ragQueryKeys.systemRAG })
-      toast.success('System RAG configuration updated!')
-      return data
-    },
-    onError: (error) => {
-      toast.error(`Failed to update system RAG: ${error.message}`)
-      throw error
-    },
-  })
-}
+    mutationFn: async (params: RAGRetrievalParams) => {
+      const searchParams = new URLSearchParams({
+        query: params.query,
+        max_chunks: String(params.max_chunks || 5),
+        max_tokens: String(params.max_tokens || 2000),
+        diversity: String(params.diversity || 0.3),
+      })
 
-// Test system RAG
-export function useTestSystemRAG() {
-  return useMutation({
-    mutationFn: (id: string) => apiClient.testSystemRAG(id),
-    onSuccess: (data) => {
-      toast.success('System RAG test completed!')
-      return data
-    },
-    onError: (error) => {
-      toast.error(`System RAG test failed: ${error.message}`)
-      throw error
-    },
-  })
-}
+      // CRITICAL: Call backend directly to bypass Next.js proxy mock data
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const url = `${BACKEND_URL}/api/documents/rag/retrieve?${searchParams.toString()}`
+      console.log('[RAG Mutation] Calling backend directly:', url)
+      console.log('[RAG Mutation] Params:', params)
 
-// Test context RAG
-export function useTestContextRAG() {
-  return useMutation({
-    mutationFn: (configId: string) => apiClient.testContextRAG(configId),
-    onSuccess: (data) => {
-      toast.success('Context RAG test completed!')
-      return data
-    },
-    onError: (error) => {
-      toast.error(`Context RAG test failed: ${error.message}`)
-      throw error
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      console.log('[RAG Mutation] Response status:', response.status, response.statusText)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[RAG Hook] Error response:', errorText)
+        throw new Error(`RAG retrieval failed (${response.status}): ${errorText || response.statusText}`)
+      }
+
+      const data = await response.json()
+      console.log('[RAG Hook] Success! Data received:', data)
+      return data as RAGRetrievalResponse
     },
   })
 }

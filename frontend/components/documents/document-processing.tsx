@@ -25,7 +25,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // API hooks
-import { useProcessingQueue, useStartProcessing } from '@/hooks/use-document-api'
+import { useProcessingQueue as useProcessingQueueOld, useStartProcessing } from '@/hooks/use-document-api'
+import { useProcessingQueueWebSocket } from '@/hooks/use-processing-queue-websocket'
+// Processing components
+import { LiveIndicator } from './processing/live-indicator'
+import { ProcessingSteps } from './processing/processing-steps'
+import { LiveProgressBar } from './processing/live-progress-bar'
 
 interface DocumentProcessingProps {
   documents: any[]
@@ -33,16 +38,28 @@ interface DocumentProcessingProps {
 }
 
 export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProcessingProps) {
-  const [processingStats, setProcessingStats] = useState({
-    total_processed_today: 42,
-    currently_processing: 3,
-    average_processing_time: 2.4,
-    success_rate: 94.2
-  })
-
-  // Fetch real processing queue
-  const { data: processingQueue = [], isLoading, refetch } = useProcessingQueue()
+  // Use WebSocket hook for live updates
+  const { 
+    queueStatus, 
+    isConnected, 
+    lastUpdate,
+    isLoading 
+  } = useProcessingQueueWebSocket()
+  
   const startProcessingMutation = useStartProcessing()
+  
+  // Extract real stats from API
+  const processingStats = {
+    total_processed_today: queueStatus?.total_processed_today || 0,
+    currently_processing: queueStatus?.currently_processing || 0,
+    average_processing_time: queueStatus?.average_processing_time || 0,
+    success_rate: queueStatus?.success_rate || 0
+  }
+  
+  // Update stats from live queue data
+  const liveProcessingDocuments = queueStatus?.processing || []
+  const livePendingDocuments = queueStatus?.pending || []
+  const liveFailedDocuments = queueStatus?.failed || []
 
   const processingDocuments = documents.filter(doc => doc.status === 'processing')
   const completedDocuments = documents.filter(doc => doc.status === 'completed')
@@ -79,6 +96,11 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
 
   return (
     <div className="space-y-6">
+      {/* Live Status Indicator */}
+      <div className="flex justify-end">
+        <LiveIndicator isConnected={isConnected} lastUpdate={lastUpdate} />
+      </div>
+
       {/* Processing Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="glass-card">
@@ -100,7 +122,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Currently Processing</p>
-                <p className="text-2xl font-bold">{processingDocuments.length}</p>
+                <p className="text-2xl font-bold">{liveProcessingDocuments.length || processingDocuments.length}</p>
               </div>
               <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
                 <Zap className="w-6 h-6 text-white" />
@@ -198,26 +220,30 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
         </TabsContent>
 
         <TabsContent value="active" className="space-y-4">
-          <h3 className="text-lg font-semibold">Currently Processing ({processingDocuments.length})</h3>
+          <h3 className="text-lg font-semibold">
+            Currently Processing ({liveProcessingDocuments.length || processingDocuments.length})
+          </h3>
 
-          {processingDocuments.map(doc => (
+          {/* Show live processing documents if available */}
+          {(liveProcessingDocuments.length > 0 ? liveProcessingDocuments : processingDocuments).map((doc: any, index: number) => (
             <motion.div
-              key={doc.id}
+              key={doc.document_id || doc.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
             >
               <Card className="glass-card">
                 <CardContent className="p-4">
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="relative">
                           <Zap className="w-8 h-8 text-blue-500 animate-pulse" />
                         </div>
                         <div>
-                          <h4 className="font-medium">{doc.name}</h4>
+                          <h4 className="font-medium">{doc.filename || doc.name}</h4>
                           <p className="text-sm text-muted-foreground">
-                            Processing • Started {new Date(doc.processing_started_at || Date.now()).toLocaleTimeString()}
+                            Processing • Started {new Date(doc.started_at || doc.processing_started_at || Date.now()).toLocaleTimeString()}
                           </p>
                         </div>
                       </div>
@@ -226,18 +252,18 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                       </Badge>
                     </div>
 
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span>Progress</span>
-                        <span>{doc.processing_progress || 45}%</span>
-                      </div>
-                      <Progress value={doc.processing_progress || 45} className="h-2" />
-                    </div>
+                    {/* Live Progress Bar */}
+                    <LiveProgressBar 
+                      progress={doc.progress || doc.processing_progress || 45}
+                      step={doc.step_name || doc.processing_step}
+                      eta_seconds={doc.eta_seconds}
+                    />
 
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Current Step: {doc.processing_step || 'Text Extraction'}</span>
-                      <span>ETA: {doc.processing_eta || '30s'}</span>
-                    </div>
+                    {/* Processing Steps Visualization */}
+                    <ProcessingSteps 
+                      steps={['Upload', 'Extract', 'Chunk', 'Embed', 'Store']}
+                      currentStep={doc.current_step || 'text_extraction'}
+                    />
                   </div>
                 </CardContent>
               </Card>

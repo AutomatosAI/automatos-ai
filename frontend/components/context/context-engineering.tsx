@@ -37,6 +37,7 @@ import {
   useTestContextRAG,
   useOptimizeContext
 } from '@/hooks/use-context-management-api'
+import { RAGContextBuilder } from './rag-context-builder'
 
 const confidenceColors = {
   high: 'text-green-400',
@@ -242,7 +243,7 @@ export function ContextEngineering() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="performance" className="flex items-center space-x-2">
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -258,6 +259,10 @@ export function ContextEngineering() {
             <TabsTrigger value="optimization" className="flex items-center space-x-2">
               <Brain className="w-4 h-4" />
               <span className="hidden sm:inline">Optimization</span>
+            </TabsTrigger>
+            <TabsTrigger value="rag" className="flex items-center space-x-2">
+              <Zap className="w-4 h-4" />
+              <span className="hidden sm:inline">RAG Context</span>
             </TabsTrigger>
           </TabsList>
 
@@ -610,6 +615,10 @@ export function ContextEngineering() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="rag" className="space-y-6">
+            <RAGContextBuilder />
           </TabsContent>
         </Tabs>
       </motion.div>

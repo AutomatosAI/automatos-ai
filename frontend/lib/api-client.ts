@@ -42,9 +42,9 @@
   const PAGE_MOCK_CONFIG: Record<string, boolean> = {
     // Core Pages
     'dashboard': false,        // ✅ Use real APIs - working endpoints
-    'agents': true,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
+    'agents': false,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
     'workflows': false,        // ✅ Use real APIs - working endpoints
-    'documents': false,      // false = REAL APIs ✅ | true = MOCK data ❌
+    'documents': false,       // false = REAL APIs ✅ | true = MOCK data ❌
     'analytics': false,        // ✅ Use real APIs - working endpoints
     'context': false,          // ✅ Use real APIs - all context endpoints working
     'memory': false,           // ✅ Use real APIs - all memory endpoints working
@@ -115,7 +115,7 @@
     // Load mock config from localStorage or use defaults
     private loadMockConfig(): MockConfig {
       if (typeof window === 'undefined') {
-        return { enabled: true, endpoints: {}, logMockUsage: true }
+        return { enabled: false, endpoints: {}, logMockUsage: true }
       }
       
       const stored = localStorage.getItem('automatos-mock-config')
@@ -1183,6 +1183,13 @@
   
     // ===== DOCUMENT ENDPOINTS =====
     async uploadDocument(file: File, metadata?: any) {
+      console.log('[Upload] Starting document upload:', {
+        filename: file.name,
+        size: file.size,
+        type: file.type,
+        metadata: metadata
+      })
+
       const formData = new FormData()
       formData.append('file', file)
       
@@ -1199,11 +1206,29 @@
       const headers: any = { ...this.defaultHeaders }
       delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
       
-      return fetch(`${this.baseUrl}/api/documents/upload`, {
+      // CRITICAL: Upload must go DIRECTLY to backend, bypassing Next.js proxy
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const url = `${BACKEND_URL}/api/documents/upload`
+      console.log('[Upload] Uploading DIRECTLY to backend:', url)
+      console.log('[Upload] FormData entries:', Array.from(formData.entries()).map(([k, v]) => [k, typeof v === 'string' ? v : 'File']))
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: headers,
         body: formData
-      }).then(response => response.json())
+      })
+
+      console.log('[Upload] Response status:', response.status, response.statusText)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('[Upload] Error response:', errorText)
+        throw new Error(`Upload failed (${response.status}): ${errorText || response.statusText}`)
+      }
+
+      const data = await response.json()
+      console.log('[Upload] Success! Response data:', data)
+      return data
     }
   
     async preprocessDocument(documentId: string) {

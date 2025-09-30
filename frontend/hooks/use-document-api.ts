@@ -266,14 +266,19 @@ export function useUploadDocument() {
   
   return useMutation({
     mutationFn: (data: { file: File, metadata?: any }) => {
+      console.log('[useUploadDocument] Starting mutation with:', data)
       return apiClient.uploadDocument(data.file, data.metadata)
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
+      console.log('[useUploadDocument] SUCCESS! Response:', response)
       toast.success('Document uploaded successfully')
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documents })
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.documentStats })
     },
-    onError: (error) => handleApiError(error, 'Failed to upload document')
+    onError: (error: any) => {
+      console.error('[useUploadDocument] ERROR:', error)
+      handleApiError(error, 'Failed to upload document')
+    }
   })
 }
 

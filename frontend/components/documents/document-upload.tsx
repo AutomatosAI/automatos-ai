@@ -199,6 +199,8 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
 
   // Upload single file
   const uploadFile = async (fileUpload: FileUpload) => {
+    console.log('[DocumentUpload] Starting upload for:', fileUpload.file.name, fileUpload.metadata)
+    
     try {
       // Update status to uploading
       setFiles(prev => prev.map(f => 
@@ -216,11 +218,15 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
         ))
       }, 200)
 
+      console.log('[DocumentUpload] Calling uploadMutation.mutateAsync...')
+      
       // Upload file
-      await uploadMutation.mutateAsync({
+      const result = await uploadMutation.mutateAsync({
         file: fileUpload.file,
         metadata: fileUpload.metadata
       })
+
+      console.log('[DocumentUpload] Upload successful! Result:', result)
 
       clearInterval(progressInterval)
 
@@ -231,40 +237,51 @@ export function DocumentUpload({ onUploadSuccess, categories }: DocumentUploadPr
           : f
       ))
 
+      toast.success(`✅ ${fileUpload.file.name} uploaded successfully!`)
+
       // Remove file after 3 seconds
       setTimeout(() => {
         removeFile(fileUpload.id)
       }, 3000)
 
     } catch (error: any) {
+      console.error('[DocumentUpload] Upload failed:', error)
+      
       // Update status to error
       setFiles(prev => prev.map(f => 
         f.id === fileUpload.id 
           ? { ...f, status: 'error', error: error.message }
           : f
       ))
+      
+      toast.error(`❌ Upload failed: ${error.message}`)
     }
   }
 
   // Upload all files
   const uploadAllFiles = async () => {
+    console.log('[DocumentUpload] uploadAllFiles called, files:', files)
+    
     const pendingFiles = files.filter(f => f.status === 'pending')
+    console.log('[DocumentUpload] pendingFiles:', pendingFiles)
     
     if (pendingFiles.length === 0) {
+      console.error('[DocumentUpload] No pending files!')
       toast.error('No files to upload')
       return
     }
 
     // Validate files
     for (const file of pendingFiles) {
+      console.log('[DocumentUpload] Validating file:', file.metadata)
+      
       if (!file.metadata.name.trim()) {
-        toast.error(`Please provide a name for "${file.file.name}"`)
+        console.error('[DocumentUpload] VALIDATION FAILED: No name for', file.file.name)
+        toast.error(`❌ VALIDATION ERROR: Please provide a name for "${file.file.name}"`, { duration: 5000 })
+        alert(`VALIDATION ERROR: Please provide a name for "${file.file.name}"`)
         return
       }
-      if (!file.metadata.category) {
-        toast.error(`Please select a category for "${file.file.name}"`)
-        return
-      }
+      // NOTE: category is not used by backend, removed validation
     }
 
     // Upload files sequentially (or in batches if needed)

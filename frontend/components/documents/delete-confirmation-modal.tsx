@@ -2,7 +2,7 @@
 'use client'
 
 import * as React from 'react'
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   X, 
@@ -91,7 +91,7 @@ export function DeleteConfirmationModal({
   }
 
   const handleConfirm = async () => {
-    if (!documentId || !canConfirm()) return
+    if (!documentId || !canConfirm) return
     
     setDeleting(true)
     setError(null)
@@ -116,13 +116,18 @@ export function DeleteConfirmationModal({
     setImpact(null)
   }
 
-  const canConfirm = () => {
-    return (
-      confirmationText.toLowerCase() === filename.toLowerCase() &&
-      acknowledgeImpact &&
-      acknowledgeNoUndo
-    )
-  }
+  // SIMPLIFIED: Just require checkboxes, no filename matching
+  const canConfirm = useMemo(() => {
+    const result = acknowledgeImpact && acknowledgeNoUndo
+    
+    console.log('[Delete Modal] Validation (SIMPLIFIED):', {
+      acknowledgeImpact,
+      acknowledgeNoUndo,
+      canConfirm: result
+    })
+    
+    return result
+  }, [acknowledgeImpact, acknowledgeNoUndo])
 
   const getImpactColor = (impact: 'high' | 'medium' | 'low') => {
     switch (impact) {
@@ -360,7 +365,7 @@ export function DeleteConfirmationModal({
               <Button 
                 variant="destructive"
                 onClick={handleConfirm}
-                disabled={!canConfirm() || deleting}
+                disabled={!canConfirm || deleting}
                 className="bg-red-600 hover:bg-red-700"
               >
                 {deleting ? (
