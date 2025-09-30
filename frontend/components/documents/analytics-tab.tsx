@@ -106,50 +106,23 @@ export function AnalyticsTab() {
   const { data: usageData } = useUsageAnalytics('24h')
   const { data: processingData } = useProcessingAnalytics('24h')
 
-  // Generate fallback data if API data is not available
+  // Use API data directly - mock data is handled in api-client.ts
+  // NOTE: usageData may be empty until backend endpoint is implemented
   const searchPatterns: SearchPatterns = usageData || {
-    popular_search_terms: [
-      { term: 'machine learning', frequency: 45, trend: 'up' },
-      { term: 'data analysis', frequency: 32, trend: 'stable' },
-      { term: 'neural networks', frequency: 28, trend: 'up' },
-      { term: 'python tutorial', frequency: 24, trend: 'down' },
-      { term: 'api documentation', frequency: 19, trend: 'stable' }
-    ],
-    most_accessed_documents: [
-      {
-        document_id: 1,
-        filename: 'ML_Guide_2024.pdf',
-        access_count: 127,
-        last_accessed: '2024-01-07T10:30:00Z',
-        avg_session_time: '8m 34s'
-      },
-      {
-        document_id: 2,
-        filename: 'Data_Analysis_Handbook.docx',
-        access_count: 89,
-        last_accessed: '2024-01-07T09:15:00Z',
-        avg_session_time: '12m 45s'
-      },
-      {
-        document_id: 3,
-        filename: 'Neural_Networks_Basics.pdf',
-        access_count: 72,
-        last_accessed: '2024-01-06T16:22:00Z',
-        avg_session_time: '6m 18s'
-      }
-    ],
+    popular_search_terms: [],
+    most_accessed_documents: [],
     search_performance: {
-      avg_response_time: '124ms',
-      total_searches: 1247,
-      successful_searches: 1198,
-      success_rate: 96.1,
-      avg_results_per_search: 8.3
+      avg_response_time: 'N/A',
+      total_searches: 0,
+      successful_searches: 0,
+      success_rate: 0,
+      avg_results_per_search: 0
     },
     usage_patterns: {
-      peak_hours: ['9:00-11:00', '14:00-16:00', '20:00-22:00'],
-      most_active_day: 'Tuesday',
-      avg_searches_per_user: 23.4,
-      common_file_types_searched: ['PDF', 'DOCX', 'TXT']
+      peak_hours: [],
+      most_active_day: 'N/A',
+      avg_searches_per_user: 0,
+      common_file_types_searched: []
     },
     last_updated: new Date().toISOString()
   }

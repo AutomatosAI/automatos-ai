@@ -31,6 +31,9 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
+// Document modals
+import { DocumentDetailsModal } from './document-details-modal'
+import { DeleteConfirmationModal } from './delete-confirmation-modal'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 
@@ -74,11 +77,20 @@ export function DocumentManagement() {
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
+  // Modal state management
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
+  
   // API hooks
-  const { data: documents = [], isLoading: loading, error } = useDocuments()
+  const { data: documents = [], isLoading, error } = useDocuments()
   const { data: documentStats } = useDocumentStats()
   const uploadDocumentMutation = useUploadDocument()
   const deleteDocumentMutation = useDeleteDocument()
+  
+  // Type the documents array properly
+  const typedDocuments = documents as BackendDocument[]
   
   const [ref, inView] = useInView({
     triggerOnce: true,
@@ -87,9 +99,9 @@ export function DocumentManagement() {
 
   // Calculate stats from real API data
   const stats = useMemo(() => {
-    const totalDocs = documents.length
-    const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
-    const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
+    const totalDocs = typedDocuments.length
+    const processedDocs = typedDocuments.filter(d => (d.status || '').toLowerCase() === 'completed').length
+    const totalSizeBytes = typedDocuments.reduce((sum, d) => sum + (d.file_size || 0), 0)
     const sizeInMB = totalSizeBytes / (1024 * 1024)
     const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
     
@@ -117,13 +129,13 @@ export function DocumentManagement() {
       },
       {
         label: 'Vector Chunks',
-        value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
+        value: typedDocuments.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
         change: '',
         icon: Database,
         color: 'text-purple-400'
       }
     ]
-  }, [documents])
+  }, [typedDocuments])
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -178,15 +190,15 @@ export function DocumentManagement() {
   const handleViewDetails = async (documentId: number) => {
     try {
       // Find document in current list
-      const document = documents.find(doc => doc.id === documentId)
+      const document = typedDocuments.find(doc => doc.id === documentId)
       if (document) {
-        alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+        setSelectedDocumentId(documentId)
+        setShowDetailsModal(true)
       } else {
-        alert('Document not found')
+        console.error('Document not found:', documentId)
       }
     } catch (error) {
       console.error('Error viewing document details:', error)
-      alert('Error loading document details')
     }
   }
 
@@ -206,20 +218,27 @@ export function DocumentManagement() {
     }
   }
 
-  const handleDelete = async (documentId: number) => {
-    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-      return
+  const handleDelete = async (documentId: number, filename: string) => {
+    try {
+      setDocumentToDelete({ id: documentId, filename })
+      setShowDeleteModal(true)
+    } catch (error) {
+      console.error('Error preparing delete confirmation:', error)
     }
-    
+  }
+
+  const confirmDelete = async (documentId: number) => {
     try {
       await deleteDocumentMutation.mutateAsync(documentId.toString())
+      setShowDeleteModal(false)
+      setDocumentToDelete(null)
     } catch (error) {
       // Error handled by mutation hook
       console.error('Error deleting document:', error)
     }
   }
 
-  const filteredDocuments = documents.filter(doc =>
+  const filteredDocuments = typedDocuments.filter(doc =>
     (doc.filename || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -254,10 +273,10 @@ export function DocumentManagement() {
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
           onClick={() => fileInputRef.current?.click()}
-          disabled={uploadDocumentMutation.isPending}
+          disabled={uploadDocumentMutation.isLoading}
         >
-          <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isPending ? 'animate-spin' : ''}`} />
-          {uploadDocumentMutation.isPending ? 'Uploading...' : 'Upload Documents'}
+          <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
+          {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
         </Button>
       </motion.div>
 
@@ -388,7 +407,7 @@ export function DocumentManagement() {
                             <Download className="w-4 h-4 mr-2" />
                             Download
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id)}>
+                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id, doc.filename)}>
                             <Trash2 className="w-4 h-4 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -439,7 +458,7 @@ export function DocumentManagement() {
               })}
               
               {/* Loading State */}
-              {loading && (
+              {isLoading && (
                 <div className="col-span-full flex items-center justify-center py-12">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -449,7 +468,7 @@ export function DocumentManagement() {
               )}
               
               {/* Empty State */}
-              {!loading && filteredDocuments.length === 0 && (
+              {(isLoading === false && filteredDocuments.length === 0) && (
                 <div className="col-span-full flex items-center justify-center py-12">
                   <div className="text-center">
                     <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -473,7 +492,7 @@ export function DocumentManagement() {
                   <div className="text-center">
                     <div className="text-red-500 mb-4">⚠️</div>
                     <h3 className="text-lg font-semibold mb-2 text-red-500">Error loading documents</h3>
-                    <p className="text-muted-foreground">{error}</p>
+                    <p className="text-muted-foreground">{error instanceof Error ? error.message : String(error)}</p>
                   </div>
                 </div>
               )}
@@ -499,9 +518,9 @@ export function DocumentManagement() {
                 >
                   <Upload className={`w-12 h-12 mx-auto mb-4 ${
                     dragActive ? 'text-primary' : 'text-muted-foreground'
-                  } ${uploadDocumentMutation.isPending ? 'animate-bounce' : ''}`} />
+                  } ${uploadDocumentMutation.isLoading ? 'animate-bounce' : ''}`} />
                   
-                  {uploadDocumentMutation.isPending ? (
+                  {uploadDocumentMutation.isLoading ? (
                     <div className="space-y-4">
                       <h3 className="text-lg font-semibold">Uploading...</h3>
                       <div className="w-full bg-secondary rounded-full h-2">
@@ -522,7 +541,7 @@ export function DocumentManagement() {
                       <Button 
                         className="gradient-accent hover:opacity-90"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={uploadDocumentMutation.isPending}
+                        disabled={uploadDocumentMutation.isLoading}
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         Choose Files
@@ -535,11 +554,17 @@ export function DocumentManagement() {
           </TabsContent>
 
           <TabsContent value="processing" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Processing</div><div className="text-muted-foreground">Processing features coming soon</div></div>
+            <div className="p-12 text-center">
+              <div className="text-lg font-semibold">Processing</div>
+              <div className="text-muted-foreground">Processing features coming soon</div>
+            </div>
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Analytics</div><div className="text-muted-foreground">Analytics features coming soon</div></div>
+            <div className="p-12 text-center">
+              <div className="text-lg font-semibold">Analytics</div>
+              <div className="text-muted-foreground">Analytics features coming soon</div>
+            </div>
           </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">
@@ -547,6 +572,35 @@ export function DocumentManagement() {
           </TabsContent>
         </Tabs>
       </motion.div>
+
+      {/* Document Details Modal */}
+      <DocumentDetailsModal
+        documentId={selectedDocumentId}
+        open={showDetailsModal}
+        onClose={() => {
+          setShowDetailsModal(false)
+          setSelectedDocumentId(null)
+        }}
+        onDownload={handleDownload}
+        onDelete={(id) => {
+          const doc = typedDocuments.find(d => d.id === id)
+          if (doc) {
+            handleDelete(id, doc.filename)
+          }
+        }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        documentId={documentToDelete?.id || null}
+        filename={documentToDelete?.filename || ''}
+        open={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false)
+          setDocumentToDelete(null)
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

@@ -25,3 +25,7 @@ console.log('5. After toggle:', window.automatos.mocks.getStatus())
 console.log('✅ Mock controls test complete!')
 console.log('💡 Now refresh the page to see the effect')
 
+
+
+
+

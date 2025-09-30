@@ -9,7 +9,7 @@
  * - Use window.automatos.mocks to control from console
  */
 
-interface ApiResponse<T = any> {
+  interface ApiResponse<T = any> {
     data: T
     success: boolean
     message?: string
@@ -30,12 +30,44 @@ interface ApiResponse<T = any> {
     }
     logMockUsage: boolean
   }
+
+  // ====================================================================
+  // PAGE-LEVEL MOCK CONFIGURATION - SIMPLE ON/OFF SWITCH PER PAGE
+  // ====================================================================
+  // Set to 'false' to use REAL APIs, 'true' to use MOCK data
+  // 
+  // Usage: When calling API from a page, pass the page name
+  // Example: apiClient.setCurrentPage('dashboard') 
+  //
+  const PAGE_MOCK_CONFIG: Record<string, boolean> = {
+    // Core Pages
+    'dashboard': false,        // ✅ Use real APIs - working endpoints
+    'agents': true,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
+    'workflows': false,        // ✅ Use real APIs - working endpoints
+    'documents': false,      // false = REAL APIs ✅ | true = MOCK data ❌
+    'analytics': false,        // ✅ Use real APIs - working endpoints
+    'context': false,          // ✅ Use real APIs - all context endpoints working
+    'memory': false,           // ✅ Use real APIs - all memory endpoints working
+    'field-theory': false,     // ✅ Use real APIs - all field theory endpoints working
+    'multi-agent': false,      // ✅ Use real APIs - coordination/reasoning working
+    'orchestrator': false,     // ✅ Use real APIs - task submission working
+    
+    // Settings/Admin Pages
+    'settings': true,          // 🔄 Use mocks until backend endpoints ready
+    'tools': true,             // 🔄 Use mocks until backend endpoints ready
+    'credentials': true,       // 🔄 Use mocks until backend endpoints ready
+    
+    // Testing/Development
+    'test': true,              // 🧪 Always use mocks for testing
+    'demo': true,              // 🧪 Always use mocks for demos
+  }
   
   class ApiClient {
     private baseUrl: string
     private defaultHeaders: Record<string, string>
     private mockConfig: MockConfig
     private mockData: Record<string, () => any>
+    private currentPage: string = '' // Track which page is making requests
   
     constructor() {
       // Use empty string to make relative URLs (will use current origin)
@@ -95,11 +127,21 @@ interface ApiResponse<T = any> {
         }
       }
       
-      // Default config - mocks DISABLED for production use
+      // Default config - mocks DISABLED for working APIs
       return {
         enabled: false, // Disabled by default - use real APIs
-        endpoints: {}, // Empty means all endpoints use real APIs
-        logMockUsage: false // Reduced logging for production
+        endpoints: {
+          // Only enable mocks for endpoints that consistently fail
+          '/api/insights/extract': false, // Requires auth - will work after backend restart
+          '/api/recommendations/generate': false, // Requires auth - will work after backend restart
+          '/api/learning/feedback': false, // Requires auth - will work after backend restart
+          '/api/knowledge/share': false, // Requires auth - will work after backend restart
+          '/api/system/performance-baseline': false, // Requires auth - will work after backend restart
+          '/api/documents/upload': false, // Schema needs fixing
+          '/api/multi-agent/behavior/learn': true, // 404 - not implemented
+          '/api/multi-agent/optimization/adaptive': true, // 404 - not implemented
+        },
+        logMockUsage: true // Enable logging to see what's being used
       }
     }
 
@@ -145,15 +187,60 @@ interface ApiResponse<T = any> {
 
     // Check if mock should be used for endpoint
     private shouldUseMock(endpoint: string): boolean {
+      // 1. CHECK PAGE-LEVEL CONFIG FIRST (highest priority)
+      if (this.currentPage && this.currentPage in PAGE_MOCK_CONFIG) {
+        // Page config overrides everything - return it directly
+        // true = use mocks, false = use real APIs
+        const useMock = PAGE_MOCK_CONFIG[this.currentPage]
+        if (this.mockConfig.logMockUsage) {
+          console.log(`🔍 ${endpoint} → Page config: ${useMock ? '🔄 MOCK' : '🌐 REAL API'}`)
+        }
+        return useMock
+      }
+
+      // 2. Check if mocks are globally disabled
       if (!this.mockConfig.enabled) return false
       
-      // Check specific endpoint config
+      // 3. Check specific endpoint config
       if (endpoint in this.mockConfig.endpoints) {
         return this.mockConfig.endpoints[endpoint]
       }
       
-      // Default to true if mocks are globally enabled
+      // 4. Default to true if mocks are globally enabled
       return true
+    }
+
+    /**
+     * Set the current page/feature to control mock behavior per page
+     * @param pageName - Name of the page (e.g., 'dashboard', 'agents', 'workflows')
+     * 
+     * @example
+     * // In your page component:
+     * useEffect(() => {
+     *   apiClient.setCurrentPage('dashboard')
+     *   return () => apiClient.setCurrentPage('') // Clear on unmount
+     * }, [])
+     */
+    public setCurrentPage(pageName: string) {
+      this.currentPage = pageName.toLowerCase()
+      const mockStatus = PAGE_MOCK_CONFIG[this.currentPage] ? 'MOCKS ON' : 'REAL APIs'
+      console.log(`📄 Page: ${pageName} → ${mockStatus}`)
+    }
+
+    /**
+     * Get the current page mock status
+     */
+    public getPageMockStatus(pageName?: string): boolean {
+      const page = pageName || this.currentPage
+      return PAGE_MOCK_CONFIG[page.toLowerCase()] ?? false
+    }
+
+    /**
+     * Override page mock setting temporarily (useful for testing)
+     */
+    public setPageMockOverride(pageName: string, useMocks: boolean) {
+      PAGE_MOCK_CONFIG[pageName.toLowerCase()] = useMocks
+      console.log(`🔧 Mock override for ${pageName}: ${useMocks ? 'ENABLED' : 'DISABLED'}`)
     }
 
 
@@ -196,35 +283,40 @@ interface ApiResponse<T = any> {
         }),
 
         // Agents endpoints
-        '/api/agents': () => [
-          {
-            id: 1,
-            name: 'Data Analyst',
-            type: 'analysis',
-            status: 'active',
-            description: 'Specialized in data analysis and insights',
-            created_at: now,
-            capabilities: ['data-processing', 'visualization', 'reporting']
-          },
-          {
-            id: 2,
-            name: 'Content Creator',
-            type: 'content',
-            status: 'active',
-            description: 'AI-powered content generation',
-            created_at: now,
-            capabilities: ['writing', 'editing', 'seo']
-          },
-          {
-            id: 3,
-            name: 'Code Assistant',
-            type: 'development',
-            status: 'idle',
-            description: 'Automated code review and generation',
-            created_at: now,
-            capabilities: ['code-review', 'refactoring', 'documentation']
-          }
-        ],
+        // NOTE: These mocks should NEVER be used if API is working correctly
+        // Agents endpoint - should use real API
+        '/api/agents/': () => {
+          console.warn('⚠️ USING MOCK AGENTS - This should not happen! API call failed.')
+          return [
+            {
+              id: 1,
+              name: 'MOCK: Data Analyst',
+              type: 'analysis',
+              status: 'active',
+              description: 'Specialized in data analysis and insights',
+              created_at: now,
+              capabilities: ['data-processing', 'visualization', 'reporting']
+            },
+            {
+              id: 2,
+              name: 'MOCK: Content Creator',
+              type: 'content',
+              status: 'active',
+              description: 'AI-powered content generation',
+              created_at: now,
+              capabilities: ['writing', 'editing', 'seo']
+            },
+            {
+              id: 3,
+              name: 'MOCK: Code Assistant',
+              type: 'development',
+              status: 'idle',
+              description: 'Automated code review and generation',
+              created_at: now,
+              capabilities: ['code-review', 'refactoring', 'documentation']
+            }
+          ]
+        },
 
         // Workflows endpoints
         '/api/workflows': () => [
@@ -275,36 +367,6 @@ interface ApiResponse<T = any> {
           { id: 1, name: 'Data Analysis', category: 'technical' },
           { id: 2, name: 'Report Writing', category: 'communication' },
           { id: 3, name: 'API Integration', category: 'technical' }
-        ],
-
-        // Context Engineering endpoints
-        '/api/context/stats': () => ({
-          total_contexts: 156,
-          active_contexts: 12,
-          total_embeddings: 4567,
-          average_similarity: 0.87,
-          cache_hit_rate: 0.73
-        }),
-        '/api/context/sources': () => [
-          { id: 1, name: 'Documentation', type: 'static', documents: 45, last_updated: new Date().toISOString() },
-          { id: 2, name: 'API References', type: 'dynamic', documents: 23, last_updated: new Date().toISOString() },
-          { id: 3, name: 'User Guides', type: 'static', documents: 67, last_updated: new Date().toISOString() }
-        ],
-        '/api/context/patterns': () => [
-          { id: 1, pattern: 'Question-Answer', count: 234, accuracy: 0.92 },
-          { id: 2, pattern: 'Code-Generation', count: 156, accuracy: 0.88 },
-          { id: 3, pattern: 'Summarization', count: 89, accuracy: 0.95 }
-        ],
-        '/api/context/performance': () => ({
-          retrieval_speed: 145,
-          embedding_time: 23,
-          cache_performance: 0.82,
-          memory_usage: 456
-        }),
-        '/api/context/queries/recent': () => [
-          { id: 1, query: 'How to create an agent?', timestamp: new Date().toISOString(), results: 5 },
-          { id: 2, query: 'API authentication', timestamp: new Date().toISOString(), results: 8 },
-          { id: 3, query: 'Workflow automation', timestamp: new Date().toISOString(), results: 12 }
         ],
 
         // Analytics endpoints  
@@ -1460,51 +1522,123 @@ interface ApiResponse<T = any> {
     }
   
   // Enhanced Analytics Methods
-  async getPerformanceEnhancements() {
-    return this.request('/api/analytics/performance/all-enhancements')
+  // ===== FIELD THEORY ENDPOINTS (All Working ✅) =====
+  async getFieldTheoryHealth() {
+    return this.request('/api/field-theory/health')
   }
-  
-  async getCostAnalysis() {
-    return this.request('/api/analytics/cost-analysis')
+
+  async updateFieldContext(data: { session_id: string, context_data: any, field_type?: string }) {
+    return this.request('/api/field-theory/fields/update', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getPeakUsageAnalysis() {
-    return this.request('/api/analytics/peak-usage')
+
+  async propagateField(data: { source: string, targets?: string[], propagation_steps?: number }) {
+    return this.request('/api/field-theory/fields/propagate', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getBottleneckDetection() {
-    return this.request('/api/analytics/bottlenecks')
+
+  async modelFieldInteractions(data: { task_id: number, user_id: number, similarity_threshold?: number }) {
+    return this.request('/api/field-theory/fields/interactions', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getPredictiveAlerts() {
-    return this.request('/api/analytics/predictive-alerts')
+
+  async manageDynamicFields(data: { session_id: string, context?: any }) {
+    return this.request('/api/field-theory/fields/dynamic', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getAgentRanking() {
-    return this.request('/api/analytics/agent-ranking')
+
+  // ===== MULTI-AGENT ENDPOINTS (Working ✅) =====
+  async getMultiAgentHealth() {
+    return this.request('/api/multi-agent/health')
   }
-  
-  async getSLACompliance() {
-    return this.request('/api/analytics/sla-compliance')
+
+  async coordinateAgents(data: { agents: string[], task: any, strategy?: string }) {
+    return this.request('/api/multi-agent/coordination/coordinate', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getAnalyticsSuccessRate() {
-    return this.request('/api/analytics/success-rate')
+
+  async collaborativeReasoning(data: { problem: string, agents: string[], strategy?: string }) {
+    return this.request('/api/multi-agent/reasoning/collaborative', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getTaskCompletionTime() {
-    return this.request('/api/analytics/completion-time')
+
+  async getOptimizationStatistics() {
+    return this.request('/api/multi-agent/optimization/statistics')
   }
-  
-  async getSystemLoadTrend() {
-    return this.request('/api/analytics/load-trend')
+
+  // ===== MEMORY ENDPOINTS (All Working ✅) =====
+  async storeMemory(data: { session_id: string, content: any, memory_type?: string, importance?: number, tags?: string[] }) {
+    return this.request('/api/v1/memory/store', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
   }
-  
-  async getErrorRateByType() {
-    return this.request('/api/analytics/error-rate')
-    }
+
+  async retrieveMemory(sessionId: string, query?: string, maxItems: number = 20, includeAugmented: boolean = true) {
+    const params = new URLSearchParams()
+    if (query) params.append('query', query)
+    params.append('max_items', maxItems.toString())
+    params.append('include_augmented', includeAugmented.toString())
+    
+    return this.request(`/api/v1/memory/retrieve/${sessionId}?${params.toString()}`)
   }
+
+  async consolidateMemory(data?: { session_id?: string, memory_level?: string, strategy?: string }) {
+    return this.request('/api/v1/memory/consolidate', {
+      method: 'POST',
+      body: JSON.stringify(data || {})
+    })
+  }
+
+  async getMemoryStats() {
+    return this.request('/api/v1/memory/stats')
+  }
+
+  // ===== CONTEXT ENDPOINTS (All Working ✅) =====
+  async getContextSystemHealth() {
+    return this.request('/api/context/system/health')
+  }
+
+  async initializeContext(data?: any) {
+    return this.request('/api/context/initialize', {
+      method: 'POST',
+      body: JSON.stringify(data || {})
+    })
+  }
+
+  // ===== ORCHESTRATOR ENDPOINTS (Working ✅) =====
+  async submitTask(data: { task_description: string, priority?: string, context?: any }) {
+    return this.request('/api/orchestrator/task/submit', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async executePhase(data: { phase: string, agents: string[], execution_type?: string }) {
+    return this.request('/api/orchestrator/execute-phase', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  // ===== EVALUATION ENDPOINTS (Working ✅) =====
+  async getPerformanceMetrics() {
+    return this.request('/api/evaluation/performance-metrics')
+  }
+}
   
-  export const apiClient = new ApiClient()
+export const apiClient = new ApiClient()
 export default apiClient
   

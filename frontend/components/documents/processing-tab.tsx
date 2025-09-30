@@ -69,55 +69,20 @@ export function ProcessingTab() {
   const { data: queueData, isLoading: queueLoading, error: queueError } = useProcessingQueue()
   const startProcessingMutation = useStartProcessing()
 
-  // Generate fallback data if API data is not available
-  const pipelineData: ProcessingPipeline = queueData || {
-    pipeline_status: 'idle',
-    total_documents: 12,
-    processing_documents: 0,
-    completed_documents: 10,
-    failed_documents: 2,
-    success_rate: 83.3,
-    avg_processing_time: '2.4s',
-    queue_status: {
-      pending: 0,
-      active_workers: 2,
-      estimated_completion: 'N/A'
-    },
-    processing_stages: [
-      {
-        stage: 'Document Analysis',
-        status: 'idle',
-        documents_count: 12,
-        avg_duration: '1.2s',
-        success_rate: 100
-      },
-      {
-        stage: 'Text Extraction',
-        status: 'idle',
-        documents_count: 12,
-        avg_duration: '0.8s',
-        success_rate: 91.7
-      },
-      {
-        stage: 'Chunking',
-        status: 'idle',
-        documents_count: 10,
-        avg_duration: '0.3s',
-        success_rate: 100
-      },
-      {
-        stage: 'Embedding Generation',
-        status: 'idle',
-        documents_count: 10,
-        avg_duration: '1.1s',
-        success_rate: 100
-      }
-    ],
-    recent_activity: [],
-    last_updated: new Date().toISOString()
-  }
+  // Use API data directly - mock data is handled in api-client.ts
+  const pipelineData: ProcessingPipeline | null = queueData || null
 
   const liveJobs: LiveProcessingJob[] = queueData?.active_jobs || []
+
+  // Debug logging to help identify re-render issues
+  useEffect(() => {
+    console.log('ProcessingTab rendered', { 
+      queueData: !!queueData, 
+      isLoading: queueLoading, 
+      error: !!queueError,
+      autoRefresh 
+    })
+  }, [queueData, queueLoading, queueError, autoRefresh])
 
   const handleReprocessAll = async () => {
     try {
@@ -186,10 +151,10 @@ export function ProcessingTab() {
             variant="outline"
             size="sm"
             onClick={handleReprocessAll}
-            disabled={pipelineData.processing_documents > 0 || startProcessingMutation.isPending}
+            disabled={pipelineData.processing_documents > 0 || startProcessingMutation.isLoading}
           >
             <Play className="w-4 h-4 mr-2" />
-            {startProcessingMutation.isPending ? 'Starting...' : 'Reprocess All'}
+            {startProcessingMutation.isLoading ? 'Starting...' : 'Reprocess All'}
           </Button>
         </div>
       </div>

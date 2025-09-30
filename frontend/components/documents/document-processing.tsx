@@ -51,7 +51,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
 
   const handleStartProcessing = async (documentId: string) => {
     try {
-      await startProcessingMutation.mutateAsync({ documentId })
+      await startProcessingMutation.mutateAsync(documentId)
       await refetch()
     } catch (error) {
       // Error handled by hook
@@ -173,7 +173,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                     <Button 
                       size="sm" 
                       onClick={() => handleStartProcessing(doc.id)}
-                      disabled={startProcessingMutation.isPending}
+                      disabled={startProcessingMutation.isLoading}
                     >
                       <Play className="w-4 h-4 mr-1" />
                       Start

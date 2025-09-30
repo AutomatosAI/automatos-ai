@@ -20,38 +20,42 @@ import { apiClient } from "@/lib/api-client"
 // Agent API client using main API client
 const agentApiClient = {
   // Agent endpoints
-  getAgents: () => agentApiClient.getAgents(),
-  getAgent: (id: string) => agentApiClient.getAgent(id),
-  getAgentStats: () => agentApiClient.getAgentStats(),
-  getAgentTypes: () => agentApiClient.getAgentTypes(),
-  createAgent: (data: any) => agentApiClient.createAgent(data),
-  updateAgent: (id: string, data: any) => agentApiClient.updateAgent(id, data),
-  deleteAgent: (id: string) => agentApiClient.deleteAgent(id),
+  getAgents: () => apiClient.getAgents(),
+  getAgent: (id: string) => apiClient.getAgent(id),
+  getAgentStats: () => apiClient.getSystemAgentStatistics(),
+  getAgentTypes: () => apiClient.getSystemAgentTypes(),
+  createAgent: (data: any) => apiClient.createAgent(data),
+  updateAgent: (id: string, data: any) => apiClient.updateAgent(id, data),
+  deleteAgent: (id: string) => apiClient.deleteAgent(id),
 
   // Skills endpoints
-  getSkills: () => agentApiClient.getSkills(),
-  getAgentSkills: (agentId: string) => agentApiClient.getAgentSkills(agentId),
-  addSkillToAgent: (agentId: string, skillId: string) => agentApiClient.addSkillToAgent(agentId, skillId),
-  removeSkillFromAgent: (agentId: string, skillId: string) => agentApiClient.removeSkillFromAgent(agentId, skillId),
+  getSkills: () => apiClient.getSkills(),
+  getAgentSkills: (agentId: string) => apiClient.getAgentSkills(agentId),
+  addSkillToAgent: (agentId: string, skillId: string) => apiClient.addSkillToAgent(agentId, skillId),
+  removeSkillFromAgent: (agentId: string, skillId: string) => apiClient.removeSkillFromAgent(agentId, skillId),
+  createSkill: (data: any) => apiClient.createSkill(data),
+  updateSkill: (id: string, data: any) => apiClient.updateSkill(id, data),
+  deleteSkill: (id: string) => apiClient.deleteSkill(id),
+  createSkillsBulk: (data: any[]) => apiClient.createSkillsBulk(data),
 
   // Configuration endpoints
-  getAgentConfig: (agentId: string) => agentApiClient.getAgentConfig(agentId),
-  updateAgentConfig: (agentId: string, config: any) => agentApiClient.updateAgentConfig(agentId, config),
+  getAgentConfig: (agentId: string) => apiClient.getAgent(agentId),
+  updateAgentConfig: (agentId: string, config: any) => apiClient.updateAgent(agentId, config),
 
   // Coordination endpoints
-  getAgentCoordination: () => agentApiClient.getAgentCoordination(),
-  coordinateAgents: (data: any) => agentApiClient.coordinateAgents(data),
-  collaborativeReasoning: (data: any) => agentApiClient.collaborativeReasoning(data),
+  getAgentCoordination: () => apiClient.coordinateAgents({ agents: [], task: {} }),
+  coordinateAgents: (data: any) => apiClient.coordinateAgents(data),
+  collaborativeReasoning: (data: any) => apiClient.collaborativeReasoning(data),
 
   // Performance endpoints
-  getAgentPerformance: (agentId: string) => agentApiClient.getAgentPerformance(agentId),
-  getAgentLogs: (agentId: string) => agentApiClient.getAgentLogs(agentId),
-  getAgentMetrics: (agentId: string) => agentApiClient.getAgentMetrics(agentId),
+  getAgentPerformance: (agentId: string) => apiClient.getAgentPerformance(agentId),
+  getAgentLogs: (agentId: string) => apiClient.getAgentLogs(agentId),
+  getAgentMetrics: (agentId: string) => apiClient.getAgentStats(agentId),
 
   // Execution endpoints
-  startAgent: (agentId: string) => agentApiClient.startAgent(agentId),
-  stopAgent: (agentId: string) => agentApiClient.stopAgent(agentId),
-  pauseAgent: (agentId: string) => agentApiClient.pauseAgent(agentId),
+  startAgent: (agentId: string) => apiClient.startAgent(agentId),
+  stopAgent: (agentId: string) => apiClient.stopAgent(agentId),
+  pauseAgent: (agentId: string) => apiClient.stopAgent(agentId), // No pause endpoint, use stop
 }
 
 // Query keys for React Query

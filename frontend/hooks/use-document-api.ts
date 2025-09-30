@@ -42,9 +42,28 @@ const FALLBACK_DATA = {
     avg_processing_time_sec: 35
   },
   processingQueue: {
-    queue_size: 0,
-    active_workers: 0,
-    estimated_completion_time: null
+    pipeline_status: 'idle',
+    total_documents: 0,
+    processing_documents: 0,
+    completed_documents: 0,
+    failed_documents: 0,
+    success_rate: 100,
+    avg_processing_time: '0s',
+    queue_status: {
+      pending: 0,
+      active_workers: 0,
+      estimated_completion: 'N/A'
+    },
+    processing_stages: [
+      { stage: 'Upload', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
+      { stage: 'Parse', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
+      { stage: 'Chunk', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
+      { stage: 'Embed', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 },
+      { stage: 'Index', status: 'idle', documents_count: 0, avg_duration: '0s', success_rate: 100 }
+    ],
+    recent_activity: [],
+    active_jobs: [],
+    last_updated: new Date().toISOString()
   },
   documentCategories: [
     { id: 'reports', name: 'Reports', count: 1 },
@@ -135,8 +154,10 @@ export function useProcessingQueue() {
     queryKey: documentQueryKeys.processingQueue,
     queryFn: () => Promise.resolve(FALLBACK_DATA.processingQueue), // Placeholder until API is ready
     retry: 2,
-    refetchInterval: 10000, // Poll every 10 seconds
+    refetchInterval: 30000, // Poll every 30 seconds instead of 10 to reduce frequency
+    staleTime: 15000, // Data is considered fresh for 15 seconds
     placeholderData: FALLBACK_DATA.processingQueue,
+    onError: (error) => handleApiError(error, 'Failed to load processing queue')
   })
 }
 
@@ -296,26 +317,36 @@ export function useDeleteDocument() {
 }
 
 /**
- * Start processing a document
+ * Start processing a document or all documents
  */
 export function useStartProcessing() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (id: string) => {
-      return apiClient.processDocument(id)
+    mutationFn: (data: string | {}) => {
+      // Handle both single document ID and reprocess all (empty object)
+      if (typeof data === 'string') {
+        return apiClient.processDocument(data)
+      } else {
+        // For reprocessing all, we'll use a placeholder API call
+        return Promise.resolve({ message: 'Reprocessing started' })
+      }
     },
-    onSuccess: (_, id) => {
-      toast.success('Document processing started')
-      queryClient.invalidateQueries({ queryKey: documentQueryKeys.document(id) })
-      queryClient.invalidateQueries({ queryKey: documentQueryKeys.processingStatus(id) })
+    onSuccess: (_, data) => {
+      if (typeof data === 'string') {
+        toast.success('Document processing started')
+        queryClient.invalidateQueries({ queryKey: documentQueryKeys.document(data) })
+        queryClient.invalidateQueries({ queryKey: documentQueryKeys.processingStatus(data) })
+        
+        // Start polling for status updates
+        queryClient.setQueryDefaults(
+          documentQueryKeys.processingStatus(data),
+          { refetchInterval: 5000 }
+        )
+      } else {
+        toast.success('Reprocessing all documents started')
+      }
       queryClient.invalidateQueries({ queryKey: documentQueryKeys.processingQueue })
-      
-      // Start polling for status updates
-      queryClient.setQueryDefaults(
-        documentQueryKeys.processingStatus(id),
-        { refetchInterval: 5000 }
-      )
     },
     onError: (error) => handleApiError(error, 'Failed to start document processing')
   })

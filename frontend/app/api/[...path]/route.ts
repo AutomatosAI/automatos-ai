@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import apiClient from '@/lib/api-client'
 
+// Get backend URL from environment or default to remote server
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+
 // This route handler attempts to proxy to the real backend
 // If backend is down, it returns mock data directly
 export async function GET(
@@ -9,7 +12,7 @@ export async function GET(
 ) {
   const path = params.path.join('/')
   const endpoint = `/api/${path}${request.nextUrl.search}`
-  const backendUrl = `http://localhost:8000${endpoint}`
+  const backendUrl = `${BACKEND_URL}${endpoint}`
   
   try {
     const response = await fetch(backendUrl, {
@@ -41,7 +44,7 @@ export async function POST(
 ) {
   const path = params.path.join('/')
   const endpoint = `/api/${path}`
-  const backendUrl = `http://localhost:8000${endpoint}`
+  const backendUrl = `${BACKEND_URL}${endpoint}`
   
   try {
     const body = await request.json()
@@ -80,7 +83,7 @@ export async function PUT(
 ) {
   const path = params.path.join('/')
   const endpoint = `/api/${path}`
-  const backendUrl = `http://localhost:8000${endpoint}`
+  const backendUrl = `${BACKEND_URL}${endpoint}`
   
   try {
     const body = await request.json()
@@ -117,7 +120,7 @@ export async function DELETE(
 ) {
   const path = params.path.join('/')
   const endpoint = `/api/${path}`
-  const backendUrl = `http://localhost:8000${endpoint}`
+  const backendUrl = `${BACKEND_URL}${endpoint}`
   
   try {
     const response = await fetch(backendUrl, {

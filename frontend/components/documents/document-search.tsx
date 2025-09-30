@@ -34,6 +34,7 @@ export function DocumentSearch({ documents, onDocumentSelect }: DocumentSearchPr
   const [searchExecuted, setSearchExecuted] = useState(false)
 
   // API hooks
+  // NOTE: Semantic search endpoint not implemented yet - will fall back to regular document list
   const { data: searchResults = [], isLoading: searchLoading, refetch: executeSearch } = useSemanticSearch(
     query, 
     { limit: 10 }, 
