@@ -26,7 +26,8 @@ from services.llm_provider import (
     create_llm_manager
 )
 from database.models import (
-    Agent, Skill, PriorityLevel, Base
+    Agent, Skill, PriorityLevel, Base,
+    AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class AgentRuntime:
     last_execution: Optional[datetime] = None
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
+    tools: List[Dict[str, Any]] = field(default_factory=list)  # Phase 3: MCP Tools assigned to agent
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         """Update agent performance metrics"""
@@ -226,13 +228,17 @@ class AgentFactory:
                     f"Response time: {verification_result['response_time']:.2f}s"
                 )
             
+            # Phase 3: Load agent's tools from database
+            agent_tools = await self._load_agent_tools(db_agent.id)
+            
             # Create runtime agent
             agent_runtime = AgentRuntime(
                 agent_id=db_agent.id,
                 metadata=metadata,
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
-                created_at=datetime.now()
+                created_at=datetime.now(),
+                tools=agent_tools  # Phase 3: MCP Tools
             )
             
             # Update database status
@@ -578,6 +584,87 @@ class AgentFactory:
         
         return test_results
     
+    # ======================================================================
+    # PHASE 3: MCP TOOLS INTEGRATION METHODS
+    # ======================================================================
+    
+    async def _load_agent_tools(self, agent_id: int) -> List[Dict[str, Any]]:
+        """
+        Load MCP tools assigned to an agent from the database.
+        
+        Phase 3: Tools Integration
+        Returns tool metadata for agent's assigned tools (only enabled ones).
+        """
+        try:
+            # Query agent_tool_assignments with eagerly loaded tool data
+            from sqlalchemy.orm import joinedload
+            
+            assignments = (
+                self.db_session.query(AgentToolAssignment)
+                .options(joinedload(AgentToolAssignment.tool))
+                .filter(
+                    AgentToolAssignment.agent_id == agent_id,
+                    AgentToolAssignment.enabled == True
+                )
+                .all()
+            )
+            
+            tools = []
+            for assignment in assignments:
+                if assignment.tool:  # Tool exists
+                    tools.append({
+                        "tool_id": assignment.tool.id,
+                        "name": assignment.tool.name,
+                        "description": assignment.tool.description,
+                        "provider": assignment.tool.provider,
+                        "category": assignment.tool.category,
+                        "icon": assignment.tool.icon,
+                        "mcp_server_url": assignment.tool.mcp_server_url,
+                        "capabilities": assignment.tool.capabilities or {},
+                        "permissions": assignment.permissions or {},
+                        "configuration": assignment.configuration or {},
+                        "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None
+                    })
+            
+            if tools:
+                self.logger.info(f"✅ Loaded {len(tools)} tools for agent {agent_id}")
+            
+            return tools
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load tools for agent {agent_id}: {e}")
+            return []
+    
+    def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
+        """
+        Check if an agent has a specific tool capability.
+        
+        Phase 3: Used by IntelligentAgentSelector for tool-based matching.
+        """
+        for tool in agent_runtime.tools:
+            tool_capabilities = tool.get("capabilities", {})
+            if isinstance(tool_capabilities, dict):
+                methods = tool_capabilities.get("methods", [])
+                if capability in methods:
+                    return True
+        
+        return False
+    
+    def get_agent_tools_summary(self, agent_runtime: AgentRuntime) -> Dict[str, Any]:
+        """Get summary of agent's tools for display/logging"""
+        return {
+            "total_tools": len(agent_runtime.tools),
+            "tools": [
+                {
+                    "name": tool.get("name"),
+                    "category": tool.get("category"),
+                    "provider": tool.get("provider")
+                }
+                for tool in agent_runtime.tools
+            ],
+            "categories": list(set(tool.get("category") for tool in agent_runtime.tools if tool.get("category")))
+        }
+    
     def cleanup(self):
         """Clean up resources"""
         if self.db_session:
@@ -623,7 +710,7 @@ async def create_specialized_agent(
             result["tests"] = test_results
         
         return result
-        
+    
     finally:
         factory.cleanup()
 

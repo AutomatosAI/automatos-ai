@@ -35,7 +35,7 @@ export function RunWorkflowModal({ open, onClose, id }: { open: boolean; onClose
               </CardHeader>
               <CardContent className="grid gap-3">
                 <Textarea rows={10} className="font-mono text-xs" value={input} onChange={e=>setInput(e.target.value)} />
-                <div className="flex justify-end"><Button onClick={runOnce} aria-busy={running} className="gradient-accent">Run</Button></div>
+                <div className="flex justify-end"><Button onClick={runOnce} aria-busy={running} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">Run</Button></div>
               </CardContent>
             </Card>
           </motion.div>

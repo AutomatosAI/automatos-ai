@@ -256,7 +256,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
 
         <Button
           onClick={() => setShowCreateModal(true)}
-          className="bg-orange-500 hover:bg-orange-600"
+          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
         >
           <Plus className="w-4 h-4 mr-2" />
           Create Skill

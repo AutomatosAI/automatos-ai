@@ -69,9 +69,9 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                   <Button variant="outline" onClick={()=>setStep(Math.max(1, step-1))} disabled={step===1}>Previous</Button>
                   <div className="text-sm text-muted-foreground">Step {step} of 2</div>
                   {step<2 ? (
-                    <Button onClick={()=>setStep(2)} disabled={!name || !description} className="gradient-accent">Next</Button>
+                    <Button onClick={()=>setStep(2)} disabled={!name || !description} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">Next</Button>
                   ) : (
-                    <Button onClick={handleCreate} disabled={!name} className="gradient-accent" aria-busy={saving}>Create Workflow</Button>
+                    <Button onClick={handleCreate} disabled={!name} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200" aria-busy={saving}>Create Workflow</Button>
                   )}
                 </div>
               </CardContent>

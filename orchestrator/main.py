@@ -30,6 +30,7 @@ from models import Base
 # Import API routers
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
+from api.workflow_templates import router as workflow_templates_router
 from api.documents_v2 import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
@@ -44,6 +45,7 @@ from api.patterns import router as patterns_router
 from api.context import router as context_router
 from api.credentials import router as credentials_router
 from api.tools import router as tools_router
+from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -297,6 +299,7 @@ def require_api_key(x_api_key: str = Header(None)):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(workflows_router)
+app.include_router(workflow_templates_router)
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
@@ -311,6 +314,7 @@ app.include_router(patterns_router)
 app.include_router(context_router)
 app.include_router(credentials_router)
 app.include_router(tools_router)
+app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)

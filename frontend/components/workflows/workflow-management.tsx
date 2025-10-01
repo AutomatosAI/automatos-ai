@@ -43,8 +43,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { workflowService, type WorkflowWithMetrics, type WorkflowStats } from '@/lib/workflow-service'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
+import { HistoryTab } from './history-tab'
+import { MonitoringTab } from './monitoring-tab'
+import { TemplatesTab } from './templates-tab'
+import { LiveProgressTab } from './live-progress-tab'
 
 // Real data will be loaded from backend
 const initialWorkflowStats = [
@@ -410,7 +414,7 @@ export function WorkflowManagement() {
         </div>
         
         <Button 
-          className="gradient-accent hover:opacity-90 transition-opacity"
+          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
           onClick={handleCreateWorkflow}
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -455,7 +459,7 @@ export function WorkflowManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="active" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="active" className="flex items-center space-x-2">
               <Play className="w-4 h-4" />
               <span className="hidden sm:inline">Active</span>
@@ -471,6 +475,10 @@ export function WorkflowManagement() {
             <TabsTrigger value="monitoring" className="flex items-center space-x-2">
               <Activity className="w-4 h-4" />
               <span className="hidden sm:inline">Monitoring</span>
+            </TabsTrigger>
+            <TabsTrigger value="live" className="flex items-center space-x-2">
+              <Eye className="w-4 h-4" />
+              <span className="hidden sm:inline">Live</span>
             </TabsTrigger>
           </TabsList>
 
@@ -523,7 +531,7 @@ export function WorkflowManagement() {
                   <p className="text-muted-foreground mb-4">
                     {workflows.length === 0 ? 'No workflows created yet' : 'No workflows match your search'}
                   </p>
-                  <Button onClick={handleCreateWorkflow} className="gradient-accent hover:opacity-90">
+                  <Button onClick={handleCreateWorkflow} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">
                     <Plus className="w-4 h-4 mr-2" />
                     Create Your First Workflow
                   </Button>
@@ -536,42 +544,24 @@ export function WorkflowManagement() {
           </TabsContent>
 
           <TabsContent value="templates" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Workflow Templates</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Workflow templates will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <TemplatesTab 
+              onUseTemplate={(templateId) => {
+                handleTemplateChange(templateId)
+              }}
+              onOpenCreateModal={() => setShowCreateModal(true)}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Workflow History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Workflow execution history will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <HistoryTab />
           </TabsContent>
 
           <TabsContent value="monitoring" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Real-time Monitoring</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Real-time workflow monitoring dashboard will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <MonitoringTab />
+          </TabsContent>
+
+          <TabsContent value="live" className="space-y-6">
+            <LiveProgressTab />
           </TabsContent>
         </Tabs>
       </motion.div>
@@ -850,7 +840,7 @@ export function WorkflowManagement() {
                   <Button
                     onClick={handleSubmitWorkflow}
                     disabled={isCreating}
-                    className="gradient-accent hover:opacity-90"
+                    className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                   >
                     {isCreating ? 'Creating...' : 'Create Workflow'}
                   </Button>

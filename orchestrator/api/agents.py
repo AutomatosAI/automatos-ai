@@ -8,8 +8,10 @@ import logging
 from database.database import get_db
 from database.models import PriorityLevel
 from database.models import Agent, Skill, Pattern, agent_skills
-from models import (
-    
+# Import MCP tool models from database.models (SQLAlchemy models)
+from database.models import AgentToolAssignment, MCPTool
+# Import Pydantic models from database.models (not models.py)
+from database.models import (
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,
@@ -21,7 +23,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"]) 
 
 def _build_agent_response(agent: Agent) -> AgentResponse:
-    """Build agent response with skills"""
+    """Build agent response with skills and tools"""
+    # Build tools list from tool_assignments relationship
+    tools = []
+    if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
+        for assignment in agent.tool_assignments:
+            if assignment.enabled and hasattr(assignment, 'tool'):
+                tools.append({
+                    "id": assignment.tool.id,
+                    "name": assignment.tool.name,
+                    "description": assignment.tool.description,
+                    "provider": assignment.tool.provider,
+                    "category": assignment.tool.category,
+                    "icon": assignment.tool.icon,
+                    "permissions": assignment.permissions or {},
+                    "configuration": assignment.configuration or {},
+                    "assigned_at": assignment.assigned_at
+                })
+    
     return AgentResponse(
         id=agent.id,
         name=agent.name,
@@ -39,6 +58,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
             created_at=skill.created_at,
             updated_at=skill.updated_at
         ).model_dump() for skill in agent.skills] if agent.skills else [],
+        tools=tools,  # Add tools to response
         priority_level=getattr(agent, 'priority_level', 'medium') or 'medium',
         max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5) or 5,
         auto_start=getattr(agent, 'auto_start', False) or False,
@@ -168,7 +188,10 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
 @router.post("/", response_model=AgentResponse, )
 async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
+    print("🚀 API CALL: create_agent function called!")
     try:
+        logger.info(f"🔧 Creating agent: {agent_data.name}, tool_ids: {agent_data.tool_ids}")
+        
         # Check if agent name already exists
         existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
         if existing:
@@ -201,13 +224,57 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
             agent.skills.extend(skills)
         
+        # Add tools if provided (NEW FEATURE)
+        if agent_data.tool_ids:
+            logger.info(f"🛠️ Processing tool_ids: {agent_data.tool_ids}")
+            # Enhanced validation: Check that all tool IDs exist and are active
+            tools = db.query(MCPTool).filter(
+                MCPTool.id.in_(agent_data.tool_ids),
+                MCPTool.status == "active"
+            ).all()
+            logger.info(f"🔍 Found {len(tools)} active tools out of {len(agent_data.tool_ids)} requested")
+            if len(tools) != len(agent_data.tool_ids):
+                found_ids = [tool.id for tool in tools]
+                missing_ids = [tid for tid in agent_data.tool_ids if tid not in found_ids]
+                # Check if missing tools exist but are inactive
+                inactive_tools = db.query(MCPTool).filter(
+                    MCPTool.id.in_(missing_ids),
+                    MCPTool.status != "active"
+                ).all()
+                if inactive_tools:
+                    inactive_names = [tool.name for tool in inactive_tools]
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Tools are inactive and cannot be assigned: {inactive_names}"
+                    )
+                else:
+                    raise HTTPException(status_code=404, detail=f"Tools not found: {missing_ids}")
+            
+            # Additional validation: Check for duplicate tool IDs
+            if len(set(agent_data.tool_ids)) != len(agent_data.tool_ids):
+                raise HTTPException(status_code=400, detail="Duplicate tool IDs are not allowed")
+            
+            # Create tool assignments
+            for tool in tools:
+                assignment = AgentToolAssignment(
+                    agent_id=agent.id,
+                    tool_id=tool.id,
+                    enabled=True,
+                    permissions={"read": True, "write": True, "execute": True},
+                    configuration={}
+                )
+                db.add(assignment)
+        
         db.commit()
         db.refresh(agent)
         
-        # Load skills for response
-        agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
+        # Load skills and tools for response
+        agent_with_skills_and_tools = db.query(Agent).options(
+            joinedload(Agent.skills),
+            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+        ).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills)
+        return _build_agent_response(agent_with_skills_and_tools)
         
     except HTTPException:
         raise
@@ -228,7 +295,10 @@ async def list_agents(
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        query = db.query(Agent).options(joinedload(Agent.skills))
+        query = db.query(Agent).options(
+            joinedload(Agent.skills),
+            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+        )
         
         # Apply filters
         if status:
@@ -313,9 +383,12 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
 
 @router.get("/{agent_id}", response_model=AgentResponse, )
 async def get_agent(agent_id: int, db: Session = Depends(get_db)):
-    """Get a specific agent by ID"""
+    """Get a specific agent by ID with skills and tools"""
     try:
-        agent = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).options(
+            joinedload(Agent.skills),
+            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+        ).filter(Agent.id == agent_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         

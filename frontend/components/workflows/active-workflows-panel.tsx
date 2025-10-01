@@ -76,12 +76,23 @@ interface ActiveWorkflowsData {
 
 export function ActiveWorkflowsPanel() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<{id: number, name: string} | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(false)
 
   // Use React Query hook for active workflows
   const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
   
   // Use mutation hook for executing workflows
   const executeWorkflowMutation = useExecuteWorkflowAdvanced()
+  
+  // Auto refresh every 5 seconds if enabled
+  useEffect(() => {
+    if (autoRefresh) {
+      const interval = setInterval(() => {
+        refetch()
+      }, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [autoRefresh, refetch])
 
   const handleExecuteWorkflow = async (workflowId: number) => {
     executeWorkflowMutation.mutate({
@@ -139,8 +150,8 @@ export function ActiveWorkflowsPanel() {
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400 mb-4">Error: {error}</p>
-          <Button onClick={loadActiveWorkflows} variant="outline">
+          <p className="text-red-400 mb-4">Error loading workflows</p>
+          <Button onClick={() => refetch()} variant="outline">
             Try Again
           </Button>
         </div>
@@ -307,7 +318,7 @@ export function ActiveWorkflowsPanel() {
                   {workflow.current_execution.status === 'idle' && (
                     <Button 
                       size="sm" 
-                      className="gradient-accent hover:opacity-90"
+                      className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                       onClick={() => handleExecuteWorkflow(workflow.id)}
                     >
                       <Play className="w-3 h-3 mr-1" />

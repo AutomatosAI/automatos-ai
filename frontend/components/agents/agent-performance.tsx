@@ -139,74 +139,71 @@ export function AgentPerformance({
 
         {/* System Overview */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Agents</p>
-                  <p className="text-2xl font-bold">{systemAnalytics?.totalAgents || 0}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {systemAnalytics?.activeAgents || 0} active
-                  </p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                  <Activity className="w-5 h-5 text-blue-400" />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
-                  <Activity className="w-6 h-6 text-white" />
-                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">{systemAnalytics?.totalAgents || 0}</h3>
+                <p className="text-muted-foreground text-sm">Total Agents</p>
+                <p className="text-xs text-muted-foreground">
+                  {systemAnalytics?.activeAgents || 0} active
+                </p>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Avg Performance</p>
-                  <p className="text-2xl font-bold">{systemAnalytics?.averagePerformance.toFixed(1) || '0'}%</p>
-                  <div className="flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3 h-3 text-green-500" />
-                    <span className="text-xs text-green-500">+2.3%</span>
-                  </div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                  <TrendingUp className="w-5 h-5 text-green-400" />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
-                  <TrendingUp className="w-6 h-6 text-white" />
-                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">{systemAnalytics?.averagePerformance.toFixed(1) || '0'}%</h3>
+                <p className="text-muted-foreground text-sm">Avg Performance</p>
+                <p className="text-xs text-green-400">+2.3%</p>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Utilization</p>
-                  <p className="text-2xl font-bold">{systemAnalytics?.utilizationRate.toFixed(0) || 0}%</p>
-                  <Progress value={systemAnalytics?.utilizationRate || 0} className="mt-2 h-2" />
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                  <Target className="w-5 h-5 text-orange-400" />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
-                  <Target className="w-6 h-6 text-white" />
-                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">{systemAnalytics?.utilizationRate.toFixed(0) || 0}%</h3>
+                <p className="text-muted-foreground text-sm">Utilization</p>
+                <p className="text-xs text-orange-400">CPU usage based</p>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
-                  <p className="text-2xl font-bold">
-                    {systemAnalytics?.totalExecutions > 0 
-                      ? ((systemAnalytics.successfulExecutions / systemAnalytics.totalExecutions) * 100).toFixed(1)
-                      : '0'
-                    }%
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {systemAnalytics?.successfulExecutions || 0} / {systemAnalytics?.totalExecutions || 0} tasks
-                  </p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                  <CheckCircle className="w-5 h-5 text-purple-400" />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
-                  <CheckCircle className="w-6 h-6 text-white" />
-                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">
+                  {systemAnalytics?.totalExecutions > 0 
+                    ? ((systemAnalytics.successfulExecutions / systemAnalytics.totalExecutions) * 100).toFixed(1)
+                    : '0'
+                  }%
+                </h3>
+                <p className="text-muted-foreground text-sm">Success Rate</p>
+                <p className="text-xs text-purple-400">
+                  {systemAnalytics?.successfulExecutions || 0} / {systemAnalytics?.totalExecutions || 0} tasks
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -357,7 +354,7 @@ export function AgentPerformance({
       </div>
       ) : performanceMetrics ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -375,7 +372,7 @@ export function AgentPerformance({
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -392,7 +389,7 @@ export function AgentPerformance({
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -410,7 +407,7 @@ export function AgentPerformance({
             </CardContent>
           </Card>
 
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -439,7 +436,7 @@ export function AgentPerformance({
         {/* Resource Usage */}
         <TabsContent value="metrics" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="glass-card">
+            <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Cpu className="w-5 h-5" />
@@ -459,7 +456,7 @@ export function AgentPerformance({
               </CardContent>
             </Card>
 
-            <Card className="glass-card">
+            <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <MemoryStick className="w-5 h-5" />
@@ -553,7 +550,7 @@ export function AgentPerformance({
 
         {/* Activity Logs */}
         <TabsContent value="logs" className="space-y-6">
-          <Card className="glass-card">
+          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardHeader>
               <CardTitle>Recent Activity</CardTitle>
             </CardHeader>
