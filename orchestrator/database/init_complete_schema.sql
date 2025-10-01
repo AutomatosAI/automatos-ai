@@ -1,4 +1,24 @@
 -- ================================================================
+-- Workflow Enhancements for PRD-10 (October 1, 2025)
+-- ================================================================
+-- Add missing fields to workflows table for frontend Edit/Delete functionality
+
+ALTER TABLE workflows 
+ADD COLUMN IF NOT EXISTS owner VARCHAR(255),
+ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]',
+ADD COLUMN IF NOT EXISTS default_policy_id VARCHAR(255);
+
+-- Index for owner-based filtering
+CREATE INDEX IF NOT EXISTS idx_workflows_owner ON workflows(owner);
+
+-- GIN index for tag-based filtering  
+CREATE INDEX IF NOT EXISTS idx_workflows_tags ON workflows USING GIN (tags);
+
+COMMENT ON COLUMN workflows.owner IS 'Owner of the workflow (email, username, or team identifier)';
+COMMENT ON COLUMN workflows.tags IS 'Array of tags for categorization and filtering';
+COMMENT ON COLUMN workflows.default_policy_id IS 'Default policy configuration for workflow execution';
+
+-- ================================================================
 -- Document Usage Tracking Table for Context Engineering Analytics
 -- ================================================================
 -- This table tracks all document-related events for real-time analytics

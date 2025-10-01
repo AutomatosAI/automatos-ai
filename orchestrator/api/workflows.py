@@ -69,6 +69,127 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {e}")
         raise HTTPException(status_code=500, detail="Error listing workflows")
 
+@router.get("/{workflow_id}")
+async def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
+    """Get individual workflow by ID"""
+    try:
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        return {
+            "id": workflow.id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "status": workflow.status,
+            "owner": getattr(workflow, 'owner', None),
+            "tags": getattr(workflow, 'tags', None),
+            "default_policy_id": getattr(workflow, 'default_policy_id', None),
+            "workflow_definition": workflow.workflow_definition,
+            "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
+            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workflow {workflow_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting workflow: {str(e)}")
+
+@router.put("/{workflow_id}")
+async def update_workflow(
+    workflow_id: int,
+    workflow_data: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Update workflow"""
+    try:
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        # Update fields if provided
+        if "name" in workflow_data:
+            workflow.name = workflow_data["name"]
+        if "description" in workflow_data:
+            workflow.description = workflow_data["description"]
+        if "status" in workflow_data:
+            workflow.status = workflow_data["status"]
+        if "owner" in workflow_data:
+            workflow.owner = workflow_data["owner"]
+        if "tags" in workflow_data:
+            workflow.tags = workflow_data["tags"]
+        if "default_policy_id" in workflow_data:
+            workflow.default_policy_id = workflow_data["default_policy_id"]
+        if "workflow_definition" in workflow_data:
+            workflow.workflow_definition = workflow_data["workflow_definition"]
+        
+        workflow.updated_at = datetime.now()
+        db.commit()
+        db.refresh(workflow)
+        
+        logger.info(f"Workflow {workflow_id} updated successfully")
+        
+        # Send WebSocket update
+        await manager.broadcast({
+            "type": "workflow_updated",
+            "workflow_id": workflow.id,
+            "name": workflow.name,
+            "status": workflow.status
+        })
+        
+        return {
+            "id": workflow.id,
+            "name": workflow.name,
+            "description": workflow.description,
+            "status": workflow.status,
+            "message": "Workflow updated successfully",
+            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating workflow {workflow_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error updating workflow: {str(e)}")
+
+@router.delete("/{workflow_id}")
+async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
+    """Delete workflow"""
+    try:
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        workflow_name = workflow.name
+        
+        # Delete associated executions first (or handle with CASCADE in DB)
+        db.query(WorkflowExecution).filter(WorkflowExecution.workflow_id == workflow_id).delete()
+        
+        # Delete workflow
+        db.delete(workflow)
+        db.commit()
+        
+        logger.info(f"Workflow {workflow_id} ({workflow_name}) deleted successfully")
+        
+        # Send WebSocket update
+        await manager.broadcast({
+            "type": "workflow_deleted",
+            "workflow_id": workflow_id,
+            "name": workflow_name
+        })
+        
+        return {
+            "message": "Workflow deleted successfully",
+            "id": workflow_id,
+            "name": workflow_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting workflow {workflow_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting workflow: {str(e)}")
+
 @router.post("")
 async def create_workflow(
     workflow_data: Dict[str, Any] = Body(...),
@@ -601,6 +722,49 @@ async def execute_workflow_general(execution_data: Dict[str, Any], db: Session =
     except Exception as e:
         logger.error(f"Error in general workflow execution: {e}")
         raise HTTPException(status_code=500, detail=f"Error executing workflow: {str(e)}")
+
+@router.get("/executions/")
+async def list_executions(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    workflow_id: Optional[int] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """List all workflow executions with filtering"""
+    try:
+        query = db.query(WorkflowExecution)
+        
+        # Apply filters
+        if workflow_id:
+            query = query.filter(WorkflowExecution.workflow_id == workflow_id)
+        if status:
+            query = query.filter(WorkflowExecution.status == status)
+        
+        total = query.count()
+        executions = query.order_by(desc(WorkflowExecution.started_at)).offset(skip).limit(limit).all()
+        
+        return {
+            "items": [
+                {
+                    "id": e.id,
+                    "workflow_id": e.workflow_id,
+                    "agent_id": e.agent_id,
+                    "status": e.status,
+                    "started_at": e.started_at.isoformat() if e.started_at else None,
+                    "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                    "duration": str(e.completed_at - e.started_at) if e.completed_at and e.started_at else None,
+                    "input_data": e.input_data,
+                    "output_data": e.output_data
+                } for e in executions
+            ],
+            "total": total,
+            "skip": skip,
+            "limit": limit
+        }
+    except Exception as e:
+        logger.error(f"Error listing executions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing executions: {str(e)}")
 
 @router.post("/executions/")
 async def create_execution(execution_data: Dict[str, Any], db: Session = Depends(get_db)):
