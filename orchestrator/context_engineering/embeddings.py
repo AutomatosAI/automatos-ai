@@ -42,6 +42,9 @@ class EmbeddingGenerator:
     def _initialize_model(self):
         """Initialize the embedding model"""
         try:
+            if self.config.model_name == "disabled":
+                logger.info("Embedding model disabled - skipping initialization")
+                return
             if self.config.model_type == "sentence_transformer":
                 self.model = SentenceTransformer(self.config.model_name)
                 self.config.dimension = self.model.get_sentence_embedding_dimension()

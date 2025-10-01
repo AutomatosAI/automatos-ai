@@ -23,7 +23,8 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { apiClient } from '@/lib/api'
+// API hooks
+import { useDocumentAnalytics, useUsageAnalytics, useProcessingAnalytics } from '@/hooks/use-document-api'
 
 interface DocumentAnalytics {
   overview: {
@@ -98,149 +99,32 @@ interface SearchPatterns {
 }
 
 export function AnalyticsTab() {
-  const [analyticsData, setAnalyticsData] = useState<DocumentAnalytics | null>(null)
-  const [searchPatterns, setSearchPatterns] = useState<SearchPatterns | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
+  
+  // API hooks
+  const { data: analyticsData, isLoading: loading, error } = useDocumentAnalytics('24h')
+  const { data: usageData } = useUsageAnalytics('24h')
+  const { data: processingData } = useProcessingAnalytics('24h')
 
-  useEffect(() => {
-    loadAnalyticsData()
-  }, [])
-
-  const loadAnalyticsData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      
-      const [analytics, patterns] = await Promise.all([
-        apiClient.getAnalyticsOverview(),
-        apiClient.getSearchPatterns()
-      ])
-      
-      // Provide fallback data for comprehensive display
-      if (!analytics || Object.keys(analytics).length <= 3) {
-        setAnalyticsData({
-          overview: {
-            total_documents: 24,
-            total_chunks: 456,
-            total_size_mb: 127.5,
-            avg_chunks_per_doc: 19,
-            embedding_count: 1248,
-            unique_sources: 8
-          },
-          document_types: [
-            { type: 'pdf', count: 12, percentage: 50.0 },
-            { type: 'docx', count: 7, percentage: 29.2 },
-            { type: 'txt', count: 3, percentage: 12.5 },
-            { type: 'md', count: 2, percentage: 8.3 }
-          ],
-          status_breakdown: [
-            { status: 'processed', count: 20, percentage: 83.3 },
-            { status: 'processing', count: 2, percentage: 8.3 },
-            { status: 'failed', count: 2, percentage: 8.3 }
-          ],
-          upload_trends: [
-            { date: '2024-01-01', count: 3 },
-            { date: '2024-01-02', count: 5 },
-            { date: '2024-01-03', count: 2 },
-            { date: '2024-01-04', count: 7 },
-            { date: '2024-01-05', count: 4 },
-            { date: '2024-01-06', count: 2 },
-            { date: '2024-01-07', count: 1 }
-          ],
-          size_by_type: [
-            { type: 'pdf', total_size_mb: 85.2, avg_size_mb: 7.1, count: 12 },
-            { type: 'docx', total_size_mb: 32.1, avg_size_mb: 4.6, count: 7 },
-            { type: 'txt', total_size_mb: 6.8, avg_size_mb: 2.3, count: 3 },
-            { type: 'md', total_size_mb: 3.4, avg_size_mb: 1.7, count: 2 }
-          ],
-          performance_metrics: {
-            processing_success_rate: 91.7,
-            avg_processing_time: '2.4s',
-            total_processing_time: '48.2s',
-            documents_per_hour: 45
-          },
-          insights: [
-            {
-              type: 'success',
-              title: 'High Processing Success Rate',
-              message: 'Your document processing pipeline is performing exceptionally well with a 91.7% success rate.'
-            },
-            {
-              type: 'info',
-              title: 'PDF Documents Dominant',
-              message: 'PDF files make up 50% of your document library. Consider optimizing PDF processing workflows.'
-            },
-            {
-              type: 'warning',
-              title: 'Some Failed Documents',
-              message: '2 documents failed to process. Review error logs to identify and resolve issues.'
-            }
-          ],
-          last_updated: new Date().toISOString()
-        })
-      } else {
-        setAnalyticsData(analytics)
-      }
-
-      if (!patterns || Object.keys(patterns).length <= 3) {
-        setSearchPatterns({
-          popular_search_terms: [
-            { term: 'machine learning', frequency: 45, trend: 'up' },
-            { term: 'data analysis', frequency: 32, trend: 'stable' },
-            { term: 'neural networks', frequency: 28, trend: 'up' },
-            { term: 'python tutorial', frequency: 24, trend: 'down' },
-            { term: 'api documentation', frequency: 19, trend: 'stable' }
-          ],
-          most_accessed_documents: [
-            {
-              document_id: 1,
-              filename: 'ML_Guide_2024.pdf',
-              access_count: 127,
-              last_accessed: '2024-01-07T10:30:00Z',
-              avg_session_time: '8m 34s'
-            },
-            {
-              document_id: 2,
-              filename: 'Data_Analysis_Handbook.docx',
-              access_count: 89,
-              last_accessed: '2024-01-07T09:15:00Z',
-              avg_session_time: '12m 45s'
-            },
-            {
-              document_id: 3,
-              filename: 'Neural_Networks_Basics.pdf',
-              access_count: 72,
-              last_accessed: '2024-01-06T16:22:00Z',
-              avg_session_time: '6m 18s'
-            }
-          ],
-          search_performance: {
-            avg_response_time: '124ms',
-            total_searches: 1247,
-            successful_searches: 1198,
-            success_rate: 96.1,
-            avg_results_per_search: 8.3
-          },
-          usage_patterns: {
-            peak_hours: ['9:00-11:00', '14:00-16:00', '20:00-22:00'],
-            most_active_day: 'Tuesday',
-            avg_searches_per_user: 23.4,
-            common_file_types_searched: ['PDF', 'DOCX', 'TXT']
-          },
-          last_updated: new Date().toISOString()
-        })
-      } else {
-        setSearchPatterns(patterns)
-      }
-      
-    } catch (err) {
-      console.error('Error loading analytics data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load analytics data')
-    } finally {
-      setLoading(false)
-    }
+  // Use API data directly - mock data is handled in api-client.ts
+  // NOTE: usageData may be empty until backend endpoint is implemented
+  const searchPatterns: SearchPatterns = usageData || {
+    popular_search_terms: [],
+    most_accessed_documents: [],
+    search_performance: {
+      avg_response_time: 'N/A',
+      total_searches: 0,
+      successful_searches: 0,
+      success_rate: 0,
+      avg_results_per_search: 0
+    },
+    usage_patterns: {
+      peak_hours: [],
+      most_active_day: 'N/A',
+      avg_searches_per_user: 0,
+      common_file_types_searched: []
+    },
+    last_updated: new Date().toISOString()
   }
 
   if (loading) {
@@ -259,10 +143,7 @@ export function AnalyticsTab() {
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <AlertCircle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400 mb-4">Error: {error}</p>
-          <Button onClick={loadAnalyticsData} variant="outline">
-            Try Again
-          </Button>
+          <p className="text-red-400 mb-4">Error: {error.message}</p>
         </div>
       </div>
     )
@@ -311,7 +192,7 @@ export function AnalyticsTab() {
           </p>
         </div>
         
-        <Button onClick={loadAnalyticsData} variant="outline" size="sm">
+        <Button variant="outline" size="sm">
           <Download className="w-4 h-4 mr-2" />
           Export Report
         </Button>

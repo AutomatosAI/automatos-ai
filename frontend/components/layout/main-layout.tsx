@@ -2,9 +2,12 @@
 'use client'
 
 import { useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { Header } from './header'
+// ChatWidget removed to prevent errors
+// import { ChatWidget } from '../chat-widget'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -12,6 +15,27 @@ interface MainLayoutProps {
 
 export function MainLayout({ children }: MainLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const pathname = usePathname()
+
+  // Get current page context for the chat
+  const getCurrentPage = () => {
+    if (pathname === '/') return 'dashboard'
+    if (pathname.startsWith('/agents')) return 'agents'
+    if (pathname.startsWith('/documents')) return 'documents'
+    if (pathname.startsWith('/workflows')) return 'workflows'
+    if (pathname.startsWith('/analytics')) return 'analytics'
+    if (pathname.startsWith('/context')) return 'context'
+    if (pathname.startsWith('/playbooks')) return 'playbooks'
+    if (pathname.startsWith('/chat')) return 'chat'
+    return 'dashboard'
+  }
+
+  const chatContext = {
+    currentPage: getCurrentPage(),
+    selectedItems: [], // This could be populated based on page state
+    userRole: 'user', // This could come from authentication
+    recentActions: [] // This could track recent user actions
+  }
 
   return (
     <div className="min-h-screen gradient-bg">
@@ -33,6 +57,16 @@ export function MainLayout({ children }: MainLayoutProps) {
           </motion.div>
         </main>
       </div>
+      
+      {/* Chat Widget - Only show on non-chat pages */}
+      {/* ChatWidget removed to prevent errors
+      {pathname !== '/chat' && (
+        <ChatWidget 
+          position="bottom-right"
+          context={chatContext}
+        />
+      )}
+      */}
     </div>
   )
 }

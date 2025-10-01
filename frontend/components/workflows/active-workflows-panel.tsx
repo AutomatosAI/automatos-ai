@@ -27,7 +27,7 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { apiClient } from '@/lib/api'
+import { useActiveWorkflows, useExecuteWorkflowAdvanced } from '@/hooks/use-workflow-api'
 import { LiveProgressPanel } from './live-progress-panel'
 
 interface ActiveWorkflow {
@@ -75,52 +75,22 @@ interface ActiveWorkflowsData {
 }
 
 export function ActiveWorkflowsPanel() {
-  const [workflowsData, setWorkflowsData] = useState<ActiveWorkflowsData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [autoRefresh, setAutoRefresh] = useState(true)
   const [selectedWorkflow, setSelectedWorkflow] = useState<{id: number, name: string} | null>(null)
 
-  useEffect(() => {
-    loadActiveWorkflows()
-    
-    if (autoRefresh) {
-      const interval = setInterval(loadActiveWorkflows, 5000) // Refresh every 5 seconds
-      return () => clearInterval(interval)
-    }
-  }, [autoRefresh])
-
-  const loadActiveWorkflows = async () => {
-    try {
-      setError(null)
-      const data = await apiClient.request<ActiveWorkflowsData>('/api/workflows/active')
-      setWorkflowsData(data)
-    } catch (err) {
-      console.error('Error loading active workflows:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load active workflows')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Use React Query hook for active workflows
+  const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
+  
+  // Use mutation hook for executing workflows
+  const executeWorkflowMutation = useExecuteWorkflowAdvanced()
 
   const handleExecuteWorkflow = async (workflowId: number) => {
-    try {
-      await apiClient.request(`/api/workflows/${workflowId}/execute-advanced`, {
-        method: 'POST',
-        body: JSON.stringify({
-          options: {
-            priority: 'normal',
-            timeout: 300
-          }
-        })
-      })
-      
-      // Refresh data after execution
-      setTimeout(loadActiveWorkflows, 1000)
-    } catch (err) {
-      console.error('Error executing workflow:', err)
-      setError(err instanceof Error ? err.message : 'Failed to execute workflow')
-    }
+    executeWorkflowMutation.mutate({
+      workflowId: workflowId.toString(),
+      options: {
+        priority: 'normal',
+        timeout: 300
+      }
+    })
   }
 
   const getStatusIcon = (status: string) => {

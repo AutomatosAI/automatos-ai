@@ -14,7 +14,9 @@ import {
   BarChart3,
   Settings,
   ChevronLeft,
-  Bot
+  Bot,
+  MessageCircle,
+  Wrench
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -37,6 +39,12 @@ const navigationItems = [
     description: 'Manage AI agents and skills'
   },
   {
+    name: 'AI Assistant',
+    href: '/chat',
+    icon: MessageCircle,
+    description: 'Chat with AI assistant'
+  },
+  {
     name: 'Document Management',
     href: '/documents',
     icon: FileText,
@@ -49,10 +57,16 @@ const navigationItems = [
     description: 'Create and monitor workflows'
   },
   {
+    name: 'Tools Dashboard',
+    href: '/tools',
+    icon: Wrench,
+    description: 'Development and utility tools'
+  },
+  {
     name: 'Context Engineering',
     href: '/context',
     icon: Brain,
-    description: 'RAG system and context patterns'
+    description: 'RAG system and field theory'
   },
   {
     name: 'Performance Analytics',

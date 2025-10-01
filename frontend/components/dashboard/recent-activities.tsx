@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { CheckCircle, AlertCircle, Clock } from 'lucide-react'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client'
 
 export function RecentActivities() {
   const [activities, setActivities] = useState([])

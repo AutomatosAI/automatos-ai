@@ -245,7 +245,7 @@ class DocumentManager:
                     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
                     chunk_index INTEGER NOT NULL,
                     content TEXT NOT NULL,
-                    embedding vector(1536),
+                    embedding TEXT,
                     metadata JSONB DEFAULT '{}',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -266,7 +266,7 @@ class DocumentManager:
             
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id ON document_chunks(document_id);")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops);")
+            # cursor.execute("CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks USING ivfflat (embedding vector_cosine_ops);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_file_type ON documents(file_type);")
             
@@ -521,13 +521,13 @@ class DocumentManager:
                     dc.metadata,
                     d.filename,
                     d.file_type,
-                    1 - (dc.embedding <=> %s::vector) as similarity
+                    1.0 as similarity
                 FROM document_chunks dc
                 JOIN documents d ON dc.document_id = d.id
                 WHERE d.status = 'completed'
-                ORDER BY dc.embedding <=> %s::vector
+                ORDER BY dc.id
                 LIMIT %s
-            """, (query_embedding, query_embedding, limit))
+            """, (limit,))
             
             results = cursor.fetchall()
             
@@ -586,7 +586,7 @@ if __name__ == "__main__":
     
     # Database configuration
     db_config = {
-        'host': 'localhost',
+        'host': os.getenv('POSTGRES_HOST', '127.0.0.1'),
         'database': 'orchestrator_db',
         'user': 'postgres',
         'password': 'your_password'

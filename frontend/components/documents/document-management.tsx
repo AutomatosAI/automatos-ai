@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import { 
@@ -31,7 +31,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
-import { apiClient, Document } from '@/lib/api'
+// Document modals
+import { DocumentDetailsModal } from './document-details-modal'
+import { DeleteConfirmationModal } from './delete-confirmation-modal'
+import { SemanticSearch } from './semantic-search'
+import { DocumentProcessing } from './document-processing'
+import { DocumentAnalytics } from './document-analytics'
+// API hooks
+import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -70,213 +77,111 @@ const typeIcons: Record<string, any> = {
 export function DocumentManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
-  // Real data state
-  const [realDocuments, setRealDocuments] = useState<BackendDocument[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [stats, setStats] = useState([
-    {
-      label: 'Total Documents',
-      value: '0',
-      change: '+0 this month',
-      icon: FileText,
-      color: 'text-blue-400'
-    },
-    {
-      label: 'Processed',
-      value: '0',
-      change: '0% success rate',
-      icon: Database,
-      color: 'text-green-400'
-    },
-    {
-      label: 'Storage Used',
-      value: '0 GB',
-      change: '+0 GB this week',
-      icon: FolderOpen,
-      color: 'text-orange-400'
-    },
-    {
-      label: 'Vector Chunks',
-      value: '0',
-      change: '+0 chunks',
-      icon: Database,
-      color: 'text-purple-400'
-    }
-  ])
+  // Modal state management
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
+  
+  // API hooks
+  const { data: documents = [], isLoading, error } = useDocuments()
+  const { data: documentStats } = useDocumentStats()
+  const uploadDocumentMutation = useUploadDocument()
+  const deleteDocumentMutation = useDeleteDocument()
+  
+  // Type the documents array properly
+  const typedDocuments = documents as BackendDocument[]
+  
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
   })
 
-  // Fetch real documents from API
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      try {
-        setLoading(true)
-        const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-        setRealDocuments(documents)
-        
-        // Calculate real stats from backend data
-        const totalDocs = documents.length
-        const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
-        const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
-        const sizeInMB = totalSizeBytes / (1024 * 1024)
-        const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
-        
-        setStats([
-          {
-            label: 'Total Documents',
-            value: totalDocs.toString(),
-            change: `+${Math.max(0, totalDocs - 2)} this month`,
-            icon: FileText,
-            color: 'text-blue-400'
-          },
-          {
-            label: 'Processed',
-            value: processedDocs.toString(),
-            change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
-            icon: Database,
-            color: 'text-green-400'
-          },
-          {
-            label: 'Storage Used',
-            value: sizeDisplay,
-            change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
-            icon: FolderOpen,
-            color: 'text-orange-400'
-          },
-          {
-            label: 'Vector Chunks',
-            value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
-            change: '',
-            icon: Database,
-            color: 'text-purple-400'
-          }
-        ])
-        
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch documents')
-        console.error('Error fetching documents:', err)
-      } finally {
-        setLoading(false)
+  // Calculate stats from real API data
+  const stats = useMemo(() => {
+    const totalDocs = typedDocuments.length
+    const processedDocs = typedDocuments.filter(d => (d.status || '').toLowerCase() === 'completed').length
+    const totalSizeBytes = typedDocuments.reduce((sum, d) => sum + (d.file_size || 0), 0)
+    const sizeInMB = totalSizeBytes / (1024 * 1024)
+    const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
+    
+    return [
+      {
+        label: 'Total Documents',
+        value: totalDocs.toString(),
+        change: `+${Math.max(0, totalDocs - 2)} this month`,
+        icon: FileText,
+        color: 'text-blue-400'
+      },
+      {
+        label: 'Processed',
+        value: processedDocs.toString(),
+        change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
+        icon: Database,
+        color: 'text-green-400'
+      },
+      {
+        label: 'Storage Used',
+        value: sizeDisplay,
+        change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
+        icon: FolderOpen,
+        color: 'text-orange-400'
+      },
+      {
+        label: 'Vector Chunks',
+        value: typedDocuments.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
+        change: '',
+        icon: Database,
+        color: 'text-purple-400'
       }
-    }
-
-    fetchDocuments()
-  }, [])
+    ]
+  }, [typedDocuments])
 
   const handleFileUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
+    console.log('[DocumentManagement] handleFileUpload called with files:', files)
+    
+    if (!files || files.length === 0) {
+      console.log('[DocumentManagement] No files selected')
+      return
+    }
 
-    setIsUploading(true)
-    setUploadProgress(0)
-
+    console.log('[DocumentManagement] Processing', files.length, 'file(s)')
+    
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-
-        // Simulate upload progress
-        const interval = setInterval(() => {
-          setUploadProgress(prev => {
-            if (prev >= 90) {
-              clearInterval(interval)
-              return 90
-            }
-            return prev + 10
-          })
-        }, 200)
-
-        // Upload to backend API (multipart/form-data -> /api/documents/upload)
-        const uploadRes = await apiClient.uploadDocument(file, { description: '', tags: [] })
-
-        clearInterval(interval)
-        setUploadProgress(100)
-
-        console.log('Upload result:', uploadRes)
-
-        // Small delay to show completion
-        await new Promise(resolve => setTimeout(resolve, 500))
-      }
-
-      // Reset state after successful upload and refresh documents
-      setTimeout(async () => {
-        setIsUploading(false)
-        setUploadProgress(0)
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ''
-        }
+        console.log('[DocumentManagement] Uploading file:', file.name, 'size:', file.size, 'type:', file.type)
         
-        // Refresh documents list
-        try {
-          const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-          if (Array.isArray(documents)) {
-            setRealDocuments(documents)
-            
-            // Recalculate stats
-            const totalDocs = documents.length
-            const processedDocs = documents.filter(d => (d.status || '').toLowerCase() === 'completed').length
-            
-            // Calculate total storage (bytes)
-            const totalSizeBytes = documents.reduce((sum, d) => sum + (d.file_size || 0), 0)
-            const sizeInMB = totalSizeBytes / (1024 * 1024)
-            const sizeDisplay = sizeInMB < 1024 ? `${sizeInMB.toFixed(1)} MB` : `${(sizeInMB / 1024).toFixed(1)} GB`
-            
-            setStats([
-              {
-                label: 'Total Documents',
-                value: totalDocs.toString(),
-                change: `+${Math.max(0, totalDocs - 2)} this month`,
-                icon: FileText,
-                color: 'text-blue-400'
-              },
-              {
-                label: 'Processed',
-                value: processedDocs.toString(),
-                change: totalDocs > 0 ? `${((processedDocs / totalDocs) * 100).toFixed(1)}% success rate` : '0% success rate',
-                icon: Database,
-                color: 'text-green-400'
-              },
-              {
-                label: 'Storage Used',
-                value: sizeDisplay,
-                change: `+${Math.max(0, sizeInMB - 0.5).toFixed(1)} MB this week`,
-                icon: FolderOpen,
-                color: 'text-orange-400'
-              },
-              {
-                label: 'Vector Chunks',
-                value: documents.reduce((sum, d)=> sum + (d.chunk_count || 0), 0).toString(),
-                change: '',
-                icon: Database,
-                color: 'text-purple-400'
-              }
-            ])
-          }
-        } catch (error) {
-          console.error('Error refreshing documents:', error)
-        }
-      }, 1000)
-
+        await uploadDocumentMutation.mutateAsync({ 
+          file, 
+          metadata: { description: '', tags: [] } 
+        })
+        
+        console.log('[DocumentManagement] File uploaded successfully:', file.name)
+      }
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      
+      console.log('[DocumentManagement] All files uploaded successfully')
     } catch (error) {
-      console.error('Upload error:', error)
-      setIsUploading(false)
-      setUploadProgress(0)
-      setError('Failed to upload document. Please try again.')
+      // Error handled by mutation hook
+      console.error('[DocumentManagement] Upload error:', error)
     }
   }
 
   const handleUploadClick = () => {
+    console.log('[DocumentManagement] Upload button clicked, triggering file picker')
     fileInputRef.current?.click()
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[DocumentManagement] File input changed, files:', e.target.files)
     handleFileUpload(e.target.files)
   }
 
@@ -291,22 +196,31 @@ export function DocumentManagement() {
   }
 
   const handleDrop = (e: React.DragEvent) => {
+    console.log('[DocumentManagement] File dropped')
     e.preventDefault()
     e.stopPropagation()
     setDragActive(false)
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      console.log('[DocumentManagement] Processing dropped files:', e.dataTransfer.files)
       handleFileUpload(e.dataTransfer.files)
+    } else {
+      console.log('[DocumentManagement] No files in drop event')
     }
   }
 
   // Core User Functions - Following Testing Rules
   const handleViewDetails = async (documentId: number) => {
     try {
-      const document = await apiClient.request<BackendDocument>(`/api/documents/${documentId}`)
-      alert(`Document Details:\n\nID: ${document.id}\nFilename: ${document.filename}\nType: ${document.file_type}\nSize: ${document.file_size} bytes\nStatus: ${document.status}\nChunks: ${document.chunk_count}`)
+      // Find document in current list
+      const document = typedDocuments.find(doc => doc.id === documentId)
+      if (document) {
+        setSelectedDocumentId(documentId)
+        setShowDetailsModal(true)
+      } else {
+        console.error('Document not found:', documentId)
+      }
     } catch (error) {
       console.error('Error viewing document details:', error)
-      alert('Error loading document details')
     }
   }
 
@@ -326,30 +240,27 @@ export function DocumentManagement() {
     }
   }
 
-  const handleDelete = async (documentId: number) => {
-    if (!confirm('Are you sure you want to delete this document? This action cannot be undone.')) {
-      return
-    }
-    
+  const handleDelete = async (documentId: number, filename: string) => {
     try {
-      await apiClient.request(`/api/documents/${documentId}`, {
-        method: 'DELETE'
-      })
-      
-      // Refresh documents list after deletion
-      const documents = await apiClient.request<BackendDocument[]>('/api/documents/')
-      if (Array.isArray(documents)) {
-        setRealDocuments(documents)
-      }
-      
-      alert('Document deleted successfully')
+      setDocumentToDelete({ id: documentId, filename })
+      setShowDeleteModal(true)
     } catch (error) {
-      console.error('Error deleting document:', error)
-      alert('Error deleting document')
+      console.error('Error preparing delete confirmation:', error)
     }
   }
 
-  const filteredDocuments = realDocuments.filter(doc =>
+  const confirmDelete = async (documentId: number) => {
+    try {
+      await deleteDocumentMutation.mutateAsync(documentId.toString())
+      setShowDeleteModal(false)
+      setDocumentToDelete(null)
+    } catch (error) {
+      // Error handled by mutation hook
+      console.error('Error deleting document:', error)
+    }
+  }
+
+  const filteredDocuments = typedDocuments.filter(doc =>
     (doc.filename || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (doc.file_type || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -383,11 +294,14 @@ export function DocumentManagement() {
         
         <Button 
           className="gradient-accent hover:opacity-90 transition-opacity"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
+          onClick={() => {
+            console.log('[Header Button] Upload Documents clicked, fileInputRef:', fileInputRef.current)
+            fileInputRef.current?.click()
+          }}
+          disabled={uploadDocumentMutation.isLoading}
         >
-          <Upload className={`w-4 h-4 mr-2 ${isUploading ? 'animate-spin' : ''}`} />
-          {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload Documents'}
+          <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
+          {uploadDocumentMutation.isLoading ? 'Uploading...' : 'Upload Documents'}
         </Button>
       </motion.div>
 
@@ -428,10 +342,14 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">Document Library</span>
+              <span className="hidden sm:inline">Library</span>
+            </TabsTrigger>
+            <TabsTrigger value="search" className="flex items-center space-x-2">
+              <Search className="w-4 h-4" />
+              <span className="hidden sm:inline">Search</span>
             </TabsTrigger>
             <TabsTrigger value="upload" className="flex items-center space-x-2">
               <Upload className="w-4 h-4" />
@@ -518,7 +436,7 @@ export function DocumentManagement() {
                             <Download className="w-4 h-4 mr-2" />
                             Download
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id)}>
+                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id, doc.filename)}>
                             <Trash2 className="w-4 h-4 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -569,7 +487,7 @@ export function DocumentManagement() {
               })}
               
               {/* Loading State */}
-              {loading && (
+              {isLoading && (
                 <div className="col-span-full flex items-center justify-center py-12">
                   <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
@@ -579,7 +497,7 @@ export function DocumentManagement() {
               )}
               
               {/* Empty State */}
-              {!loading && filteredDocuments.length === 0 && (
+              {(isLoading === false && filteredDocuments.length === 0) && (
                 <div className="col-span-full flex items-center justify-center py-12">
                   <div className="text-center">
                     <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -603,11 +521,27 @@ export function DocumentManagement() {
                   <div className="text-center">
                     <div className="text-red-500 mb-4">⚠️</div>
                     <h3 className="text-lg font-semibold mb-2 text-red-500">Error loading documents</h3>
-                    <p className="text-muted-foreground">{error}</p>
+                    <p className="text-muted-foreground">{error instanceof Error ? error.message : String(error)}</p>
                   </div>
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="search" className="space-y-6">
+            <SemanticSearch
+              context="documents"
+              onResultSelect={(result) => {
+                // Find and select the document
+                const doc = documents.find(d => d.id === result.document_id)
+                if (doc) {
+                  setSelectedDocument(doc)
+                  setShowDetailsModal(true)
+                }
+              }}
+              showActions={true}
+              maxResults={10}
+            />
           </TabsContent>
 
           <TabsContent value="upload" className="space-y-6">
@@ -629,18 +563,17 @@ export function DocumentManagement() {
                 >
                   <Upload className={`w-12 h-12 mx-auto mb-4 ${
                     dragActive ? 'text-primary' : 'text-muted-foreground'
-                  } ${isUploading ? 'animate-bounce' : ''}`} />
+                  } ${uploadDocumentMutation.isLoading ? 'animate-bounce' : ''}`} />
                   
-                  {isUploading ? (
+                  {uploadDocumentMutation.isLoading ? (
                     <div className="space-y-4">
                       <h3 className="text-lg font-semibold">Uploading...</h3>
                       <div className="w-full bg-secondary rounded-full h-2">
                         <div 
-                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${uploadProgress}%` }}
+                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
                         />
                       </div>
-                      <p className="text-sm text-muted-foreground">{uploadProgress}% complete</p>
+                      <p className="text-sm text-muted-foreground">Processing files...</p>
                     </div>
                   ) : (
                     <>
@@ -652,8 +585,11 @@ export function DocumentManagement() {
                       </p>
                       <Button 
                         className="gradient-accent hover:opacity-90"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
+                        onClick={() => {
+                          console.log('[Upload Button] Choose Files clicked, fileInputRef:', fileInputRef.current)
+                          fileInputRef.current?.click()
+                        }}
+                        disabled={uploadDocumentMutation.isLoading}
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         Choose Files
@@ -666,11 +602,23 @@ export function DocumentManagement() {
           </TabsContent>
 
           <TabsContent value="processing" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Processing</div><div className="text-muted-foreground">Processing features coming soon</div></div>
+            <DocumentProcessing 
+              documents={documents}
+              onDocumentSelect={(docId) => {
+                const doc = documents.find(d => d.id === parseInt(docId))
+                if (doc) {
+                  setSelectedDocument(doc)
+                  setShowDetailsModal(true)
+                }
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
-            <div className="p-12 text-center"><div className="text-lg font-semibold">Analytics</div><div className="text-muted-foreground">Analytics features coming soon</div></div>
+            <DocumentAnalytics 
+              documents={documents}
+              documentStats={documentStats}
+            />
           </TabsContent>
 
           <TabsContent value="codegraph" className="space-y-6">
@@ -678,6 +626,35 @@ export function DocumentManagement() {
           </TabsContent>
         </Tabs>
       </motion.div>
+
+      {/* Document Details Modal */}
+      <DocumentDetailsModal
+        documentId={selectedDocumentId}
+        open={showDetailsModal}
+        onClose={() => {
+          setShowDetailsModal(false)
+          setSelectedDocumentId(null)
+        }}
+        onDownload={handleDownload}
+        onDelete={(id) => {
+          const doc = typedDocuments.find(d => d.id === id)
+          if (doc) {
+            handleDelete(id, doc.filename)
+          }
+        }}
+      />
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        documentId={documentToDelete?.id || null}
+        filename={documentToDelete?.filename || ''}
+        open={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false)
+          setDocumentToDelete(null)
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

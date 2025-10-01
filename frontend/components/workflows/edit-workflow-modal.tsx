@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client"
 
 export function EditWorkflowModal({ open, onClose, id }: { open: boolean; onClose: () => void; id: string }) {
   const [name, setName] = React.useState('')

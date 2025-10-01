@@ -13,10 +13,33 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel
 
 from database.database import get_db
-from models import RAGConfiguration, Document
+from database.models import RAGConfiguration, Document
 from services.rag_service import get_rag_service, RAGService
+
+# Request models
+class RAGConfigCreate(BaseModel):
+    name: str
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    chunk_size: int = 1000
+    chunk_overlap: int = 200
+    retrieval_strategy: str = "similarity"
+    top_k: int = 5
+    similarity_threshold: float = 0.7
+    configuration: dict = {}
+
+class RAGConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    embedding_model: Optional[str] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    retrieval_strategy: Optional[str] = None
+    top_k: Optional[int] = None
+    similarity_threshold: Optional[float] = None
+    configuration: Optional[dict] = None
+    is_active: Optional[bool] = None
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +52,14 @@ async def get_context_stats(
 ):
     """Get real-time context engineering statistics"""
     try:
-        # Get retrieval stats from RAG service
-        retrieval_stats = rag_service.get_retrieval_stats()
-        
-        # Get document count for vector embeddings estimate
-        document_count = db.query(Document).count()
-        total_chunks = db.query(Document).with_entities(
-            func.sum(Document.chunk_count)
-        ).scalar() or 0
+        # Get retrieval stats from RAG service (now reads from database)
+        retrieval_stats = rag_service.get_retrieval_stats(db)
         
         return {
             "contextQueries": retrieval_stats['total_queries'],
             "retrievalSuccess": retrieval_stats['success_rate'],
             "avgResponseTime": retrieval_stats['avg_response_time'],
-            "vectorEmbeddings": int(total_chunks),
+            "vectorEmbeddings": retrieval_stats['vector_embeddings'],
             "systemStatus": retrieval_stats['system_status'],
             "lastQueryTime": retrieval_stats['last_query_time']
         }
@@ -53,24 +70,13 @@ async def get_context_stats(
 
 @router.get("/performance")
 async def get_rag_performance_data(
-    rag_service: RAGService = Depends(get_rag_service)
+    time_range: str = Query("24h", regex="^(1h|24h|7d|30d)$", description="Time range: 1h, 24h, 7d, or 30d"),
+    rag_service: RAGService = Depends(get_rag_service),
+    db: Session = Depends(get_db)
 ):
     """Get RAG performance data for charts"""
     try:
-        performance_data = rag_service.get_performance_data()
-        
-        # Ensure we have data for the last 24 hours
-        if not performance_data:
-            # Generate default data structure
-            performance_data = []
-            for hour in range(0, 24, 4):
-                performance_data.append({
-                    'time': f"{hour:02d}:00",
-                    'queries': 0,
-                    'success_rate': 0.0,
-                    'avg_latency': 0.0
-                })
-        
+        performance_data = rag_service.get_performance_data(db, time_range)
         return performance_data
         
     except Exception as e:
@@ -93,11 +99,12 @@ async def get_context_sources(
 @router.get("/queries/recent")
 async def get_recent_queries(
     limit: int = Query(default=10, ge=1, le=50),
-    rag_service: RAGService = Depends(get_rag_service)
+    rag_service: RAGService = Depends(get_rag_service),
+    db: Session = Depends(get_db)
 ):
     """Get recent context queries"""
     try:
-        return rag_service.get_recent_queries(limit)
+        return rag_service.get_recent_queries(db, limit)
         
     except Exception as e:
         logger.error(f"Error getting recent queries: {e}")
@@ -186,3 +193,297 @@ async def initialize_context_system(
     except Exception as e:
         logger.error(f"Error initializing context system: {e}")
         raise HTTPException(status_code=500, detail=f"Error initializing context system: {str(e)}")
+
+@router.get("/optimize")
+async def get_optimization_recommendations(db: Session = Depends(get_db)):
+    """Analyze context system and provide optimization recommendations"""
+    try:
+        from sqlalchemy import text
+        recommendations = []
+        
+        # Check 1: Embeddings coverage
+        embedding_query = text("""
+            SELECT 
+                COUNT(*) as total_docs,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs,
+                (SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL) as embedded_chunks
+            FROM documents
+        """)
+        
+        stats = db.execute(embedding_query).fetchone()
+        
+        if stats and stats.total_docs > 0:
+            incomplete_docs = stats.total_docs - stats.completed_docs
+            if incomplete_docs > 0:
+                recommendations.append({
+                    "type": "warning",
+                    "category": "Coverage",
+                    "title": "Incomplete Document Processing",
+                    "description": f"{incomplete_docs} documents not fully processed",
+                    "action": "Reprocess failed documents",
+                    "impact": "high"
+                })
+        
+        # Check 2: Query performance
+        perf_query = text("""
+            SELECT AVG(execution_time_ms) as avg_time
+            FROM document_usage
+            WHERE event_type IN ('document_searched', 'rag_query')
+                AND timestamp >= NOW() - INTERVAL '24 hours'
+        """)
+        
+        perf = db.execute(perf_query).fetchone()
+        
+        if perf and perf.avg_time and perf.avg_time > 1000:
+            recommendations.append({
+                "type": "warning",
+                "category": "Performance",
+                "title": "Slow Query Performance",
+                "description": f"Average query time is {perf.avg_time:.0f}ms (target: <1000ms)",
+                "action": "Consider adding more vector indexes or reducing chunk size",
+                "impact": "medium"
+            })
+        
+        # Check 3: Usage patterns
+        usage_query = text("""
+            SELECT COUNT(*) as query_count
+            FROM document_usage
+            WHERE event_type IN ('document_searched', 'rag_query')
+                AND timestamp >= NOW() - INTERVAL '24 hours'
+        """)
+        
+        usage = db.execute(usage_query).fetchone()
+        
+        if usage and usage.query_count == 0:
+            recommendations.append({
+                "type": "info",
+                "category": "Usage",
+                "title": "No Recent Context Queries",
+                "description": "System has not been used for context retrieval in the last 24 hours",
+                "action": "Monitor usage patterns or test the RAG system",
+                "impact": "low"
+            })
+        elif usage and usage.query_count > 0:
+            recommendations.append({
+                "type": "success",
+                "category": "Health",
+                "title": "System Healthy",
+                "description": f"{usage.query_count} queries processed in last 24 hours",
+                "action": "No action needed",
+                "impact": "low"
+            })
+        
+        # Check 4: Empty embeddings
+        if stats and stats.embedded_chunks == 0:
+            recommendations.append({
+                "type": "error",
+                "category": "Coverage",
+                "title": "No Vector Embeddings",
+                "description": "No document chunks have embeddings generated",
+                "action": "Process documents to generate embeddings",
+                "impact": "critical"
+            })
+        
+        # Determine overall system health
+        error_count = len([r for r in recommendations if r["type"] == "error"])
+        warning_count = len([r for r in recommendations if r["type"] == "warning"])
+        
+        if error_count > 0:
+            system_health = "critical"
+        elif warning_count > 0:
+            system_health = "needs_attention"
+        else:
+            system_health = "healthy"
+        
+        return {
+            "recommendations": recommendations,
+            "last_analyzed": datetime.now().isoformat(),
+            "system_health": system_health
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting optimization recommendations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting optimization recommendations: {str(e)}")
+
+# ===== RAG CONFIGURATION CRUD ENDPOINTS =====
+
+@router.post("/rag/config")
+async def create_rag_configuration(
+    config: RAGConfigCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new RAG configuration pattern"""
+    try:
+        # Create new configuration
+        new_config = RAGConfiguration(
+            name=config.name,
+            embedding_model=config.embedding_model,
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap,
+            retrieval_strategy=config.retrieval_strategy,
+            top_k=config.top_k,
+            similarity_threshold=config.similarity_threshold,
+            configuration=config.configuration,
+            is_active=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now()
+        )
+        
+        db.add(new_config)
+        db.commit()
+        db.refresh(new_config)
+        
+        logger.info(f"Created RAG configuration: {new_config.name} (ID: {new_config.id})")
+        
+        return {
+            "id": new_config.id,
+            "name": new_config.name,
+            "embedding_model": new_config.embedding_model,
+            "chunk_size": new_config.chunk_size,
+            "chunk_overlap": new_config.chunk_overlap,
+            "retrieval_strategy": new_config.retrieval_strategy,
+            "top_k": new_config.top_k,
+            "similarity_threshold": new_config.similarity_threshold,
+            "configuration": new_config.configuration,
+            "is_active": new_config.is_active,
+            "created_at": new_config.created_at.isoformat() if new_config.created_at else None
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating RAG configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating configuration: {str(e)}")
+
+@router.get("/rag/config")
+async def list_rag_configurations(
+    db: Session = Depends(get_db)
+):
+    """List all RAG configurations"""
+    try:
+        configs = db.query(RAGConfiguration).all()
+        
+        return [{
+            "id": config.id,
+            "name": config.name,
+            "embedding_model": config.embedding_model,
+            "chunk_size": config.chunk_size,
+            "chunk_overlap": config.chunk_overlap,
+            "retrieval_strategy": config.retrieval_strategy,
+            "top_k": config.top_k,
+            "similarity_threshold": config.similarity_threshold,
+            "is_active": config.is_active,
+            "created_at": config.created_at.isoformat() if config.created_at else None
+        } for config in configs]
+        
+    except Exception as e:
+        logger.error(f"Error listing RAG configurations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing configurations: {str(e)}")
+
+@router.get("/rag/config/{config_id}")
+async def get_rag_configuration(
+    config_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get a specific RAG configuration"""
+    try:
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        
+        if not config:
+            raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")
+        
+        return {
+            "id": config.id,
+            "name": config.name,
+            "embedding_model": config.embedding_model,
+            "chunk_size": config.chunk_size,
+            "chunk_overlap": config.chunk_overlap,
+            "retrieval_strategy": config.retrieval_strategy,
+            "top_k": config.top_k,
+            "similarity_threshold": config.similarity_threshold,
+            "configuration": config.configuration,
+            "is_active": config.is_active,
+            "created_at": config.created_at.isoformat() if config.created_at else None,
+            "updated_at": config.updated_at.isoformat() if config.updated_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting RAG configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting configuration: {str(e)}")
+
+@router.put("/rag/config/{config_id}")
+async def update_rag_configuration(
+    config_id: int,
+    config_update: RAGConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a RAG configuration"""
+    try:
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        
+        if not config:
+            raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")
+        
+        # Update fields if provided
+        update_data = config_update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(config, field, value)
+        
+        config.updated_at = datetime.now()
+        
+        db.commit()
+        db.refresh(config)
+        
+        logger.info(f"Updated RAG configuration: {config.name} (ID: {config.id})")
+        
+        return {
+            "id": config.id,
+            "name": config.name,
+            "embedding_model": config.embedding_model,
+            "chunk_size": config.chunk_size,
+            "chunk_overlap": config.chunk_overlap,
+            "retrieval_strategy": config.retrieval_strategy,
+            "top_k": config.top_k,
+            "similarity_threshold": config.similarity_threshold,
+            "configuration": config.configuration,
+            "is_active": config.is_active,
+            "updated_at": config.updated_at.isoformat() if config.updated_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating RAG configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error updating configuration: {str(e)}")
+
+@router.delete("/rag/config/{config_id}")
+async def delete_rag_configuration(
+    config_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete a RAG configuration"""
+    try:
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        
+        if not config:
+            raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")
+        
+        config_name = config.name
+        db.delete(config)
+        db.commit()
+        
+        logger.info(f"Deleted RAG configuration: {config_name} (ID: {config_id})")
+        
+        return {
+            "success": True,
+            "message": f"Configuration '{config_name}' deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting RAG configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting configuration: {str(e)}")

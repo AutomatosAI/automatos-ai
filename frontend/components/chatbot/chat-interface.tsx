@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { apiClient } from '@/lib/api-client'
 
 interface ChatMessage {
   id: string
@@ -181,7 +182,7 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
 
   const handleActionClick = async (action: ActionButton) => {
     try {
-      const response = await fetch('/api/chatbot/execute', {
+        const response = await apiClient.request('/api/chatbot/execute', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

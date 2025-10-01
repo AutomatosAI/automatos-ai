@@ -6,7 +6,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { fieldTheoryClient } from '@/lib/api/field-theory-client'
+import { apiClient } from "@/lib/api-client"
 
 export function useFieldOperations() {
   const [isLoading, setIsLoading] = useState(false)
@@ -15,79 +15,58 @@ export function useFieldOperations() {
 
   const updateField = useCallback(async (
     sessionId: string,
-    context: string,
-    fieldType?: 'scalar' | 'vector' | 'tensor',
-    influenceWeights?: number[]
+    contextData: any,
+    fieldType?: 'scalar' | 'vector' | 'tensor'
   ) => {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.updateField({
-      session_id: sessionId,
-      context,
-      field_type: fieldType,
-      influence_weights: influenceWeights,
-    })
+    try {
+      // ✅ Using verified working endpoint: /api/field-theory/fields/update
+      const response = await apiClient.updateFieldContext({
+        session_id: sessionId,
+        context_data: contextData,
+        field_type: fieldType,
+      })
 
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setFieldData(response.data)
+      setFieldData(response)
+      setIsLoading(false)
+      return response
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update field')
+      setIsLoading(false)
+      throw err
     }
-
-    setIsLoading(false)
-    return response
   }, [])
 
   const propagateField = useCallback(async (
-    sessionId: string,
-    steps?: number,
-    alpha?: number,
-    beta?: number
+    source: string,
+    targets?: string[],
+    propagationSteps?: number
   ) => {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.propagateField({
-      session_id: sessionId,
-      steps,
-      alpha,
-      beta,
-    })
+    try {
+      // ✅ Using verified working endpoint: /api/field-theory/fields/propagate
+      const response = await apiClient.propagateField({
+        source,
+        targets,
+        propagation_steps: propagationSteps,
+      })
 
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setFieldData(response.data)
+      setFieldData(response)
+      setIsLoading(false)
+      return response
+    } catch (err: any) {
+      setError(err?.message || 'Failed to propagate field')
+      setIsLoading(false)
+      throw err
     }
-
-    setIsLoading(false)
-    return response
   }, [])
 
-  const optimizeField = useCallback(async (
-    sessionId: string,
-    objectives?: string[],
-    constraints?: Record<string, any>
-  ) => {
-    setIsLoading(true)
-    setError(null)
-
-    const response = await fieldTheoryClient.optimizeField({
-      session_id: sessionId,
-      objectives,
-      constraints,
-    })
-
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setFieldData(response.data)
-    }
-
-    setIsLoading(false)
-    return response
-  }, [])
+  // Note: optimizeField endpoint not yet working - remove or implement when backend ready
+  // const optimizeField = ... removed until backend implements /api/field-theory/fields/optimize
 
   return {
     isLoading,
@@ -95,7 +74,7 @@ export function useFieldOperations() {
     error,
     updateField,
     propagateField,
-    optimizeField,
+    // optimizeField - removed until backend ready
   }
 }
 
@@ -105,53 +84,53 @@ export function useFieldInteractions() {
   const [error, setError] = useState<string | null>(null)
 
   const modelInteractions = useCallback(async (
-    sessionId1: string,
-    sessionId2: string,
-    interactionType?: 'similarity' | 'difference' | 'combination'
+    taskId: number,
+    userId: number,
+    similarityThreshold?: number
   ) => {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.modelFieldInteractions({
-      session_id_1: sessionId1,
-      session_id_2: sessionId2,
-      interaction_type: interactionType,
-    })
+    try {
+      // ✅ Using verified working endpoint: /api/field-theory/fields/interactions
+      const response = await apiClient.modelFieldInteractions({
+        task_id: taskId,
+        user_id: userId,
+        similarity_threshold: similarityThreshold,
+      })
 
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setInteractionData(response.data)
+      setInteractionData(response)
+      setIsLoading(false)
+      return response
+    } catch (err: any) {
+      setError(err?.message || 'Failed to model field interactions')
+      setIsLoading(false)
+      throw err
     }
-
-    setIsLoading(false)
-    return response
   }, [])
 
   const dynamicManagement = useCallback(async (
     sessionId: string,
-    timeDelta?: number,
-    learningRate?: number,
-    momentum?: number
+    context?: any
   ) => {
     setIsLoading(true)
     setError(null)
 
-    const response = await fieldTheoryClient.dynamicFieldManagement({
-      session_id: sessionId,
-      time_delta: timeDelta,
-      learning_rate: learningRate,
-      momentum,
-    })
+    try {
+      // ✅ Using verified working endpoint: /api/field-theory/fields/dynamic
+      const response = await apiClient.manageDynamicFields({
+        session_id: sessionId,
+        context,
+      })
 
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setInteractionData(response.data)
+      setInteractionData(response)
+      setIsLoading(false)
+      return response
+    } catch (err: any) {
+      setError(err?.message || 'Failed to manage dynamic fields')
+      setIsLoading(false)
+      throw err
     }
-
-    setIsLoading(false)
-    return response
   }, [])
 
   return {
@@ -163,55 +142,8 @@ export function useFieldInteractions() {
   }
 }
 
-export function useFieldContext() {
-  const [contexts, setContexts] = useState<Record<string, any>>({})
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const getContext = useCallback(async (sessionId: string) => {
-    setIsLoading(true)
-    setError(null)
-
-    const response = await fieldTheoryClient.getFieldContext(sessionId)
-
-    if (response.error) {
-      setError(response.error)
-    } else if (response.data) {
-      setContexts(prev => ({ ...prev, [sessionId]: response.data }))
-    }
-
-    setIsLoading(false)
-    return response
-  }, [])
-
-  const clearContext = useCallback(async (sessionId: string) => {
-    setIsLoading(true)
-    setError(null)
-
-    const response = await fieldTheoryClient.clearFieldContext(sessionId)
-
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setContexts(prev => {
-        const newContexts = { ...prev }
-        delete newContexts[sessionId]
-        return newContexts
-      })
-    }
-
-    setIsLoading(false)
-    return response
-  }, [])
-
-  return {
-    contexts,
-    isLoading,
-    error,
-    getContext,
-    clearContext,
-  }
-}
+// useFieldContext removed - endpoints not yet implemented
+// Use updateFieldContext and manageDynamicFields from useFieldOperations instead
 
 export function useFieldStatistics() {
   const [statistics, setStatistics] = useState<{
@@ -228,18 +160,11 @@ export function useFieldStatistics() {
     setError(null)
 
     try {
-      const [fieldStats, fieldStates, interactions, health] = await Promise.all([
-        fieldTheoryClient.getFieldStatistics(),
-        fieldTheoryClient.getFieldStates(),
-        fieldTheoryClient.getFieldInteractions(),
-        fieldTheoryClient.healthCheck(),
-      ])
+      // ✅ Using verified working endpoint: /api/field-theory/health
+      const health = await apiClient.getFieldTheoryHealth()
 
       setStatistics({
-        fieldStats: fieldStats.data,
-        fieldStates: fieldStates.data,
-        interactions: interactions.data,
-        health: health.data,
+        health,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch statistics')
@@ -260,58 +185,5 @@ export function useFieldStatistics() {
   }
 }
 
-export function useBatchFieldOperations() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [batchResults, setBatchResults] = useState<any[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  const batchUpdateFields = useCallback(async (requests: Array<{
-    session_id: string
-    context: string
-    field_type?: 'scalar' | 'vector' | 'tensor'
-    influence_weights?: number[]
-  }>) => {
-    setIsLoading(true)
-    setError(null)
-
-    const response = await fieldTheoryClient.batchUpdateFields(requests)
-
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setBatchResults(response.data || [])
-    }
-
-    setIsLoading(false)
-    return response
-  }, [])
-
-  const batchPropagateFields = useCallback(async (requests: Array<{
-    session_id: string
-    steps?: number
-    alpha?: number
-    beta?: number
-  }>) => {
-    setIsLoading(true)
-    setError(null)
-
-    const response = await fieldTheoryClient.batchPropagateFields(requests)
-
-    if (response.error) {
-      setError(response.error)
-    } else {
-      setBatchResults(response.data || [])
-    }
-
-    setIsLoading(false)
-    return response
-  }, [])
-
-  return {
-    isLoading,
-    batchResults,
-    error,
-    batchUpdateFields,
-    batchPropagateFields,
-  }
-}
+// Batch operations removed - not yet implemented in backend
+// export function useBatchFieldOperations() { ... }
