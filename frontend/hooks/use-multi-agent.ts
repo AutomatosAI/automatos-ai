@@ -6,7 +6,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { multiAgentClient, Agent } from '@/lib/api/multi-agent-client'
+import { multiAgentClient, Agent } from "@/lib/api-client'
 
 export function useMultiAgentReasoning() {
   const [isLoading, setIsLoading] = useState(false)

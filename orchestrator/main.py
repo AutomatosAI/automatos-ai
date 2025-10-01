@@ -3,19 +3,25 @@
 Main FastAPI Application for Automotas AI
 =========================================
 
-Comprehensive API server with WebSocket support for real-time updates.
+Comprehensive API server with WebSocket support for real-time updates. DO NOT COMMENT OUT ANYTHING IN THIS FILE.
 """
 
 import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import uuid
 from datetime import datetime
+
+# Load .env file BEFORE anything else
+env_path = Path(__file__).parent / '.env'
+load_dotenv(env_path)
 
 # Import database and models
 from database.database import init_database, get_db
@@ -26,7 +32,7 @@ from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.documents_v2 import router as documents_router
 from api.system import router as system_router
-#from api.context_engineering import router as context_engineering_router
+from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
 from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
@@ -42,6 +48,31 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+
+# Import MISSING API routers
+from api.orchestrator import router as orchestrator_router
+from api.analytics_api import router as analytics_api_router
+from api.analytics_real import router as analytics_real_router
+from api.insights import router as insights_router
+from api.knowledge import router as knowledge_router
+from api.learning import router as learning_router
+from api.problems import router as problems_router
+from api.query import router as query_router
+from api.recommendations import router as recommendations_router
+from api.solutions import router as solutions_router
+from api.synthesis import router as synthesis_router
+from api.websocket_api import router as websocket_api_router
+from api.chatbot import router as chatbot_router
+from api.chatbot_suggestions import router as chatbot_suggestions_router
+from api.document_processing import router as document_processing_router
+from api.agent_endpoints import router as agent_endpoints_router
+
+# Import Dashboard Integration (PRD-06)
+from api.dashboard_integration import (
+    register_dashboard_routes,
+    startup_dashboard,
+    shutdown_dashboard
+)
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
@@ -67,14 +98,23 @@ async def lifespan(app: FastAPI):
     try:
         init_database()
         logger.info("Database initialized successfully")
+        
+        # Initialize Dashboard Services (PRD-06)
+        await startup_dashboard(app)
+        logger.info("Dashboard services initialized successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize services: {e}")
         raise
     
     yield
     
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
+    
+    # Shutdown Dashboard Services (PRD-06)
+    await shutdown_dashboard(app)
+    logger.info("Dashboard services shutdown complete")
 
 # Create FastAPI app with enhanced documentation
 app = FastAPI(
@@ -227,7 +267,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://ui.automatos.app").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -259,7 +299,7 @@ app.include_router(agents_router)
 app.include_router(workflows_router)
 app.include_router(documents_router)
 app.include_router(system_router)
-#app.include_router(context_engineering_router)
+app.include_router(context_engineering_router)
 app.include_router(memory_router)
 app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
@@ -275,6 +315,27 @@ app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
+
+# Include MISSING API routers
+app.include_router(orchestrator_router)
+app.include_router(analytics_api_router)
+app.include_router(analytics_real_router)
+app.include_router(insights_router)
+app.include_router(knowledge_router)
+app.include_router(learning_router)
+app.include_router(problems_router)
+app.include_router(query_router)
+app.include_router(recommendations_router)
+app.include_router(solutions_router)
+app.include_router(synthesis_router)
+app.include_router(websocket_api_router)
+app.include_router(chatbot_router)
+app.include_router(chatbot_suggestions_router)
+app.include_router(document_processing_router)
+app.include_router(agent_endpoints_router)
+
+# Register Dashboard Routes (PRD-06)
+register_dashboard_routes(app)
 
 # Include legacy routes (from existing api_routes.py)
 try:

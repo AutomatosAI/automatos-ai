@@ -61,24 +61,19 @@ const skillCategories = [
     description: 'Software development and programming'
   },
   {
-    category: 'analysis',
-    name: 'Analysis',
+    category: 'security',
+    name: 'Security',
+    description: 'Security and compliance'
+  },
+  {
+    category: 'infrastructure',
+    name: 'Infrastructure',
+    description: 'Infrastructure and operations'
+  },
+  {
+    category: 'analytics',
+    name: 'Analytics',
     description: 'Data analysis and insights'
-  },
-  {
-    category: 'communication',
-    name: 'Communication',
-    description: 'Messaging and interaction'
-  },
-  {
-    category: 'technical',
-    name: 'Technical',
-    description: 'Technical operations and systems'
-  },
-  {
-    category: 'management',
-    name: 'Management',
-    description: 'Project and resource management'
   }
 ]
 
@@ -104,11 +99,27 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
 
     setIsSubmitting(true)
     try {
-      await createSkillMutation.mutateAsync(skillData)
+      // Format the skill data correctly
+      const formattedData = {
+        name: skillData.name,
+        description: skillData.description || "",
+        skill_type: skillData.skill_type,
+        category: skillData.category,
+        difficulty: "intermediate", // Default difficulty level
+        is_active: true,
+        implementation: skillData.implementation || "",
+        parameters: skillData.parameters || {}
+      }
+      
+      // Submit to the single skill creation endpoint
+      await createSkillMutation.mutateAsync(formattedData)
+      toast.success(`Skill ${skillData.name} created successfully`)
       onSuccess()
       resetForm()
-    } catch (error) {
+      handleClose()
+    } catch (error: any) {
       console.error('Error creating skill:', error)
+      toast.error(`Failed to create skill: ${error?.message || 'Unknown error'}`)
     } finally {
       setIsSubmitting(false)
     }

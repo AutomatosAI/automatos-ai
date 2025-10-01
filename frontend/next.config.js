@@ -3,16 +3,15 @@ const nextConfig = {
   typescript: { 
     ignoreBuildErrors: true 
   },
-  logging: {
-    fetches: {
-      fullUrl: true
-    }
-  },
-  experimental: {
-    logging: {
-      level: 'verbose'
-    }
-  }
+  // Commented out proxy - we'll handle API calls with mock fallback
+  // async rewrites() {
+  //   return [
+  //     {
+  //       source: '/api/:path*',
+  //       destination: 'http://localhost:8000/api/:path*',
+  //     },
+  //   ]
+  // }
 }
 
 module.exports = nextConfig

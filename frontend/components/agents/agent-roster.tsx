@@ -14,7 +14,8 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  Bot
+  Bot,
+  Trash2
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -25,7 +26,10 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
-import { apiClient, Agent } from '@/lib/api'
+import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
+import { AgentConfigurationModal } from './agent-configuration-modal'
+import { AgentStatusControlModal } from './agent-status-control-modal'
+import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
 
 // Agent type icons mapping
 const agentTypeIcons: Record<string, string> = {
@@ -38,7 +42,18 @@ const agentTypeIcons: Record<string, string> = {
 }
 
 // Real agent data from API - no more mock data
-interface RealAgent extends Agent {
+interface AgentWithPerformance {
+  id: string
+  name: string
+  agent_type: string
+  status: string
+  description?: string
+  created_at?: string
+  skills?: Array<{ id: string; name: string }>
+  performance_metrics?: {
+    success_rate?: number
+    tasks_completed?: number
+  }
   performance?: number
   tasksCompleted?: number
   specializations?: string[]
@@ -58,76 +73,80 @@ const statusIcons: Record<string, any> = {
   maintenance: AlertCircle
 }
 
-export function AgentRoster() {
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+interface AgentRosterProps {
+  agents: any[]
+  loading: boolean
+  searchTerm: string
+  statusFilter: string
+  onAgentSelect: (agentId: string | null) => void
+  onViewDetails: (agentId: string | null) => void
+  selectedAgentId: string | null
+  onRefresh: () => void
+}
 
-  // Fetch agents from API
-  useEffect(() => {
-    const fetchAgents = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getAgents()
-        setAgents(data)
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch agents')
-        console.error('Error fetching agents:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchAgents()
-  }, [])
+export function AgentRoster({ 
+  agents, 
+  loading, 
+  searchTerm, 
+  statusFilter, 
+  onAgentSelect, 
+  onViewDetails,
+  selectedAgentId, 
+  onRefresh 
+}: AgentRosterProps) {
+  // Modal states
+  const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
+  const [statusModalAgentId, setStatusModalAgentId] = useState<number | null>(null)
+  const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
+  const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
+  
+  // Use real API hooks for agent actions
+  const startAgentMutation = useStartAgent()
+  const stopAgentMutation = useStopAgent()
 
   // Context menu handlers
   const handleViewDetails = (agentId: string) => {
-    console.log('View details for agent:', agentId)
-    // You can implement a modal or navigate to a details page
-    alert(`Viewing details for agent ${agentId}`)
+    onViewDetails(agentId) // Use the dedicated View Details handler
   }
 
   const handleConfigure = (agentId: string) => {
-    console.log('Configure agent:', agentId)
-    // Navigate to configuration tab or open configuration modal
-    // For now, we'll show an alert
-    alert(`Opening configuration for agent ${agentId}. This would typically switch to the Configuration tab.`)
+    setConfigModalAgentId(Number(agentId))
   }
 
-  const handleToggleStatus = async (agentId: number, currentStatus: string) => {
+  const handleToggleStatus = async (agentId: string, currentStatus: string) => {
+    setStatusModalAgentId(Number(agentId))
+    setCurrentAgentStatus(currentStatus)
+  }
+  
+  const handleDelete = (agentId: string) => {
+    setDeleteModalAgentId(Number(agentId))
+  }
+  
+  const handleStatusChange = async (agentId: number, newStatus: string) => {
     try {
-      const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
-      const updatedAgent = await apiClient.request(`/api/agents/${agentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
-      })
-      console.log('Agent status updated:', updatedAgent)
+      if (newStatus === 'inactive') {
+        await stopAgentMutation.mutateAsync(agentId.toString())
+      } else if (newStatus === 'active') {
+        await startAgentMutation.mutateAsync(agentId.toString())
+      }
       
-      // Update the local state
-      setAgents(prevAgents => 
-        prevAgents.map((agent: any) => 
-          agent.id === agentId ? { ...agent, status: newStatus } : agent
-        )
-      )
-      
-      alert(`Agent status changed to ${newStatus}`)
+      // Refresh the agents list
+      onRefresh()
       
     } catch (error) {
       console.error('Error updating agent status:', error)
-      alert(`Error updating agent status: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   
-  const filteredAgents = agents.filter(agent =>
-    (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
-  )
+  const filteredAgents = agents.filter(agent => {
+    const matchesSearch = (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
+    
+    const matchesStatus = statusFilter === 'all' || agent.status === statusFilter
+    
+    return matchesSearch && matchesStatus
+  })
 
   if (loading) {
     return (
@@ -135,18 +154,6 @@ export function AgentRoster() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
           <p className="text-muted-foreground">Loading agents...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
-          <p className="text-red-500 mb-2">Error loading agents</p>
-          <p className="text-sm text-muted-foreground">{error}</p>
         </div>
       </div>
     )
@@ -180,11 +187,10 @@ export function AgentRoster() {
           return (
             <motion.div
               key={agent.id}
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
-              onClick={() => setSelectedAgent(agent.id.toString())}
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
@@ -205,15 +211,24 @@ export function AgentRoster() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleViewDetails(agent.id)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleViewDetails(agent.id.toString());
+                    }}>
                       <Eye className="w-4 h-4 mr-2" />
                       View Details
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleConfigure(agent.id)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleConfigure(agent.id);
+                    }}>
                       <Settings className="w-4 h-4 mr-2" />
                       Configure
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleToggleStatus(agent.id, agent.status)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation(); // Prevent card click
+                      handleToggleStatus(agent.id, agent.status);
+                    }}>
                       {agent.status === 'active' ? (
                         <>
                           <Pause className="w-4 h-4 mr-2" />
@@ -226,6 +241,16 @@ export function AgentRoster() {
                         </>
                       )}
                     </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent card click
+                        handleDelete(agent.id);
+                      }}
+                      className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -236,12 +261,12 @@ export function AgentRoster() {
                   <StatusIcon className="w-3 h-3 mr-1" />
                   {agent.status || 'active'}
                 </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {agent.performance_metrics?.success_rate ? 
-                    `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
-                    'N/A'
-                  }
-                </span>
+                  <span className="text-sm text-muted-foreground">
+                    {agent.performance_metrics?.success_rate != null ? 
+                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
+                      'N/A'
+                    }
+                  </span>
               </div>
 
               {/* Performance Bar */}
@@ -249,7 +274,7 @@ export function AgentRoster() {
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
                   <span>Success Rate</span>
                   <span>
-                    {agent.performance_metrics?.success_rate ? 
+                    {agent.performance_metrics?.success_rate != null ? 
                       `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
                       'N/A'
                     }
@@ -259,7 +284,7 @@ export function AgentRoster() {
                   <div 
                     className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
                     style={{ 
-                      width: `${agent.performance_metrics?.success_rate ? 
+                      width: `${agent.performance_metrics?.success_rate != null ? 
                         agent.performance_metrics.success_rate * 100 : 0}%` 
                     }}
                   />
@@ -319,6 +344,35 @@ export function AgentRoster() {
           </p>
         </motion.div>
       )}
+
+      {/* Agent Configuration Modal */}
+      <AgentConfigurationModal
+        agentId={configModalAgentId}
+        open={configModalAgentId !== null}
+        onClose={() => setConfigModalAgentId(null)}
+        onSave={(agentId, config) => {
+          onRefresh();
+        }}
+      />
+
+      {/* Agent Status Control Modal */}
+      <AgentStatusControlModal
+        agentId={statusModalAgentId}
+        currentStatus={currentAgentStatus}
+        open={statusModalAgentId !== null}
+        onClose={() => setStatusModalAgentId(null)}
+        onStatusChanged={handleStatusChange}
+      />
+
+      {/* Agent Confirm Delete Modal */}
+      <AgentConfirmDeleteModal
+        agentId={deleteModalAgentId}
+        open={deleteModalAgentId !== null}
+        onClose={() => setDeleteModalAgentId(null)}
+        onDeleted={() => {
+          onRefresh();
+        }}
+      />
     </div>
   )
 }

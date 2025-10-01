@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 
 """
 Database Configuration and Session Management
@@ -7,9 +10,8 @@ Database setup, connection management, and session handling for Automotas AI.
 """
 
 import os
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 import logging
 
@@ -17,28 +19,20 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-# Database configuration
+# Database configuration - PostgreSQL only from environment variables
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "sqlite:///./automatos_ai.db"
+    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
 )
 
-# Create engine with connection pooling
-if "sqlite" in DATABASE_URL:
-    engine = create_engine(
-        DATABASE_URL,
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-        echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
-    )
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-        echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
-    )
+# Create PostgreSQL engine with connection pooling
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    echo=os.getenv("SQL_DEBUG", "false").lower() == "true"
+)
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -80,7 +74,7 @@ def init_database():
         create_tables()
         
         with get_db_session() as db:
-            from .models import SystemConfiguration, RAGConfiguration
+            from models import SystemConfiguration, RAGConfiguration
             
             # Create default system configurations
             default_configs = [
@@ -146,14 +140,8 @@ def init_database():
         logger.error(f"Error initializing database: {e}")
         raise
 
-# Database event listeners
-@event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Set SQLite pragmas for better performance (if using SQLite)"""
-    if "sqlite" in DATABASE_URL:
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+# Database event listeners for PostgreSQL
+# No special connection setup needed for PostgreSQL
 
 if __name__ == "__main__":
     init_database()

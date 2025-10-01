@@ -5,7 +5,7 @@
  * Service layer for RAG/context management with real backend integration
  */
 
-import { apiClient, type RAGConfig, type Document } from './api';
+import { apiClient, type RAGConfig, type Document } from "./api-client";
 
 export interface ContextStats {
   contextQueries: number;

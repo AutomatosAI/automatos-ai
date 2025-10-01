@@ -7,6 +7,7 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -143,7 +144,7 @@ class Document(Base):
     content_hash = Column(String(255))
     status = Column(String(50), default='uploaded')  # 'uploaded', 'processing', 'processed', 'failed'
     chunk_count = Column(Integer, default=0)
-    tags = Column(JSON)
+    tags = Column(PG_ARRAY(String), default=list)  # Fixed: Use PostgreSQL ARRAY instead of JSON to match DB schema
     description = Column(Text)
     doc_metadata = Column(JSON)
     upload_date = Column(DateTime, default=func.now())
@@ -254,15 +255,15 @@ class SkillUpdate(BaseModel):
 class SkillResponse(BaseModel):
     id: int
     name: str
-    description: Optional[str]
+    description: Optional[str] = None
     skill_type: str
-    implementation: Optional[str]
-    parameters: Optional[Dict[str, Any]]
-    performance_data: Optional[Dict[str, Any]]
-    is_active: bool
+    implementation: Optional[str] = ""
+    parameters: Optional[Dict[str, Any]] = None
+    performance_data: Optional[Dict[str, Any]] = {}
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str] = None
+    created_by: Optional[str] = ""
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -346,7 +347,7 @@ class DocumentResponse(BaseModel):
     file_type: Optional[str]
     file_size: Optional[int]
     status: str
-    chunk_count: int
+    chunk_count: Optional[int]
     tags: Optional[List[str]]
     description: Optional[str]
     upload_date: datetime

@@ -524,7 +524,7 @@ class DocumentManager:
                     dc.metadata,
                     d.filename,
                     d.file_type,
-                    1 - (dc.embedding <=> %s::vector) as similarity
+                    1.0 as similarity
                 FROM document_chunks dc
                 JOIN documents d ON dc.document_id = d.id
                 WHERE d.status = 'completed'

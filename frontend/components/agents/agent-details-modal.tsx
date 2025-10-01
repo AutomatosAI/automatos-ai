@@ -30,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useAgent, useAgentStats, useAgentLogs } from '@/hooks/use-agent-api'
 
 interface AgentDetailsModalProps {
   agentId: number | null
@@ -110,95 +111,15 @@ export function AgentDetailsModal({
   onToggleStatus,
   onDelete 
 }: AgentDetailsModalProps) {
-  const [agent, setAgent] = useState<AgentDetails | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
 
-  useEffect(() => {
-    if (open && agentId) {
-      loadAgentDetails()
-    }
-  }, [open, agentId])
+  // Use real API hooks
+  const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
+  const { data: agentStats } = useAgentStats(agentId?.toString() || '')
+  const { data: agentLogs } = useAgentLogs(agentId?.toString() || '')
 
-  const loadAgentDetails = async () => {
-    if (!agentId) return
-    
-    setLoading(true)
-    setError(null)
-    
-    try {
-      // Mock data for demonstration - replace with actual API call
-      const mockAgent: AgentDetails = {
-        id: agentId,
-        name: 'Code Architect Agent',
-        description: 'Advanced code analysis and architecture design agent',
-        agent_type: 'code_architect',
-        status: 'active',
-        created_at: '2024-01-15T10:30:00Z',
-        updated_at: '2024-01-16T14:22:00Z',
-        performance_metrics: {
-          success_rate: 0.94,
-          avg_response_time: 1250,
-          tasks_completed: 156,
-          tasks_failed: 8,
-          uptime_hours: 72,
-          efficiency_score: 0.89
-        },
-        skills: [
-          {
-            id: 1,
-            name: 'Code Analysis',
-            description: 'Analyze code quality and structure',
-            skill_type: 'technical',
-            category: 'analysis',
-            is_active: true
-          },
-          {
-            id: 2,
-            name: 'Architecture Design',
-            description: 'Design system architecture',
-            skill_type: 'technical',
-            category: 'design',
-            is_active: true
-          }
-        ],
-        current_workload: {
-          active_workflows: 3,
-          queued_tasks: 7,
-          processing_capacity: 100,
-          current_utilization: 45
-        },
-        activity_timeline: [
-          {
-            timestamp: new Date(Date.now() - 300000).toISOString(),
-            event_type: 'task_completed',
-            description: 'Completed code analysis task',
-            status: 'success'
-          },
-          {
-            timestamp: new Date(Date.now() - 600000).toISOString(),
-            event_type: 'workflow_started',
-            description: 'Started new workflow execution',
-            status: 'info'
-          }
-        ],
-        resource_usage: {
-          memory_mb: 512,
-          cpu_percent: 35,
-          network_io: 245,
-          storage_mb: 128
-        }
-      }
-      
-      setAgent(mockAgent)
-    } catch (err) {
-      console.error('Error loading agent details:', err)
-      setError('Failed to load agent details')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const error = agentError?.message || null
+
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A'
@@ -323,7 +244,7 @@ export function AgentDetailsModal({
                 <div className="text-center">
                   <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
                   <p className="text-red-400 mb-4">Error: {error}</p>
-                  <Button onClick={loadAgentDetails} variant="outline">
+                  <Button onClick={() => window.location.reload()} variant="outline">
                     Try Again
                   </Button>
                 </div>
@@ -415,8 +336,8 @@ export function AgentDetailsModal({
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-green-400">
-                            {agent?.performance_metrics?.success_rate ? 
-                              `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
+                            {agentStats?.success_rate != null ? 
+                              `${(agentStats.success_rate * 100).toFixed(1)}%` : 
                               'N/A'
                             }
                           </p>
@@ -424,14 +345,14 @@ export function AgentDetailsModal({
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-blue-400">
-                            {agent?.performance_metrics?.tasks_completed || 0}
+                            {agentStats?.tasks_completed || 0}
                           </p>
                           <p className="text-sm text-muted-foreground">Tasks Done</p>
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-purple-400">
-                            {agent?.performance_metrics?.avg_response_time ? 
-                              `${agent.performance_metrics.avg_response_time}ms` : 
+                            {agentStats?.avg_response_time != null ? 
+                              `${agentStats.avg_response_time}ms` : 
                               'N/A'
                             }
                           </p>
@@ -458,26 +379,26 @@ export function AgentDetailsModal({
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>Success Rate</span>
-                            <span>{agent?.performance_metrics?.success_rate ? 
-                              `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 'N/A'}
+                            <span>{agentStats?.success_rate != null ? 
+                              `${(agentStats.success_rate * 100).toFixed(1)}%` : 'N/A'}
                             </span>
                           </div>
                           <Progress 
-                            value={agent?.performance_metrics?.success_rate ? 
-                              agent.performance_metrics.success_rate * 100 : 0} 
+                            value={agentStats?.success_rate != null ? 
+                              agentStats.success_rate * 100 : 0} 
                             className="h-2"
                           />
                         </div>
                         <div className="pt-4 grid grid-cols-2 gap-4 text-center">
                           <div>
                             <p className="text-lg font-semibold text-green-400">
-                              {agent?.performance_metrics?.tasks_completed || 0}
+                              {agentStats?.tasks_completed || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Completed</p>
                           </div>
                           <div>
                             <p className="text-lg font-semibold text-red-400">
-                              {agent?.performance_metrics?.tasks_failed || 0}
+                              {agentStats?.tasks_failed || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Failed</p>
                           </div>
@@ -493,16 +414,19 @@ export function AgentDetailsModal({
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>CPU Usage</span>
-                            <span>{agent?.resource_usage?.cpu_percent}%</span>
+                            <span>{agent?.resource_usage?.cpu_percent || 0}%</span>
                           </div>
                           <Progress value={agent?.resource_usage?.cpu_percent || 0} className="h-2" />
                         </div>
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>Memory Usage</span>
-                            <span>{agent?.resource_usage?.memory_mb} MB</span>
+                            <span>{agent?.resource_usage?.memory_mb || 0} MB</span>
                           </div>
-                          <Progress value={(agent?.resource_usage?.memory_mb || 0) / 10.24} className="h-2" />
+                          <Progress 
+                            value={Math.min((agent?.resource_usage?.memory_mb || 0) / 80, 100)} 
+                            className="h-2" 
+                          />
                         </div>
                       </CardContent>
                     </Card>

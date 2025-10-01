@@ -6,7 +6,7 @@ Context Engineering API Router
 Enhanced API endpoints for context engineering features with comprehensive Swagger documentation.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Body
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
@@ -25,28 +25,28 @@ logger = logging.getLogger(__name__)
 
 # Pydantic models for API
 class EntropyRequest(BaseModel):
-    text: str = Field(..., description="Text to calculate entropy for", example="Hello world")
+    text: str = Body(..., description="Text to calculate entropy for", example="Hello world")
 
 class EntropyResponse(BaseModel):
-    text: str = Field(..., description="Input text")
-    entropy: float = Field(..., description="Shannon entropy value")
-    bits: float = Field(..., description="Entropy in bits")
+    text: str = Body(..., description="Input text")
+    entropy: float = Body(..., description="Shannon entropy value")
+    bits: float = Body(..., description="Entropy in bits")
 
 class VectorRequest(BaseModel):
-    vectors: List[List[float]] = Field(..., description="List of vectors for operations")
+    vectors: List[List[float]] = Body(..., description="List of vectors for operations")
     
 class SimilarityRequest(BaseModel):
-    vector1: List[float] = Field(..., description="First vector")
-    vector2: List[float] = Field(..., description="Second vector")
-    metric: str = Field(default="cosine", description="Distance metric to use")
+    vector1: List[float] = Body(..., description="First vector")
+    vector2: List[float] = Body(..., description="Second vector")
+    metric: str = Body(default="cosine", description="Distance metric to use")
 
 class SimilarityResponse(BaseModel):
-    metric: str = Field(..., description="Distance metric used")
-    similarity: float = Field(..., description="Similarity score")
-    distance: float = Field(..., description="Distance value")
+    metric: str = Body(..., description="Distance metric used")
+    similarity: float = Body(..., description="Similarity score")
+    distance: float = Body(..., description="Distance value")
 
 class StatsRequest(BaseModel):
-    data: List[float] = Field(..., description="Numerical data for analysis")
+    data: List[float] = Body(..., description="Numerical data for analysis")
 
 class StatsResponse(BaseModel):
     mean: float
@@ -186,58 +186,58 @@ async def analyze_statistics(request: StatsRequest):
 @router.post("/graph/centrality",
              summary="Calculate Graph Centrality",
              description="Calculate various centrality measures for graph nodes")
-async def calculate_centrality(
-    edges: List[List[int]] = Field(..., description="Graph edges as list of [source, target] pairs"),
-    centrality_type: str = Query("betweenness", description="Type of centrality: betweenness, closeness, eigenvector")
-):
-    """Calculate graph centrality measures"""
-    try:
-        if centrality_type == "betweenness":
-            centrality = graph_theory.betweenness_centrality(edges)
-        elif centrality_type == "closeness": 
-            centrality = graph_theory.closeness_centrality(edges)
-        elif centrality_type == "eigenvector":
-            centrality = graph_theory.eigenvector_centrality(edges)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported centrality type")
-            
-        return {
-            "edges": edges,
-            "centrality_type": centrality_type,
-            "centrality_scores": centrality
-        }
-    except Exception as e:
-        logger.error(f"Error calculating centrality: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# async def calculate_centrality(
+#     edges: List[List[int]] = Body(..., description="Graph edges as list of [source, target] pairs"),
+#     centrality_type: str = Query("betweenness", description="Type of centrality: betweenness, closeness, eigenvector")
+# ):
+#     """Calculate graph centrality measures"""
+#     try:
+#         if centrality_type == "betweenness":
+#             centrality = graph_theory.betweenness_centrality(edges)
+#         elif centrality_type == "closeness": 
+#             centrality = graph_theory.closeness_centrality(edges)
+#         elif centrality_type == "eigenvector":
+#             centrality = graph_theory.eigenvector_centrality(edges)
+#         else:
+#             raise HTTPException(status_code=400, detail="Unsupported centrality type")
+#             
+#         return {
+#             "edges": edges,
+#             "centrality_type": centrality_type,
+#             "centrality_scores": centrality
+#         }
+#     except Exception as e:
+#         logger.error(f"Error calculating centrality: {e}")
+#        raise HTTPException(status_code=500, detail=str(e))
 
 # Optimization Endpoints  
 @router.post("/optimize/gradient-descent",
              summary="Gradient Descent Optimization",
              description="Perform gradient descent optimization on a function")
-async def gradient_descent(
-    initial_point: List[float] = Field(..., description="Initial point for optimization"),
-    learning_rate: float = Field(0.01, description="Learning rate for optimization"),
-    iterations: int = Field(100, description="Number of iterations")
-):
-    """Perform gradient descent optimization"""
-    try:
-        # This is a simple quadratic function optimization example
-        result = optimization.gradient_descent(
-            initial_point=initial_point,
-            learning_rate=learning_rate,
-            max_iterations=iterations
-        )
-        
-        return {
-            "initial_point": initial_point,
-            "optimized_point": result["point"],
-            "final_value": result["value"],
-            "iterations_used": result["iterations"],
-            "converged": result["converged"]
-        }
-    except Exception as e:
-        logger.error(f"Error in gradient descent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# async def gradient_descent(
+#     initial_point: List[float] = Body(..., description="Initial point for optimization"),
+#     learning_rate: float = Body(0.01, description="Learning rate for optimization"),
+#     iterations: int = Body(100, description="Number of iterations")
+# ):
+#     """Perform gradient descent optimization"""
+#     try:
+#         # This is a simple quadratic function optimization example
+#         result = optimization.gradient_descent(
+#             initial_point=initial_point,
+#             learning_rate=learning_rate,
+#             max_iterations=iterations
+#         )
+#         
+#         return {
+#             "initial_point": initial_point,
+#             "optimized_point": result["point"],
+#             "final_value": result["value"],
+#             "iterations_used": result["iterations"],
+#             "converged": result["converged"]
+#         }
+#     except Exception as e:
+#         logger.error(f"Error in gradient descent: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 # Context Retrieval & Generation Endpoints (Phase 3)
 
@@ -245,10 +245,10 @@ async def gradient_descent(
              summary="Semantic Text Chunking",
              description="Chunk text using advanced semantic algorithms with multiple strategies")
 async def chunk_text(
-    text: str = Field(..., description="Text to chunk"),
-    strategy: str = Field("semantic_similarity", description="Chunking strategy"),
-    target_size: int = Field(1000, description="Target chunk size"),
-    overlap_ratio: float = Field(0.1, description="Overlap ratio between chunks")
+    text: str = Body(..., description="Text to chunk"),
+    strategy: str = Body("semantic_similarity", description="Chunking strategy"),
+    target_size: int = Body(1000, description="Target chunk size"),
+    overlap_ratio: float = Body(0.1, description="Overlap ratio between chunks")
 ):
     """Perform semantic text chunking"""
     try:
@@ -306,8 +306,8 @@ async def chunk_text(
              summary="Advanced Query Processing",
              description="Process and expand queries with intent classification and semantic expansion")
 async def process_query(
-    query_text: str = Field(..., description="Query text to process"),
-    context: Optional[Dict[str, Any]] = Field(None, description="Additional context information")
+    query_text: str = Body(..., description="Query text to process"),
+    context: Optional[Dict[str, Any]] = Body(None, description="Additional context information")
 ):
     """Process and expand a query"""
     try:
@@ -356,9 +356,9 @@ async def process_query(
              summary="Multi-Modal Content Processing", 
              description="Process content with automatic modality detection and specialized processing")
 async def process_content(
-    content: str = Field(..., description="Content to process"),
-    source_info: Optional[Dict[str, Any]] = Field(None, description="Source information"),
-    force_modality: Optional[str] = Field(None, description="Force specific modality")
+    content: str = Body(..., description="Content to process"),
+    source_info: Optional[Dict[str, Any]] = Body(None, description="Source information"),
+    force_modality: Optional[str] = Body(None, description="Force specific modality")
 ):
     """Process multi-modal content"""
     try:

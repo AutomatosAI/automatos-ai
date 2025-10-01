@@ -1,7 +1,6 @@
 
 """
 Multi-Agent Coordination Manager
-================================
 
 Advanced coordination strategies for multi-agent systems with:
 - Load balancing and resource allocation
@@ -30,6 +29,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 # Import models
+from models import Agent, Workflow, WorkflowExecution
 from models import Task, Agent, Workflow
 from database.database import get_db
 
@@ -115,8 +115,8 @@ class CoordinationManager:
         
         try:
             # Retrieve task
-            db_task = db.query(Task).filter(
-                and_(Task.id == task_id, Task.owner_id == user_id)
+            db_task = db.query(WorkflowExecution).filter(
+                and_(WorkflowExecution.id == task_id, WorkflowExecution.user_id == user_id)
             ).first()
             
             if not db_task:
@@ -239,7 +239,7 @@ class CoordinationManager:
     def _select_coordination_strategy(
         self,
         agents: List[str],
-        task: Task,
+        task: WorkflowExecution,
         context: Optional[Dict[str, Any]] = None
     ) -> CoordinationStrategy:
         """Automatically select optimal coordination strategy"""
@@ -268,11 +268,11 @@ class CoordinationManager:
         else:
             return CoordinationStrategy.MESH
     
-    def _estimate_task_complexity(self, task: Task) -> float:
+    def _estimate_task_complexity(self, task: WorkflowExecution) -> float:
         """Estimate task complexity based on description and requirements"""
         
         # Simple complexity estimation
-        content = f"{task.title} {task.description or ''}"
+        content = f"{task.workflow.name if task.workflow else ''} {task.workflow.description if task.workflow and task.workflow.description else ''}"
         word_count = len(content.split())
         
         # Complexity factors
@@ -295,7 +295,7 @@ class CoordinationManager:
     async def _create_coordination_plan(
         self,
         db: Session,
-        task: Task,
+        task: WorkflowExecution,
         agents: List[str],
         strategy: CoordinationStrategy,
         context: Optional[Dict[str, Any]] = None
@@ -426,7 +426,7 @@ class CoordinationManager:
     async def _assign_tasks_to_agents(
         self,
         agents: List[str],
-        task: Task,
+        task: WorkflowExecution,
         strategy: CoordinationStrategy
     ) -> Dict[str, List[int]]:
         """Assign task components to agents based on load balancing"""

@@ -6,7 +6,7 @@ import { X, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { apiClient } from '@/lib/api'
+import { apiClient } from "@/lib/api-client"
 
 export function RunWorkflowModal({ open, onClose, id }: { open: boolean; onClose: () => void; id: string }) {
   const [input, setInput] = React.useState('{"query":"hello"}')

@@ -24,6 +24,9 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
+// API hooks
+import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
+
 interface CreateAgentModalProps {
   open: boolean
   onClose: () => void
@@ -81,13 +84,7 @@ const agentTypes = [
   }
 ]
 
-const availableSkills = [
-  'code_analysis', 'debugging', 'refactoring', 'test_generation', 'documentation',
-  'vulnerability_scanning', 'threat_modeling', 'compliance_check', 'security_audit',
-  'performance_analysis', 'bottleneck_detection', 'optimization', 'profiling',
-  'data_processing', 'pattern_recognition', 'report_generation', 'visualization',
-  'deployment', 'scaling', 'monitoring', 'resource_management', 'ci_cd'
-]
+// Skills will be loaded dynamically from the API
 
 export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalProps) {
   const [step, setStep] = useState(1)
@@ -102,6 +99,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     autoStart: true
   })
 
+  // API hooks
+  const createAgentMutation = useCreateAgent()
+  const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
+
   const handleSkillToggle = (skill: string) => {
     setAgentData(prev => ({
       ...prev,
@@ -111,22 +112,48 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     }))
   }
 
-  const handleCreate = () => {
-    // Create agent logic here
-    console.log('Creating agent:', agentData)
-    onClose()
-    // Reset form
-    setAgentData({
-      name: '',
-      type: '',
-      description: '',
-      skills: [],
-      specializations: [],
-      maxConcurrentTasks: 3,
-      priority: 'normal',
-      autoStart: true
-    })
-    setStep(1)
+  const handleCreate = async () => {
+    if (!agentData.name || !agentData.type) {
+      return // Prevent submission with missing required fields
+    }
+
+    try {
+      // Prepare agent payload
+      const agentPayload = {
+        name: agentData.name,
+        agent_type: agentData.type,
+        description: agentData.description || '', // Ensure empty string for null
+        skills: agentData.skills, // Skills IDs array - passed directly to API
+        configuration: {
+          specializations: agentData.specializations || [],
+          maxConcurrentTasks: agentData.maxConcurrentTasks || 3,
+          priority: agentData.priority || 'normal',
+          autoStart: agentData.autoStart !== undefined ? agentData.autoStart : true
+        }
+      }
+      
+      // Create the agent
+      const newAgent = await createAgentMutation.mutateAsync(agentPayload)
+      
+      // Notify parent component and close modal
+      onSuccess() 
+      onClose()
+      
+      // Reset form
+      setAgentData({
+        name: '',
+        type: '',
+        description: '',
+        skills: [],
+        specializations: [],
+        maxConcurrentTasks: 3,
+        priority: 'normal',
+        autoStart: true
+      })
+      setStep(1)
+    } catch (error) {
+      console.error('Failed to create agent:', error)
+    }
   }
 
   const selectedType = agentTypes.find(type => type.type === agentData.type)
@@ -358,25 +385,37 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       <p className="text-sm text-muted-foreground mb-4">
                         Select the skills your agent should possess
                       </p>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                        {availableSkills.map(skill => (
-                          <motion.div
-                            key={skill}
-                            className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
-                              agentData.skills.includes(skill)
-                                ? 'border-primary bg-primary/10'
-                                : 'border-border/50 hover:border-primary/30'
-                            }`}
-                            onClick={() => handleSkillToggle(skill)}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                          >
-                            <span className="text-sm font-medium">
-                              {skill.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                            </span>
-                          </motion.div>
-                        ))}
-                      </div>
+                      {skillsLoading ? (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                            {[1, 2, 3, 4, 5, 6].map((i) => (
+                              <div key={i} className="p-3 rounded-lg border border-border/50 animate-pulse bg-secondary/20">
+                                <div className="h-5 w-20 bg-secondary rounded" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                          {availableSkillsData.map((skill) => (
+                            <motion.div
+                              key={skill.id}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
+                                agentData.skills.includes(skill.id)
+                                  ? 'border-primary bg-primary/10'
+                                  : 'border-border/50 hover:border-primary/30'
+                              }`}
+                              onClick={() => handleSkillToggle(skill.id)}
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <span className="text-sm font-medium">
+                                {skill.name}
+                              </span>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex justify-between items-center pt-6 border-t border-border/30">
@@ -415,10 +454,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      disabled={!agentData.name || !agentData.type}
+                      disabled={!agentData.name || !agentData.type || createAgentMutation.isPending}
                       className="gradient-accent hover:opacity-90"
                     >
-                      Create Agent
+                      {createAgentMutation.isPending ? 'Creating...' : 'Create Agent'}
                     </Button>
                   )}
                 </div>

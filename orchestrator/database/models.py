@@ -7,13 +7,15 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Union,  Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
+from uuid import uuid4
 
 # DEPRECATED: This module is deprecated. Use `automatos-ai/orchestrator/models.py` instead.
 # Keeping this file as a shim to avoid breaking external imports during transition.
@@ -275,16 +277,16 @@ class SkillUpdate(BaseModel):
 class SkillResponse(BaseModel):
     id: int
     name: str
-    description: Optional[str]
+    description: Optional[str] = None
     skill_type: str
     category: str
-    implementation: Optional[str]
-    parameters: Optional[Dict[str, Any]]
-    performance_data: Optional[Dict[str, Any]]
-    is_active: bool
+    implementation: Optional[str] = ""
+    parameters: Optional[Dict[str, Any]] = None
+    performance_data: Optional[Dict[str, Any]] = {}
+    is_active: bool = True
     created_at: datetime
     updated_at: datetime
-    created_by: Optional[str]
+    created_by: Optional[str] = ""
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -366,7 +368,7 @@ class DocumentResponse(BaseModel):
     file_type: Optional[str]
     file_size: Optional[int]
     status: str
-    chunk_count: int
+    chunk_count: Optional[int]
     tags: Optional[List[str]]
     description: Optional[str]
     upload_date: datetime
@@ -456,3 +458,340 @@ class SystemMetrics(BaseModel):
     active_connections: int
     total_requests: int
     error_rate: float
+
+# Memory-related models for API compatibility
+class MemoryItemCreate(BaseModel):
+    session_id: str
+    content: Union[Dict[str, Any], str]  # Can be dict or JSON string
+    memory_type: str = "working_data"
+    importance: Optional[float] = 0.5
+    tags: Optional[List[str]] = []
+    context: Optional[Dict] = None
+    
+class MemoryItemResponse(BaseModel):
+    id: str
+    content: str
+    context: Optional[Dict] = None
+    tags: List[str] = []
+    created_at: datetime
+    
+class ExternalKnowledgeCreate(BaseModel):
+    source: str
+    content: str
+    metadata: Optional[Dict] = None
+    
+class ExternalKnowledgeResponse(BaseModel):
+    id: str
+    source: str
+    content: str
+    metadata: Optional[Dict] = None
+    created_at: datetime
+
+# Evaluation-related models
+class EvaluationResult(BaseModel):
+    score: float
+    metrics: Dict[str, Any]
+    timestamp: datetime
+    
+class EvaluationResultCreate(BaseModel):
+    score: float
+    metrics: Dict[str, Any]
+    
+class EvaluationResultResponse(BaseModel):
+    id: str
+    score: float
+    metrics: Dict[str, Any]
+    timestamp: datetime
+    
+class EvaluationMetricCreate(BaseModel):
+    name: str
+    value: float
+    
+class EvaluationMetricResponse(BaseModel):
+    id: str
+    name: str
+    value: float
+    
+class EvaluationReportCreate(BaseModel):
+    title: str
+    results: List[Dict]
+    
+class EvaluationReportResponse(BaseModel):
+    id: str
+    title: str
+    results: List[Dict]
+    created_at: datetime
+
+# Additional evaluation models
+class BenchmarkAssessment(BaseModel):
+    name: str
+    score: float
+    details: Dict[str, Any]
+    
+class ComponentMetricsDB(BaseModel):
+    component_id: str
+    metrics: Dict[str, Any]
+    
+class IntegrationAnalysisDB(BaseModel):
+    integration_id: str
+    analysis: Dict[str, Any]
+
+# Tool-related models for API compatibility
+class ToolCredentials(BaseModel):
+    tool_name: str
+    credentials: Dict[str, Any]
+    
+class ToolConfig(BaseModel):
+    name: str
+    config: Dict[str, Any]
+
+# Tool model
+class Tool(BaseModel):
+    id: Optional[str] = None
+    name: str
+    description: Optional[str] = None
+    type: Optional[str] = None
+    config: Optional[Dict] = None
+    
+class CredentialAuditLog(BaseModel):
+    id: Optional[str] = None
+    action: str
+    user_id: Optional[str] = None
+    timestamp: datetime
+    details: Optional[Dict] = None
+
+# Additional missing models
+class ToolConfiguration(BaseModel):
+    id: Optional[str] = None
+    tool_id: str
+    config: Dict[str, Any]
+    
+class ToolUsageLog(BaseModel):
+    id: Optional[str] = None
+    tool_id: str
+    user_id: Optional[str] = None
+    timestamp: datetime
+    result: Optional[Dict] = None
+
+class AgentToolPermission(BaseModel):
+    id: Optional[str] = None
+    agent_id: str
+    tool_id: str
+    environment: Optional[str] = None
+    is_active: bool = True
+    
+class PermissionAuditLog(BaseModel):
+    id: Optional[str] = None
+    action: str
+    user_id: Optional[str] = None
+    timestamp: datetime
+    details: Optional[Dict] = None
+
+# Database models for Evaluation
+class EvaluationResultDB(Base):
+    __tablename__ = 'evaluation_results'
+    
+    id = Column(Integer, primary_key=True)
+    evaluation_id = Column(String(255), unique=True, nullable=False)
+    target_id = Column(String(255), nullable=False)
+    evaluation_type = Column(String(100), nullable=False)
+    score = Column(Float)
+    metrics = Column(JSON)
+    recommendations = Column(JSON)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+# Database models for Permissions
+class AgentToolPermissionDB(Base):
+    __tablename__ = 'agent_tool_permissions'
+    
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(String(255), nullable=False)
+    tool_id = Column(String(255), nullable=False)
+    environment = Column(String(100))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+class PermissionAuditLogDB(Base):
+    __tablename__ = 'permission_audit_logs'
+    
+    id = Column(Integer, primary_key=True)
+    action = Column(String(100), nullable=False)
+    user_id = Column(String(255))
+    timestamp = Column(DateTime, default=func.now())
+    details = Column(JSON)
+
+
+# SQLAlchemy Tool model (replacing Pydantic one)
+class ToolDB(Base):
+    __tablename__ = 'tools'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    description = Column(Text)
+    category = Column(String)
+    provider = Column(String)
+    version = Column(String)
+    icon = Column(String)
+    pricing = Column(String)
+    tags = Column(JSON, default=list)
+    permissions = Column(JSON, default=list)
+    required_credentials = Column(JSON, default=list)
+    supported_environments = Column(JSON, default=list)
+    mcp_config = Column(JSON)
+    status = Column(String, default='available')
+    is_installed = Column(Boolean, default=False)
+    installation_date = Column(DateTime)
+    last_used = Column(DateTime)
+    usage_count = Column(Integer, default=0)
+    rating = Column(Float, default=0.0)
+    created_at = Column(DateTime, server_default=func.now())
+    last_updated = Column(DateTime, onupdate=func.now())
+
+# Rename the old Tool to be clear it's Pydantic
+ToolPydantic = Tool
+Tool = ToolDB
+
+# SQLAlchemy CredentialAuditLog model
+class CredentialAuditLogDB(Base):
+    __tablename__ = 'credential_audit_logs'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    credential_id = Column(String, index=True)
+    tool_id = Column(String, index=True)
+    action = Column(String)  # created, updated, deleted, accessed, tested
+    user_id = Column(String)
+    timestamp = Column(DateTime, server_default=func.now())
+    details = Column(JSON)
+    ip_address = Column(String)
+    user_agent = Column(String)
+    success = Column(Boolean)
+    error_message = Column(Text)
+
+CredentialAuditLog = CredentialAuditLogDB
+
+# SQLAlchemy ToolCredentials model
+class ToolCredentialsDB(Base):
+    __tablename__ = 'tool_credentials'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tool_id = Column(String, index=True)
+    tool_name = Column(String)
+    credential_key = Column(String)
+    encrypted_value = Column(Text)
+    environment = Column(String, default='production')
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+    created_by = Column(String)
+    is_active = Column(Boolean, default=True)
+    extra_metadata = Column(JSON)
+
+# Update reference
+ToolCredentialsPydantic = ToolCredentials
+ToolCredentials = ToolCredentialsDB
+
+# ============================================================================
+# PRD-04: Inter-Agent Communication & Collaboration Models
+# ============================================================================
+
+class AgentMessage(Base):
+    """Tracks messages exchanged between agents"""
+    __tablename__ = 'agent_messages'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    from_agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    to_agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    message_type = Column(String(50), nullable=False)
+    content = Column(JSON, nullable=False)
+    priority = Column(Integer, default=5)
+    status = Column(String(50), default='sent')  # sent, delivered, read, acknowledged
+    requires_ack = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=func.now())
+    delivered_at = Column(DateTime)
+    read_at = Column(DateTime)
+    acknowledged_at = Column(DateTime)
+
+class SharedContext(Base):
+    """Shared memory spaces for agent teams"""
+    __tablename__ = 'shared_contexts'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    name = Column(String(255))
+    team_id = Column(String(255))
+    context_data = Column(JSON, nullable=False)
+    version = Column(Integer, default=1)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey('agents.id'))
+
+class ContextPermission(Base):
+    """Permissions for shared contexts"""
+    __tablename__ = 'context_permissions'
+    
+    id = Column(Integer, primary_key=True)
+    context_id = Column(String(255), ForeignKey('shared_contexts.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'))
+    permission_level = Column(String(50), default='read')  # read, write, admin
+    granted_at = Column(DateTime, default=func.now())
+    granted_by = Column(Integer, ForeignKey('agents.id'))
+
+class CollaborationSession(Base):
+    """Records of multi-agent collaborative problem solving"""
+    __tablename__ = 'collaboration_sessions'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    problem_id = Column(Integer, ForeignKey('tasks.id'))
+    problem_description = Column(Text)
+    team_agents = Column(JSON)  # Array of agent IDs
+    strategy = Column(String(50), default='ensemble')  # ensemble, hierarchical, specialized, consensus
+    shared_context_id = Column(UUID(as_uuid=True), ForeignKey('shared_contexts.id'))
+    status = Column(String(50), default='pending')  # pending, active, completed, failed
+    result = Column(JSON)
+    consensus_data = Column(JSON)
+    metrics = Column(JSON)  # Performance metrics
+    started_at = Column(DateTime, default=func.now())
+    completed_at = Column(DateTime)
+
+class CollaborationProposal(Base):
+    """Individual agent proposals during collaboration"""
+    __tablename__ = 'collaboration_proposals'
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id'))
+    proposal_type = Column(String(50))  # solution, insight, feedback
+    proposal_content = Column(JSON, nullable=False)
+    confidence = Column(Float, default=0.5)
+    tokens_used = Column(Integer)
+    execution_time = Column(Float)
+    created_at = Column(DateTime, default=func.now())
+
+class ConsensusVote(Base):
+    """Voting records for consensus building"""
+    __tablename__ = 'consensus_votes'
+    
+    id = Column(Integer, primary_key=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey('collaboration_sessions.id', ondelete='CASCADE'))
+    proposal_id = Column(Integer, ForeignKey('collaboration_proposals.id', ondelete='CASCADE'))
+    agent_id = Column(Integer, ForeignKey('agents.id'))
+    vote_weight = Column(Float, default=1.0)
+    vote_value = Column(String(50))  # approve, reject, abstain
+    reasoning = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+
+class MessageBroadcast(Base):
+    """Tracking for team broadcast messages"""
+    __tablename__ = 'message_broadcasts'
+    
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
+    from_agent_id = Column(Integer, ForeignKey('agents.id'))
+    team_agents = Column(JSON)  # Array of agent IDs
+    message_type = Column(String(50))
+    content = Column(JSON)
+    priority = Column(Integer, default=5)
+    delivered_to = Column(JSON)  # Array of successfully delivered agent IDs
+    failed_deliveries = Column(JSON)  # Array of failed agent IDs
+    created_at = Column(DateTime, default=func.now())
+

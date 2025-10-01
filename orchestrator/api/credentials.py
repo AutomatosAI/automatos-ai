@@ -2,7 +2,6 @@
 
 """
 Credentials Management API Routes
-=================================
 
 Secure credential storage and management for tools with encryption,
 environment separation, and audit logging.
@@ -20,6 +19,7 @@ import base64
 import os
 
 from database.database import get_db
+from database.models import ToolCredentials, Tool, CredentialAuditLog
 from models import ToolCredentials, Tool, CredentialAuditLog
 from utils.logging_adapter import set_request_id
 import uuid
