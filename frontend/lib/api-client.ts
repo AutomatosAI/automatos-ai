@@ -22,6 +22,19 @@
     code?: string
   }
 
+  export interface RAGConfig {
+    id?: number
+    name: string
+    embedding_model: string
+    chunk_size: number
+    chunk_overlap: number
+    retrieval_strategy: string
+    top_k: number
+    similarity_threshold: number
+    configuration?: any
+    is_active?: boolean
+  }
+
   // Mock configuration interface
   interface MockConfig {
     enabled: boolean
@@ -44,7 +57,7 @@
     'dashboard': false,        // ✅ Use real APIs - working endpoints
     'agents': false,           // ✅ Use real APIs - working endpoints (FIXED: recursive call bug)
     'workflows': false,        // ✅ Use real APIs - working endpoints
-    'documents': false,       // false = REAL APIs ✅ | true = MOCK data ❌
+    'documents': false,        // false = REAL APIs ✅ | true = MOCK data ❌
     'analytics': false,        // ✅ Use real APIs - working endpoints
     'context': false,          // ✅ Use real APIs - all context endpoints working
     'memory': false,           // ✅ Use real APIs - all memory endpoints working
@@ -69,15 +82,15 @@
     private mockData: Record<string, () => any>
     private currentPage: string = '' // Track which page is making requests
   
-    constructor() {
-      // Use empty string to make relative URLs (will use current origin)
-      // This way /api/agents will work correctly with our Next.js API routes
-      this.baseUrl = ''
-      
-      // Get API key from environment variables
-      const apiKey = typeof window !== 'undefined' 
-        ? (window as any).NEXT_PUBLIC_API_KEY || process.env.NEXT_PUBLIC_API_KEY
-        : process.env.NEXT_PUBLIC_API_KEY
+  constructor() {
+    // CRITICAL: Point directly to production backend since Next.js proxy is disabled
+    // Frontend runs locally on Mac, backend on remote server
+    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
+    
+    // Get API key from environment variables
+    const apiKey = typeof window !== 'undefined' 
+      ? (window as any).NEXT_PUBLIC_API_KEY || process.env.NEXT_PUBLIC_API_KEY
+      : process.env.NEXT_PUBLIC_API_KEY
       
       this.defaultHeaders = {
         'Content-Type': 'application/json',
@@ -1339,13 +1352,17 @@
       return this.request('/api/context/patterns')
     }
 
-    async getContextPerformance() {
-      return this.request('/api/context/performance')
-    }
+  async getContextPerformance(timeRange: string = '24h') {
+    return this.request(`/api/context/performance?time_range=${timeRange}`)
+  }
 
-    async getRecentContextQueries() {
-      return this.request('/api/context/queries/recent')
-    }
+  async getRecentContextQueries() {
+    return this.request('/api/context/queries/recent')
+  }
+
+  async getOptimizationRecommendations() {
+    return this.request('/api/context/optimize')
+  }
 
     // ===== ANALYTICS ENDPOINTS =====
     async getPerformanceEnhancements() {
@@ -1661,6 +1678,36 @@
   // ===== EVALUATION ENDPOINTS (Working ✅) =====
   async getPerformanceMetrics() {
     return this.request('/api/evaluation/performance-metrics')
+  }
+
+  // ===== RAG CONFIGURATION ENDPOINTS =====
+  async createRAGConfig(config: Omit<RAGConfig, 'id'>): Promise<RAGConfig> {
+    return this.request('/api/context/rag/config', {
+      method: 'POST',
+      body: JSON.stringify(config)
+    })
+  }
+
+  async updateRAGConfig(id: number, config: Partial<RAGConfig>): Promise<RAGConfig> {
+    return this.request(`/api/context/rag/config/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(config)
+    })
+  }
+
+  async deleteRAGConfig(id: number): Promise<void> {
+    return this.request(`/api/context/rag/config/${id}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async testRAGConfig(id: number, query: string): Promise<any> {
+    console.log('[API] testRAGConfig called:', { id, query })
+    const result = await this.request(`/api/context/rag/${id}/test?query=${encodeURIComponent(query)}`, {
+      method: 'POST'
+    })
+    console.log('[API] testRAGConfig result:', result)
+    return result
   }
 }
   

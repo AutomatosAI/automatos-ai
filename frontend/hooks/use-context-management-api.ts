@@ -30,10 +30,10 @@ export function useContextStats() {
 }
 
 // Get context performance
-export function useContextPerformance() {
+export function useContextPerformance(timeRange: string = '24h') {
   return useQuery({
-    queryKey: contextManagementQueryKeys.contextPerformance,
-    queryFn: () => apiClient.getContextPerformance(),
+    queryKey: [...contextManagementQueryKeys.contextPerformance, timeRange],
+    queryFn: () => apiClient.getContextPerformance(timeRange),
     refetchInterval: 30000,
     staleTime: 15000,
   })
@@ -132,15 +132,25 @@ export function useUpdateContextPerformance() {
   })
 }
 
-// Optimize context
+// Get optimization recommendations (query)
+export function useOptimizationRecommendations() {
+  return useQuery({
+    queryKey: ['context', 'optimization'],
+    queryFn: () => apiClient.getOptimizationRecommendations(),
+    staleTime: 60000, // Cache for 1 minute
+    refetchInterval: false, // Don't auto-refetch
+  })
+}
+
+// Trigger optimization analysis (mutation for manual refresh)
 export function useOptimizeContext() {
   const queryClient = useQueryClient()
   
   return useMutation({
-    mutationFn: (data: any) => apiClient.updateSystemConfig(data),
+    mutationFn: () => apiClient.getOptimizationRecommendations(),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['context'] })
-      toast.success('Context optimization completed!')
+      queryClient.setQueryData(['context', 'optimization'], data)
+      toast.success('Optimization analysis complete!')
       return data
     },
     onError: (error) => {

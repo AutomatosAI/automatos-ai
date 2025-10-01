@@ -35,9 +35,12 @@ import {
   useRecentContextQueries,
   useContextPatterns,
   useTestContextRAG,
-  useOptimizeContext
+  useOptimizeContext,
+  useOptimizationRecommendations
 } from '@/hooks/use-context-management-api'
 import { RAGContextBuilder } from './rag-context-builder'
+import { ConfigureRAGModal } from './configure-rag-modal'
+import { PatternDetailsModal } from './pattern-details-modal'
 
 const confidenceColors = {
   high: 'text-green-400',
@@ -54,6 +57,8 @@ const getConfidenceLevel = (confidence: number) => {
 export function ContextEngineering() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('24h')
   const [searchTerm, setSearchTerm] = useState('')
+  const [configureModalOpen, setConfigureModalOpen] = useState(false)
+  const [selectedPattern, setSelectedPattern] = useState<any>(null)
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -61,10 +66,11 @@ export function ContextEngineering() {
 
   // Use real API hooks - they will call API and fallback to mock if needed
   const { data: contextStats, isLoading: statsLoading, refetch: refetchStats } = useContextStats()
-  const { data: performanceData, isLoading: perfLoading } = useContextPerformance()
+  const { data: performanceData, isLoading: perfLoading } = useContextPerformance(selectedTimeRange)
   const { data: contextSources, isLoading: sourcesLoading } = useContextSources()
   const { data: recentQueries, isLoading: queriesLoading } = useRecentContextQueries()
   const { data: contextPatterns, isLoading: patternsLoading } = useContextPatterns()
+  const { data: optimizationData, isLoading: optimizationLoading, refetch: refetchOptimization } = useOptimizationRecommendations()
   
   // Mutations
   const testRAGMutation = useTestContextRAG()
@@ -77,29 +83,29 @@ export function ContextEngineering() {
   const contextStatsCards = useMemo(() => [
     {
       label: 'Context Queries',
-      value: (contextStats as any)?.total_contexts?.toString() || '0',
-      change: (contextStats as any)?.active_contexts ? `${(contextStats as any).active_contexts} active` : 'No activity',
+      value: (contextStats as any)?.contextQueries?.toString() || '0',
+      change: (contextStats as any)?.lastQueryTime ? `Last: ${new Date((contextStats as any).lastQueryTime).toLocaleTimeString()}` : 'No activity',
       icon: Search,
       color: 'text-blue-400'
     },
     {
       label: 'Retrieval Success',
-      value: `${(((contextStats as any)?.cache_hit_rate || 0) * 100).toFixed(1)}%`,
-      change: (contextStats as any)?.cache_hit_rate ? 'System operational' : 'No RAG activity',
+      value: `${((contextStats as any)?.retrievalSuccess || 0).toFixed(1)}%`,
+      change: (contextStats as any)?.systemStatus === 'operational' ? 'System operational' : 'No RAG activity',
       icon: Target,
       color: 'text-green-400'
     },
     {
       label: 'Avg Response Time',
-      value: `${((contextStats as any)?.average_similarity || 0).toFixed(2)}s`,
+      value: (contextStats as any)?.avgResponseTime || '0.00s',
       change: 'Real-time measurement',
       icon: Zap,
       color: 'text-orange-400'
     },
     {
       label: 'Vector Embeddings',
-      value: (contextStats as any)?.total_embeddings?.toString() || '0',
-      change: `${(contextStats as any)?.total_embeddings || 0} total chunks`,
+      value: (contextStats as any)?.vectorEmbeddings?.toString() || '0',
+      change: `${(contextStats as any)?.vectorEmbeddings || 0} total chunks`,
       icon: Database,
       color: 'text-purple-400'
     }
@@ -107,8 +113,8 @@ export function ContextEngineering() {
 
   // Process performance data for charts from API ONLY
   const ragPerformanceData = useMemo(() => {
-    if ((performanceData as any)?.performance_data) {
-      return (performanceData as any).performance_data.map((item: any) => ({
+    if (performanceData && Array.isArray(performanceData)) {
+      return (performanceData as any[]).map((item: any) => ({
         time: item.time || '00:00',
         queries: item.queries || 0,
         success_rate: item.success_rate || 0,
@@ -123,8 +129,8 @@ export function ContextEngineering() {
     if (contextSources && Array.isArray(contextSources)) {
       return contextSources.map((source: any) => ({
         name: source.name || 'Unknown',
-        value: source.count || source.items || 0,
-        color: ['#ff6b35', '#60B5FF', '#72BF78', '#A19AD3', '#FF9149'][Math.floor(Math.random() * 5)]
+        value: source.value || 0,
+        color: source.color || '#60B5FF'
       }))
     }
     return []
@@ -173,7 +179,13 @@ export function ContextEngineering() {
   }
 
   const handleOptimize = async () => {
-    await optimizeMutation.mutateAsync('optimize')
+    try {
+      console.log('[Optimization] Starting analysis...')
+      const result = await refetchOptimization()
+      console.log('[Optimization] Analysis complete:', result)
+    } catch (error) {
+      console.error('[Optimization] Analysis failed:', error)
+    }
   }
 
   return (
@@ -199,7 +211,10 @@ export function ContextEngineering() {
             <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button className="gradient-accent hover:opacity-90">
+          <Button 
+            className="gradient-accent hover:opacity-90"
+            onClick={() => setConfigureModalOpen(true)}
+          >
             <Settings className="w-4 h-4 mr-2" />
             Configure RAG
           </Button>
@@ -579,7 +594,11 @@ export function ContextEngineering() {
                       <Badge variant="outline" className="text-xs">
                         {pattern.category}
                       </Badge>
-                      <Button variant="ghost" size="sm">
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setSelectedPattern(pattern)}
+                      >
                         <Eye className="w-4 h-4 mr-1" />
                         View Details
                       </Button>
@@ -601,17 +620,127 @@ export function ContextEngineering() {
                   <Button 
                     size="sm" 
                     onClick={handleOptimize}
-                    disabled={(optimizeMutation as any).isPending}
+                    disabled={optimizationLoading}
                   >
-                    {(optimizeMutation as any).isPending ? 'Optimizing...' : 'Optimize Patterns'}
+                    {optimizationLoading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Analyze System
+                      </>
+                    )}
                   </Button>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
-                  <div className="text-center text-muted-foreground">
-                    RAG system optimization tools and recommendations will be displayed here
+                  {/* System Health Status */}
+                  {optimizationData && (optimizationData as any).system_health && (
+                    <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          (optimizationData as any).system_health === 'healthy' ? 'bg-green-500/20' :
+                          (optimizationData as any).system_health === 'needs_attention' ? 'bg-yellow-500/20' :
+                          'bg-red-500/20'
+                        }`}>
+                          <Activity className={`w-5 h-5 ${
+                            (optimizationData as any).system_health === 'healthy' ? 'text-green-500' :
+                            (optimizationData as any).system_health === 'needs_attention' ? 'text-yellow-500' :
+                            'text-red-500'
+                          }`} />
+                        </div>
+                        <div>
+                          <p className="font-semibold">System Health</p>
+                          <p className="text-sm text-muted-foreground">
+                            Last analyzed: {new Date((optimizationData as any).last_analyzed).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge 
+                        variant={(optimizationData as any).system_health === 'healthy' ? 'default' : 'destructive'}
+                        className="text-lg px-4 py-1"
+                      >
+                        {(optimizationData as any).system_health === 'healthy' ? '✓ Healthy' :
+                         (optimizationData as any).system_health === 'needs_attention' ? '⚠ Needs Attention' :
+                         '✗ Critical'}
+                      </Badge>
+                    </div>
+                  )}
+
+                  {/* Recommendations */}
+                  {optimizationLoading ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
+                      <p>Analyzing RAG system...</p>
+                    </div>
+                  ) : optimizationData && (optimizationData as any).recommendations?.length > 0 ? (
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-sm text-muted-foreground">Optimization Recommendations</h4>
+                      {(optimizationData as any).recommendations.map((rec: any, index: number) => (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          className={`p-4 border rounded-lg ${
+                            rec.type === 'error' ? 'border-red-500/20 bg-red-500/5' :
+                            rec.type === 'warning' ? 'border-yellow-500/20 bg-yellow-500/5' :
+                            rec.type === 'success' ? 'border-green-500/20 bg-green-500/5' :
+                            'border-blue-500/20 bg-blue-500/5'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              rec.type === 'error' ? 'bg-red-500/20' :
+                              rec.type === 'warning' ? 'bg-yellow-500/20' :
+                              rec.type === 'success' ? 'bg-green-500/20' :
+                              'bg-blue-500/20'
+                            }`}>
+                              {rec.type === 'error' ? '✗' :
+                               rec.type === 'warning' ? '⚠' :
+                               rec.type === 'success' ? '✓' :
+                               'ℹ'}
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center justify-between mb-2">
+                                <h5 className="font-semibold">{rec.title}</h5>
+                                <Badge variant="outline" className="text-xs">
+                                  {rec.category}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mb-2">
+                                {rec.description}
+                              </p>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 text-xs">
+                                  <Zap className="w-3 h-3" />
+                                  <span className="text-muted-foreground">Action:</span>
+                                  <span className="font-medium">{rec.action}</span>
+                                </div>
+                                <Badge 
+                                  variant={rec.impact === 'critical' ? 'destructive' : 
+                                          rec.impact === 'high' ? 'default' : 'secondary'}
+                                  className="text-xs"
+                                >
+                                  {rec.impact} impact
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Brain className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                      <p className="font-medium">No optimization data available</p>
+                      <p className="text-sm">Click "Analyze System" to get recommendations</p>
                   </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -622,6 +751,24 @@ export function ContextEngineering() {
           </TabsContent>
         </Tabs>
       </motion.div>
+
+      {/* Configure RAG Modal */}
+      <ConfigureRAGModal
+        isOpen={configureModalOpen}
+        onClose={() => setConfigureModalOpen(false)}
+        onConfigCreated={(config) => {
+          console.log('New pattern created:', config)
+          setConfigureModalOpen(false)
+          refetchStats() // Refresh to show new pattern
+        }}
+      />
+
+      {/* Pattern Details Modal */}
+      <PatternDetailsModal
+        isOpen={!!selectedPattern}
+        onClose={() => setSelectedPattern(null)}
+        pattern={selectedPattern}
+      />
     </div>
   )
 }
