@@ -69,6 +69,109 @@ async def list_workflows(
         logger.error(f"Error listing workflows: {e}")
         raise HTTPException(status_code=500, detail="Error listing workflows")
 
+@router.get("/active")
+async def get_active_workflows(db: Session = Depends(get_db)):
+    """Get all currently active workflows with live status"""
+    try:
+        active_workflows = db.query(Workflow).options(joinedload(Workflow.agents)).filter(
+            Workflow.status == WorkflowStatus.ACTIVE.value
+        ).all()
+        
+        # Get recent executions for each workflow
+        workflow_data = []
+        for workflow in active_workflows:
+            recent_executions = db.query(WorkflowExecution).filter(
+                WorkflowExecution.workflow_id == workflow.id
+            ).order_by(desc(WorkflowExecution.started_at)).limit(5).all()
+            
+            # Calculate workflow metrics
+            total_executions = db.query(WorkflowExecution).filter(
+                WorkflowExecution.workflow_id == workflow.id
+            ).count()
+            
+            successful_executions = db.query(WorkflowExecution).filter(
+                and_(
+                    WorkflowExecution.workflow_id == workflow.id,
+                    WorkflowExecution.status == ExecutionStatus.COMPLETED.value
+                )
+            ).count()
+            
+            success_rate = (successful_executions / max(total_executions, 1)) * 100
+            
+            # Get current execution status
+            current_execution = db.query(WorkflowExecution).filter(
+                and_(
+                    WorkflowExecution.workflow_id == workflow.id,
+                    WorkflowExecution.status == ExecutionStatus.RUNNING.value
+                )
+            ).first()
+            
+            # Simulate live progress for running workflows
+            progress = 0
+            current_step = "Idle"
+            estimated_completion = None
+            
+            if current_execution:
+                # Calculate progress based on execution time
+                elapsed = (datetime.now() - current_execution.started_at).total_seconds()
+                progress = min(95, int(elapsed / 60 * 20))  # Simulate progress
+                
+                # Determine current step (would be read from actual execution data)
+                if progress < 20:
+                    current_step = "Initializing"
+                elif progress < 40:
+                    current_step = "Processing"
+                elif progress < 70:
+                    current_step = "Executing"
+                else:
+                    current_step = "Finalizing"
+                    
+                estimated_completion = (datetime.now() + timedelta(minutes=5-elapsed/60)).isoformat()
+            
+            workflow_data.append({
+                "id": workflow.id,
+                "name": workflow.name,
+                "description": workflow.description,
+                "status": workflow.status,
+                "current_execution": {
+                    "id": current_execution.id if current_execution else None,
+                    "status": current_execution.status if current_execution else "idle",
+                    "progress": progress,
+                    "current_step": current_step,
+                    "started_at": current_execution.started_at.isoformat() if current_execution else None,
+                    "estimated_completion": estimated_completion
+                },
+                "metrics": {
+                    "total_executions": total_executions,
+                    "successful_executions": successful_executions,
+                    "success_rate": round(success_rate, 1),
+                    "avg_duration": "4.2m",  # Would be calculated from actual data
+                    "last_execution": recent_executions[0].started_at.isoformat() if recent_executions else None
+                },
+                "recent_executions": [
+                    {
+                        "id": exec.id,
+                        "status": exec.status,
+                        "started_at": exec.started_at.isoformat(),
+                        "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
+                        "duration": str(exec.completed_at - exec.started_at) if exec.completed_at else None
+                    } for exec in recent_executions
+                ],
+                "created_at": workflow.created_at.isoformat(),
+                "updated_at": workflow.updated_at.isoformat()
+            })
+        
+        return {
+            "active_workflows": workflow_data,
+            "total_active": len(workflow_data),
+            "system_load": min(100, len(workflow_data) * 15),
+            "last_updated": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting active workflows: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")
+
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
     """Get individual workflow by ID"""
@@ -165,7 +268,14 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         workflow_name = workflow.name
         
-        # Delete associated executions first (or handle with CASCADE in DB)
+        # Delete workflow_agents associations first (foreign key constraint)
+        try:
+            from database.models import WorkflowAgent
+            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id == workflow_id).delete()
+        except Exception as e:
+            logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
+        
+        # Delete associated executions
         db.query(WorkflowExecution).filter(WorkflowExecution.workflow_id == workflow_id).delete()
         
         # Delete workflow
@@ -192,6 +302,61 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error deleting workflow {workflow_id}: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting workflow: {str(e)}")
+
+@router.delete("/cleanup/old")
+async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
+    """Delete workflows older than specified days"""
+    from datetime import datetime, timedelta
+    try:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        # Find old workflows
+        old_workflows = db.query(Workflow).filter(Workflow.created_at < cutoff_date).all()
+        
+        if not old_workflows:
+            return {
+                "message": "No old workflows to delete",
+                "deleted_count": 0,
+                "days": days
+            }
+        
+        deleted_count = len(old_workflows)
+        workflow_ids = [w.id for w in old_workflows]
+        
+        # Delete workflow_agents associations first (foreign key constraint)
+        try:
+            from database.models import WorkflowAgent
+            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
+        except Exception as e:
+            logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
+        
+        # Delete executions for these workflows
+        db.query(WorkflowExecution).filter(WorkflowExecution.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
+        
+        # Delete workflows
+        db.query(Workflow).filter(Workflow.id.in_(workflow_ids)).delete(synchronize_session=False)
+        
+        db.commit()
+        
+        logger.info(f"Deleted {deleted_count} workflows older than {days} days")
+        
+        # Send WebSocket update
+        await manager.broadcast({
+            "type": "workflows_cleaned",
+            "deleted_count": deleted_count,
+            "days": days
+        })
+        
+        return {
+            "message": f"Successfully deleted {deleted_count} workflows",
+            "deleted_count": deleted_count,
+            "days": days,
+            "workflow_ids": workflow_ids
+        }
+    except Exception as e:
+        logger.error(f"Error cleaning up old workflows: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cleaning up workflows: {str(e)}")
 
 @router.post("")
 async def create_workflow(
@@ -289,110 +454,6 @@ async def create_workflow(
         logger.error(f"Error creating workflow: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating workflow: {str(e)}")
-
-@router.get("/active")
-async def get_active_workflows(db: Session = Depends(get_db)):
-    """Get all currently active workflows with live status"""
-    try:
-        active_workflows = db.query(Workflow).options(joinedload(Workflow.agents)).filter(
-            Workflow.status == WorkflowStatus.ACTIVE.value
-        ).all()
-        
-        # Get recent executions for each workflow
-        workflow_data = []
-        for workflow in active_workflows:
-            recent_executions = db.query(WorkflowExecution).filter(
-                WorkflowExecution.workflow_id == workflow.id
-            ).order_by(desc(WorkflowExecution.started_at)).limit(5).all()
-            
-            # Calculate workflow metrics
-            total_executions = db.query(WorkflowExecution).filter(
-                WorkflowExecution.workflow_id == workflow.id
-            ).count()
-            
-            successful_executions = db.query(WorkflowExecution).filter(
-                and_(
-                    WorkflowExecution.workflow_id == workflow.id,
-                    WorkflowExecution.status == ExecutionStatus.COMPLETED.value
-                )
-            ).count()
-            
-            success_rate = (successful_executions / max(total_executions, 1)) * 100
-            
-            # Get current execution status
-            current_execution = db.query(WorkflowExecution).filter(
-                and_(
-                    WorkflowExecution.workflow_id == workflow.id,
-                    WorkflowExecution.status == ExecutionStatus.RUNNING.value
-                )
-            ).first()
-            
-            # Simulate live progress for running workflows
-            progress = 0
-            current_step = "Idle"
-            estimated_completion = None
-            
-            if current_execution:
-                # Calculate progress based on execution time
-                elapsed = (datetime.now() - current_execution.started_at).total_seconds()
-                progress = min(95, int(elapsed / 60 * 20))  # Simulate progress
-                
-                steps = ["Initializing", "Processing", "Analyzing", "Generating", "Finalizing"]
-                current_step = steps[min(len(steps)-1, int(progress / 20))]
-                
-                estimated_completion = (current_execution.started_at + timedelta(minutes=5)).isoformat()
-            
-            workflow_data.append({
-                "id": workflow.id,
-                "name": workflow.name,
-                "description": workflow.description,
-                "status": workflow.status,
-                "agents": [
-                    {
-                        "id": agent.id,
-                        "name": agent.name,
-                        "agent_type": agent.agent_type,
-                        "status": agent.status
-                    } for agent in workflow.agents
-                ],
-                "current_execution": {
-                    "id": current_execution.id if current_execution else None,
-                    "status": current_execution.status if current_execution else "idle",
-                    "progress": progress,
-                    "current_step": current_step,
-                    "started_at": current_execution.started_at.isoformat() if current_execution else None,
-                    "estimated_completion": estimated_completion
-                },
-                "metrics": {
-                    "total_executions": total_executions,
-                    "successful_executions": successful_executions,
-                    "success_rate": round(success_rate, 1),
-                    "avg_duration": "4.2m",  # Would be calculated from actual data
-                    "last_execution": recent_executions[0].started_at.isoformat() if recent_executions else None
-                },
-                "recent_executions": [
-                    {
-                        "id": exec.id,
-                        "status": exec.status,
-                        "started_at": exec.started_at.isoformat(),
-                        "completed_at": exec.completed_at.isoformat() if exec.completed_at else None,
-                        "duration": str(exec.completed_at - exec.started_at) if exec.completed_at else None
-                    } for exec in recent_executions
-                ],
-                "created_at": workflow.created_at.isoformat(),
-                "updated_at": workflow.updated_at.isoformat()
-            })
-        
-        return {
-            "active_workflows": workflow_data,
-            "total_active": len(workflow_data),
-            "system_load": min(100, len(workflow_data) * 15),
-            "last_updated": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting active workflows: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")
 
 @router.get("/stats/dashboard")
 async def get_workflow_dashboard_stats(db: Session = Depends(get_db)):
@@ -643,11 +704,14 @@ async def execute_workflow_advanced(
         db.commit()
         db.refresh(execution)
         
-        # Start execution with live progress tracking
-        background_tasks.add_task(
-            execute_workflow_with_progress,
-            execution.id,
-            execution_data.get('options', {})
+        # Start execution as asyncio task for real-time WebSocket updates
+        # Using asyncio.create_task instead of BackgroundTasks to allow immediate WebSocket delivery
+        import asyncio
+        asyncio.create_task(
+            execute_workflow_with_progress(
+                execution.id,
+                execution_data.get('options', {})
+            )
         )
         
         return {
@@ -699,14 +763,22 @@ async def execute_workflow(
         db.commit()
         db.refresh(execution)
         
-        # Add background task to actually execute the workflow
-        background_tasks.add_task(
-            execute_workflow_with_progress,
-            execution.id,
-            execution_data.get('options', {})
-        )
+        # Start execution as asyncio task for real-time WebSocket updates
+        # Using asyncio.create_task instead of BackgroundTasks to allow immediate WebSocket delivery
+        import asyncio
         
-        logger.info(f"Workflow {workflow_id} execution {execution.id} started in background")
+        async def _run_with_error_handling():
+            try:
+                await execute_workflow_with_progress(
+                    execution.id,
+                    execution_data.get('options', {})
+                )
+            except Exception as e:
+                logger.error(f"❌ FATAL: Workflow execution task crashed: {e}", exc_info=True)
+        
+        asyncio.create_task(_run_with_error_handling())
+        
+        logger.info(f"Workflow {workflow_id} execution {execution.id} started with real-time updates")
         
         return {
             "id": execution.id,
@@ -860,26 +932,34 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             execution.status = ExecutionStatus.RUNNING.value
             db.commit()
             
-            # Send start notification
-            await manager.broadcast({
-                "type": "execution_started",
-                "data": {
-                    "execution_id": execution_id,
-                    "workflow_id": execution.workflow_id,
-                    "workflow_name": workflow.name if workflow else "Unknown",
-                    "status": "running",
-                    "timestamp": datetime.now().isoformat()
-                }
-            })
+            # Publish execution start to Redis
+            from core.redis_client import get_redis_client
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_client.publish_workflow_event(
+                    workflow_id=execution.workflow_id,
+                    execution_id=execution_id,
+                    event_type="execution_started",
+                    data={
+                        "workflow_name": workflow.name if workflow else "Unknown",
+                        "status": "running",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            else:
+                logger.warning("Redis client not initialized for execution_started event")
             
             # REAL TASK DECOMPOSITION using LLM
             decomposer = RealTaskDecomposer()
             
-            # Get task description from workflow
-            task_description = workflow.description or workflow.name
+            # Get task description from workflow (prioritize goal > description > name)
+            task_description = workflow.goal or workflow.description or workflow.name
             workflow_def = workflow.workflow_definition or {}
             task_type = workflow_def.get("category", "general")
             complexity = workflow_def.get("priority", "medium")
+            
+            # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
+            workflow_context = workflow.context or {}
             
             logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
             
@@ -957,13 +1037,13 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             "match_score": best_match.match_score
                         }
                 
-                except Exception as e:
-                    logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
-                    execution.input_data["agent_selection"] = {
-                        "is_real": False,
-                        "error": str(e)
-                    }
-                    db.commit()
+            except Exception as e:
+                logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
+                execution.input_data["agent_selection"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                db.commit()
                 
                 # MEMORY RETRIEVAL (PRD 04 & 05 Integration)
                 logger.info(f"🧠 Retrieving agent memories...")
@@ -1060,17 +1140,29 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "error": str(e)
                 }
                 db.commit()
+                # Initialize empty context_enhancements if error occurred
+                context_enhancements = {}
+            
+            # DEBUG: Check what we have before agent execution
+            logger.info(f"🔍 DEBUG: About to start agent execution")
+            logger.info(f"🔍 DEBUG: steps count = {len(steps)}")
+            logger.info(f"🔍 DEBUG: agent_assignments count = {len(agent_assignments)}")
+            logger.info(f"🔍 DEBUG: context_enhancements count = {len(context_enhancements)}")
             
             # REAL AGENT EXECUTION
+            logger.info(f"🤖 Starting agent execution phase...")
             logger.info(f"🤖 Executing {len(steps)} subtasks with real agents...")
             try:
+                logger.info(f"🔍 DEBUG: Creating AgentExecutionManager...")
                 execution_manager = AgentExecutionManager(
                     db_session=db,
                     max_parallel_executions=3,
                     max_retries=2
                 )
+                logger.info(f"🔍 DEBUG: AgentExecutionManager created successfully")
                 execution_manager.websocket_manager = manager
                 
+                logger.info(f"🔍 DEBUG: About to call execute_workflow_subtasks...")
                 # Execute all subtasks with real agents
                 subtask_results = await execution_manager.execute_workflow_subtasks(
                     subtasks=steps,
@@ -1384,23 +1476,29 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             
             db.commit()
             
-            # Send completion notification
-            await manager.broadcast({
-                "type": "execution_completed",
-                "data": {
-                    "execution_id": execution_id,
-                    "workflow_id": execution.workflow_id,
-                    "workflow_name": workflow.name if workflow else "Unknown",
-                    "status": "completed",
-                    "progress": 100,
-                    "execution_time": f"{total_duration}s",
-                    "output": execution.output_data,
-                    "timestamp": datetime.now().isoformat()
-                }
-            })
+            # Publish execution completion to Redis
+            from core.redis_client import get_redis_client
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_client.publish_workflow_event(
+                    workflow_id=execution.workflow_id,
+                    execution_id=execution_id,
+                    event_type="execution_completed",
+                    data={
+                        "workflow_name": workflow.name if workflow else "Unknown",
+                        "status": "completed",
+                        "progress": 100,
+                        "execution_time": f"{total_duration}s",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            else:
+                logger.warning("Redis client not initialized for execution_completed event")
             
     except Exception as e:
-        logger.error(f"Error in workflow execution {execution_id}: {e}")
+        import traceback
+        logger.error(f"❌ FATAL ERROR in workflow execution {execution_id}: {e}")
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         
         try:
             with get_db_session() as db:

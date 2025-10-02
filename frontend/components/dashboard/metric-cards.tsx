@@ -16,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
-import { useSystemMetrics } from '@/hooks/use-system-config-api'
+import { useSystemMetrics, useApiHealth } from '@/hooks/use-system-config-api'
 
 interface MetricCardProps {
   title: string
@@ -69,8 +69,9 @@ export function MetricCards() {
   const { data: documents, isLoading: documentsLoading } = useDocuments()
   const { data: workflows, isLoading: workflowsLoading } = useWorkflows()
   const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
+  const { data: apiHealth, isLoading: apiHealthLoading } = useApiHealth()
   
-  const isLoading = agentsLoading || documentsLoading || workflowsLoading || metricsLoading
+  const isLoading = agentsLoading || documentsLoading || workflowsLoading || metricsLoading || apiHealthLoading
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -101,7 +102,7 @@ export function MetricCards() {
   const documentsProcessed = documentsArray.length || 0
   const runningWorkflows = workflowsArray.filter((w: any) => w?.status === 'running').length || 0
   const totalWorkflows = workflowsArray.length || 0
-  const apiCalls = systemMetrics?.api_calls_count || 0
+  const apiCalls = apiHealth?.summary?.total_calls || 0
 
   const metrics = [
     {

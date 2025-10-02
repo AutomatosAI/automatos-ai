@@ -150,9 +150,11 @@ class AgentExecutionManager:
                 agent_ids = []
                 for subtask_id, agent_match in agent_assignments.items():
                     if isinstance(agent_match, list) and agent_match:
-                        agent_ids.append(agent_match[0].get("agent_id"))
+                        agent_ids.append(agent_match[0].agent_id if hasattr(agent_match[0], 'agent_id') else agent_match[0].get("agent_id"))
                     elif isinstance(agent_match, dict):
                         agent_ids.append(agent_match.get("agent_id"))
+                    elif hasattr(agent_match, 'agent_id'):
+                        agent_ids.append(agent_match.agent_id)
                 
                 # Remove duplicates and None values
                 agent_ids = list(set(filter(None, agent_ids)))
@@ -216,6 +218,9 @@ class AgentExecutionManager:
                     all_results[subtask_id] = self._create_failed_execution(subtask_id, str(result))
                 else:
                     all_results[subtask_id] = result
+                
+                # ✨ REAL-TIME UPDATE: Save to database immediately after each subtask
+                await self._update_execution_output_data(execution_id, subtasks, all_results)
         
         self.logger.info(f"✅ Completed execution of {len(all_results)} subtasks")
         
@@ -268,12 +273,32 @@ class AgentExecutionManager:
         """Execute a single subtask with assigned agent"""
         
         description = subtask.get("description", subtask.get("name", "Unknown"))
-        agent_id = agent_match.get("agent_id") if agent_match else None
-        agent_name = agent_match.get("agent_name", "Unknown") if agent_match else "No Agent"
+        # Handle different agent_match types
+        if hasattr(agent_match, 'agent_id'):  # AgentMatch object
+            agent_id = agent_match.agent_id
+            agent_name = agent_match.agent_name
+        elif isinstance(agent_match, dict):
+            agent_id = agent_match.get("agent_id")
+            agent_name = agent_match.get("agent_name", "Unknown")
+        else:
+            agent_id = None
+            agent_name = "No Agent"
         
         self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name}")
         
         # Create execution tracking
+        # Handle context_enh as dataclass or dict
+        if context_enh:
+            if hasattr(context_enh, 'context_quality_score'):  # ContextEnhancement object
+                context_quality = context_enh.context_quality_score
+                prompt_used = context_enh.enhanced_prompt
+            else:  # dict
+                context_quality = context_enh.get("context_quality", 0.0)
+                prompt_used = context_enh.get("enhanced_prompt", description)
+        else:
+            context_quality = 0.0
+            prompt_used = description
+            
         execution = SubtaskExecution(
             subtask_id=subtask_id,
             subtask_description=description,
@@ -281,14 +306,16 @@ class AgentExecutionManager:
             agent_name=agent_name,
             status=SubtaskStatus.RUNNING,
             start_time=datetime.now(),
-            context_quality=context_enh.get("context_quality", 0.0) if context_enh else 0.0,
-            prompt_used=context_enh.get("enhanced_prompt", description) if context_enh else description
+            context_quality=context_quality,
+            prompt_used=prompt_used
         )
         
         self.active_executions[subtask_id] = execution
         
         # Send WebSocket update
         await self._broadcast_execution_update(execution, execution_id, workflow_id)
+        # Force event loop to yield and flush WebSocket immediately
+        await asyncio.sleep(0)
         
         # PHASE 2: Notify team that task is starting
         await self._notify_task_start(execution, subtask_id)
@@ -310,8 +337,8 @@ class AgentExecutionManager:
             
             # Update execution with result
             execution.status = SubtaskStatus.COMPLETED
-            execution.llm_response = result.get("response", "")
-            execution.tokens_used = result.get("tokens_used", 0)
+            execution.llm_response = result.get("result", "")  # agent_factory returns "result" not "response"
+            execution.tokens_used = result.get("execution", {}).get("tokens_used", 0)
             execution.end_time = datetime.now()
             execution.execution_time_ms = int(
                 (execution.end_time - execution.start_time).total_seconds() * 1000
@@ -344,6 +371,16 @@ class AgentExecutionManager:
         
         # Send final WebSocket update
         await self._broadcast_execution_update(execution, execution_id, workflow_id)
+        # Force event loop to yield and flush WebSocket immediately
+        await asyncio.sleep(0)
+        
+        # ✨ CRITICAL: Update database immediately with THIS subtask's result
+        await self._update_single_subtask_in_db(
+            execution_id=execution_id,
+            subtask_id=subtask_id,
+            subtask=subtask,
+            result=execution
+        )
         
         return execution
     
@@ -393,30 +430,48 @@ class AgentExecutionManager:
         execution_id: int,
         workflow_id: int
     ):
-        """Send WebSocket update for subtask execution"""
+        """Publish subtask update to Redis channel (decoupled from execution loop)"""
         
-        if not self.websocket_manager:
-            return
+        self.logger.info(f"🔔 _broadcast_execution_update called for subtask {execution.subtask_id} - status: {execution.status.value}")
         
         try:
-            await self.websocket_manager.broadcast({
-                "type": "subtask_execution_update",
-                "data": {
-                    "execution_id": execution_id,
-                    "workflow_id": workflow_id,
-                    "subtask_id": execution.subtask_id,
-                    "subtask_description": execution.subtask_description[:100],
-                    "agent_name": execution.agent_name,
-                    "status": execution.status.value,
-                    "tokens_used": execution.tokens_used,
-                    "execution_time_ms": execution.execution_time_ms,
-                    "error_message": execution.error_message,
-                    "retry_count": execution.retry_count,
-                    "timestamp": datetime.now().isoformat()
-                }
-            })
+            from core.redis_client import get_redis_client
+            
+            redis_client = get_redis_client()
+            if not redis_client:
+                self.logger.warning(f"⚠️ Redis client not initialized - cannot publish updates!")
+                return
+            
+            # Prepare message payload
+            message_data = {
+                "subtask_id": execution.subtask_id,
+                "subtask_description": execution.subtask_description[:100],
+                "agent_name": execution.agent_name,
+                "status": execution.status.value,
+                "tokens_used": execution.tokens_used,
+                "execution_time_ms": execution.execution_time_ms,
+                "error_message": execution.error_message,
+                "retry_count": execution.retry_count,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            self.logger.info(f"📡 Publishing to Redis: {message_data}")
+            
+            # Publish to Redis (non-blocking, immediately flushed)
+            success = redis_client.publish_workflow_event(
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                event_type="subtask_execution_update",
+                data=message_data
+            )
+            
+            if success:
+                self.logger.info(f"✅ Redis publish successful for subtask {execution.subtask_id}")
+            else:
+                self.logger.warning(f"⚠️ Redis publish may have failed for subtask {execution.subtask_id}")
+                
         except Exception as e:
-            self.logger.error(f"Failed to broadcast execution update: {e}")
+            self.logger.error(f"❌ Failed to publish to Redis: {e}", exc_info=True)
     
     def _parse_duration(self, duration_str: Any) -> float:
         """Parse duration string to seconds"""
@@ -476,6 +531,119 @@ class AgentExecutionManager:
             "avg_context_quality": avg_context_quality,
             "timestamp": datetime.now().isoformat()
         }
+    
+    async def _update_single_subtask_in_db(
+        self,
+        execution_id: int,
+        subtask_id: str,
+        subtask: Dict[str, Any],
+        result: SubtaskExecution
+    ):
+        """Update a SINGLE subtask in database immediately after completion"""
+        try:
+            from database.database import get_db_session
+            from database.models import WorkflowExecution
+            
+            with get_db_session() as db:
+                execution = db.query(WorkflowExecution).filter(
+                    WorkflowExecution.id == execution_id
+                ).first()
+                
+                if not execution:
+                    self.logger.warning(f"Execution {execution_id} not found for update")
+                    return
+                
+                # Initialize output_data if needed
+                if execution.output_data is None:
+                    execution.output_data = {}
+                if "subtasks" not in execution.output_data:
+                    execution.output_data["subtasks"] = []
+                
+                # Find or create this subtask in the list
+                subtask_index = int(subtask_id.split("_")[1])
+                subtasks_list = execution.output_data["subtasks"]
+                
+                # Extend list if needed
+                while len(subtasks_list) <= subtask_index:
+                    subtasks_list.append({})
+                
+                # Update this specific subtask
+                subtasks_list[subtask_index] = {
+                    **subtask,
+                    "execution_result": {
+                        "status": result.status.value,
+                        "llm_response": result.llm_response,
+                        "tokens_used": result.tokens_used,
+                        "execution_time_ms": result.execution_time_ms
+                    },
+                    "completed": (result.status == SubtaskStatus.COMPLETED)
+                }
+                
+                execution.output_data["subtasks"] = subtasks_list
+                
+                # Mark as modified for JSONB update
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(execution, "output_data")
+                
+                # Commit to database
+                db.commit()
+                self.logger.info(f"🔥 LIVE UPDATE: Execution {execution_id}, subtask {subtask_id} - {result.tokens_used} tokens")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to update single subtask: {e}", exc_info=True)
+    
+    async def _update_execution_output_data(
+        self,
+        execution_id: int,
+        subtasks: List[Dict[str, Any]],
+        results: Dict[str, SubtaskExecution]
+    ):
+        """Update execution output_data in database with latest subtask results"""
+        try:
+            from database.database import get_db_session
+            from database.models import WorkflowExecution
+            
+            with get_db_session() as db:
+                execution = db.query(WorkflowExecution).filter(
+                    WorkflowExecution.id == execution_id
+                ).first()
+                
+                if not execution:
+                    self.logger.warning(f"Execution {execution_id} not found for update")
+                    return
+                
+                # Update subtasks with execution results
+                updated_subtasks = []
+                for idx, subtask in enumerate(subtasks):
+                    subtask_id = f"subtask_{idx}"
+                    result = results.get(subtask_id)
+                    
+                    # Copy subtask data
+                    updated_subtask = {**subtask}
+                    
+                    # Add execution result if available
+                    if result:
+                        updated_subtask["execution_result"] = {
+                            "status": result.status.value,
+                            "llm_response": result.llm_response,
+                            "tokens_used": result.tokens_used,
+                            "execution_time_ms": result.execution_time_ms
+                        }
+                        updated_subtask["completed"] = (result.status == SubtaskStatus.COMPLETED)
+                    
+                    updated_subtasks.append(updated_subtask)
+                
+                # Update output_data with latest subtasks
+                if execution.output_data is None:
+                    execution.output_data = {}
+                execution.output_data["subtasks"] = updated_subtasks
+                
+                # Commit to database
+                db.commit()
+                self.logger.info(f"✅ Updated execution {execution_id} with {len(results)} completed subtasks")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Failed to update execution output_data: {e}")
     
     # ======================================================================
     # PHASE 2: INTER-AGENT COMMUNICATION METHODS

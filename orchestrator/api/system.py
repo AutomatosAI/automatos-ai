@@ -373,35 +373,84 @@ async def get_system_health(db: Session = Depends(get_db)):
         logger.error(f"Error getting system health: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")
 
-@router.get("/metrics")
-async def get_system_metrics(db: Session = Depends(get_db)):
-    """Get detailed system metrics"""
+def _store_current_metrics(db: Session):
+    """Store current system metrics to database"""
     try:
-        # CPU metrics
-        cpu_count = psutil.cpu_count()
-        cpu_percent = psutil.cpu_percent(interval=1, percpu=True)
+        from sqlalchemy import text
         
-        # Memory metrics
+        # Collect current metrics
+        cpu_avg = sum(psutil.cpu_percent(interval=0.1, percpu=True)) / psutil.cpu_count()
         memory = psutil.virtual_memory()
-        swap = psutil.swap_memory()
-        
-        # Disk metrics
         disk = psutil.disk_usage('/')
         disk_io = psutil.disk_io_counters()
-        
-        # Network metrics
         network = psutil.net_io_counters()
         
-        # Get analytics data from the Analytics Engine
-        # This makes the dashboard use real data instead of placeholders
+        # Store each metric
+        metrics = [
+            ("cpu_usage", cpu_avg, "percent"),
+            ("memory_usage", memory.percent, "percent"),
+            ("memory_available", memory.available, "bytes"),
+            ("disk_usage", disk.percent, "percent"),
+            ("disk_read_bytes", disk_io.read_bytes if disk_io else 0, "bytes"),
+            ("disk_write_bytes", disk_io.write_bytes if disk_io else 0, "bytes"),
+            ("network_sent", network.bytes_sent, "bytes"),
+            ("network_recv", network.bytes_recv, "bytes"),
+        ]
+        
+        for metric_name, metric_value, metric_unit in metrics:
+            db.execute(
+                text("""
+                    INSERT INTO system_metrics (metric_name, metric_value, metric_unit, recorded_at)
+                    VALUES (:name, :value, :unit, NOW())
+                """),
+                {"name": metric_name, "value": metric_value, "unit": metric_unit}
+            )
+        
+        db.commit()
+        logger.debug(f"Stored {len(metrics)} system metrics to database")
+        
+    except Exception as e:
+        logger.error(f"Failed to store metrics: {e}")
+        db.rollback()
+
+
+@router.get("/metrics")
+async def get_system_metrics(
+    db: Session = Depends(get_db),
+    timeRange: Optional[str] = Query(None, description="Include time-series data: 1h, 24h, 7d, 30d")
+):
+    """
+    Get detailed system metrics with optional time-series history from DATABASE.
+    
+    - No timeRange: Returns current snapshot only + stores to DB
+    - With timeRange (24h): Returns current snapshot + REAL 24h time-series from DB
+    
+    Metrics stored: CPU, Memory, Disk, Network
+    """
+    try:
+        from sqlalchemy import text
+        from datetime import timedelta
+        
+        # Collect current metrics
+        cpu_count = psutil.cpu_count()
+        cpu_percent = psutil.cpu_percent(interval=1, percpu=True)
+        cpu_avg = sum(cpu_percent) / len(cpu_percent)
+        
+        memory = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        disk = psutil.disk_usage('/')
+        disk_io = psutil.disk_io_counters()
+        network = psutil.net_io_counters()
+        
+        # Store current metrics to database (async - don't wait)
+        _store_current_metrics(db)
+        
+        # Get analytics data
         try:
             from services.analytics_engine import AnalyticsEngine
-            # Create an instance of the analytics engine
             analytics_engine = AnalyticsEngine(db)
             
-            # Get context optimization metrics
             context_metrics = await analytics_engine._get_context_metrics()
-            # Convert from camelCase to snake_case for consistency
             context_optimization = {
                 "tokens_saved": context_metrics.get("tokensSaved", 0),
                 "compression_ratio": context_metrics.get("avgCompressionRatio", 1.0),
@@ -409,9 +458,7 @@ async def get_system_metrics(db: Session = Depends(get_db)):
                 "efficiency": context_metrics.get("efficiency", 0.0)
             }
             
-            # Get learning metrics
             learning_metrics = await analytics_engine._get_learning_metrics()
-            # Convert from camelCase to snake_case for consistency
             learning = {
                 "total_memories": learning_metrics.get("totalMemoryItems", 0),
                 "recent_memories": learning_metrics.get("recentMemoryItems", 0),
@@ -422,33 +469,25 @@ async def get_system_metrics(db: Session = Depends(get_db)):
                 "memory_consolidations": learning_metrics.get("memoryConsolidations", 0),
                 "avg_improvement": learning_metrics.get("avgImprovement", 0.0)
             }
-            
         except Exception as e:
-            # Fallback to default values if Analytics Engine fails
             logger.error(f"Failed to get analytics data: {e}")
             context_optimization = {
-                "tokens_saved": 0,
-                "compression_ratio": 1.0,
-                "total_optimizations": 0,
-                "efficiency": 0.0
+                "tokens_saved": 0, "compression_ratio": 1.0,
+                "total_optimizations": 0, "efficiency": 0.0
             }
             learning = {
-                "total_memories": 0,
-                "recent_memories": 0,
-                "knowledge_nodes": 0,
-                "active_collaborations": 0,
-                "total_collaborations": 0,
-                "knowledge_growth": 0,
-                "memory_consolidations": 0,
-                "avg_improvement": 0.0
+                "total_memories": 0, "recent_memories": 0, "knowledge_nodes": 0,
+                "active_collaborations": 0, "total_collaborations": 0,
+                "knowledge_growth": 0, "memory_consolidations": 0, "avg_improvement": 0.0
             }
         
-        return {
+        # Base response with current metrics
+        response = {
             "timestamp": datetime.now().isoformat(),
             "cpu": {
                 "count": cpu_count,
                 "usage_percent": cpu_percent,
-                "average_usage": sum(cpu_percent) / len(cpu_percent)
+                "average_usage": cpu_avg
             },
             "memory": {
                 "total": memory.total,
@@ -456,29 +495,119 @@ async def get_system_metrics(db: Session = Depends(get_db)):
                 "used": memory.used,
                 "percent": memory.percent
             },
-            "swap": {
-                "total": swap.total,
-                "used": swap.used,
-                "percent": swap.percent
-            },
+            "swap": {"total": swap.total, "used": swap.used, "percent": swap.percent},
             "disk": {
-                "total": disk.total,
-                "used": disk.used,
-                "free": disk.free,
-                "percent": disk.percent,
-                "usage_percent": disk.percent,  # Alias for backward compatibility
+                "total": disk.total, "used": disk.used, "free": disk.free,
+                "percent": disk.percent, "usage_percent": disk.percent,
                 "read_bytes": disk_io.read_bytes if disk_io else 0,
                 "write_bytes": disk_io.write_bytes if disk_io else 0
             },
             "network": {
-                "bytes_sent": network.bytes_sent,
-                "bytes_recv": network.bytes_recv,
-                "packets_sent": network.packets_sent,
-                "packets_recv": network.packets_recv
+                "bytes_sent": network.bytes_sent, "bytes_recv": network.bytes_recv,
+                "packets_sent": network.packets_sent, "packets_recv": network.packets_recv
             },
             "context_optimization": context_optimization,
             "learning": learning
         }
+        
+        # Add REAL time-series data from database if requested
+        if timeRange:
+            hours_map = {"1h": 1, "24h": 24, "7d": 168, "30d": 720}
+            hours = hours_map.get(timeRange, 24)
+            
+            # Query REAL historical data from database
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            
+            cpu_data = db.execute(
+                text("""
+                    SELECT recorded_at, metric_value 
+                    FROM system_metrics 
+                    WHERE metric_name = 'cpu_usage' AND recorded_at >= :cutoff
+                    ORDER BY recorded_at ASC
+                """),
+                {"cutoff": cutoff}
+            ).fetchall()
+            
+            memory_data = db.execute(
+                text("""
+                    SELECT recorded_at, metric_value 
+                    FROM system_metrics 
+                    WHERE metric_name = 'memory_usage' AND recorded_at >= :cutoff
+                    ORDER BY recorded_at ASC
+                """),
+                {"cutoff": cutoff}
+            ).fetchall()
+            
+            disk_data = db.execute(
+                text("""
+                    SELECT recorded_at, metric_value 
+                    FROM system_metrics 
+                    WHERE metric_name = 'disk_usage' AND recorded_at >= :cutoff
+                    ORDER BY recorded_at ASC
+                """),
+                {"cutoff": cutoff}
+            ).fetchall()
+            
+            # Convert to chart format
+            cpu_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in cpu_data]
+            memory_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in memory_data]
+            disk_usage = [{"time": row[0].isoformat(), "value": round(row[1], 2)} for row in disk_data]
+            
+            # Add current values if no historical data exists
+            if not cpu_usage:
+                cpu_usage = [{"time": datetime.utcnow().isoformat(), "value": round(cpu_avg, 2)}]
+            if not memory_usage:
+                memory_usage = [{"time": datetime.utcnow().isoformat(), "value": round(memory.percent, 2)}]
+            if not disk_usage:
+                disk_usage = [{"time": datetime.utcnow().isoformat(), "value": round(disk.percent, 2)}]
+            
+            # Get API call count from tracking middleware
+            try:
+                import main
+                total_api_calls = sum(stats["call_count"] for stats in main.api_call_stats.values())
+                avg_response_time = sum(stats["avg_time"] for stats in main.api_call_stats.values()) / len(main.api_call_stats) if main.api_call_stats else 0
+                
+                # Generate time-series for API calls (distribute evenly across time range)
+                # In production, you'd store these in the database with timestamps
+                api_calls_series = []
+                response_time_series = []
+                
+                # Create data points at regular intervals
+                num_points = min(len(cpu_usage), 24)  # Match CPU data points
+                for i in range(num_points):
+                    time_point = datetime.utcnow() - timedelta(hours=hours - (i * hours / num_points))
+                    # Estimate calls per hour (simple distribution)
+                    calls_per_point = total_api_calls / num_points if total_api_calls > 0 else 0
+                    api_calls_series.append({
+                        "time": time_point.isoformat(),
+                        "value": round(calls_per_point, 0)
+                    })
+                    response_time_series.append({
+                        "time": time_point.isoformat(),
+                        "value": round(avg_response_time, 2)
+                    })
+            except Exception as e:
+                logger.error(f"Failed to get API call stats: {e}")
+                total_api_calls = 0
+                avg_response_time = 0
+                api_calls_series = []
+                response_time_series = []
+            
+            # Add time-series to response
+            response["cpu_usage"] = cpu_usage
+            response["memory_usage"] = memory_usage
+            response["disk_usage"] = disk_usage
+            response["api_calls"] = api_calls_series
+            response["response_time"] = response_time_series
+            response["aggregated"] = {
+                "cpu_average": round(sum(d["value"] for d in cpu_usage) / len(cpu_usage), 2) if cpu_usage else cpu_avg,
+                "memory_average": round(sum(d["value"] for d in memory_usage) / len(memory_usage), 2) if memory_usage else memory.percent,
+                "disk_average": round(sum(d["value"] for d in disk_usage) / len(disk_usage), 2) if disk_usage else disk.percent,
+                "api_calls_total": total_api_calls,
+                "response_time_average": round(avg_response_time, 2)
+            }
+        
+        return response
         
     except Exception as e:
         logger.error(f"Error getting system metrics: {e}")

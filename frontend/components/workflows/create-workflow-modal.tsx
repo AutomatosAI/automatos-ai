@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, GitBranch } from 'lucide-react'
+import { X, GitBranch, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -15,17 +15,51 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
   const [step, setStep] = React.useState(1)
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
+  const [goal, setGoal] = React.useState('')
+  const [contextJson, setContextJson] = React.useState('')
+  const [showAdvanced, setShowAdvanced] = React.useState(false)
   const [defaultPolicyId, setDefaultPolicyId] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState('')
 
   async function handleCreate() {
     setSaving(true)
+    setError('')
+    
+    // Parse context JSON if provided
+    let contextData = {}
+    if (contextJson.trim()) {
+      try {
+        contextData = JSON.parse(contextJson)
+      } catch (e) {
+        setError('Invalid JSON in context field')
+        setSaving(false)
+        return
+      }
+    }
+    
     try {
-      const wf = await apiClient.createWorkflow({ name, description, default_policy_id: defaultPolicyId })
+      const wf = await apiClient.createWorkflow({ 
+        name, 
+        description,
+        goal: goal || undefined,
+        context: Object.keys(contextData).length > 0 ? contextData : undefined,
+        default_policy_id: defaultPolicyId 
+      })
       try { window.dispatchEvent(new Event('workflows:refresh')) } catch {}
       onClose()
-      setStep(1); setName(''); setDescription(''); setDefaultPolicyId('')
-    } finally { setSaving(false) }
+      setStep(1)
+      setName('')
+      setDescription('')
+      setGoal('')
+      setContextJson('')
+      setDefaultPolicyId('')
+      setShowAdvanced(false)
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create workflow')
+    } finally { 
+      setSaving(false) 
+    }
   }
 
   return (
@@ -50,13 +84,61 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                   </TabsList>
                   <TabsContent value="step-1" className="space-y-4">
                     <div>
-                      <Label>Name</Label>
+                      <Label>Name <span className="text-red-400">*</span></Label>
                       <Input value={name} onChange={e=>setName(e.target.value)} placeholder="Workflow name" className="bg-secondary/50" />
                     </div>
                     <div>
-                      <Label>Description</Label>
-                      <Textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)} className="bg-secondary/50" />
+                      <Label>Description <span className="text-red-400">*</span></Label>
+                      <Textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Describe what this workflow should accomplish..." className="bg-secondary/50" />
                     </div>
+                    
+                    {/* Advanced Options Toggle */}
+                    <div className="pt-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="text-sm text-blue-400 hover:text-blue-300 -ml-2"
+                      >
+                        <ChevronRight className={`w-4 h-4 mr-1 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
+                        {showAdvanced ? 'Hide' : 'Show'} Advanced Options
+                      </Button>
+                    </div>
+
+                    {/* Advanced Options */}
+                    {showAdvanced && (
+                      <div className="space-y-3 p-3 bg-secondary/20 border border-secondary rounded-lg">
+                        <div>
+                          <Label htmlFor="goal" className="text-sm">Goal (Optional)</Label>
+                          <Input
+                            id="goal"
+                            value={goal}
+                            onChange={(e) => setGoal(e.target.value)}
+                            placeholder="e.g., Review PR #123 for security vulnerabilities"
+                            className="bg-secondary/50 border-secondary text-sm"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            High-level objective - overrides description if provided
+                          </p>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="context" className="text-sm">Context (Optional JSON)</Label>
+                          <Textarea
+                            id="context"
+                            value={contextJson}
+                            onChange={(e) => setContextJson(e.target.value)}
+                            placeholder={`{\n  "codegraph_project": "my-app",\n  "pr_number": 123\n}`}
+                            className="bg-secondary/50 border-secondary font-mono text-xs"
+                            rows={4}
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Additional context (JSON). Use <code className="bg-black/30 px-1 rounded text-xs">codegraph_project</code> to enable code access.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </TabsContent>
                   <TabsContent value="step-2" className="space-y-4">
                     <div>
@@ -65,13 +147,22 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                     </div>
                   </TabsContent>
                 </Tabs>
+                {/* Error Display */}
+                {error && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-sm text-red-400">
+                    {error}
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center mt-8 pt-6 border-t border-border/30">
                   <Button variant="outline" onClick={()=>setStep(Math.max(1, step-1))} disabled={step===1}>Previous</Button>
                   <div className="text-sm text-muted-foreground">Step {step} of 2</div>
                   {step<2 ? (
                     <Button onClick={()=>setStep(2)} disabled={!name || !description} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">Next</Button>
                   ) : (
-                    <Button onClick={handleCreate} disabled={!name} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200" aria-busy={saving}>Create Workflow</Button>
+                    <Button onClick={handleCreate} disabled={!name || saving} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200" aria-busy={saving}>
+                      {saving ? 'Creating...' : 'Create Workflow'}
+                    </Button>
                   )}
                 </div>
               </CardContent>

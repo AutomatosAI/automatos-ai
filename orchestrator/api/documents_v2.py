@@ -9,11 +9,13 @@ Enhanced REST API endpoints for document upload, processing, and management.
 import os
 import hashlib
 import tempfile
+import json
 from typing import List, Optional
 from pathlib import Path
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 
 from database.database import get_db
 from models import Document, DocumentUploadResponse, DocumentResponse
@@ -1038,6 +1040,33 @@ async def rag_retrieve(
         execution_time_ms = int((time.time() - start_time) * 1000)
         
         logger.info(f"RAG retrieval: query='{query[:50]}', chunks={len(selected_chunks)}, tokens={total_tokens}, diversity={diversity_score:.2f}, time={execution_time_ms}ms")
+        
+        # Track RAG query for analytics
+        try:
+            tracking_query = text("""
+                INSERT INTO document_usage (event_type, query, results_count, execution_time_ms, metadata, timestamp)
+                VALUES ('rag_query', :query, :results_count, :execution_time_ms, :metadata, :timestamp)
+            """)
+            db.execute(
+                tracking_query,
+                {
+                    "query": query,
+                    "results_count": len(selected_chunks),
+                    "execution_time_ms": execution_time_ms,
+                    "metadata": json.dumps({
+                        "max_chunks": max_chunks,
+                        "max_tokens": max_tokens,
+                        "diversity": diversity,
+                        "total_tokens": total_tokens,
+                        "diversity_score": round(diversity_score, 3)
+                    }),
+                    "timestamp": datetime.now()
+                }
+            )
+            db.commit()
+        except Exception as track_error:
+            logger.warning(f"Failed to track RAG query: {track_error}")
+            # Don't fail the request if tracking fails
         
         return {
             "query": query,

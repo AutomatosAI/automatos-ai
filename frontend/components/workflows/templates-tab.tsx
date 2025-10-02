@@ -34,7 +34,7 @@ import {
 } from '@/hooks/use-template-api'
 
 interface TemplatesTabProps {
-  onUseTemplate: (templateId: string) => void
+  onUseTemplate: (template: any) => void
   onOpenCreateModal?: () => void
 }
 
@@ -127,13 +127,12 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
     try {
       // Record usage
       await recordUsageMutation.mutateAsync(template.template_id)
-      // Notify parent component
-      onUseTemplate(template.template_id)
-      if (onOpenCreateModal) {
-        onOpenCreateModal()
-      }
+      // Notify parent component with full template object
+      onUseTemplate(template)
     } catch (error) {
       console.error('Error recording template usage:', error)
+      // Still pass template even if recording fails
+      onUseTemplate(template)
     }
   }
 

@@ -15,7 +15,9 @@ import {
   TrendingUp,
   Eye,
   MoreVertical,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  AlertCircle
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -27,8 +29,25 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useActiveWorkflows, useExecuteWorkflowAdvanced } from '@/hooks/use-workflow-api'
 import { LiveProgressPanel } from './live-progress-panel'
+import { apiClient } from '@/lib/api-client'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface ActiveWorkflow {
   id: number;
@@ -74,9 +93,19 @@ interface ActiveWorkflowsData {
   last_updated: string;
 }
 
-export function ActiveWorkflowsPanel() {
+interface ActiveWorkflowsPanelProps {
+  onWorkflowClick?: (workflowId: number) => void
+}
+
+export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelProps) {
   const [selectedWorkflow, setSelectedWorkflow] = useState<{id: number, name: string} | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false)
+  const [cleanupDays, setCleanupDays] = useState('30')
+  const [workflowToDelete, setWorkflowToDelete] = useState<{id: number, name: string} | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const queryClient = useQueryClient()
 
   // Use React Query hook for active workflows
   const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
@@ -102,6 +131,39 @@ export function ActiveWorkflowsPanel() {
         timeout: 300
       }
     })
+  }
+
+  const handleDeleteWorkflow = async () => {
+    if (!workflowToDelete) return
+    
+    setIsDeleting(true)
+    try {
+      await apiClient.deleteWorkflow(workflowToDelete.id)
+      await queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] })
+      setWorkflowToDelete(null)
+      refetch()
+    } catch (error) {
+      console.error('Error deleting workflow:', error)
+      alert('Failed to delete workflow')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleCleanupWorkflows = async () => {
+    setIsDeleting(true)
+    try {
+      const response = await apiClient.cleanupOldWorkflows(parseInt(cleanupDays))
+      await queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] })
+      setShowCleanupDialog(false)
+      alert(`Successfully deleted ${response.deleted_count} workflows`)
+      refetch()
+    } catch (error) {
+      console.error('Error cleaning up workflows:', error)
+      alert('Failed to cleanup workflows')
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const getStatusIcon = (status: string) => {
@@ -173,21 +235,35 @@ export function ActiveWorkflowsPanel() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold">Active Workflows</h3>
+          <h3 className="text-lg font-semibold">
+            <span className="text-white">Active</span> <span className="text-orange-500">Workflows</span>
+          </h3>
           <p className="text-sm text-muted-foreground">
             {workflowsData.total_active} active • {workflowsData.system_load}% system load
           </p>
         </div>
         
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setAutoRefresh(!autoRefresh)}
-          className={autoRefresh ? 'bg-green-500/10 border-green-500/20' : ''}
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-          Auto Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowCleanupDialog(true)}
+            className="bg-red-500/10 border-red-500/20 hover:bg-red-500/20"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Cleanup Old Workflows
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={autoRefresh ? 'bg-green-500/10 border-green-500/20' : ''}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+            Auto Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Active Workflows Grid */}
@@ -199,10 +275,11 @@ export function ActiveWorkflowsPanel() {
           return (
             <motion.div
               key={workflow.id}
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
+              onClick={() => onWorkflowClick?.(workflow.id)}
             >
               {/* Header */}
               <div className="flex items-start justify-between mb-4">
@@ -215,18 +292,34 @@ export function ActiveWorkflowsPanel() {
                 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
                       <MoreVertical className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setSelectedWorkflow({id: workflow.id, name: workflow.name})}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation()
+                      onWorkflowClick?.(workflow.id)
+                    }}>
                       <Eye className="w-4 h-4 mr-2" />
-                      View Live Progress
+                      Open Execution Theater
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleExecuteWorkflow(workflow.id)}>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation()
+                      handleExecuteWorkflow(workflow.id)
+                    }}>
                       <Play className="w-4 h-4 mr-2" />
                       Execute Workflow
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setWorkflowToDelete({ id: workflow.id, name: workflow.name })
+                      }}
+                      className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Workflow
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -263,10 +356,10 @@ export function ActiveWorkflowsPanel() {
               {/* Agents */}
               <div className="mb-4">
                 <div className="text-sm text-muted-foreground mb-2">
-                  Agents ({workflow.agents.length})
+                  Agents ({workflow.agents?.length || 0})
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {workflow.agents.map(agent => (
+                  {(workflow.agents || []).map(agent => (
                     <Badge key={agent.id} variant="outline" className="text-xs">
                       {agent.name}
                     </Badge>
@@ -277,19 +370,19 @@ export function ActiveWorkflowsPanel() {
               {/* Metrics */}
               <div className="grid grid-cols-2 gap-4 mb-4 text-xs">
                 <div>
-                  <p className="text-muted-foreground">Total Runs</p>
+                  <p className="text-green-400">Total Runs</p>
                   <p className="font-medium">{workflow.metrics.total_executions}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Success Rate</p>
+                  <p className="text-green-400">Success Rate</p>
                   <p className="font-medium">{workflow.metrics.success_rate}%</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Avg Duration</p>
+                  <p className="text-green-400">Avg Duration</p>
                   <p className="font-medium">{workflow.metrics.avg_duration}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">Last Run</p>
+                  <p className="text-green-400">Last Run</p>
                   <p className="font-medium">
                     {workflow.metrics.last_execution ? 
                       new Date(workflow.metrics.last_execution).toLocaleDateString() : 
@@ -301,18 +394,21 @@ export function ActiveWorkflowsPanel() {
 
               {/* Actions */}
               <div className="flex justify-between items-center pt-4 border-t border-border/30">
-                <div className="text-xs text-muted-foreground">
-                  Created: {new Date(workflow.created_at).toLocaleDateString()}
+                <div className="text-xs">
+                  <span className="text-green-400">Created:</span> <span className="text-muted-foreground">{new Date(workflow.created_at).toLocaleDateString()}</span>
                 </div>
                 
                 <div className="flex space-x-2">
                   <Button 
                     size="sm" 
                     variant="outline"
-                    onClick={() => setSelectedWorkflow({id: workflow.id, name: workflow.name})}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onWorkflowClick?.(workflow.id)
+                    }}
                   >
                     <Eye className="w-3 h-3 mr-1" />
-                    View Progress
+                    Open Theater
                   </Button>
                   
                   {workflow.current_execution.status === 'idle' && (
@@ -341,6 +437,99 @@ export function ActiveWorkflowsPanel() {
           onClose={() => setSelectedWorkflow(null)}
         />
       )}
+
+      {/* Delete Individual Workflow Confirmation Dialog */}
+      <Dialog open={!!workflowToDelete} onOpenChange={(open) => !open && setWorkflowToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-400" />
+              Delete Workflow
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-semibold text-white">"{workflowToDelete?.name}"</span>?
+              <br /><br />
+              This will permanently delete the workflow and all its execution history. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setWorkflowToDelete(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteWorkflow}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete Workflow'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cleanup Old Workflows Dialog */}
+      <Dialog open={showCleanupDialog} onOpenChange={setShowCleanupDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-orange-400" />
+              Cleanup Old Workflows
+            </DialogTitle>
+            <DialogDescription>
+              Select how old workflows should be before deletion. This will permanently delete workflows and their execution history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Delete workflows older than:</label>
+              <Select value={cleanupDays} onValueChange={setCleanupDays}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">7 days</SelectItem>
+                  <SelectItem value="14">14 days</SelectItem>
+                  <SelectItem value="30">30 days</SelectItem>
+                  <SelectItem value="60">60 days</SelectItem>
+                  <SelectItem value="90">90 days</SelectItem>
+                  <SelectItem value="180">6 months</SelectItem>
+                  <SelectItem value="365">1 year</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-yellow-200">
+                  This action cannot be undone. All workflows created before {new Date(Date.now() - parseInt(cleanupDays) * 24 * 60 * 60 * 1000).toLocaleDateString()} will be permanently deleted.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCleanupDialog(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCleanupWorkflows}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? 'Cleaning...' : 'Cleanup Workflows'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

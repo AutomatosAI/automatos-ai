@@ -967,6 +967,10 @@
     async getSystemMetrics() {
       return this.request('/api/system/metrics')
     }
+
+    async getApiHealth() {
+      return this.request('/api/health/endpoints')
+    }
   
     async getSystemConfig() {
       return this.request('/api/system/config')
@@ -1123,6 +1127,10 @@
       return this.request('/api/workflows')
     }
   
+    async getWorkflow(workflowId: string) {
+      return this.request(`/api/workflows/${workflowId}`)
+    }
+  
     async createWorkflow(data: any) {
       return this.request('/api/workflows', {
         method: 'POST',
@@ -1149,22 +1157,37 @@
       })
     }
   
-    async executeWorkflow(workflowId: string, data: any) {
-      return this.request(`/api/workflows/${workflowId}/execute`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-    }
+  async executeWorkflow(workflowId: string, data: any) {
+    return this.request(`/api/workflows/${workflowId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async executeWorkflowDirect(data: any) {
+    return this.request('/api/workflows/execute', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteWorkflow(workflowId: number) {
+    return this.request(`/api/workflows/${workflowId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async cleanupOldWorkflows(days: number = 30) {
+    return this.request(`/api/workflows/cleanup/old?days=${days}`, {
+      method: 'DELETE'
+    })
+  }
   
-    async executeWorkflowDirect(data: any) {
-      return this.request('/api/workflows/execute', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-    }
-  
-    async getWorkflowExecutions() {
-      return this.request('/api/workflows/executions/')
+    async getWorkflowExecutions(workflowId?: string) {
+      const url = workflowId 
+        ? `/api/workflows/executions/?workflow_id=${workflowId}`
+        : '/api/workflows/executions/'
+      return this.request(url)
     }
   
     async getWorkflowExecution(executionId: string) {
@@ -1614,8 +1637,8 @@
     }
   
     async getPerformanceAnalytics(timeRange: string) {
-      // Will use mock fallback automatically if endpoint fails
-      return this.request(`/api/performance/analytics?timeRange=${timeRange}`)
+      // Use existing /api/system/metrics with timeRange parameter
+      return this.request(`/api/system/metrics?timeRange=${timeRange}`)
     }
   
     async getUsageAnalytics(timeRange: string) {

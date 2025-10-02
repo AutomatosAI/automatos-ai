@@ -431,6 +431,8 @@ class PatternResponse(BaseModel):
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    goal: Optional[str] = Field(None, description="High-level objective of the workflow (overrides description if provided)")
+    context: Optional[Dict[str, Any]] = Field(None, description="Additional context for workflow execution (e.g., codegraph_project, pr_number, git_url)")
     workflow_definition: Dict[str, Any] = Field(default_factory=dict)
     agent_ids: Optional[List[int]] = []
     owner: Optional[str] = None
@@ -451,6 +453,8 @@ class WorkflowResponse(BaseModel):
     id: int
     name: str
     description: Optional[str]
+    goal: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
     workflow_definition: Dict[str, Any]
     status: str
     owner: Optional[str]

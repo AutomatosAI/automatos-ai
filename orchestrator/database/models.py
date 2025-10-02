@@ -145,6 +145,8 @@ class Workflow(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    goal = Column(Text)  # High-level objective (overrides description if provided)
+    context = Column(JSON)  # Additional context for execution (codegraph_project, pr_number, etc.)
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     created_at = Column(DateTime, default=func.now())
@@ -363,6 +365,8 @@ class PatternResponse(BaseModel):
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    goal: Optional[str] = Field(None, description="High-level objective of the workflow (overrides description if provided)")
+    context: Optional[Dict[str, Any]] = Field(None, description="Additional context for workflow execution (e.g., codegraph_project, pr_number, git_url)")
     workflow_definition: Dict[str, Any]
     agent_ids: Optional[List[int]] = []
 
