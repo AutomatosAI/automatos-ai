@@ -3,9 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Literal
 from pydantic import BaseModel
 
-
 SlotName = Literal["INSTRUCTION", "MEMORY", "RETRIEVAL", "CODE", "TOOLS", "CONSTRAINTS"]
-
 
 class Slot(BaseModel):
     name: SlotName
@@ -13,7 +11,6 @@ class Slot(BaseModel):
     weight: float = 1.0
     enabled: bool = True
     max_chars: Optional[int] = None
-
 
 class ContextPolicy(BaseModel):
     policy_id: str
@@ -34,7 +31,6 @@ class ContextPolicy(BaseModel):
                 "CONSTRAINTS": Slot(name="CONSTRAINTS", weight=0.7, enabled=True, max_chars=600),
             },
         )
-
 
 class AssembledContext(BaseModel):
     policy_id: str
@@ -86,5 +82,4 @@ def assemble_context(
     stats["TOTAL"] = sum(stats.values())
     slots_used = [s.name for s in ordered if stats.get(s.name, 0) > 0]
     return AssembledContext(policy_id=policy.policy_id, prompt=assembled, stats=stats, slots_used=slots_used)
-
 
