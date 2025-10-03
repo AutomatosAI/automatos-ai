@@ -9,6 +9,7 @@ Extracts symbols (functions, classes) and builds relationship graphs.
 import os
 import re
 import ast
+import json
 import hashlib
 import logging
 import tempfile
@@ -41,9 +42,19 @@ class CodeSymbol:
 
 
 @dataclass
+class CodeRelationship:
+    """Represents a relationship between code symbols"""
+    from_symbol: str  # qualified name
+    to_symbol: str    # qualified name
+    relationship_type: str  # 'calls', 'imports', 'extends', 'implements', 'references'
+    metadata: Dict[str, Any]
+
+
+@dataclass
 class ParseResult:
     """Result of parsing a single file"""
     symbols: List[CodeSymbol]
+    relationships: List[CodeRelationship]  # NEW
     file_hash: str
     lines_of_code: int
     language: str
@@ -117,14 +128,14 @@ class CodeGraphService:
             result = self.db.execute(
                 text("""
                     INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, exclude_patterns)
-                    VALUES (:name, 'github', :url, :branch, 'indexing', :excludes)
+                    VALUES (:name, 'github', :url, :branch, 'indexing', CAST(:excludes AS json))
                     RETURNING id
                 """),
                 {
                     "name": project_name,
                     "url": github_url,
                     "branch": branch,
-                    "excludes": str(exclude_patterns or [])
+                    "excludes": json.dumps(exclude_patterns or [])
                 }
             )
             project_id = result.fetchone()[0]
@@ -140,6 +151,7 @@ class CodeGraphService:
             
             # Discover and parse files
             symbols_data = []
+            relationships_data = []  # NEW: Collect relationships
             files_data = []
             total_files = 0
             
@@ -174,6 +186,16 @@ class CodeGraphService:
                                 "metadata": symbol.metadata
                             })
                         
+                        # NEW: Store relationships
+                        for rel in parse_result.relationships:
+                            relationships_data.append({
+                                "project_id": project_id,
+                                "from_symbol": rel.from_symbol,
+                                "to_symbol": rel.to_symbol,
+                                "relationship_type": rel.relationship_type,
+                                "metadata": rel.metadata
+                            })
+                        
                         total_files += 1
                         
                 except Exception as e:
@@ -199,6 +221,10 @@ class CodeGraphService:
             if symbols_data:
                 await self._store_symbols_with_embeddings(symbols_data)
             
+            # NEW: Store relationships (after symbols are stored)
+            if relationships_data:
+                await self._store_relationships(project_id, relationships_data)
+            
             # Update project stats
             duration = time.time() - start_time
             self.db.execute(
@@ -207,6 +233,7 @@ class CodeGraphService:
                     SET status = 'active',
                         total_files = :total_files,
                         total_symbols = :total_symbols,
+                        total_relationships = :total_relationships,
                         last_indexed = NOW(),
                         index_duration_seconds = :duration,
                         updated_at = NOW()
@@ -216,6 +243,7 @@ class CodeGraphService:
                     "id": project_id,
                     "total_files": total_files,
                     "total_symbols": len(symbols_data),
+                    "total_relationships": len(relationships_data),
                     "duration": duration
                 }
             )
@@ -329,14 +357,15 @@ class CodeGraphService:
             language = self._detect_language(extension)
             
             if language == 'python':
-                symbols = self._parse_python(content, file_path, repo_root)
+                symbols, relationships = self._parse_python(content, file_path, repo_root)
             elif language in ['typescript', 'javascript']:
-                symbols = self._parse_typescript_javascript(content, file_path, repo_root, language)
+                symbols, relationships = self._parse_typescript_javascript(content, file_path, repo_root, language)
             else:
                 return None
             
             return ParseResult(
                 symbols=symbols,
+                relationships=relationships,
                 file_hash=file_hash,
                 lines_of_code=lines_of_code,
                 language=language
@@ -353,21 +382,25 @@ class CodeGraphService:
                 return language
         return None
     
-    def _parse_python(self, content: str, file_path: str, repo_root: str) -> List[CodeSymbol]:
-        """Parse Python file using AST"""
+    def _parse_python(self, content: str, file_path: str, repo_root: str) -> Tuple[List[CodeSymbol], List[CodeRelationship]]:
+        """Parse Python file using AST - extract symbols AND relationships"""
         symbols = []
+        relationships = []
         
         try:
             tree = ast.parse(content)
             rel_path = os.path.relpath(file_path, repo_root)
             
-            # Extract functions and classes
+            # First pass: Extract all symbols
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
                     # Extract function
                     signature = self._get_function_signature(node)
                     docstring = ast.get_docstring(node)
                     code_snippet = ast.get_source_segment(content, node) or ""
+                    
+                    # Extract function calls within this function
+                    calls = self._extract_function_calls(node)
                     
                     symbols.append(CodeSymbol(
                         symbol_type='function',
@@ -380,9 +413,19 @@ class CodeGraphService:
                         code_snippet=code_snippet[:1000],  # Limit snippet size
                         metadata={
                             'args': [arg.arg for arg in node.args.args],
-                            'decorators': [d.id if isinstance(d, ast.Name) else str(d) for d in node.decorator_list]
+                            'decorators': [d.id if isinstance(d, ast.Name) else str(d) for d in node.decorator_list],
+                            'calls': calls  # Track what this function calls
                         }
                     ))
+                    
+                    # Create 'calls' relationships
+                    for called_func in calls:
+                        relationships.append(CodeRelationship(
+                            from_symbol=f"{rel_path}::{node.name}",
+                            to_symbol=called_func,
+                            relationship_type='calls',
+                            metadata={'line': node.lineno}
+                        ))
                 
                 elif isinstance(node, ast.ClassDef):
                     # Extract class
@@ -406,11 +449,56 @@ class CodeGraphService:
                             'methods': [m.name for m in node.body if isinstance(m, ast.FunctionDef)]
                         }
                     ))
+                    
+                    # Create 'extends' relationships for base classes
+                    for base in bases:
+                        if base and base != 'object':
+                            relationships.append(CodeRelationship(
+                                from_symbol=f"{rel_path}::{node.name}",
+                                to_symbol=base,
+                                relationship_type='extends',
+                                metadata={'line': node.lineno}
+                            ))
+                
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    # Extract imports
+                    imports = self._extract_imports(node)
+                    for imported in imports:
+                        relationships.append(CodeRelationship(
+                            from_symbol=rel_path,
+                            to_symbol=imported,
+                            relationship_type='imports',
+                            metadata={'line': node.lineno}
+                        ))
         
         except Exception as e:
             logger.warning(f"Failed to parse Python AST: {e}")
         
-        return symbols
+        return symbols, relationships
+    
+    def _extract_function_calls(self, function_node: ast.FunctionDef) -> List[str]:
+        """Extract all function calls within a function"""
+        calls = []
+        for node in ast.walk(function_node):
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    calls.append(node.func.id)
+                elif isinstance(node.func, ast.Attribute):
+                    # Handle method calls like obj.method()
+                    calls.append(node.func.attr)
+        return list(set(calls))  # Remove duplicates
+    
+    def _extract_imports(self, node: ast.AST) -> List[str]:
+        """Extract imported modules/functions"""
+        imports = []
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imports.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ''
+            for alias in node.names:
+                imports.append(f"{module}.{alias.name}" if module else alias.name)
+        return imports
     
     def _get_function_signature(self, node: ast.FunctionDef) -> str:
         """Generate function signature from AST node"""
@@ -433,9 +521,10 @@ class CodeGraphService:
         file_path: str,
         repo_root: str,
         language: str
-    ) -> List[CodeSymbol]:
+    ) -> Tuple[List[CodeSymbol], List[CodeRelationship]]:
         """Parse TypeScript/JavaScript using regex (simplified for MVP)"""
         symbols = []
+        relationships = []
         rel_path = os.path.relpath(file_path, repo_root)
         
         # Regex patterns for functions and classes
@@ -495,8 +584,28 @@ class CodeGraphService:
                     code_snippet=line[:500],
                     metadata={'language': language, 'extends': base}
                 ))
+                
+                # Create 'extends' relationship if base class exists
+                if base:
+                    relationships.append(CodeRelationship(
+                        from_symbol=f"{rel_path}::{name}",
+                        to_symbol=base,
+                        relationship_type='extends',
+                        metadata={'line': i}
+                    ))
+            
+            # Extract imports (simplified)
+            import_match = re.search(r'import\s+.*?\s+from\s+[\'"](.+?)[\'"]', line)
+            if import_match:
+                imported_module = import_match.group(1)
+                relationships.append(CodeRelationship(
+                    from_symbol=rel_path,
+                    to_symbol=imported_module,
+                    relationship_type='imports',
+                    metadata={'line': i}
+                ))
         
-        return symbols
+        return symbols, relationships
     
     async def _store_symbols_with_embeddings(self, symbols_data: List[Dict[str, Any]]):
         """Store symbols in database with embeddings"""
@@ -538,12 +647,12 @@ class CodeGraphService:
                              signature, docstring, code_snippet, embedding, metadata)
                             VALUES (:project_id, :symbol_type, :name, :qualified_name, :file_path,
                                     :line_number, :signature, :docstring, :code_snippet,
-                                    :embedding::vector, :metadata)
+                                    CAST(:embedding AS vector), :metadata)
                         """),
                         {
                             **symbol,
                             "embedding": embedding_str,
-                            "metadata": str(symbol.get('metadata', {}))
+                            "metadata": json.dumps(symbol.get('metadata', {}))
                         }
                     )
                 
@@ -567,6 +676,95 @@ class CodeGraphService:
                         }
                     )
                 self.db.commit()
+    
+    async def _store_relationships(self, project_id: int, relationships_data: List[Dict[str, Any]]):
+        """
+        Store code relationships in database
+        
+        Maps qualified symbol names to symbol IDs and creates relationships.
+        """
+        import json
+        
+        try:
+            # Build TWO maps: qualified_name -> id AND name -> ids
+            symbol_map = {}  # qualified_name -> symbol_id
+            name_map = {}    # simple name -> [symbol_ids]
+            
+            result = self.db.execute(
+                text("SELECT id, qualified_name, name FROM codegraph_symbols WHERE project_id = :project_id"),
+                {"project_id": project_id}
+            )
+            for row in result:
+                symbol_map[row.qualified_name] = row.id
+                # Store by simple name too (for fuzzy matching)
+                if row.name not in name_map:
+                    name_map[row.name] = []
+                name_map[row.name].append(row.id)
+            
+            # Insert relationships (only if both symbols exist)
+            relationships_inserted = 0
+            skipped_external = 0
+            skipped_notfound = 0
+            
+            # DEBUG: Log first few symbol names for comparison
+            if relationships_data:
+                logger.info(f"🔍 DEBUG: Sample qualified names in symbol_map: {list(symbol_map.keys())[:3]}")
+                sample_rels = [f"{r['from_symbol']} -> {r['to_symbol']}" for r in relationships_data[:3]]
+                logger.info(f"🔍 DEBUG: Sample relationship names: {sample_rels}")
+            
+            matched_fuzzy = 0
+            for idx, rel in enumerate(relationships_data):
+                # Try exact qualified name match first
+                from_symbol_id = symbol_map.get(rel['from_symbol'])
+                to_symbol_id = symbol_map.get(rel['to_symbol'])
+                
+                # If to_symbol not found by qualified name, try fuzzy match by simple name
+                if not to_symbol_id:
+                    # Extract simple name from qualified or use as-is
+                    to_name = rel['to_symbol'].split('::')[-1] if '::' in rel['to_symbol'] else rel['to_symbol']
+                    to_candidates = name_map.get(to_name, [])
+                    # If only one match, use it (unambiguous)
+                    if len(to_candidates) == 1:
+                        to_symbol_id = to_candidates[0]
+                        matched_fuzzy += 1
+                        if matched_fuzzy <= 3:
+                            logger.info(f"✅ Fuzzy matched '{rel['to_symbol']}' -> '{to_name}' (id={to_symbol_id})")
+               
+                # Debug first few
+                if idx < 3:
+                    logger.info(f"🔍 Rel {idx}: from={rel['from_symbol']} (id={from_symbol_id}), to={rel['to_symbol']} (id={to_symbol_id})")
+               
+                # Only create relationship if both symbols are found
+                # (to_symbol might be external library, base class not in project, etc.)
+                if from_symbol_id and to_symbol_id:
+                    try:
+                        self.db.execute(
+                            text("""
+                                INSERT INTO codegraph_relationships 
+                                (project_id, from_symbol_id, to_symbol_id, relationship_type, metadata)
+                                VALUES (:project_id, :from_symbol_id, :to_symbol_id, :relationship_type, CAST(:metadata AS jsonb))
+                            """),
+                            {
+                                "project_id": project_id,
+                                "from_symbol_id": from_symbol_id,
+                                "to_symbol_id": to_symbol_id,
+                                "relationship_type": rel['relationship_type'],
+                                "metadata": json.dumps(rel['metadata'])
+                            }
+                        )
+                        relationships_inserted += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to insert relationship: {e}")
+                        continue
+                else:
+                    skipped_external += 1
+            
+            self.db.commit()
+            logger.info(f"✅ Stored {relationships_inserted} relationships (from {len(relationships_data)} extracted, {matched_fuzzy} fuzzy-matched, {skipped_external} skipped)")
+            
+        except Exception as e:
+            logger.error(f"Failed to store relationships: {e}")
+            # Don't raise - relationships are supplementary, don't fail indexing
     
     async def search_symbols(
         self,
@@ -866,6 +1064,131 @@ class CodeGraphService:
             "project_name": project.name,
             "files_removed": project.total_files,
             "symbols_removed": project.total_symbols
+        }
+    
+    async def get_call_graph(
+        self,
+        project_name: str,
+        symbol: str,
+        depth: int = 1,
+        direction: str = "outgoing"
+    ) -> Dict[str, Any]:
+        """
+        Generate call graph for a symbol showing function calls and dependencies
+        
+        Args:
+            project_name: Name of the project
+            symbol: Qualified symbol name (e.g., "module.py::ClassName::method")
+            depth: How many levels to traverse (1-5)
+            direction: 'outgoing' (calls made), 'incoming' (callers), 'both'
+        """
+        # Get project ID
+        project = self.db.execute(
+            text("SELECT id FROM codegraph_projects WHERE name = :name"),
+            {"name": project_name}
+        ).fetchone()
+        
+        if not project:
+            raise ValueError(f"Project '{project_name}' not found")
+        
+        project_id = project.id
+        
+        # BFS to build call graph
+        visited = set()
+        nodes = []
+        edges = []
+        queue = [(symbol, 0)]  # (symbol, level)
+        
+        while queue:
+            current_symbol, level = queue.pop(0)
+            
+            if current_symbol in visited or level > depth:
+                continue
+            
+            visited.add(current_symbol)
+            
+            # Get symbol details
+            symbol_info = self.db.execute(
+                text("""
+                    SELECT id, symbol_type, name, qualified_name, file_path, line_number
+                    FROM codegraph_symbols
+                    WHERE project_id = :project_id AND qualified_name = :symbol
+                    LIMIT 1
+                """),
+                {"project_id": project_id, "symbol": current_symbol}
+            ).fetchone()
+            
+            if not symbol_info:
+                continue
+            
+            # Add node
+            node = {
+                "id": str(symbol_info.id),
+                "symbol": symbol_info.qualified_name,
+                "name": symbol_info.name,
+                "type": symbol_info.symbol_type,
+                "file": symbol_info.file_path,
+                "line": symbol_info.line_number,
+                "level": level
+            }
+            nodes.append(node)
+            
+            # Get relationships
+            if direction in ["outgoing", "both"]:
+                # Get symbols this one calls
+                outgoing = self.db.execute(
+                    text("""
+                        SELECT s.qualified_name, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON r.to_symbol_id = s.id
+                        WHERE r.from_symbol_id = :symbol_id
+                          AND r.relationship_type IN ('calls', 'imports', 'extends')
+                    """),
+                    {"symbol_id": symbol_info.id}
+                ).fetchall()
+                
+                for rel in outgoing:
+                    edges.append({
+                        "from": current_symbol,
+                        "to": rel.qualified_name,
+                        "type": rel.relationship_type
+                    })
+                    
+                    if level < depth:
+                        queue.append((rel.qualified_name, level + 1))
+            
+            if direction in ["incoming", "both"]:
+                # Get symbols that call this one
+                incoming = self.db.execute(
+                    text("""
+                        SELECT s.qualified_name, r.relationship_type
+                        FROM codegraph_relationships r
+                        JOIN codegraph_symbols s ON r.from_symbol_id = s.id
+                        WHERE r.to_symbol_id = :symbol_id
+                          AND r.relationship_type IN ('calls', 'imports', 'extends')
+                    """),
+                    {"symbol_id": symbol_info.id}
+                ).fetchall()
+                
+                for rel in incoming:
+                    edges.append({
+                        "from": rel.qualified_name,
+                        "to": current_symbol,
+                        "type": rel.relationship_type
+                    })
+                    
+                    if level < depth:
+                        queue.append((rel.qualified_name, level + 1))
+        
+        return {
+            "project": project_name,
+            "root_symbol": symbol,
+            "depth": depth,
+            "direction": direction,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "nodes": nodes,
+            "edges": edges
         }
 
 

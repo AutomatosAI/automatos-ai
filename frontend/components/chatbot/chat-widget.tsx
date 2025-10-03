@@ -16,10 +16,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ChatInterface } from './chat-interface'
+import { useRouter } from 'next/navigation'
 
 // Configuration to disable chatbot UI
-const CHATBOT_DISABLED = true
+const CHATBOT_DISABLED = false  // ✅ RE-ENABLED for Phase 2!
 
 interface ChatWidgetProps {
   position?: 'bottom-right' | 'bottom-left'
@@ -46,6 +46,7 @@ export function ChatWidget({
     recentActions: []
   }
 }: ChatWidgetProps) {
+  const router = useRouter()
   const [isMinimized, setIsMinimized] = useState(true)
   const [isExpanded, setIsExpanded] = useState(false)
   const [quickMessage, setQuickMessage] = useState('')
@@ -129,9 +130,8 @@ export function ChatWidget({
       })
 
       if (response.ok) {
-        // Open full chat interface with the response
-        setIsExpanded(true)
-        setIsMinimized(false)
+        // Open full chat page
+        router.push('/chat')
       }
     } catch (error) {
       console.error('Error sending message:', error)
@@ -169,7 +169,7 @@ export function ChatWidget({
               transition={{ type: "spring", stiffness: 500, damping: 30 }}
             >
               <Button
-                onClick={() => setIsMinimized(false)}
+                onClick={() => router.push('/chat')}
                 className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-xl hover:shadow-2xl transition-all duration-300 group relative"
                 size="lg"
               >
@@ -215,7 +215,7 @@ export function ChatWidget({
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setIsExpanded(true)}
+                      onClick={() => router.push('/chat')}
                       className="text-gray-400 hover:text-white hover:bg-gray-800"
                     >
                       <Maximize2 className="w-4 h-4" />
@@ -296,19 +296,6 @@ export function ChatWidget({
         </AnimatePresence>
       </div>
 
-      {/* Full-screen chat interface */}
-      <AnimatePresence>
-        {isExpanded && (
-          <ChatInterface
-            onClose={() => {
-              setIsExpanded(false)
-              setIsMinimized(true)
-            }}
-            context={context}
-            initialQuery={quickMessage}
-          />
-        )}
-      </AnimatePresence>
     </>
   )
 }

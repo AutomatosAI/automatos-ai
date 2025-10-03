@@ -11,10 +11,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { apiClient } from "@/lib/api-client"
+import { CodeGraphVisualization } from './CodeGraphVisualization'
 import { 
   Database, FileCode, Search, GitBranch, Trash2, RotateCw,
   Activity, TrendingUp, Github, Loader2, CheckCircle2, XCircle,
-  Code2, FunctionSquare, FileSearch
+  Code2, FunctionSquare, FileSearch, Network
 } from 'lucide-react'
 
 interface Project {
@@ -26,6 +27,7 @@ interface Project {
   language: string
   total_files: number
   total_symbols: number
+  total_relationships: number  // NEW: Show relationship count
   last_indexed: string
   index_duration_seconds: number
   status: string
@@ -209,6 +211,7 @@ export function CodeGraphPanel() {
     totalProjects: projects.length,
     totalFiles: projects.reduce((sum, p) => sum + p.total_files, 0),
     totalSymbols: projects.reduce((sum, p) => sum + p.total_symbols, 0),
+    totalRelationships: projects.reduce((sum, p) => sum + (p.total_relationships || 0), 0),  // NEW
     activeProjects: projects.filter(p => p.status === 'active').length
   }
 
@@ -257,8 +260,8 @@ export function CodeGraphPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <Activity className="w-5 h-5 text-orange-400 mb-2" />
-                <div className="text-2xl font-bold">{stats.activeProjects}</div>
-                <div className="text-sm text-muted-foreground">Active</div>
+                <div className="text-2xl font-bold">{(stats.totalRelationships / 1000).toFixed(1)}K</div>
+                <div className="text-sm text-muted-foreground">Relationships</div>
               </div>
             </div>
           </CardContent>
@@ -286,9 +289,9 @@ export function CodeGraphPanel() {
             <Search className="w-4 h-4 mr-2" />
             Search
           </TabsTrigger>
-          <TabsTrigger value="analytics">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Analytics
+          <TabsTrigger value="visualization">
+            <Network className="w-4 h-4 mr-2" />
+            Visualization
           </TabsTrigger>
         </TabsList>
 
@@ -337,6 +340,10 @@ export function CodeGraphPanel() {
                       <span className="font-semibold">{project.total_symbols.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-muted-foreground">Relationships:</span>
+                      <span className="font-semibold">{(project.total_relationships || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-muted-foreground">Language:</span>
                       <span className="font-semibold">{project.language || 'Multi'}</span>
                     </div>
@@ -352,17 +359,29 @@ export function CodeGraphPanel() {
                       size="sm" 
                       variant="outline" 
                       className="flex-1"
+                      onClick={() => {
+                        setSelectedProject(project.name)
+                        setActiveTab('search')
+                      }}
+                    >
+                      <Search className="w-3 h-3 mr-1" />
+                      Search
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
                       onClick={() => handleReindex(project.id)}
                       disabled={loading}
+                      title="Re-index this project"
                     >
-                      <RotateCw className="w-3 h-3 mr-1" />
-                      Re-index
+                      <RotateCw className="w-3 h-3" />
                     </Button>
                     <Button 
                       size="sm" 
                       variant="outline"
                       onClick={() => handleDeleteProject(project.id)}
                       disabled={loading}
+                      title="Delete this project"
                     >
                       <Trash2 className="w-3 h-3" />
                     </Button>
@@ -508,32 +527,19 @@ export function CodeGraphPanel() {
         </TabsContent>
 
         {/* Analytics Tab */}
-        <TabsContent value="analytics" className="space-y-4">
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle>Project Statistics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {projects.map(project => (
-                  <div key={project.id} className="flex items-center justify-between p-3 bg-secondary/20 rounded">
-                    <div>
-                      <div className="font-semibold">{project.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {project.total_files} files • {project.total_symbols} symbols
-                      </div>
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {project.index_duration_seconds ? 
-                        `Indexed in ${project.index_duration_seconds.toFixed(1)}s` : 
-                        'Not indexed'
-                      }
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="visualization" className="space-y-4">
+          {selectedProject ? (
+            <CodeGraphVisualization project={selectedProject} />
+          ) : (
+            <Card className="glass-card">
+              <CardContent className="py-12">
+                <div className="text-center text-muted-foreground">
+                  <Network className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>Select a project from the search tab to visualize code relationships</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 

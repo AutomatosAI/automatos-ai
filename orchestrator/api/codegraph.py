@@ -333,3 +333,28 @@ async def health_check():
     }
 
 
+@router.get("/call-graph")
+async def get_call_graph_api(
+    project: str = Query(..., description="Project name"),
+    symbol: str = Query(..., description="Qualified name of the root symbol"),
+    depth: int = Query(1, ge=1, le=5, description="Depth of the call graph traversal"),
+    direction: str = Query("outgoing", description="Traversal direction: 'outgoing', 'incoming', 'both'"),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve the call graph or dependency tree for a given symbol.
+    Returns nodes and edges for visualization of code relationships.
+    
+    Example: /api/code-graph/call-graph?project=Automatos-ai&symbol=AgentFactory&depth=2
+    """
+    try:
+        codegraph_service = CodeGraphService(db, OPENAI_API_KEY)
+        call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction)
+        return call_graph
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Call graph error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve call graph: {e}")
+
+

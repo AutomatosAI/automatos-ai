@@ -51,6 +51,8 @@ export function TemplatesTab({ onUseTemplate, onOpenCreateModal }: TemplatesTabP
     template_id: '',
     name: '',
     description: '',
+    goal: '',  // NEW: Workflow goal
+    context: {},  // NEW: Workflow context
     category: 'Development',
     difficulty: 'intermediate',
     tags: [],
@@ -684,6 +686,63 @@ function TemplateForm({ form, onChange, onSubmit, onCancel, isLoading, submitLab
           placeholder="Describe what this template does..."
           className="bg-secondary/50 border-secondary min-h-[80px]"
         />
+      </div>
+
+      <div>
+        <Label htmlFor="goal">Workflow Goal (Optional)</Label>
+        <Input
+          id="goal"
+          value={form.goal || ''}
+          onChange={(e) => onChange({ ...form, goal: e.target.value })}
+          placeholder="e.g., Review PR #123 for security vulnerabilities"
+          className="bg-secondary/50 border-secondary"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          High-level objective - overrides description if provided
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="context">Workflow Context (Optional JSON)</Label>
+        <Textarea
+          id="context"
+          value={typeof form.context === 'string' ? form.context : JSON.stringify(form.context || {}, null, 2)}
+          onChange={(e) => {
+            try {
+              const parsed = JSON.parse(e.target.value)
+              onChange({ ...form, context: parsed })
+            } catch {
+              // Invalid JSON, keep as string temporarily
+              onChange({ ...form, context: e.target.value })
+            }
+          }}
+          placeholder={'{\n  "codegraph_project": "my-app",\n  "pr_number": 123,\n  "git_url": "https://github.com/..."\n}'}
+          className="bg-secondary/50 border-secondary min-h-[100px] font-mono text-xs"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
+        </p>
+        <div className="mt-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs text-orange-300 flex items-start gap-2">
+          <span className="text-sm">⚡</span>
+          <span><strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 py-0.5 rounded">codegraph_project</code> in context to give agents access to indexed code.</span>
+        </div>
+      </div>
+
+      <div>
+        <Label htmlFor="tags">Tags (Optional)</Label>
+        <Input
+          id="tags"
+          value={Array.isArray(form.tags) ? form.tags.join(', ') : ''}
+          onChange={(e) => {
+            const tagArray = e.target.value.split(',').map(t => t.trim()).filter(Boolean)
+            onChange({ ...form, tags: tagArray })
+          }}
+          placeholder="project:automatos-ai, type:pr-review, automated"
+          className="bg-secondary/50 border-secondary"
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Comma-separated tags for organization and filtering
+        </p>
       </div>
 
       <div className="grid grid-cols-3 gap-4">

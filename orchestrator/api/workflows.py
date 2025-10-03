@@ -377,6 +377,8 @@ async def create_workflow(
         # Extract required fields
         name = workflow_data.get("name")
         description = workflow_data.get("description", "")
+        goal = workflow_data.get("goal")  # High-level objective (optional)
+        context = workflow_data.get("context")  # Additional context like {"codegraph_project": "my-repo"}
         category = workflow_data.get("category", "automation")
         priority = workflow_data.get("priority", "medium")
         config = workflow_data.get("config", {})
@@ -403,9 +405,13 @@ async def create_workflow(
         }
 
         # Create workflow record
+        import json as json_lib
         workflow = Workflow(
             name=name,
             description=description,
+            goal=goal,
+            context=json_lib.dumps(context) if context else None,  # Convert dict to JSON string
+            tags=tags,
             workflow_definition=workflow_definition,
             status=WorkflowStatus.DRAFT.value,
             created_by=workflow_data.get("created_by", "system")
@@ -1096,9 +1102,24 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             logger.info(f"📚 Enhancing subtasks with RAG context...")
             try:
                 context_integrator = ContextEngineeringIntegrator(db_session=db)
+                
+                # Get workflow tags and context for CodeGraph project selection
+                workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
+                workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
+                
+                # If context is a JSON string, parse it
+                if isinstance(workflow_ctx, str):
+                    try:
+                        import json
+                        workflow_ctx = json.loads(workflow_ctx)
+                    except:
+                        workflow_ctx = None
+                
                 context_enhancements = await context_integrator.enhance_subtasks_with_context(
                     subtasks=steps,
-                    workflow_description=task_description
+                    workflow_description=task_description,
+                    workflow_tags=workflow_tags,
+                    workflow_context=workflow_ctx
                 )
                 
                 # Store context enhancement results

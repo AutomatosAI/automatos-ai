@@ -146,7 +146,8 @@ class Workflow(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     goal = Column(Text)  # High-level objective (overrides description if provided)
-    context = Column(JSON)  # Additional context for execution (codegraph_project, pr_number, etc.)
+    context = Column(Text)  # Additional context for execution (codegraph_project, pr_number, etc.)
+    tags = Column(JSON, default=list)  # Tags for categorization and filtering
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     created_at = Column(DateTime, default=func.now())

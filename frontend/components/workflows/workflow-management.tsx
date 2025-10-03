@@ -162,29 +162,8 @@ const availableAgents = [
   }
 ]
 
-const workflowTemplates = [
-  {
-    id: 'code-review',
-    name: 'Code Review Pipeline',
-    description: 'Comprehensive code review with security and quality checks',
-    agents: ['code-architect', 'security-guard', 'test-master'],
-    steps: ['Code Analysis', 'Security Scan', 'Quality Check', 'Documentation Review']
-  },
-  {
-    id: 'bug-investigation',
-    name: 'Bug Investigation',
-    description: 'Systematic bug analysis and resolution workflow',
-    agents: ['bug-hunter', 'performance-optimizer'],
-    steps: ['Issue Analysis', 'Root Cause Investigation', 'Solution Development', 'Testing', 'Documentation']
-  },
-  {
-    id: 'security-audit',
-    name: 'Security Audit',
-    description: 'Complete security assessment and compliance check',
-    agents: ['security-guard'],
-    steps: ['Vulnerability Scan', 'Code Security Review', 'Infrastructure Audit', 'Compliance Check', 'Report Generation']
-  }
-]
+// Removed hardcoded templates - all templates now come from database via workflow_templates table
+const workflowTemplates: any[] = []
 
 export function WorkflowManagement() {
   const queryClient = useQueryClient()
