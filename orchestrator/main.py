@@ -17,7 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import uuid
+import time
 from datetime import datetime
+from collections import defaultdict, deque
 
 # Load .env file BEFORE anything else
 env_path = Path(__file__).parent / '.env'
@@ -30,6 +32,7 @@ from models import Base
 # Import API routers
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
+from api.workflow_templates import router as workflow_templates_router
 from api.documents_v2 import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
@@ -44,6 +47,7 @@ from api.patterns import router as patterns_router
 from api.context import router as context_router
 from api.credentials import router as credentials_router
 from api.tools import router as tools_router
+from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -66,6 +70,7 @@ from api.chatbot import router as chatbot_router
 from api.chatbot_suggestions import router as chatbot_suggestions_router
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
+from api.redis_websocket import router as redis_websocket_router
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -90,6 +95,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# API Tracking (in-memory, last 100 calls per endpoint)
+api_call_stats = defaultdict(lambda: {
+    "call_count": 0,
+    "total_time": 0,
+    "avg_time": 0,
+    "min_time": float('inf'),
+    "max_time": 0,
+    "recent_times": deque(maxlen=100),
+    "error_count": 0,
+    "last_called": None,
+    "status_codes": defaultdict(int)
+})
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
@@ -98,6 +116,14 @@ async def lifespan(app: FastAPI):
     try:
         init_database()
         logger.info("Database initialized successfully")
+        
+        # Initialize Redis client for real-time updates
+        from core.redis_client import init_redis_client
+        redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
+        redis_port = int(os.getenv("REDIS_PORT", "6379"))
+        redis_password = os.getenv("REDIS_PASSWORD", None)
+        init_redis_client(host=redis_host, port=redis_port, password=redis_password)
+        logger.info(f"Redis client initialized: {redis_host}:{redis_port}")
         
         # Initialize Dashboard Services (PRD-06)
         await startup_dashboard(app)
@@ -287,6 +313,42 @@ async def add_request_id_middleware(request, call_next):
     finally:
         clear_request_id(token)
 
+@app.middleware("http")
+async def api_tracking_middleware(request, call_next):
+    """Track API calls and response times"""
+    # Skip tracking for websockets and static files
+    if request.url.path.startswith(("/ws/", "/static/", "/docs", "/openapi.json")):
+        return await call_next(request)
+    
+    start_time = time.time()
+    status_code = 500  # Default to error
+    
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    except Exception as e:
+        logger.error(f"Error in request {request.url.path}: {e}")
+        raise
+    finally:
+        # Calculate response time
+        response_time = (time.time() - start_time) * 1000  # in ms
+        endpoint = f"{request.method} {request.url.path}"
+        
+        # Update stats
+        stats = api_call_stats[endpoint]
+        stats["call_count"] += 1
+        stats["total_time"] += response_time
+        stats["avg_time"] = stats["total_time"] / stats["call_count"]
+        stats["min_time"] = min(stats["min_time"], response_time)
+        stats["max_time"] = max(stats["max_time"], response_time)
+        stats["recent_times"].append(response_time)
+        stats["last_called"] = datetime.now().isoformat()
+        stats["status_codes"][status_code] += 1
+        
+        if status_code >= 400:
+            stats["error_count"] += 1
+
 # Simple API key auth dependency
 def require_api_key(x_api_key: str = Header(None)):
     required = os.getenv("API_KEY")
@@ -297,6 +359,7 @@ def require_api_key(x_api_key: str = Header(None)):
 # Include API routers
 app.include_router(agents_router)
 app.include_router(workflows_router)
+app.include_router(workflow_templates_router)
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
@@ -311,6 +374,7 @@ app.include_router(patterns_router)
 app.include_router(context_router)
 app.include_router(credentials_router)
 app.include_router(tools_router)
+app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
@@ -329,6 +393,7 @@ app.include_router(recommendations_router)
 app.include_router(solutions_router)
 app.include_router(synthesis_router)
 app.include_router(websocket_api_router)
+app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
 app.include_router(chatbot_router)
 app.include_router(chatbot_suggestions_router)
 app.include_router(document_processing_router)
@@ -595,6 +660,90 @@ async def health_check():
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e),
             "message": "System experiencing issues. Check logs for details."
+        }
+
+@app.get("/api/health/endpoints",
+         summary="📡 API Endpoint Health",
+         description="Get health statistics for all API endpoints including call counts and response times",
+         tags=["🏥 System Health"],
+         response_description="API endpoint health and performance statistics")
+async def api_endpoint_health():
+    """
+    ## 📡 API Endpoint Health Statistics
+    
+    Returns real-time statistics for all API endpoints:
+    - Call counts
+    - Average, min, max response times
+    - Status code distribution
+    - Error rates
+    - Last called timestamp
+    """
+    try:
+        endpoints = []
+        total_calls = 0
+        total_errors = 0
+        
+        for endpoint, stats in api_call_stats.items():
+            # Calculate health status based on error rate and response time
+            error_rate = (stats["error_count"] / stats["call_count"] * 100) if stats["call_count"] > 0 else 0
+            avg_time = stats["avg_time"]
+            
+            if error_rate > 10 or avg_time > 1000:
+                health = "unhealthy"
+            elif error_rate > 5 or avg_time > 500:
+                health = "degraded"
+            else:
+                health = "healthy"
+            
+            endpoints.append({
+                "endpoint": endpoint,
+                "health": health,
+                "call_count": stats["call_count"],
+                "avg_response_time": round(stats["avg_time"], 2),
+                "min_response_time": round(stats["min_time"], 2) if stats["min_time"] != float('inf') else 0,
+                "max_response_time": round(stats["max_time"], 2),
+                "error_count": stats["error_count"],
+                "error_rate": round(error_rate, 2),
+                "last_called": stats["last_called"],
+                "status_codes": dict(stats["status_codes"])
+            })
+            
+            total_calls += stats["call_count"]
+            total_errors += stats["error_count"]
+        
+        # Sort by call count (most used first)
+        endpoints.sort(key=lambda x: x["call_count"], reverse=True)
+        
+        # Calculate overall health
+        overall_error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0
+        overall_status = "healthy"
+        if overall_error_rate > 5:
+            overall_status = "degraded"
+        if overall_error_rate > 10:
+            overall_status = "unhealthy"
+        
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now().isoformat(),
+            "summary": {
+                "total_endpoints": len(endpoints),
+                "total_calls": total_calls,
+                "total_errors": total_errors,
+                "overall_error_rate": round(overall_error_rate, 2),
+                "healthy_endpoints": len([e for e in endpoints if e["health"] == "healthy"]),
+                "degraded_endpoints": len([e for e in endpoints if e["health"] == "degraded"]),
+                "unhealthy_endpoints": len([e for e in endpoints if e["health"] == "unhealthy"])
+            },
+            "endpoints": endpoints[:20]  # Top 20 most used endpoints
+        }
+        
+    except Exception as e:
+        logger.error(f"API health check failed: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e),
+            "message": "Failed to retrieve API health statistics"
         }
 
 # Root endpoint

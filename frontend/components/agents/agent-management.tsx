@@ -153,25 +153,27 @@ export function AgentManagement() {
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
       >
         {stats.map((stat, index) => (
-          <Card key={stat.label} className="glass-card">
+          <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-muted-foreground mb-1">
-                    {stat.label}
-                  </p>
-                  <div className="flex items-center gap-3">
-                    <p className="text-2xl font-bold">
-                      {statsLoading ? '...' : stat.value}
-                    </p>
-                    <p className={`text-xs ${stat.color}`}>
-                      {stat.change}
-                    </p>
-                  </div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                  <stat.icon className={`w-5 h-5 ${
+                    index === 0 ? 'text-orange-400' :
+                    index === 1 ? 'text-green-400' :
+                    index === 2 ? 'text-blue-400' :
+                    index === 3 ? 'text-purple-400' :
+                    'text-white'
+                  }`} />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-red-500">
-                  <stat.icon className="w-5 h-5 text-white" />
-                </div>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">
+                  {statsLoading ? '...' : stat.value}
+                </h3>
+                <p className="text-muted-foreground text-sm">{stat.label}</p>
+                <p className={`text-xs ${stat.color}`}>
+                  {stat.change}
+                </p>
               </div>
             </CardContent>
           </Card>

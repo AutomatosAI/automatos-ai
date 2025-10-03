@@ -15,6 +15,7 @@ function getErrorMessage(error: unknown): string {
 // Query keys for React Query
 export const systemConfigQueryKeys = {
   health: ['system', 'health'] as const,
+  apiHealth: ['api', 'health'] as const,
   metrics: ['system', 'metrics'] as const,
   config: ['system', 'config'] as const,
   configKey: (key: string) => ['system', 'config', key] as const,
@@ -36,6 +37,16 @@ export function useSystemHealth() {
   return useQuery({
     queryKey: systemConfigQueryKeys.health,
     queryFn: () => apiClient.getSystemHealth(),
+    refetchInterval: 30000,
+    staleTime: 15000,
+  })
+}
+
+// Get API endpoint health
+export function useApiHealth() {
+  return useQuery({
+    queryKey: systemConfigQueryKeys.apiHealth,
+    queryFn: () => apiClient.getApiHealth(),
     refetchInterval: 30000,
     staleTime: 15000,
   })

@@ -16,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAgents, useDocuments, useWorkflows } from '@/hooks/use-api'
-import { useSystemMetrics } from '@/hooks/use-system-config-api'
+import { useSystemMetrics, useApiHealth } from '@/hooks/use-system-config-api'
 
 interface MetricCardProps {
   title: string
@@ -30,37 +30,33 @@ interface MetricCardProps {
 
 function MetricCard({ title, value, change, changeType, icon: Icon, gradient, badge }: MetricCardProps) {
   return (
-    <Card className="glass-card overflow-hidden">
+    <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300 overflow-hidden">
       <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              <p className="text-sm font-medium text-muted-foreground">{title}</p>
-              {badge && (
-                <Badge variant="secondary" className="text-xs">
-                  {badge}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <p className="text-2xl font-bold">{value}</p>
-              {change && (
-                <div className={`flex items-center gap-1 text-sm ${
-                  changeType === 'positive' 
-                    ? 'text-green-600' 
-                    : changeType === 'negative' 
-                    ? 'text-red-600' 
-                    : 'text-muted-foreground'
-                }`}>
-                  <TrendingUp className="w-3 h-3" />
-                  {change}
-                </div>
-              )}
-            </div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+            <Icon className={`w-5 h-5 ${
+              gradient.includes('orange') ? 'text-orange-400' :
+              gradient.includes('blue') ? 'text-blue-400' :
+              gradient.includes('green') ? 'text-green-400' :
+              gradient.includes('purple') ? 'text-purple-400' :
+              'text-white'
+            }`} />
           </div>
-          <div className={`p-3 rounded-xl bg-gradient-to-br ${gradient}`}>
-            <Icon className="w-6 h-6 text-white" />
-          </div>
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-2xl font-bold">{value}</h3>
+          <p className="text-muted-foreground text-sm">{title}</p>
+          {change && (
+            <p className={`text-xs ${
+              changeType === 'positive' 
+                ? 'text-green-400' 
+                : changeType === 'negative' 
+                ? 'text-red-400' 
+                : 'text-muted-foreground'
+            }`}>
+              {change}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -73,8 +69,9 @@ export function MetricCards() {
   const { data: documents, isLoading: documentsLoading } = useDocuments()
   const { data: workflows, isLoading: workflowsLoading } = useWorkflows()
   const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
+  const { data: apiHealth, isLoading: apiHealthLoading } = useApiHealth()
   
-  const isLoading = agentsLoading || documentsLoading || workflowsLoading || metricsLoading
+  const isLoading = agentsLoading || documentsLoading || workflowsLoading || metricsLoading || apiHealthLoading
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -105,7 +102,7 @@ export function MetricCards() {
   const documentsProcessed = documentsArray.length || 0
   const runningWorkflows = workflowsArray.filter((w: any) => w?.status === 'running').length || 0
   const totalWorkflows = workflowsArray.length || 0
-  const apiCalls = systemMetrics?.api_calls_count || 0
+  const apiCalls = apiHealth?.summary?.total_calls || 0
 
   const metrics = [
     {

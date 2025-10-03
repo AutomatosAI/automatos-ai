@@ -103,7 +103,7 @@ export function EditWorkflowModal({ open, onClose, id }: { open: boolean; onClos
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <Button variant="outline" onClick={onClose}>Cancel</Button>
-                  <Button onClick={save} aria-busy={saving} className="gradient-accent">Save</Button>
+                  <Button onClick={save} aria-busy={saving} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">Save</Button>
                 </div>
               </CardContent>
             </Card>

@@ -1,4 +1,19 @@
 
+/**
+ * Tools Dashboard - MCP Tools Management
+ * ========================================
+ * 
+ * Phase 3: Updated to use REAL API data from MCP Tools endpoints
+ * - Replaced mock data with useMCPTools() hook
+ * - Real-time stats from useMCPToolsStats()
+ * - Category counts from useMCPToolCategories()
+ * 
+ * TODO: Complete implementation of:
+ * - Installation status tracking
+ * - Tool configuration management  
+ * - Ratings system
+ * - Usage analytics integration
+ */
 
 'use client'
 
@@ -30,9 +45,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { apiClient } from '@/lib/api'
+import { apiClient } from '@/lib/api-client'
 import { ToolConfigModal } from './tool-config-modal'
 import { AgentToolAssignment } from './agent-tool-assignment'
+import { CreateToolModal } from './create-tool-modal'
+import { useMCPTools, useMCPToolsStats, useMCPToolCategories, useMCPToolAssignments, useUpdateMCPTool } from '@/hooks/use-mcp-tools-api'
 
 // Tool Categories
 const toolCategories = [
@@ -313,8 +330,15 @@ interface Tool {
 }
 
 export function ToolsDashboard() {
-  const [tools, setTools] = useState<Tool[]>(mockTools)
-  const [filteredTools, setFilteredTools] = useState<Tool[]>(mockTools)
+  // Fetch real data from API
+  const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ limit: 100 })
+  const { data: statsData } = useMCPToolsStats()
+  const { data: categoriesData } = useMCPToolCategories()
+  const { data: toolAssignments = [] } = useMCPToolAssignments()
+  const updateToolMutation = useUpdateMCPTool()
+
+  const [filteredTools, setFilteredTools] = useState<any[]>([])
+  const [tools, setTools] = useState<any[]>([])
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -323,8 +347,33 @@ export function ToolsDashboard() {
   
   // Modal states
   const [configModalOpen, setConfigModalOpen] = useState(false)
-  const [selectedTool, setSelectedTool] = useState<Tool | null>(null)
+  const [selectedTool, setSelectedTool] = useState<any | null>(null)
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
+  const [createToolModalOpen, setCreateToolModalOpen] = useState(false) // Phase 3
+
+  // Convert MCP tools to match Tool interface for UI compatibility
+  useEffect(() => {
+    const convertedTools = (mcpTools as any[]).map((tool: any) => {
+      // Check if this tool is assigned to any agent
+      const isAssigned = (toolAssignments as any[]).some((assignment: any) => 
+        assignment.tool_id === tool.id && assignment.enabled
+      )
+      
+      return {
+        ...tool,
+        isInstalled: isAssigned, // Use real assignment status
+        isConfigured: isAssigned, // Assume configured if assigned
+        rating: 0, // TODO: Add ratings system
+        usageCount: 0, // TODO: Track from usage logs
+        permissions: [], // TODO: Map from tool data
+        requiredCredentials: Object.keys(tool.credentials_schema?.required || {}),
+        supportedEnvironments: ['production', 'staging'], // TODO: Get from tool metadata
+        lastUpdated: tool.updated_at,
+        pricing: 'Free' // TODO: Add pricing info to backend
+      }
+    })
+    setTools(convertedTools)
+  }, [mcpTools, toolAssignments])
 
   useEffect(() => {
     filterTools()
@@ -344,7 +393,7 @@ export function ToolsDashboard() {
       filtered = filtered.filter(tool =>
         tool?.name?.toLowerCase()?.includes(query) ||
         tool?.description?.toLowerCase()?.includes(query) ||
-        tool?.tags?.some(tag => tag?.toLowerCase()?.includes(query)) ||
+        tool?.tags?.some((tag: any) => tag?.toLowerCase()?.includes(query)) ||
         tool?.provider?.toLowerCase()?.includes(query)
       )
     }
@@ -369,34 +418,64 @@ export function ToolsDashboard() {
   }
 
   const getToolStats = () => {
+    // Use real stats from API if available and has the expected structure
+    if (statsData && typeof statsData === 'object' && 'total_tools' in statsData) {
+      return {
+        installed: (statsData as any).assigned_tools || 0,
+        configured: (statsData as any).assigned_tools || 0,
+        available: (statsData as any).active_tools || 0,
+        total: (statsData as any).total_tools || 0
+      }
+    }
+    
+    // Fallback to calculated stats
     const installed = tools.filter(tool => tool?.isInstalled)?.length || 0
     const configured = tools.filter(tool => tool?.isConfigured)?.length || 0
-    const available = tools.filter(tool => tool?.status === 'available')?.length || 0
+    const available = tools.filter(tool => tool?.status === 'active')?.length || 0
     
     return { installed, configured, available, total: tools?.length || 0 }
   }
 
   const getCategoryCount = (categoryId: string) => {
     if (categoryId === 'all') return tools?.length || 0
+    
+    // Use real category counts from API if available
+    if (categoriesData && Array.isArray(categoriesData) && categoryId !== 'all') {
+      const category = (categoriesData as any[]).find((c: any) => c.name === categoryId)
+      if (category) return category.count
+    }
+    
     return tools.filter(tool => tool?.category === categoryId)?.length || 0
+  }
+
+  // Show loading state
+  if (toolsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Activity className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
+          <p className="text-muted-foreground">Loading tools...</p>
+        </div>
+      </div>
+    )
   }
 
   const handleToolInstall = async (tool: Tool) => {
     setLoading(true)
     try {
-      // API call to install tool
-      // await apiClient.request(`/api/tools/${tool.id}/install`, { method: 'POST' })
+      console.log(`Installing tool: ${tool.name} (ID: ${tool.id})`)
       
-      // Update local state
-      setTools(prevTools => 
-        prevTools.map(t => 
-          t?.id === tool?.id 
-            ? { ...t, isInstalled: true }
-            : t
-        )
-      )
+      // Use the mutation hook which automatically invalidates queries
+      await updateToolMutation.mutateAsync({
+        id: tool.id,
+        data: { status: 'active' }
+      })
+      
+      console.log('Tool installed successfully')
+      
     } catch (error) {
       console.error('Failed to install tool:', error)
+      alert(`❌ Failed to install ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -410,112 +489,155 @@ export function ToolsDashboard() {
   const handleToolUninstall = async (tool: Tool) => {
     setLoading(true)
     try {
-      // API call to uninstall tool
-      // await apiClient.request(`/api/tools/${tool.id}/uninstall`, { method: 'DELETE' })
+      console.log(`Uninstalling tool: ${tool.name} (ID: ${tool.id})`)
       
-      // Update local state
-      setTools(prevTools => 
-        prevTools.map(t => 
-          t?.id === tool?.id 
-            ? { ...t, isInstalled: false, isConfigured: false }
-            : t
-        )
-      )
+      // Use the mutation hook which automatically invalidates queries
+      await updateToolMutation.mutateAsync({
+        id: tool.id,
+        data: { status: 'inactive' }
+      })
+      
+      console.log('Tool uninstalled successfully')
+      
     } catch (error) {
       console.error('Failed to uninstall tool:', error)
+      alert(`❌ Failed to uninstall ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
   }
 
-  const stats = getToolStats()
+  const stats = {
+    total_tools: (mcpTools as any[]).length,
+    active_tools: (mcpTools as any[]).filter((tool: any) => tool.status === 'active').length,
+    assigned_tools: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
+    total_agents: (toolAssignments as any[]).reduce((acc: any, assignment: any) => {
+      if (assignment.enabled && !acc.includes(assignment.agent_id)) {
+        acc.push(assignment.agent_id)
+      }
+      return acc
+    }, []).length,
+    installed: (mcpTools as any[]).filter((tool: any) => tool.status === 'active').length,
+    configured: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
+    available: (mcpTools as any[]).filter((tool: any) => tool.status === 'available').length,
+    total: (mcpTools as any[]).length
+  }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-8">
       {/* Header Section */}
-      <div className="flex flex-col space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold gradient-text">Tools & Integrations</h1>
-            <p className="text-muted-foreground mt-2">
-              Discover, install, and manage tools to extend your AI agents' capabilities
-            </p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <Button
-              variant="outline"
-              onClick={() => setAssignmentModalOpen(true)}
-              className="hover:border-blue-500/50"
-            >
-              <Users className="w-4 h-4 mr-2" />
-              Agent Assignment
-            </Button>
-            <Button className="icon-gradient">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Custom Tool
-            </Button>
-          </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8 }}
+        className="flex items-center justify-between"
+      >
+        <div>
+          <h1 className="text-3xl font-bold mb-2">
+            Tools & <span className="gradient-text">Integrations</span>
+          </h1>
+          <p className="text-muted-foreground text-lg">
+            Discover, install, and manage tools to extend your AI agents' capabilities
+          </p>
         </div>
+        <div className="flex items-center space-x-3">
+          <Button
+            variant="outline"
+            onClick={() => setAssignmentModalOpen(true)}
+            className="hover:border-blue-500/50"
+          >
+            <Users className="w-4 h-4 mr-2" />
+            Agent Assignment
+          </Button>
+          <Button 
+            className="gradient-accent hover:opacity-90 transition-opacity"
+            onClick={() => setCreateToolModalOpen(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Custom Tool
+          </Button>
+        </div>
+      </motion.div>
 
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="bg-secondary/30 border-border/30">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-green-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{stats.installed}</p>
-                  <p className="text-sm text-muted-foreground">Installed</p>
-                </div>
+      {/* Statistics Cards */}
+      <motion.div
+        className="grid grid-cols-1 md:grid-cols-4 gap-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, delay: 0.2 }}
+      >
+          <motion.div
+            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.1 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-400" />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-2xl font-bold">{stats.installed}</h3>
+              <p className="text-muted-foreground text-sm">Installed</p>
+              <p className="text-xs text-green-400">+{stats.installed} this week</p>
+            </div>
+          </motion.div>
           
-          <Card className="bg-secondary/30 border-border/30">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                  <Settings className="w-5 h-5 text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{stats.configured}</p>
-                  <p className="text-sm text-muted-foreground">Configured</p>
-                </div>
+          <motion.div
+            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Settings className="w-5 h-5 text-blue-400" />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-2xl font-bold">{stats.configured}</h3>
+              <p className="text-muted-foreground text-sm">Configured</p>
+              <p className="text-xs text-blue-400">+{stats.configured} ready</p>
+            </div>
+          </motion.div>
           
-          <Card className="bg-secondary/30 border-border/30">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{stats.available}</p>
-                  <p className="text-sm text-muted-foreground">Available</p>
-                </div>
+          <motion.div
+            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-purple-400" />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-2xl font-bold">{stats.available}</h3>
+              <p className="text-muted-foreground text-sm">Available</p>
+              <p className="text-xs text-purple-400">Ready to install</p>
+            </div>
+          </motion.div>
           
-          <Card className="bg-secondary/30 border-border/30">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
-                  <Grid3X3 className="w-5 h-5 text-orange-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold">{stats.total}</p>
-                  <p className="text-sm text-muted-foreground">Total Tools</p>
-                </div>
+          <motion.div
+            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.4 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-orange-400" />
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-2xl font-bold">{stats.total}</h3>
+              <p className="text-muted-foreground text-sm">Total Tools</p>
+              <p className="text-xs text-orange-400">In marketplace</p>
+            </div>
+          </motion.div>
+        </motion.div>
 
       {/* Main Content */}
       <Tabs defaultValue="marketplace" className="space-y-6">
@@ -592,7 +714,9 @@ export function ToolsDashboard() {
                 variant={selectedCategory === category.id ? 'default' : 'outline'}
                 onClick={() => setSelectedCategory(category.id)}
                 className={`flex items-center space-x-2 ${
-                  selectedCategory === category.id ? 'icon-gradient' : 'hover:border-orange-500/50'
+                  selectedCategory === category.id 
+                    ? 'bg-gray-800 border-orange-400/50 text-white' 
+                    : 'hover:border-orange-500/50'
                 }`}
               >
                 {typeof category.icon === 'string' ? (
@@ -703,21 +827,27 @@ export function ToolsDashboard() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Encrypted Credentials</span>
+                  <span className="text-sm text-muted-foreground">Active Tools</span>
                   <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
-                    Active
+                    {tools.filter(t => t?.status === 'active').length}
                   </Badge>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Role-based Access</span>
-                  <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
-                    Enabled
+                  <span className="text-sm text-muted-foreground">Assigned Tools</span>
+                  <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                    {tools.filter(t => t?.isInstalled).length}
                   </Badge>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Audit Logging</span>
-                  <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
-                    Active
+                  <span className="text-sm text-muted-foreground">Configured Tools</span>
+                  <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">
+                    {tools.filter(t => t?.isConfigured).length}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Total Agents</span>
+                  <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+                    {new Set((toolAssignments as any[]).map((a: any) => a.agent_id)).size}
                   </Badge>
                 </div>
               </CardContent>
@@ -727,32 +857,29 @@ export function ToolsDashboard() {
               <CardHeader>
                 <CardTitle className="text-base flex items-center space-x-2">
                   <Activity className="w-5 h-5 text-blue-400" />
-                  <span>Recent Activity</span>
+                  <span>Tool Assignments</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 rounded-full bg-green-400" />
-                    <div className="flex-1">
-                      <p className="text-sm">GitHub credentials updated</p>
-                      <p className="text-xs text-muted-foreground">2 minutes ago</p>
+                  {(toolAssignments as any[]).slice(0, 5).map((assignment: any, index: number) => (
+                    <div key={index} className="flex items-center space-x-3">
+                      <div className="w-2 h-2 rounded-full bg-green-400" />
+                      <div className="flex-1">
+                        <p className="text-sm">
+                          {assignment.tool?.name || `Tool ${assignment.tool_id}`} → Agent {assignment.agent_id}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {assignment.enabled ? 'Active' : 'Disabled'}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 rounded-full bg-blue-400" />
-                    <div className="flex-1">
-                      <p className="text-sm">Slack tool accessed by Agent #3</p>
-                      <p className="text-xs text-muted-foreground">5 minutes ago</p>
+                  ))}
+                  {(toolAssignments as any[]).length === 0 && (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-muted-foreground">No tool assignments yet</p>
                     </div>
-                  </div>
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-2 rounded-full bg-yellow-400" />
-                    <div className="flex-1">
-                      <p className="text-sm">AWS S3 permission denied</p>
-                      <p className="text-xs text-muted-foreground">12 minutes ago</p>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -780,6 +907,11 @@ export function ToolsDashboard() {
         open={assignmentModalOpen}
         onClose={() => setAssignmentModalOpen(false)}
         tools={tools}
+      />
+
+      <CreateToolModal
+        open={createToolModalOpen}
+        onClose={() => setCreateToolModalOpen(false)}
       />
     </div>
   )
@@ -859,7 +991,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
                   <Button 
                     onClick={onInstall}
                     disabled={loading}
-                    className="icon-gradient"
+                    className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                     size="sm"
                   >
                     <Download className="w-4 h-4 mr-1" />
@@ -952,7 +1084,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
               <Button 
                 onClick={onInstall}
                 disabled={loading}
-                className="w-full icon-gradient"
+                className="w-full bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                 size="sm"
               >
                 <Download className="w-4 h-4 mr-2" />

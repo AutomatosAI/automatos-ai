@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { ChatInterface } from '@/components/chat-interface'
+import { ChatInterface } from '@/components/chatbot/chat-interface'
 import { Bot, MessageCircle, Sparkles, ArrowRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'

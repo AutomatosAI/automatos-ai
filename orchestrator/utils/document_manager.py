@@ -512,7 +512,10 @@ class DocumentManager:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             
-            # Search for similar chunks
+            # Format embedding for pgvector
+            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+            
+            # Search for similar chunks using real vector similarity
             cursor.execute("""
                 SELECT 
                     dc.id as chunk_id,
@@ -525,9 +528,10 @@ class DocumentManager:
                 FROM document_chunks dc
                 JOIN documents d ON dc.document_id = d.id
                 WHERE d.status = 'completed'
-                ORDER BY dc.id
+                    AND dc.embedding IS NOT NULL
+                ORDER BY dc.embedding <=> %s::vector
                 LIMIT %s
-            """, (limit,))
+            """, (embedding_str, embedding_str, limit))
             
             results = cursor.fetchall()
             

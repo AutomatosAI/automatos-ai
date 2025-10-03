@@ -32,7 +32,8 @@ import {
   useSystemHealth,
   useSystemMetrics,
   useSystemAgentStatistics,
-  useSystemActivities
+  useSystemActivities,
+  useApiHealth
 } from '../../hooks/use-system-config-api'
 
 import { 
@@ -70,6 +71,7 @@ export function Dashboard() {
   // Fetch real data from APIs
   const { data: systemHealth, isLoading: healthLoading } = useSystemHealth()
   const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
+  const { data: apiHealth, isLoading: apiHealthLoading } = useApiHealth()
   const { data: activities, isLoading: activitiesLoading } = useSystemActivities()
   const { data: agents, isLoading: agentsLoading } = useAgents()
   const { data: documents, isLoading: documentsLoading } = useDocuments()
@@ -243,69 +245,93 @@ export function Dashboard() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* CPU Usage */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Cpu className="w-4 h-4 text-blue-500" />
-                          <span className="text-sm">CPU</span>
-                        </div>
-                        <span className="text-sm font-mono">
-                          {systemMetrics?.cpu?.average_usage || 0}%
-                        </span>
+                    {/* Free Disk Space */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <HardDrive className="w-4 h-4 text-orange-500" />
+                        <span className="text-sm font-medium">Free Space</span>
                       </div>
-                      <Progress 
-                        value={systemMetrics?.cpu?.average_usage || 0} 
-                        className="h-1.5"
-                      />
+                      <div className="text-right">
+                        <div className="text-sm font-mono font-semibold">
+                          {systemMetrics?.disk?.free ? 
+                            `${(systemMetrics.disk.free / (1024**3)).toFixed(1)} GB` : 
+                            'N/A'}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          of {systemMetrics?.disk?.total ? 
+                            `${(systemMetrics.disk.total / (1024**3)).toFixed(1)} GB` : 
+                            'N/A'}
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Memory Usage */}
+                    <Separator />
+
+                    {/* Network Transfer */}
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <MemoryStick className="w-4 h-4 text-green-500" />
-                          <span className="text-sm">Memory</span>
-                        </div>
-                        <span className="text-sm font-mono">
-                          {systemMetrics?.memory?.percent || 0}%
-                        </span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Wifi className="w-4 h-4 text-purple-500" />
+                        <span className="text-sm font-medium">Network Transfer</span>
                       </div>
-                      <Progress 
-                        value={systemMetrics?.memory?.percent || 0} 
-                        className="h-1.5"
-                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">↑ Sent</div>
+                          <div className="text-sm font-mono font-semibold text-green-500">
+                            {systemMetrics?.network?.bytes_sent ? 
+                              `${(systemMetrics.network.bytes_sent / (1024**3)).toFixed(2)} GB` : 
+                              '0 GB'}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">↓ Received</div>
+                          <div className="text-sm font-mono font-semibold text-blue-500">
+                            {systemMetrics?.network?.bytes_recv ? 
+                              `${(systemMetrics.network.bytes_recv / (1024**3)).toFixed(2)} GB` : 
+                              '0 GB'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Disk Usage */}
+                    <Separator />
+
+                    {/* Disk I/O */}
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <HardDrive className="w-4 h-4 text-orange-500" />
-                          <span className="text-sm">Disk</span>
-                        </div>
-                        <span className="text-sm font-mono">
-                          {systemMetrics?.disk?.percent || 0}%
-                        </span>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Database className="w-4 h-4 text-indigo-500" />
+                        <span className="text-sm font-medium">Disk I/O</span>
                       </div>
-                      <Progress 
-                        value={systemMetrics?.disk?.percent || 0} 
-                        className="h-1.5"
-                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Read</div>
+                          <div className="text-sm font-mono font-semibold">
+                            {systemMetrics?.disk?.read_bytes ? 
+                              `${(systemMetrics.disk.read_bytes / (1024**3)).toFixed(2)} GB` : 
+                              '0 GB'}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-xs text-muted-foreground">Write</div>
+                          <div className="text-sm font-mono font-semibold">
+                            {systemMetrics?.disk?.write_bytes ? 
+                              `${(systemMetrics.disk.write_bytes / (1024**3)).toFixed(2)} GB` : 
+                              '0 GB'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Network Status */}
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Wifi className="w-4 h-4 text-purple-500" />
-                          <span className="text-sm">Network</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                          <span className="text-sm font-mono">Online</span>
-                        </div>
+                    <Separator />
+
+                    {/* CPU Cores Info */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Cpu className="w-4 h-4 text-blue-500" />
+                        <span className="text-sm font-medium">CPU Cores</span>
                       </div>
+                      <span className="text-sm font-mono font-semibold">
+                        {systemMetrics?.cpu?.count || 0} cores
+                      </span>
                     </div>
                   </div>
                 )}
@@ -321,37 +347,68 @@ export function Dashboard() {
           >
             <Card className="glass-card">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-brand-accent" />
-                  API Health
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-brand-accent" />
+                    API Health
+                  </div>
+                  {apiHealth?.status && (
+                    <Badge variant={apiHealth.status === 'healthy' ? 'default' : apiHealth.status === 'degraded' ? 'outline' : 'destructive'}>
+                      {apiHealth.status.toUpperCase()}
+                    </Badge>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {healthLoading ? (
+                {apiHealthLoading ? (
                   <div className="space-y-3">
-                    {[...Array(4)].map((_, i) => (
+                    {[...Array(5)].map((_, i) => (
                       <div key={i} className="h-4 bg-muted rounded animate-pulse" />
                     ))}
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {systemHealth?.endpoints?.map((endpoint: any) => (
-                      <div key={endpoint.name} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${
-                            endpoint.status === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                          }`} />
-                          <span className="text-sm">{endpoint.name}</span>
+                    {/* Summary Stats */}
+                    {apiHealth?.summary && (
+                      <div className="grid grid-cols-2 gap-2 mb-3 pb-3 border-b border-border/50">
+                        <div className="text-xs">
+                          <div className="text-muted-foreground">Total Calls</div>
+                          <div className="text-lg font-mono font-bold">{apiHealth.summary.total_calls.toLocaleString()}</div>
                         </div>
-                        <span className="text-xs font-mono text-muted-foreground">
-                          {endpoint.latency}ms
-                        </span>
+                        <div className="text-xs">
+                          <div className="text-muted-foreground">Error Rate</div>
+                          <div className="text-lg font-mono font-bold">{apiHealth.summary.overall_error_rate}%</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Top Endpoints */}
+                    <div className="text-xs font-medium mb-2">Top API Endpoints</div>
+                    {apiHealth?.endpoints?.slice(0, 5).map((endpoint: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                            endpoint.health === 'healthy' ? 'bg-green-500' : 
+                            endpoint.health === 'degraded' ? 'bg-yellow-500' : 'bg-red-500'
+                          }`} />
+                          <span className="text-xs font-mono truncate" title={endpoint.endpoint}>
+                            {endpoint.endpoint.replace('GET ', '').replace('POST ', '').replace('PUT ', '').replace('DELETE ', '')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {Math.round(endpoint.avg_response_time)}ms
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {endpoint.call_count}
+                          </Badge>
+                        </div>
                       </div>
                     ))}
                     
-                    {!systemHealth?.endpoints && (
-                      <div className="text-sm text-muted-foreground">
-                        No API health data available
+                    {(!apiHealth?.endpoints || apiHealth.endpoints.length === 0) && (
+                      <div className="text-sm text-muted-foreground text-center py-4">
+                        No API calls tracked yet
                       </div>
                     )}
                   </div>

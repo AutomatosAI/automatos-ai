@@ -967,6 +967,10 @@
     async getSystemMetrics() {
       return this.request('/api/system/metrics')
     }
+
+    async getApiHealth() {
+      return this.request('/api/health/endpoints')
+    }
   
     async getSystemConfig() {
       return this.request('/api/system/config')
@@ -1123,6 +1127,10 @@
       return this.request('/api/workflows')
     }
   
+    async getWorkflow(workflowId: string) {
+      return this.request(`/api/workflows/${workflowId}`)
+    }
+  
     async createWorkflow(data: any) {
       return this.request('/api/workflows', {
         method: 'POST',
@@ -1149,22 +1157,37 @@
       })
     }
   
-    async executeWorkflow(workflowId: string, data: any) {
-      return this.request(`/api/workflows/${workflowId}/execute`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-    }
+  async executeWorkflow(workflowId: string, data: any) {
+    return this.request(`/api/workflows/${workflowId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async executeWorkflowDirect(data: any) {
+    return this.request('/api/workflows/execute', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteWorkflow(workflowId: number) {
+    return this.request(`/api/workflows/${workflowId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async cleanupOldWorkflows(days: number = 30) {
+    return this.request(`/api/workflows/cleanup/old?days=${days}`, {
+      method: 'DELETE'
+    })
+  }
   
-    async executeWorkflowDirect(data: any) {
-      return this.request('/api/workflows/execute', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-    }
-  
-    async getWorkflowExecutions() {
-      return this.request('/api/workflows/executions/')
+    async getWorkflowExecutions(workflowId?: string) {
+      const url = workflowId 
+        ? `/api/workflows/executions/?workflow_id=${workflowId}`
+        : '/api/workflows/executions/'
+      return this.request(url)
     }
   
     async getWorkflowExecution(executionId: string) {
@@ -1177,6 +1200,67 @@
   
     async getRecommendedWorkflowTemplates() {
       return this.request('/api/workflows/templates/recommended')
+    }
+
+    // Workflow Templates CRUD endpoints
+    async listWorkflowTemplates(params?: {
+      category?: string
+      difficulty?: string
+      is_featured?: boolean
+      is_public?: boolean
+      search?: string
+      skip?: number
+      limit?: number
+      sort_by?: string
+    }) {
+      const queryParams = new URLSearchParams()
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams.append(key, String(value))
+          }
+        })
+      }
+      const query = queryParams.toString()
+      return this.request(`/api/workflow-templates${query ? '?' + query : ''}`)
+    }
+
+    async getWorkflowTemplateById(templateId: string) {
+      return this.request(`/api/workflow-templates/${templateId}`)
+    }
+
+    async createWorkflowTemplate(templateData: any) {
+      return this.request('/api/workflow-templates', {
+        method: 'POST',
+        body: JSON.stringify(templateData)
+      })
+    }
+
+    async updateWorkflowTemplate(templateId: string, templateData: any) {
+      return this.request(`/api/workflow-templates/${templateId}`, {
+        method: 'PUT',
+        body: JSON.stringify(templateData)
+      })
+    }
+
+    async deleteWorkflowTemplate(templateId: string) {
+      return this.request(`/api/workflow-templates/${templateId}`, {
+        method: 'DELETE'
+      })
+    }
+
+    async recordTemplateUsage(templateId: string) {
+      return this.request(`/api/workflow-templates/${templateId}/use`, {
+        method: 'POST'
+      })
+    }
+
+    async getFeaturedTemplates(limit?: number) {
+      return this.request(`/api/workflow-templates/featured/list${limit ? '?limit=' + limit : ''}`)
+    }
+
+    async getTemplateCategories() {
+      return this.request('/api/workflow-templates/categories/list')
     }
 
     // Code graph endpoints
@@ -1392,6 +1476,97 @@
         body: JSON.stringify(data)
       })
     }
+
+    // ===== MCP TOOLS ENDPOINTS (Phase 3) =====
+    async getMCPTools(params?: { status?: string; category?: string; provider?: string; search?: string; skip?: number; limit?: number }) {
+      const queryParams = new URLSearchParams()
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined) queryParams.append(key, String(value))
+        })
+      }
+      const url = queryParams.toString() ? `/api/mcp-tools/?${queryParams}` : '/api/mcp-tools/'
+      return this.request(url)
+    }
+
+    async getMCPTool(id: number) {
+      return this.request(`/api/mcp-tools/${id}`)
+    }
+
+    async createMCPTool(data: any) {
+      return this.request('/api/mcp-tools/', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+    }
+
+    async updateMCPTool(id: number, data: any) {
+      return this.request(`/api/mcp-tools/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      })
+    }
+
+    async deleteMCPTool(id: number) {
+      return this.request(`/api/mcp-tools/${id}`, {
+        method: 'DELETE'
+      })
+    }
+
+    async testMCPToolConnection(id: number, params?: any) {
+      return this.request(`/api/mcp-tools/${id}/test`, {
+        method: 'POST',
+        body: JSON.stringify(params || {})
+      })
+    }
+
+    async getMCPToolCategories() {
+      return this.request('/api/mcp-tools/categories/list')
+    }
+
+    async getMCPToolsStats() {
+      return this.request('/api/mcp-tools/stats/summary')
+    }
+
+    // Agent-Tool Assignment Endpoints
+    async getMCPToolAssignments(enabledOnly: boolean = true) {
+      return this.request(`/api/mcp-tools/assignments?enabled_only=${enabledOnly}`)
+    }
+
+  async getAgentTools(agentId: number, enabledOnly: boolean = true) {
+      return this.request(`/api/mcp-tools/agents/${agentId}/tools?enabled_only=${enabledOnly}`)
+    }
+
+    async assignToolToAgent(agentId: number, toolId: number, data?: { enabled?: boolean; permissions?: any; configuration?: any }) {
+      return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
+        method: 'POST',
+        body: JSON.stringify(data || { tool_id: toolId, enabled: true, permissions: {}, configuration: {} })
+      })
+    }
+
+    async removeToolFromAgent(agentId: number, toolId: number) {
+      return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
+        method: 'DELETE'
+      })
+    }
+
+    async updateToolPermissions(agentId: number, toolId: number, permissions: any) {
+      return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}/permissions`, {
+        method: 'PUT',
+        body: JSON.stringify(permissions)
+      })
+    }
+
+    async getToolUsageLogs(params?: { tool_id?: number; agent_id?: number; success_only?: boolean; skip?: number; limit?: number }) {
+      const queryParams = new URLSearchParams()
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined) queryParams.append(key, String(value))
+        })
+      }
+      const url = queryParams.toString() ? `/api/mcp-tools/usage/logs?${queryParams}` : '/api/mcp-tools/usage/logs'
+      return this.request(url)
+    }
   
     // ===== CHATBOT ENDPOINTS =====
     async sendChatbotQuery(message: string, context?: any) {
@@ -1462,8 +1637,8 @@
     }
   
     async getPerformanceAnalytics(timeRange: string) {
-      // Will use mock fallback automatically if endpoint fails
-      return this.request(`/api/performance/analytics?timeRange=${timeRange}`)
+      // Use existing /api/system/metrics with timeRange parameter
+      return this.request(`/api/system/metrics?timeRange=${timeRange}`)
     }
   
     async getUsageAnalytics(timeRange: string) {

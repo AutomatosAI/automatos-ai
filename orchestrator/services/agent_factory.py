@@ -26,7 +26,8 @@ from services.llm_provider import (
     create_llm_manager
 )
 from database.models import (
-    Agent, Skill, PriorityLevel, Base
+    Agent, Skill, PriorityLevel, Base,
+    AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class AgentRuntime:
     last_execution: Optional[datetime] = None
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
+    tools: List[Dict[str, Any]] = field(default_factory=list)  # Phase 3: MCP Tools assigned to agent
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         """Update agent performance metrics"""
@@ -226,13 +228,17 @@ class AgentFactory:
                     f"Response time: {verification_result['response_time']:.2f}s"
                 )
             
+            # Phase 3: Load agent's tools from database
+            agent_tools = await self._load_agent_tools(db_agent.id)
+            
             # Create runtime agent
             agent_runtime = AgentRuntime(
                 agent_id=db_agent.id,
                 metadata=metadata,
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
-                created_at=datetime.now()
+                created_at=datetime.now(),
+                tools=agent_tools  # Phase 3: MCP Tools
             )
             
             # Update database status
@@ -281,6 +287,84 @@ class AgentFactory:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    async def activate_agent(self, agent_id: int) -> Optional[AgentRuntime]:
+        """
+        Load an agent from database and activate it in runtime.
+        
+        Args:
+            agent_id: ID of agent to activate
+            
+        Returns:
+            AgentRuntime if successful, None if agent not found or activation failed
+        """
+        try:
+            # Check if already active
+            if agent_id in self.active_agents:
+                self.logger.info(f"Agent {agent_id} already active in runtime")
+                return self.active_agents[agent_id]
+            
+            # Load from database
+            db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
+            if not db_agent:
+                self.logger.error(f"Agent {agent_id} not found in database")
+                return None
+            
+            # Get LLM config from agent configuration
+            config = db_agent.configuration or {}
+            llm_config_dict = config.get("llm_config")
+            
+            if not llm_config_dict:
+                # Use default if not configured
+                self.logger.warning(f"Agent {agent_id} has no llm_config, using DEFAULT_LLM_CONFIG")
+                llm_config_dict = DEFAULT_LLM_CONFIG.copy()
+            
+            # Create LLM manager
+            provider = LLMProvider(llm_config_dict.get("provider", "openai"))
+            llm_config = LLMConfig(
+                provider=provider,
+                model=llm_config_dict.get("model", "gpt-4"),
+                temperature=llm_config_dict.get("temperature", 0.7),
+                max_tokens=llm_config_dict.get("max_tokens", 2000),
+            )
+            llm_manager = LLMManager(llm_config)
+            
+            # Create metadata from database agent
+            metadata = AgentMetadata(
+                name=db_agent.name,
+                agent_type=db_agent.agent_type,
+                description=db_agent.description,
+                skills=config.get("skills", []),
+                custom_metadata=config.get("custom_metadata", {})
+            )
+            
+            # Load agent's tools
+            agent_tools = await self._load_agent_tools(agent_id)
+            
+            # Create runtime
+            agent_runtime = AgentRuntime(
+                agent_id=agent_id,
+                metadata=metadata,
+                llm_manager=llm_manager,
+                lifecycle_state=AgentLifecycle.ACTIVE,
+                created_at=datetime.now(),
+                tools=agent_tools
+            )
+            
+            # Add to active agents
+            self.active_agents[agent_id] = agent_runtime
+            
+            # Update database status
+            db_agent.status = AgentLifecycle.ACTIVE.value
+            self.db_session.commit()
+            
+            self.logger.info(f"✅ Activated agent {agent_id} ({db_agent.name}) with {llm_config_dict.get('model')}")
+            
+            return agent_runtime
+            
+        except Exception as e:
+            self.logger.error(f"Failed to activate agent {agent_id}: {str(e)}")
+            return None
+    
     async def execute_with_prompt(
         self,
         agent: Union[int, AgentRuntime],
@@ -308,14 +392,18 @@ class AgentFactory:
         """
         start_time = time.time()
         
-        # Get agent runtime
+        # Get agent runtime - auto-activate if needed
         if isinstance(agent, int):
             agent_runtime = self.active_agents.get(agent)
             if not agent_runtime:
-                return {
-                    "status": "error",
-                    "error": f"Agent {agent} not found in runtime"
-                }
+                # Agent not in runtime - try to activate it
+                self.logger.info(f"Agent {agent} not in runtime, attempting to activate...")
+                agent_runtime = await self.activate_agent(agent)
+                if not agent_runtime:
+                    return {
+                        "status": "error",
+                        "error": f"Agent {agent} could not be activated"
+                    }
         else:
             agent_runtime = agent
         
@@ -343,9 +431,9 @@ class AgentFactory:
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
-            # Execute with retries
+            # Execute with retries (at least 1 attempt)
             last_error = None
-            for attempt in range(max_retries):
+            for attempt in range(max(1, max_retries)):
                 try:
                     # REAL LLM API CALL
                     response = await agent_runtime.llm_manager.generate_response(messages)
@@ -578,6 +666,87 @@ class AgentFactory:
         
         return test_results
     
+    # ======================================================================
+    # PHASE 3: MCP TOOLS INTEGRATION METHODS
+    # ======================================================================
+    
+    async def _load_agent_tools(self, agent_id: int) -> List[Dict[str, Any]]:
+        """
+        Load MCP tools assigned to an agent from the database.
+        
+        Phase 3: Tools Integration
+        Returns tool metadata for agent's assigned tools (only enabled ones).
+        """
+        try:
+            # Query agent_tool_assignments with eagerly loaded tool data
+            from sqlalchemy.orm import joinedload
+            
+            assignments = (
+                self.db_session.query(AgentToolAssignment)
+                .options(joinedload(AgentToolAssignment.tool))
+                .filter(
+                    AgentToolAssignment.agent_id == agent_id,
+                    AgentToolAssignment.enabled == True
+                )
+                .all()
+            )
+            
+            tools = []
+            for assignment in assignments:
+                if assignment.tool:  # Tool exists
+                    tools.append({
+                        "tool_id": assignment.tool.id,
+                        "name": assignment.tool.name,
+                        "description": assignment.tool.description,
+                        "provider": assignment.tool.provider,
+                        "category": assignment.tool.category,
+                        "icon": assignment.tool.icon,
+                        "mcp_server_url": assignment.tool.mcp_server_url,
+                        "capabilities": assignment.tool.capabilities or {},
+                        "permissions": assignment.permissions or {},
+                        "configuration": assignment.configuration or {},
+                        "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None
+                    })
+            
+            if tools:
+                self.logger.info(f"✅ Loaded {len(tools)} tools for agent {agent_id}")
+            
+            return tools
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load tools for agent {agent_id}: {e}")
+            return []
+    
+    def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
+        """
+        Check if an agent has a specific tool capability.
+        
+        Phase 3: Used by IntelligentAgentSelector for tool-based matching.
+        """
+        for tool in agent_runtime.tools:
+            tool_capabilities = tool.get("capabilities", {})
+            if isinstance(tool_capabilities, dict):
+                methods = tool_capabilities.get("methods", [])
+                if capability in methods:
+                    return True
+        
+        return False
+    
+    def get_agent_tools_summary(self, agent_runtime: AgentRuntime) -> Dict[str, Any]:
+        """Get summary of agent's tools for display/logging"""
+        return {
+            "total_tools": len(agent_runtime.tools),
+            "tools": [
+                {
+                    "name": tool.get("name"),
+                    "category": tool.get("category"),
+                    "provider": tool.get("provider")
+                }
+                for tool in agent_runtime.tools
+            ],
+            "categories": list(set(tool.get("category") for tool in agent_runtime.tools if tool.get("category")))
+        }
+    
     def cleanup(self):
         """Clean up resources"""
         if self.db_session:
@@ -623,7 +792,7 @@ async def create_specialized_agent(
             result["tests"] = test_results
         
         return result
-        
+    
     finally:
         factory.cleanup()
 

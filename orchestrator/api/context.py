@@ -145,11 +145,12 @@ async def test_rag_configuration(
 
 @router.get("/system/health")
 async def get_context_system_health(
-    rag_service: RAGService = Depends(get_rag_service)
+    rag_service: RAGService = Depends(get_rag_service),
+    db: Session = Depends(get_db)
 ):
     """Get context engineering system health"""
     try:
-        stats = rag_service.get_retrieval_stats()
+        stats = rag_service.get_retrieval_stats(db)
         
         return {
             "status": "healthy" if stats['system_status'] == 'operational' else "degraded",

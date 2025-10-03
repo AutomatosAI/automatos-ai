@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   X, 
   Users, 
-  Tool, 
+  Wrench, 
   Shield, 
   CheckCircle, 
   AlertTriangle, 
@@ -40,7 +40,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { apiClient } from '@/lib/api'
+import { apiClient } from '@/lib/api-client'
+import { useAgents } from '@/hooks/use-agent-api'
+import { useMCPTools, useMCPToolAssignments } from '@/hooks/use-mcp-tools-api'
 
 interface Tool {
   id: number
@@ -78,59 +80,9 @@ interface AgentToolAssignmentProps {
   tools: Tool[]
 }
 
-// Mock agents data (in real app, this would come from API)
-const mockAgents = [
-  {
-    id: 1,
-    name: 'Code Architect Pro',
-    agent_type: 'code_architect',
-    status: 'active',
-    description: 'Senior-level code architecture and system design specialist',
-    icon: '🏗️'
-  },
-  {
-    id: 2,
-    name: 'Security Guardian',
-    agent_type: 'security_expert',
-    status: 'active',
-    description: 'Cybersecurity and vulnerability assessment expert',
-    icon: '🛡️'
-  },
-  {
-    id: 3,
-    name: 'Performance Optimizer',
-    agent_type: 'performance_optimizer',
-    status: 'active',
-    description: 'System optimization and performance tuning specialist',
-    icon: '⚡'
-  },
-  {
-    id: 4,
-    name: 'Data Analyst AI',
-    agent_type: 'data_analyst',
-    status: 'active',
-    description: 'Data analysis and insights generation expert',
-    icon: '📊'
-  },
-  {
-    id: 5,
-    name: 'Infrastructure Manager',
-    agent_type: 'infrastructure_manager',
-    status: 'active',
-    description: 'Cloud infrastructure and deployment management',
-    icon: '☁️'
-  },
-  {
-    id: 6,
-    name: 'Custom Agent Alpha',
-    agent_type: 'custom',
-    status: 'active',
-    description: 'General-purpose AI agent with custom capabilities',
-    icon: '🤖'
-  }
-]
+// Real data is now loaded from API hooks above
 
-// Permission matrix - maps agent types to allowed tools
+// Permission matrix - maps agent types to allowed tools (simplified for demo)
 const agentToolPermissions = {
   code_architect: ['GitHub', 'Jira', 'Docker'],
   security_expert: ['GitHub', 'AWS S3'],
@@ -149,8 +101,22 @@ const agentTypeColors = {
   custom: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
 }
 
-export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps) {
-  const [agents, setAgents] = useState<Agent[]>(mockAgents)
+function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps) {
+  // Use real API data instead of mock data
+  const { data: agentsData = [], isLoading: agentsLoading } = useAgents()
+  const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ limit: 100 })
+  const { data: toolAssignments = [] } = useMCPToolAssignments()
+  
+  // Convert API data to match expected format
+  const agents = (agentsData as any[]).map((agent: any) => ({
+    id: agent.id,
+    name: agent.name,
+    agent_type: agent.agent_type,
+    status: agent.status,
+    description: agent.description,
+    icon: '🤖' // Default icon, could be enhanced later
+  }))
+  
   const [assignments, setAssignments] = useState<Record<string, number[]>>({})
   const [activeTab, setActiveTab] = useState('matrix')
   const [searchQuery, setSearchQuery] = useState('')
@@ -163,10 +129,10 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
   }>>([])
 
   useEffect(() => {
-    if (open) {
+    if (open && (toolAssignments as any[]).length > 0) {
       loadCurrentAssignments()
     }
-  }, [open])
+  }, [open, toolAssignments])
 
   useEffect(() => {
     validateAssignments()
@@ -174,18 +140,21 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
 
   const loadCurrentAssignments = async () => {
     try {
-      // In real app, load from API
-      // const response = await apiClient.request('/api/permissions/assignments')
+      // Convert real tool assignments to the expected format
+      const realAssignments: Record<string, number[]> = {}
       
-      // Mock current assignments
-      const mockAssignments = {
-        'agent_1': [1, 2], // Code Architect -> GitHub, Jira
-        'agent_2': [1, 5], // Security Expert -> GitHub, AWS S3
-        'agent_5': [5, 6, 3], // Infrastructure Manager -> AWS S3, Docker, Slack
-        'agent_6': [1, 2, 3, 4] // Custom Agent -> GitHub, Jira, Slack, Gmail
-      }
+      (toolAssignments as any[]).forEach((assignment: any) => {
+        if (assignment.enabled) {
+          const agentKey = `agent_${assignment.agent_id}`
+          if (!realAssignments[agentKey]) {
+            realAssignments[agentKey] = []
+          }
+          realAssignments[agentKey].push(assignment.tool_id)
+        }
+      })
       
-      setAssignments(mockAssignments)
+      console.log('Real assignments loaded:', realAssignments)
+      setAssignments(realAssignments)
     } catch (error) {
       console.error('Failed to load assignments:', error)
     }
@@ -229,17 +198,24 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
   }
 
   const toggleAssignment = (agentId: number, toolId: number) => {
+    console.log(`Toggling assignment: Agent ${agentId} <-> Tool ${toolId}`)
     const agentKey = `agent_${agentId}`
     setAssignments(prev => {
       const currentAssignments = prev[agentKey] || []
       const isAssigned = currentAssignments.includes(toolId)
       
-      return {
+      console.log(`Current assignments for ${agentKey}:`, currentAssignments)
+      console.log(`Is assigned: ${isAssigned}`)
+      
+      const newAssignments = {
         ...prev,
         [agentKey]: isAssigned 
           ? currentAssignments.filter(id => id !== toolId)
           : [...currentAssignments, toolId]
       }
+      
+      console.log(`New assignments:`, newAssignments)
+      return newAssignments
     })
   }
 
@@ -249,8 +225,19 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
   }
 
   const isPermissionAllowed = (agentType: string, toolName: string) => {
-    const allowedTools = agentToolPermissions[agentType as keyof typeof agentToolPermissions] || []
-    return allowedTools.includes(toolName)
+    // For demo purposes, allow most combinations
+    // In a real implementation, this would check against a proper permission matrix
+    const restrictedCombinations = [
+      { agentType: 'code_architect', toolName: 'Slack MCP' },
+      { agentType: 'security_expert', toolName: 'Jira MCP' },
+      { agentType: 'infrastructure_manager', toolName: 'Jira MCP' }
+    ]
+    
+    const isRestricted = restrictedCombinations.some(combo => 
+      combo.agentType === agentType && combo.toolName === toolName
+    )
+    
+    return !isRestricted
   }
 
   const getAssignmentCount = (agentId: number) => {
@@ -280,7 +267,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
     }
   }
 
-  const filteredAgents = agents.filter(agent => {
+  const filteredAgents = agents.filter((agent: any) => {
     const matchesSearch = !searchQuery || 
       agent?.name?.toLowerCase()?.includes(searchQuery.toLowerCase()) ||
       agent?.agent_type?.toLowerCase()?.includes(searchQuery.toLowerCase())
@@ -290,11 +277,18 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
     return matchesSearch && matchesType
   })
 
-  const installedTools = tools.filter(tool => tool?.isInstalled)
+  // Show only installed tools (tools that have been installed via the install button)
+  const installedTools = (mcpTools as any[]).filter((tool: any) => {
+    // Check if tool is installed (status: 'active')
+    return tool.status === 'active'
+  })
+  
+  // If no tools are installed, show a helpful message
+  const toolsToShow = installedTools.length > 0 ? installedTools : []
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="glass-card max-w-6xl max-h-[90vh] overflow-hidden">
+      <DialogContent className="glass-card max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -305,14 +299,33 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                 <h2 className="text-xl font-semibold">Agent-Tool Assignment</h2>
                 <p className="text-sm text-muted-foreground font-normal">
                   Manage which tools each agent can access
+                  {agentsLoading && <span className="ml-2 text-blue-400">(Loading agents...)</span>}
+                  {toolsLoading && <span className="ml-2 text-blue-400">(Loading tools...)</span>}
                 </p>
               </div>
             </div>
-            {conflicts?.length > 0 && (
-              <Badge className="bg-red-500/10 text-red-400 border-red-500/20">
-                {conflicts.length} Conflicts
-              </Badge>
-            )}
+            <div className="flex items-center space-x-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  console.log('🔍 DEBUG INFO:')
+                  console.log(`- Agents loaded: ${agents.length}`)
+                  console.log(`- Tools loaded: ${toolsToShow.length}`)
+                  console.log(`- Assignments:`, assignments)
+                  console.log(`- Conflicts:`, conflicts)
+                  alert(`Modal Debug:\n- Agents: ${agents.length}\n- Tools: ${toolsToShow.length}\n- Assignments: ${Object.keys(assignments).length}`)
+                }}
+                className="text-xs"
+              >
+                Debug Info
+              </Button>
+              {conflicts?.length > 0 && (
+                <Badge className="bg-red-500/10 text-red-400 border-red-500/20">
+                  {conflicts.length} Conflicts
+                </Badge>
+              )}
+            </div>
           </DialogTitle>
         </DialogHeader>
 
@@ -320,7 +333,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <TabsList className="grid w-full grid-cols-3 bg-secondary/50">
               <TabsTrigger value="matrix" className="flex items-center space-x-2">
-                <Tool className="w-4 h-4" />
+                <Wrench className="w-4 h-4" />
                 <span>Assignment Matrix</span>
               </TabsTrigger>
               <TabsTrigger value="agents" className="flex items-center space-x-2">
@@ -334,8 +347,34 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
             </TabsList>
 
             <TabsContent value="matrix" className="space-y-6">
-              {/* Filters */}
-              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+              {/* Show message if no tools are installed */}
+              {toolsToShow.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-orange-500/10 flex items-center justify-center">
+                    <Wrench className="w-8 h-8 text-orange-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">No Tools Installed</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Install tools from the Tools Dashboard to assign them to agents
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      onClose()
+                      // Navigate to tools page or refresh
+                      window.location.href = '/tools'
+                    }}
+                  >
+                    Go to Tools Dashboard
+                  </Button>
+                </div>
+              )}
+              
+              {/* Assignment Matrix Table */}
+              {toolsToShow.length > 0 && (
+                <>
+                  {/* Filters */}
+                  <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
                 <div className="flex gap-4 flex-1">
                   <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -367,7 +406,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
               <Card className="bg-secondary/30 border-border/30">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center space-x-2">
-                    <Tool className="w-5 h-5" />
+                    <Wrench className="w-5 h-5" />
                     <span>Assignment Matrix</span>
                   </CardTitle>
                 </CardHeader>
@@ -406,12 +445,14 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                                 </div>
                               </div>
                             </td>
-                            {installedTools.map(tool => {
+                            {toolsToShow.map(tool => {
                               const isAssigned = isToolAssigned(agent?.id || 0, tool?.id || 0)
                               const isAllowed = isPermissionAllowed(agent?.agent_type || '', tool?.name || '')
                               const hasConflict = conflicts.some(c => 
                                 c.agentId === agent?.id && c.toolId === tool?.id
                               )
+
+                              console.log(`Agent: ${agent?.name} (${agent?.agent_type}), Tool: ${tool?.name}, Allowed: ${isAllowed}, Assigned: ${isAssigned}`)
 
                               return (
                                 <td key={tool?.id} className="p-3 text-center">
@@ -419,17 +460,28 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                                     <Button
                                       variant={isAssigned ? "default" : "outline"}
                                       size="sm"
-                                      onClick={() => toggleAssignment(agent?.id || 0, tool?.id || 0)}
+                                      onClick={(e) => {
+                                        e.preventDefault()
+                                        e.stopPropagation()
+                                        console.log(`✅ Button clicked: Agent ${agent?.id} (${agent?.name}), Tool ${tool?.id} (${tool?.name})`)
+                                        console.log(`   - Agent Type: ${agent?.agent_type}`)
+                                        console.log(`   - Tool Name: ${tool?.name}`)
+                                        console.log(`   - Is Allowed: ${isAllowed}`)
+                                        console.log(`   - Currently Assigned: ${isAssigned}`)
+                                        toggleAssignment(agent?.id || 0, tool?.id || 0)
+                                      }}
                                       disabled={!isAllowed}
                                       className={`w-8 h-8 p-0 ${
                                         isAssigned 
                                           ? hasConflict 
                                             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400'
-                                            : 'icon-gradient'
+                                            : 'bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white'
                                           : isAllowed 
-                                            ? 'hover:border-orange-500/50' 
+                                            ? 'hover:border-orange-500/50 hover:bg-orange-500/10 cursor-pointer' 
                                             : 'opacity-50 cursor-not-allowed'
                                       }`}
+                                      style={{ pointerEvents: 'auto', zIndex: 10 }}
+                                      title={`${isAllowed ? 'Click to assign/unassign' : 'Permission denied'} - ${agent?.name} ↔ ${tool?.name}`}
                                     >
                                       {isAssigned ? (
                                         hasConflict ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />
@@ -450,6 +502,8 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                   </div>
                 </CardContent>
               </Card>
+                </>
+              )}
             </TabsContent>
 
             <TabsContent value="agents" className="space-y-6">
@@ -483,7 +537,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                         <div>
                           <h4 className="text-sm font-medium mb-2">Assigned Tools</h4>
                           <div className="flex flex-wrap gap-2">
-                            {installedTools.filter(tool => isToolAssigned(agent?.id || 0, tool?.id || 0)).map(tool => {
+                            {toolsToShow.filter(tool => isToolAssigned(agent?.id || 0, tool?.id || 0)).map(tool => {
                               const hasConflict = conflicts.some(c => 
                                 c.agentId === agent?.id && c.toolId === tool?.id
                               )
@@ -509,7 +563,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                         <div>
                           <h4 className="text-sm font-medium mb-2">Available Tools</h4>
                           <div className="flex flex-wrap gap-2">
-                            {installedTools
+                            {toolsToShow
                               .filter(tool => 
                                 !isToolAssigned(agent?.id || 0, tool?.id || 0) && 
                                 isPermissionAllowed(agent?.agent_type || '', tool?.name || '')
@@ -519,8 +573,14 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
                                   key={tool?.id}
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => toggleAssignment(agent?.id || 0, tool?.id || 0)}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    console.log(`Button clicked (By Agent): Agent ${agent?.id}, Tool ${tool?.id}`)
+                                    toggleAssignment(agent?.id || 0, tool?.id || 0)
+                                  }}
                                   className="h-8 text-xs hover:border-orange-500/50"
+                                  style={{ pointerEvents: 'auto', zIndex: 10 }}
                                 >
                                   <Plus className="w-3 h-3 mr-1" />
                                   {tool?.icon} {tool?.name}
@@ -685,7 +745,7 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
             <Button 
               onClick={handleSave}
               disabled={saving || conflicts?.length > 0}
-              className="icon-gradient"
+              className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
             >
               {saving ? (
                 <>
@@ -705,3 +765,5 @@ export function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmen
     </Dialog>
   )
 }
+
+export { AgentToolAssignment }

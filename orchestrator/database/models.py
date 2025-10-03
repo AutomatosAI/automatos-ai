@@ -57,6 +57,50 @@ class Agent(Base):
     skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
+    # Phase 3: MCP Tools relationship - forward ref to avoid circular import
+    tool_assignments = relationship("AgentToolAssignment", back_populates="agent", cascade="all, delete-orphan", foreign_keys="[AgentToolAssignment.agent_id]")
+
+# Phase 3: MCP Tools Models
+class AgentToolAssignment(Base):
+    """Agent-Tool Assignment with permissions"""
+    __tablename__ = 'agent_tool_assignments'
+    
+    id = Column(Integer, primary_key=True)
+    agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'), nullable=False)
+    tool_id = Column(Integer, ForeignKey('mcp_tools.id', ondelete='CASCADE'), nullable=False)
+    enabled = Column(Boolean, default=True)
+    permissions = Column(JSON, default={})
+    configuration = Column(JSON, default={})
+    assigned_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    agent = relationship("Agent", back_populates="tool_assignments")
+    tool = relationship("MCPTool", back_populates="tool_assignments")
+
+class MCPTool(Base):
+    """MCP Tool Model"""
+    __tablename__ = 'mcp_tools'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text)
+    mcp_server_url = Column(String(500))
+    capabilities = Column(JSON, default={})
+    credentials_schema = Column(JSON, default={})
+    status = Column(String(50), default='active')
+    provider = Column(String(255))
+    version = Column(String(50))
+    icon = Column(String(100))
+    category = Column(String(100))
+    tags = Column(JSON)  # Using JSON instead of ARRAY for compatibility
+    tool_metadata = Column('metadata', JSON, default={})
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    tool_assignments = relationship("AgentToolAssignment", back_populates="tool", cascade="all, delete-orphan")
 
 class Skill(Base):
     __tablename__ = 'skills'
@@ -101,6 +145,8 @@ class Workflow(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    goal = Column(Text)  # High-level objective (overrides description if provided)
+    context = Column(JSON)  # Additional context for execution (codegraph_project, pr_number, etc.)
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     created_at = Column(DateTime, default=func.now())
@@ -228,6 +274,7 @@ class AgentCreate(BaseModel):
     agent_type: AgentType
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
+    tool_ids: Optional[List[int]] = []  # NEW: Support for tool assignment during creation
     priority_level: Optional[PriorityLevel] = PriorityLevel.MEDIUM
     max_concurrent_tasks: Optional[int] = Field(default=5, ge=1, le=100)
     auto_start: Optional[bool] = False
@@ -257,6 +304,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str]
     skills: List[Dict[str, Any]] = []
+    tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -317,6 +365,8 @@ class PatternResponse(BaseModel):
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    goal: Optional[str] = Field(None, description="High-level objective of the workflow (overrides description if provided)")
+    context: Optional[Dict[str, Any]] = Field(None, description="Additional context for workflow execution (e.g., codegraph_project, pr_number, git_url)")
     workflow_definition: Dict[str, Any]
     agent_ids: Optional[List[int]] = []
 

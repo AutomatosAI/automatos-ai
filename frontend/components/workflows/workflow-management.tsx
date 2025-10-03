@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
+import { useQueryClient } from '@tanstack/react-query'
 import { 
   Play, 
   Pause, 
@@ -23,7 +24,9 @@ import {
   Activity,
   X,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  Bot,
+  Zap
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,8 +46,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { workflowService, type WorkflowWithMetrics, type WorkflowStats } from '@/lib/workflow-service'
-import { apiClient } from "@/lib/api-client'
+import { apiClient } from '@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
+import { HistoryTab } from './history-tab'
+import { MonitoringTab } from './monitoring-tab'
+import { TemplatesTab } from './templates-tab'
+import { LiveProgressTab } from './live-progress-tab'
+import { ExecutionTheater } from './execution-theater'
 
 // Real data will be loaded from backend
 const initialWorkflowStats = [
@@ -179,6 +187,7 @@ const workflowTemplates = [
 ]
 
 export function WorkflowManagement() {
+  const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -193,11 +202,18 @@ export function WorkflowManagement() {
     triggerOnce: true,
     threshold: 0.1,
   })
+  
+  // Execution Theater state
+  const [showExecutionTheater, setShowExecutionTheater] = useState(false)
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
+  const [autoStartExecution, setAutoStartExecution] = useState(false)
 
   // Workflow creation form state
   const [workflowForm, setWorkflowForm] = useState({
     name: '',
     description: '',
+    goal: '',
+    context: {} as Record<string, any>,
     template: '',
     priority: 'medium',
     selectedAgents: [] as string[],
@@ -208,6 +224,8 @@ export function WorkflowManagement() {
       parallelExecution: false
     }
   })
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [contextJson, setContextJson] = useState('')
 
   // Load real data from backend
   useEffect(() => {
@@ -282,9 +300,13 @@ export function WorkflowManagement() {
   const handleCreateWorkflow = () => {
     setShowCreateModal(true)
     setCurrentStep(1)
+    setShowAdvanced(false)
+    setContextJson('')
     setWorkflowForm({
       name: '',
       description: '',
+      goal: '',
+      context: {},
       template: '',
       priority: 'medium',
       selectedAgents: [],
@@ -299,40 +321,59 @@ export function WorkflowManagement() {
 
   const handleSubmitWorkflow = async () => {
     setIsCreating(true)
-    try {
-      // Get agent IDs from selected agent names
-      const selectedAgentIds = availableAgents
-        .filter(agent => workflowForm.selectedAgents.includes(agent.id))
-        .map(agent => parseInt(agent.id))
-
-      // Prepare the workflow data in the expected API format
-      const workflowData = {
-        name: workflowForm.name,
-        description: workflowForm.description,
-        workflow_definition: {
-          template: workflowForm.template,
-          priority: workflowForm.priority,
-          agents: workflowForm.selectedAgents,
-          steps: workflowForm.customSteps,
-          configuration: workflowForm.configuration,
-          category: workflowForm.template ? workflowTemplates.find(t => t.id === workflowForm.template)?.name : 'Custom',
-          tags: workflowForm.template ? [workflowForm.template] : ['custom']
-        },
-        agent_ids: selectedAgentIds
+    
+    // Parse context JSON if provided
+    let contextData = workflowForm.context
+    if (contextJson.trim()) {
+      try {
+        contextData = JSON.parse(contextJson)
+      } catch (e) {
+        setError('Invalid JSON in context field')
+        setIsCreating(false)
+        return
       }
+    }
+    
+    // Get agent IDs from selected agent names
+    const selectedAgentIds = availableAgents
+      .filter(agent => workflowForm.selectedAgents.includes(agent.id))
+      .map(agent => parseInt(agent.id))
 
+    // Prepare the workflow data in the expected backend API format
+    const workflowData = {
+      name: workflowForm.name,
+      description: workflowForm.description,
+      goal: workflowForm.goal || undefined, // Only include if provided
+      context: Object.keys(contextData).length > 0 ? contextData : undefined, // Only include if not empty
+      category: workflowForm.template ? workflowTemplates.find(t => t.id === workflowForm.template)?.name : 'automation',
+      priority: workflowForm.priority,
+      config: workflowForm.configuration,
+      steps: workflowForm.customSteps,
+      agents: workflowForm.selectedAgents,
+      tags: workflowForm.template ? [workflowForm.template] : ['custom']
+    }
+    
+    try {
       // Submit to backend API using the service
       const result = await workflowService.createWorkflow(workflowData)
       console.log('Workflow created successfully:', result)
 
       // Reload workflow data to show the new workflow
       await loadWorkflowData()
+      
+      // Invalidate React Query cache to refresh active workflows panel
+      queryClient.invalidateQueries({ queryKey: ['workflows', 'active'] })
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
 
       // Close modal and reset form
       setShowCreateModal(false)
+      setShowAdvanced(false)
+      setContextJson('')
       setWorkflowForm({
         name: '',
         description: '',
+        goal: '',
+        context: {},
         template: '',
         priority: 'medium',
         selectedAgents: [],
@@ -344,29 +385,62 @@ export function WorkflowManagement() {
         }
       })
 
-      // Show success message (you can add a toast notification here)
-      alert('Workflow created successfully!')
+      // Automatically open Execution Theater for the new workflow with auto-start
+      if (result && result.id) {
+        setTimeout(() => {
+          setSelectedWorkflowId(result.id)
+          setAutoStartExecution(true)
+          setShowExecutionTheater(true)
+        }, 500) // Small delay to allow UI to update
+      }
       
-    } catch (error) {
-      console.error('Error creating workflow:', error)
-      // Show error message (you can add a toast notification here)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-      alert(`Error creating workflow: ${errorMessage}`)
+    } catch (error: any) {
+      console.error('Full error creating workflow:', error)
+      console.error('Payload sent:', workflowData)
+      
+      // Extract detailed error message from API response
+      let errorMessage = 'Unknown error'
+      if (error?.response?.data?.detail) {
+        errorMessage = error.response.data.detail
+      } else if (error?.message) {
+        errorMessage = error.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      setError(errorMessage)
     } finally {
       setIsCreating(false)
     }
   }
 
-  const handleTemplateChange = (templateId: string) => {
-    const template = workflowTemplates.find(t => t.id === templateId)
-    if (template) {
+  const handleTemplateChange = (template: any) => {
+    // Handle both old format (string ID) and new format (full template object)
+    if (typeof template === 'string') {
+      // Old format - hardcoded template ID
+      const hardcodedTemplate = workflowTemplates.find(t => t.id === template)
+      if (hardcodedTemplate) {
+        setWorkflowForm({
+          ...workflowForm,
+          template: template,
+          name: hardcodedTemplate.name,
+          description: hardcodedTemplate.description,
+          selectedAgents: hardcodedTemplate.agents,
+          customSteps: hardcodedTemplate.steps
+        })
+      }
+    } else {
+      // New format - full template object from backend API
+      // Add timestamp to avoid name conflicts
+      const timestamp = new Date().toISOString().slice(11, 19).replace(/:/g, '')
       setWorkflowForm({
         ...workflowForm,
-        template: templateId,
-        name: template.name,
+        template: template.template_id || template.id,
+        name: `${template.name} ${timestamp}`,
         description: template.description,
-        selectedAgents: template.agents,
-        customSteps: template.steps
+        priority: template.priority || 'medium',
+        selectedAgents: template.recommended_agents || [],
+        customSteps: template.template_definition?.steps || []
       })
     }
   }
@@ -380,6 +454,19 @@ export function WorkflowManagement() {
     })
   }
 
+  const handleWorkflowClick = (workflowId: number) => {
+    setSelectedWorkflowId(workflowId)
+    setShowExecutionTheater(true)
+  }
+
+  const handleBackFromTheater = () => {
+    setShowExecutionTheater(false)
+    setSelectedWorkflowId(null)
+    setAutoStartExecution(false) // Reset auto-start flag
+    // Reload workflows to get fresh data
+    loadWorkflowData()
+  }
+
   const filteredWorkflows = workflows.filter(workflow => {
     const matchesSearch = (workflow.name && workflow.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (workflow.description && workflow.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -390,6 +477,17 @@ export function WorkflowManagement() {
     
     return matchesSearch && matchesStatus
   })
+
+  // Show Execution Theater if workflow is selected
+  if (showExecutionTheater && selectedWorkflowId) {
+    return (
+      <ExecutionTheater 
+        workflowId={selectedWorkflowId}
+        onBack={handleBackFromTheater}
+        autoStart={autoStartExecution}
+      />
+    )
+  }
 
   return (
     <div className="space-y-8">
@@ -410,7 +508,7 @@ export function WorkflowManagement() {
         </div>
         
         <Button 
-          className="gradient-accent hover:opacity-90 transition-opacity"
+          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
           onClick={handleCreateWorkflow}
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -455,7 +553,7 @@ export function WorkflowManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="active" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="active" className="flex items-center space-x-2">
               <Play className="w-4 h-4" />
               <span className="hidden sm:inline">Active</span>
@@ -471,6 +569,10 @@ export function WorkflowManagement() {
             <TabsTrigger value="monitoring" className="flex items-center space-x-2">
               <Activity className="w-4 h-4" />
               <span className="hidden sm:inline">Monitoring</span>
+            </TabsTrigger>
+            <TabsTrigger value="live" className="flex items-center space-x-2">
+              <Eye className="w-4 h-4" />
+              <span className="hidden sm:inline">Live</span>
             </TabsTrigger>
           </TabsList>
 
@@ -515,351 +617,232 @@ export function WorkflowManagement() {
               </div>
             )}
 
-            {/* Empty State */}
-            {!loading && !error && filteredWorkflows.length === 0 && (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <GitBranch className="h-8 w-8 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground mb-4">
-                    {workflows.length === 0 ? 'No workflows created yet' : 'No workflows match your search'}
-                  </p>
-                  <Button onClick={handleCreateWorkflow} className="gradient-accent hover:opacity-90">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Create Your First Workflow
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Active Workflows Panel */}
-            <ActiveWorkflowsPanel />
+            {/* Active Workflows Panel - handles its own empty state */}
+            <ActiveWorkflowsPanel onWorkflowClick={handleWorkflowClick} />
           </TabsContent>
 
           <TabsContent value="templates" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Workflow Templates</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Workflow templates will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <TemplatesTab 
+              onUseTemplate={(templateId) => {
+                setError(null) // Clear any previous errors
+                handleTemplateChange(templateId)
+                setShowCreateModal(true) // Open modal after populating template data
+              }}
+              onOpenCreateModal={() => {
+                setError(null) // Clear any previous errors
+                setShowCreateModal(true)
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Workflow History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Workflow execution history will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <HistoryTab />
           </TabsContent>
 
           <TabsContent value="monitoring" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Real-time Monitoring</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground">
-                  Real-time workflow monitoring dashboard will be displayed here
-                </div>
-              </CardContent>
-            </Card>
+            <MonitoringTab />
+          </TabsContent>
+
+          <TabsContent value="live" className="space-y-6">
+            <LiveProgressTab />
           </TabsContent>
         </Tabs>
       </motion.div>
 
-      {/* Create Workflow Modal */}
+      {/* Create Workflow Modal - Simplified for Intelligent Orchestration */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="glass-card max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="glass-card max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>Create New Workflow</span>
-              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                <span>Step {currentStep} of 3</span>
-                <div className="flex space-x-1">
-                  {[1, 2, 3].map(step => (
-                    <div
-                      key={step}
-                      className={`w-2 h-2 rounded-full ${
-                        step <= currentStep ? 'bg-primary' : 'bg-secondary'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </DialogTitle>
+            <DialogTitle>Create New Workflow</DialogTitle>
+            <p className="text-sm text-muted-foreground mt-2">
+              Describe your task and the Orchestrator will intelligently select the best agents and execute it.
+            </p>
           </DialogHeader>
 
           <div className="space-y-6">
-            {/* Step 1: Basic Information */}
-            {currentStep === 1 && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="space-y-4"
-              >
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="template">Choose Template</Label>
-                    <Select value={workflowForm.template || ""} onValueChange={handleTemplateChange}>
-                      <SelectTrigger className="bg-secondary/50 border-secondary">
-                        <SelectValue placeholder="Select a workflow template" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="custom">Custom Workflow</SelectItem>
-                        {workflowTemplates.map(template => (
-                          <SelectItem key={template.id} value={template.id}>
-                            {template.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+            {/* Simplified Single-Step Form */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-4"
+            >
+              <div>
+                <Label htmlFor="name">Workflow Name <span className="text-red-400">*</span></Label>
+                <Input
+                  id="name"
+                  value={workflowForm.name}
+                  onChange={(e) => setWorkflowForm({...workflowForm, name: e.target.value})}
+                  placeholder="e.g., Analyze API Documentation"
+                  className="bg-secondary/50 border-secondary"
+                />
+              </div>
 
+              <div>
+                <Label htmlFor="description">Task Description <span className="text-red-400">*</span></Label>
+                <Textarea
+                  id="description"
+                  value={workflowForm.description}
+                  onChange={(e) => setWorkflowForm({...workflowForm, description: e.target.value})}
+                  placeholder="Describe what you want the workflow to accomplish. Be as specific as possible - the Orchestrator uses this to intelligently select agents and break down the task."
+                  className="bg-secondary/50 border-secondary min-h-[120px]"
+                  rows={5}
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  💡 <strong>Tip:</strong> Include context, goals, and expected outcomes for better results
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="priority">Priority</Label>
+                <Select 
+                  value={workflowForm.priority || "medium"} 
+                  onValueChange={(value) => setWorkflowForm({...workflowForm, priority: value})}
+                >
+                  <SelectTrigger className="bg-secondary/50 border-secondary">
+                    <SelectValue placeholder="Select priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium (Default)</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Advanced Options Toggle */}
+              <div className="flex items-center justify-between">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-blue-400 hover:text-blue-300"
+                >
+                  <ChevronRight className={`w-4 h-4 mr-2 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
+                  Advanced Options (Goal & Context)
+                </Button>
+              </div>
+
+              {/* Advanced Options */}
+              {showAdvanced && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-4 p-4 bg-secondary/20 border border-secondary rounded-lg"
+                >
                   <div>
-                    <Label htmlFor="name">Workflow Name</Label>
+                    <Label htmlFor="goal">Workflow Goal (Optional)</Label>
                     <Input
-                      id="name"
-                      value={workflowForm.name}
-                      onChange={(e) => setWorkflowForm({...workflowForm, name: e.target.value})}
-                      placeholder="Enter workflow name"
+                      id="goal"
+                      value={workflowForm.goal}
+                      onChange={(e) => setWorkflowForm({...workflowForm, goal: e.target.value})}
+                      placeholder="e.g., Review PR #123 for security vulnerabilities"
                       className="bg-secondary/50 border-secondary"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      High-level objective - overrides description if provided
+                    </p>
                   </div>
 
                   <div>
-                    <Label htmlFor="description">Description</Label>
+                    <Label htmlFor="context">Workflow Context (Optional JSON)</Label>
                     <Textarea
-                      id="description"
-                      value={workflowForm.description}
-                      onChange={(e) => setWorkflowForm({...workflowForm, description: e.target.value})}
-                      placeholder="Describe what this workflow does"
-                      className="bg-secondary/50 border-secondary min-h-[100px]"
+                      id="context"
+                      value={contextJson}
+                      onChange={(e) => setContextJson(e.target.value)}
+                      placeholder={`{\n  "codegraph_project": "my-app",\n  "pr_number": 123,\n  "git_url": "https://github.com/..."\n}`}
+                      className="bg-secondary/50 border-secondary font-mono text-sm min-h-[100px]"
+                      rows={5}
                     />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
+                    </p>
                   </div>
 
-                  <div>
-                    <Label htmlFor="priority">Priority</Label>
-                    <Select 
-                      value={workflowForm.priority || "medium"} 
-                      onValueChange={(value) => setWorkflowForm({...workflowForm, priority: value})}
-                    >
-                      <SelectTrigger className="bg-secondary/50 border-secondary">
-                        <SelectValue placeholder="Select priority" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                        <SelectItem value="critical">Critical</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Step 2: Agent Selection */}
-            {currentStep === 2 && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="space-y-4"
-              >
-                <div>
-                  <Label>Select Agents</Label>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Choose the agents that will participate in this workflow
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {availableAgents.map(agent => (
-                      <div
-                        key={agent.id}
-                        className={`p-4 border rounded-lg cursor-pointer transition-all ${
-                          workflowForm.selectedAgents.includes(agent.id)
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        }`}
-                        onClick={() => toggleAgent(agent.id)}
-                      >
-                        <div className="flex items-start space-x-3">
-                          <Checkbox
-                            checked={workflowForm.selectedAgents.includes(agent.id)}
-                            className="mt-1"
-                          />
-                          <div className="flex-1">
-                            <h4 className="font-semibold">{agent.name}</h4>
-                            <p className="text-sm text-muted-foreground mb-2">
-                              {agent.description}
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              {agent.skills.map((skill: string) => (
-                                <Badge key={skill} variant="outline" className="text-xs">
-                                  {skill}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Step 3: Configuration */}
-            {currentStep === 3 && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className="space-y-4"
-              >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h4 className="font-semibold">Execution Settings</h4>
-                    
+                  <div className="text-xs text-yellow-400 flex items-start space-x-2">
+                    <Zap className="w-4 h-4 mt-0.5 flex-shrink-0" />
                     <div>
-                      <Label htmlFor="maxRetries">Max Retries</Label>
-                      <Input
-                        id="maxRetries"
-                        type="number"
-                        value={workflowForm.configuration.maxRetries}
-                        onChange={(e) => setWorkflowForm({
-                          ...workflowForm,
-                          configuration: {
-                            ...workflowForm.configuration,
-                            maxRetries: parseInt(e.target.value) || 0
-                          }
-                        })}
-                        className="bg-secondary/50 border-secondary"
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="timeout">Timeout (minutes)</Label>
-                      <Input
-                        id="timeout"
-                        type="number"
-                        value={workflowForm.configuration.timeout}
-                        onChange={(e) => setWorkflowForm({
-                          ...workflowForm,
-                          configuration: {
-                            ...workflowForm.configuration,
-                            timeout: parseInt(e.target.value) || 0
-                          }
-                        })}
-                        className="bg-secondary/50 border-secondary"
-                      />
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Checkbox
-                        id="parallel"
-                        checked={workflowForm.configuration.parallelExecution}
-                        onCheckedChange={(checked) => setWorkflowForm({
-                          ...workflowForm,
-                          configuration: {
-                            ...workflowForm.configuration,
-                            parallelExecution: Boolean(checked)
-                          }
-                        })}
-                      />
-                      <Label htmlFor="parallel">Enable parallel execution</Label>
+                      <strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 rounded">codegraph_project</code> in context to give agents access to indexed code.
                     </div>
                   </div>
+                </motion.div>
+              )}
 
-                  <div className="space-y-4">
-                    <h4 className="font-semibold">Workflow Summary</h4>
-                    <div className="p-4 bg-secondary/30 rounded-lg space-y-2">
-                      <div>
-                        <span className="text-sm font-medium">Name:</span>
-                        <span className="text-sm ml-2">{workflowForm.name || 'Untitled'}</span>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium">Priority:</span>
-                        <Badge className={`ml-2 ${priorityStyles[workflowForm.priority]}`}>
-                          {workflowForm.priority}
-                        </Badge>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium">Agents:</span>
-                        <span className="text-sm ml-2">{workflowForm.selectedAgents.length} selected</span>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-sm font-medium">Selected Agents:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {workflowForm.selectedAgents.map(agentId => {
-                            const agent = availableAgents.find(a => a.id === agentId)
-                            return agent ? (
-                              <Badge key={agentId} variant="outline" className="text-xs">
-                                {agent.name}
-                              </Badge>
-                            ) : null
-                          })}
-                        </div>
-                      </div>
-                    </div>
+              <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <div className="flex items-start space-x-3">
+                  <Bot className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-semibold text-blue-300 mb-1">Intelligent Orchestration</p>
+                    <p className="text-muted-foreground">
+                      The Orchestrator will automatically analyze your task, select the most capable agents, 
+                      decompose the work into subtasks, and manage execution - no manual configuration needed.
+                    </p>
                   </div>
                 </div>
-              </motion.div>
+              </div>
+            </motion.div>
+
+            {/* Error Display */}
+            {error && (
+              <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
+                <p className="text-red-400 text-sm">{error}</p>
+              </div>
             )}
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-6 border-t border-border/30">
-              <div className="flex space-x-2">
-                {currentStep > 1 && (
-                  <Button
-                    variant="outline"
-                    onClick={() => setCurrentStep(currentStep - 1)}
-                  >
-                    <ChevronLeft className="w-4 h-4 mr-2" />
-                    Previous
-                  </Button>
-                )}
-              </div>
-
-              <div className="flex space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => setShowCreateModal(false)}
-                >
-                  Cancel
-                </Button>
-                
-                {currentStep < 3 ? (
-                  <Button
-                    onClick={() => setCurrentStep(currentStep + 1)}
-                    disabled={
-                      (currentStep === 1 && !workflowForm.name) ||
-                      (currentStep === 2 && workflowForm.selectedAgents.length === 0)
+            <div className="flex items-center justify-end space-x-2 pt-4 border-t border-border/30">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCreateModal(false)
+                  setError(null)
+                  setShowAdvanced(false)
+                  setContextJson('')
+                  setWorkflowForm({
+                    name: '',
+                    description: '',
+                    goal: '',
+                    context: {},
+                    template: '',
+                    priority: 'medium',
+                    selectedAgents: [],
+                    customSteps: [],
+                    configuration: {
+                      maxRetries: 3,
+                      timeout: 30,
+                      parallelExecution: false
                     }
-                  >
-                    Next
-                    <ChevronRight className="w-4 h-4 ml-2" />
-                  </Button>
+                  })
+                }}
+                disabled={isCreating}
+              >
+                Cancel
+              </Button>
+              
+              <Button
+                onClick={handleSubmitWorkflow}
+                disabled={isCreating || !workflowForm.name || !workflowForm.description}
+                className="bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 text-white"
+              >
+                {isCreating ? (
+                  <>
+                    <Bot className="w-4 h-4 mr-2 animate-spin" />
+                    Creating Workflow...
+                  </>
                 ) : (
-                  <Button
-                    onClick={handleSubmitWorkflow}
-                    disabled={isCreating}
-                    className="gradient-accent hover:opacity-90"
-                  >
-                    {isCreating ? 'Creating...' : 'Create Workflow'}
-                  </Button>
+                  <>
+                    <Zap className="w-4 h-4 mr-2" />
+                    Create & Deploy
+                  </>
                 )}
-              </div>
+              </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }

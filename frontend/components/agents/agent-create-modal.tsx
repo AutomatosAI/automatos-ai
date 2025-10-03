@@ -37,6 +37,8 @@ import { Badge } from '@/components/ui/badge'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { useCreateAgent } from '@/hooks/use-agent-api'
+import { useMCPTools, useAssignToolToAgent } from '@/hooks/use-mcp-tools-api'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface AgentCreateModalProps {
   open: boolean
@@ -70,9 +72,12 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
     max_tokens: 2000,
     auto_start: true,
     capabilities: [] as string[],
+    selectedTools: [] as number[], // Phase 3: Selected tool IDs
   })
 
   const createAgentMutation = useCreateAgent()
+  const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ status: 'active', limit: 100 })
+  const assignToolMutation = useAssignToolToAgent()
 
   // Agent Templates
   const agentTemplates: AgentTemplate[] = [
@@ -180,7 +185,8 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
     }
 
     try {
-      await createAgentMutation.mutateAsync({
+      // Step 1: Create the agent
+      const newAgent = await createAgentMutation.mutateAsync({
         name: formData.name,
         agent_type: formData.type,
         description: formData.description,
@@ -192,6 +198,26 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
           capabilities: formData.capabilities,
         }
       })
+      
+      // Step 2: Assign selected tools (Phase 3)
+      if (formData.selectedTools.length > 0 && newAgent?.id) {
+        for (const toolId of formData.selectedTools) {
+          try {
+            await assignToolMutation.mutateAsync({
+              agentId: newAgent.id,
+              toolId,
+              data: {
+                enabled: true,
+                permissions: { read: true, write: true, execute: true },
+                configuration: {}
+              }
+            })
+          } catch (error) {
+            console.error(`Failed to assign tool ${toolId}:`, error)
+            // Continue assigning other tools even if one fails
+          }
+        }
+      }
       
       // Reset form and close modal
       setStep(1)
@@ -205,6 +231,7 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
         max_tokens: 2000,
         auto_start: true,
         capabilities: [],
+        selectedTools: [], // Phase 3
       })
       onClose()
     } catch (error) {
@@ -239,7 +266,9 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
           <DialogDescription>
             {step === 1 
               ? 'Choose an agent template to get started quickly'
-              : 'Configure your agent settings and capabilities'
+              : step === 2
+              ? 'Configure your agent settings and capabilities'
+              : 'Select tools to give your agent additional capabilities (optional)'
             }
           </DialogDescription>
         </DialogHeader>
@@ -453,15 +482,107 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
                 </div>
               </div>
             </motion.div>
+          ) : (
+            <motion.div
+              key="step3"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.3 }}
+              className="space-y-4"
+            >
+              {/* Tools Selection (Phase 3) */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium">Available Tools</h4>
+                  <Badge variant="secondary">
+                    {formData.selectedTools.length} selected
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Select MCP tools to enhance your agent's capabilities. Tools are optional and can be added later.
+                </p>
+
+                {toolsLoading ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">Loading tools...</p>
+                  </div>
+                ) : mcpTools.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">No tools available</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
+                    {mcpTools.map((tool: any) => {
+                      const isSelected = formData.selectedTools.includes(tool.id)
+                      
+                      return (
+                        <Card 
+                          key={tool.id}
+                          className={`cursor-pointer transition-all ${
+                            isSelected ? 'ring-2 ring-brand-primary' : 'hover:shadow-md'
+                          }`}
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              selectedTools: isSelected
+                                ? prev.selectedTools.filter(id => id !== tool.id)
+                                : [...prev.selectedTools, tool.id]
+                            }))
+                          }}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                              <Checkbox 
+                                checked={isSelected}
+                                onCheckedChange={(checked) => {
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    selectedTools: checked
+                                      ? [...prev.selectedTools, tool.id]
+                                      : prev.selectedTools.filter(id => id !== tool.id)
+                                  }))
+                                }}
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  {tool.icon && <span className="text-lg">{tool.icon}</span>}
+                                  <h5 className="font-medium text-sm">{tool.name}</h5>
+                                </div>
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {tool.description}
+                                </p>
+                                <div className="mt-2 flex gap-1">
+                                  {tool.provider && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {tool.provider}
+                                    </Badge>
+                                  )}
+                                  {tool.category && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {tool.category}
+                                    </Badge>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.div>
           )}
         </AnimatePresence>
 
         <DialogFooter className="flex justify-between">
           <div>
-            {step === 2 && (
+            {step > 1 && (
               <Button
                 variant="outline"
-                onClick={() => setStep(1)}
+                onClick={() => setStep(step - 1)}
               >
                 Back
               </Button>
@@ -474,11 +595,19 @@ export function AgentCreateModal({ open, onClose }: AgentCreateModalProps) {
             </Button>
             {step === 2 && (
               <Button 
-                onClick={handleFormSubmit}
-                disabled={createAgentMutation.isPending || !formData.name.trim()}
+                onClick={() => setStep(3)}
                 className="bg-brand-primary hover:bg-brand-primary/90"
               >
-                {createAgentMutation.isPending ? 'Creating...' : 'Create Agent'}
+                Next: Select Tools
+              </Button>
+            )}
+            {step === 3 && (
+              <Button 
+                onClick={handleFormSubmit}
+                disabled={createAgentMutation.isPending || assignToolMutation.isPending || !formData.name.trim()}
+                className="bg-brand-primary hover:bg-brand-primary/90"
+              >
+                {createAgentMutation.isPending || assignToolMutation.isPending ? 'Creating...' : 'Create Agent'}
               </Button>
             )}
           </div>

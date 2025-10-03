@@ -145,8 +145,12 @@ class WorkflowService {
   async createWorkflow(workflowData: {
     name: string;
     description: string;
-    workflow_definition: Record<string, any>;
-    agent_ids?: number[];
+    category?: string;
+    priority?: string;
+    config?: Record<string, any>;
+    steps?: any[];
+    agents?: any[];
+    tags?: string[];
   }): Promise<Workflow> {
     return apiClient.createWorkflow(workflowData);
   }
