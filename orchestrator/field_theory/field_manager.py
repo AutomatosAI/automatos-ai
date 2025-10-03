@@ -1,4 +1,5 @@
 
+
 """
 Field Theory Context Manager
 ============================
@@ -544,7 +545,8 @@ class FieldContextManager:
             )
             
             return result
-            
+
+        
         except Exception as e:
             logger.error(f"Error propagating influence for session {session_id}: {str(e)}")
             raise
