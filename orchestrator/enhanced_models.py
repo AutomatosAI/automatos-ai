@@ -4,7 +4,7 @@ Enhanced Pydantic Models for Swagger Documentation
 ==================================================
 
 Comprehensive models with examples, validation, and detailed field descriptions
-for improved API documentation and developer experience.
+for improved API documentation and developer experience. Testing PR workflow
 """
 
 from pydantic import BaseModel, Field
