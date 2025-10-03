@@ -1,5 +1,4 @@
 
-
 """
 Tools Management Database Models
 ================================
@@ -383,3 +382,5 @@ class ToolInstallationRequest(Base):
     
     # Relationships
     tool = relationship("Tool")
+
+
