@@ -87,3 +87,147 @@ COMMENT ON COLUMN document_usage.metadata IS 'JSON metadata: config_id, similari
 -- SELECT event_type, COUNT(*), AVG(execution_time_ms) FROM document_usage GROUP BY event_type;
 -- SELECT MAX(timestamp) as last_event FROM document_usage;
 
+-- ================================================================
+-- PRD-11: CodeGraph Implementation (October 2, 2025)
+-- ================================================================
+-- CodeGraph system for indexing and searching client codebases
+-- Enables AI agents to access precise code context instead of entire repositories
+
+-- Enable pgvector extension (if not already enabled)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 1. CodeGraph Projects Table
+-- Stores metadata about indexed code projects
+CREATE TABLE IF NOT EXISTS codegraph_projects (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    source_type VARCHAR(50) NOT NULL,  -- 'github', 'gitlab', 'local'
+    source_url TEXT,
+    branch VARCHAR(255) DEFAULT 'main',
+    language VARCHAR(50),  -- Primary language: 'python', 'typescript', etc.
+    total_files INTEGER DEFAULT 0,
+    total_symbols INTEGER DEFAULT 0,
+    total_relationships INTEGER DEFAULT 0,
+    last_indexed TIMESTAMP,
+    index_duration_seconds FLOAT,
+    status VARCHAR(50) DEFAULT 'active',  -- 'active', 'indexing', 'failed', 'archived'
+    auto_reindex BOOLEAN DEFAULT false,
+    exclude_patterns JSONB DEFAULT '[]',  -- Array of glob patterns to exclude
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_codegraph_projects_name ON codegraph_projects(name);
+CREATE INDEX IF NOT EXISTS idx_codegraph_projects_status ON codegraph_projects(status);
+CREATE INDEX IF NOT EXISTS idx_codegraph_projects_source_type ON codegraph_projects(source_type);
+
+COMMENT ON TABLE codegraph_projects IS 'CodeGraph indexed projects - client codebases for AI agent context';
+COMMENT ON COLUMN codegraph_projects.source_type IS 'Source: github, gitlab, or local directory';
+COMMENT ON COLUMN codegraph_projects.exclude_patterns IS 'Glob patterns to exclude (node_modules, __pycache__, etc.)';
+
+-- 2. CodeGraph Symbols Table
+-- Stores extracted code symbols (functions, classes, etc.) with embeddings
+CREATE TABLE IF NOT EXISTS codegraph_symbols (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES codegraph_projects(id) ON DELETE CASCADE,
+    symbol_type VARCHAR(50) NOT NULL,  -- 'function', 'class', 'interface', 'variable', 'import'
+    name VARCHAR(500) NOT NULL,
+    qualified_name VARCHAR(1000),  -- Full path: module.Class.method
+    file_path VARCHAR(1000) NOT NULL,
+    line_number INTEGER NOT NULL,
+    signature TEXT,  -- Function signature or class definition
+    docstring TEXT,  -- Documentation string
+    code_snippet TEXT,  -- Full code of the symbol
+    embedding vector(1536),  -- OpenAI ada-002 embeddings for semantic search
+    metadata JSONB DEFAULT '{}',  -- Language-specific metadata
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_codegraph_symbols_project ON codegraph_symbols(project_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_symbols_type ON codegraph_symbols(symbol_type);
+CREATE INDEX IF NOT EXISTS idx_codegraph_symbols_name ON codegraph_symbols(name);
+CREATE INDEX IF NOT EXISTS idx_codegraph_symbols_file ON codegraph_symbols(file_path);
+
+-- Vector similarity index for semantic search (using cosine distance)
+CREATE INDEX IF NOT EXISTS idx_codegraph_symbols_embedding 
+ON codegraph_symbols USING ivfflat (embedding vector_cosine_ops) 
+WITH (lists = 100);
+
+COMMENT ON TABLE codegraph_symbols IS 'Code symbols extracted from projects with semantic embeddings';
+COMMENT ON COLUMN codegraph_symbols.embedding IS 'Vector embedding for semantic code search (OpenAI ada-002, 1536 dimensions)';
+COMMENT ON COLUMN codegraph_symbols.qualified_name IS 'Fully qualified symbol name including module path';
+
+-- 3. CodeGraph Relationships Table
+-- Stores relationships between symbols (calls, imports, inheritance)
+CREATE TABLE IF NOT EXISTS codegraph_relationships (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES codegraph_projects(id) ON DELETE CASCADE,
+    from_symbol_id INTEGER REFERENCES codegraph_symbols(id) ON DELETE CASCADE,
+    to_symbol_id INTEGER REFERENCES codegraph_symbols(id) ON DELETE CASCADE,
+    relationship_type VARCHAR(50) NOT NULL,  -- 'calls', 'imports', 'extends', 'implements', 'references'
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_codegraph_relationships_project ON codegraph_relationships(project_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_relationships_from ON codegraph_relationships(from_symbol_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_relationships_to ON codegraph_relationships(to_symbol_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_relationships_type ON codegraph_relationships(relationship_type);
+
+COMMENT ON TABLE codegraph_relationships IS 'Relationships between code symbols (call graphs, imports, inheritance)';
+COMMENT ON COLUMN codegraph_relationships.relationship_type IS 'Type: calls, imports, extends, implements, references';
+
+-- 4. CodeGraph Files Table
+-- Tracks individual files for change detection and re-indexing
+CREATE TABLE IF NOT EXISTS codegraph_files (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES codegraph_projects(id) ON DELETE CASCADE,
+    file_path VARCHAR(1000) NOT NULL,
+    file_hash VARCHAR(64),  -- SHA-256 for change detection
+    file_size INTEGER,
+    lines_of_code INTEGER,
+    complexity_score INTEGER,  -- Cyclomatic complexity
+    language VARCHAR(50),
+    last_modified TIMESTAMP,
+    indexed_at TIMESTAMP DEFAULT NOW(),
+    metadata JSONB DEFAULT '{}',
+    UNIQUE(project_id, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_codegraph_files_project ON codegraph_files(project_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_files_path ON codegraph_files(file_path);
+CREATE INDEX IF NOT EXISTS idx_codegraph_files_hash ON codegraph_files(file_hash);
+
+COMMENT ON TABLE codegraph_files IS 'Individual files in projects for change detection and incremental indexing';
+COMMENT ON COLUMN codegraph_files.file_hash IS 'SHA-256 hash for detecting file changes';
+
+-- 5. CodeGraph Query Logs Table
+-- Tracks all CodeGraph queries for analytics
+CREATE TABLE IF NOT EXISTS codegraph_query_logs (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES codegraph_projects(id) ON DELETE CASCADE,
+    query_type VARCHAR(50) NOT NULL,  -- 'symbol', 'semantic', 'call_graph', 'dependency'
+    query_text TEXT NOT NULL,
+    results_count INTEGER,
+    execution_time_ms FLOAT,
+    user_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_codegraph_query_logs_project ON codegraph_query_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_codegraph_query_logs_type ON codegraph_query_logs(query_type);
+CREATE INDEX IF NOT EXISTS idx_codegraph_query_logs_created ON codegraph_query_logs(created_at DESC);
+
+COMMENT ON TABLE codegraph_query_logs IS 'Analytics for CodeGraph queries (search performance, popular queries)';
+COMMENT ON COLUMN codegraph_query_logs.query_type IS 'Type: symbol, semantic, call_graph, dependency';
+
+-- ================================================================
+-- CodeGraph Verification Queries
+-- ================================================================
+-- SELECT * FROM codegraph_projects;
+-- SELECT project_id, symbol_type, COUNT(*) FROM codegraph_symbols GROUP BY project_id, symbol_type;
+-- SELECT relationship_type, COUNT(*) FROM codegraph_relationships GROUP BY relationship_type;
+-- SELECT query_type, COUNT(*), AVG(execution_time_ms) FROM codegraph_query_logs GROUP BY query_type;
+

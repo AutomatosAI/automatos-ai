@@ -1,0 +1,335 @@
+"""
+CodeGraph API Endpoints
+=======================
+
+REST API for code indexing and intelligent search.
+"""
+
+import os
+import logging
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+
+from database.database import get_db
+from services.codegraph_service import CodeGraphService
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
+
+# Get OpenAI API key
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+
+# Request/Response Models
+class IndexGitHubRequest(BaseModel):
+    """Request to index a GitHub repository"""
+    project_name: str = Field(..., description="Unique project name")
+    github_url: str = Field(..., description="GitHub repository URL")
+    branch: str = Field(default="main", description="Branch to index")
+    auth_token: Optional[str] = Field(None, description="GitHub auth token for private repos")
+    exclude_patterns: Optional[List[str]] = Field(None, description="Additional exclude patterns")
+
+
+class IndexResponse(BaseModel):
+    """Response from indexing operation"""
+    project_id: int
+    project_name: str
+    total_files: int
+    total_symbols: int
+    duration_seconds: float
+    status: str
+
+
+class SearchResponse(BaseModel):
+    """Response from search operations"""
+    project: str
+    query: str
+    count: int
+    results: List[dict]
+    execution_time_ms: float
+    prompt_block: Optional[str] = None
+
+
+class ProjectResponse(BaseModel):
+    """Project metadata response"""
+    id: int
+    name: str
+    source_type: str
+    source_url: Optional[str]
+    branch: Optional[str]
+    language: Optional[str]
+    total_files: int
+    total_symbols: int
+    total_relationships: int
+    last_indexed: Optional[str]
+    index_duration_seconds: Optional[float]
+    status: str
+    auto_reindex: bool
+    created_at: Optional[str]
+
+
+# Helper to get service instance
+def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
+    """Get CodeGraph service instance"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENAI_API_KEY not configured"
+        )
+    return CodeGraphService(db, OPENAI_API_KEY)
+
+
+# Endpoints
+@router.post("/index/github", response_model=IndexResponse)
+async def index_github_repository(
+    request: IndexGitHubRequest,
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    Index a GitHub repository
+    
+    **Example:**
+    ```json
+    {
+        "project_name": "automatos-ai",
+        "github_url": "https://github.com/AutomatosAI/automatos-ai.git",
+        "branch": "main",
+        "exclude_patterns": ["tests", "docs"]
+    }
+    ```
+    
+    **What it does:**
+    - Clones the repository (shallow clone for speed)
+    - Parses Python and TypeScript/JavaScript files
+    - Extracts functions, classes, and symbols
+    - Generates semantic embeddings
+    - Stores in database for search
+    """
+    try:
+        result = await service.index_github_project(
+            project_name=request.project_name,
+            github_url=request.github_url,
+            branch=request.branch,
+            auth_token=request.auth_token,
+            exclude_patterns=request.exclude_patterns
+        )
+        
+        return IndexResponse(**result)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error indexing GitHub repository: {e}")
+        raise HTTPException(status_code=500, detail=f"Indexing failed: {str(e)}")
+
+
+@router.get("/search/symbols", response_model=SearchResponse)
+async def search_symbols(
+    project: str = Query(..., description="Project name"),
+    q: str = Query(..., description="Search query"),
+    symbol_type: Optional[str] = Query(None, description="Filter by symbol type (function, class, etc.)"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum results"),
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    Search for code symbols by name (exact/fuzzy matching)
+    
+    **Example:**
+    ```
+    GET /api/code-graph/search/symbols?project=automatos-ai&q=authenticate&limit=5
+    ```
+    
+    **Search types:**
+    - Exact match: `authenticate_user` finds `authenticate_user()`
+    - Fuzzy match: `auth` finds `authenticate_user()`, `AuthService`, etc.
+    - Qualified: `api.auth` finds symbols in `api/auth.py`
+    """
+    try:
+        results = await service.search_symbols(
+            project_name=project,
+            query=q,
+            symbol_type=symbol_type,
+            limit=limit
+        )
+        
+        return SearchResponse(**results, prompt_block=None)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error searching symbols: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.get("/search/semantic", response_model=SearchResponse)
+async def search_semantic(
+    project: str = Query(..., description="Project name"),
+    q: str = Query(..., description="Semantic search query"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum results"),
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    Semantic search using vector similarity
+    
+    **Example:**
+    ```
+    GET /api/code-graph/search/semantic?project=automatos-ai&q=user authentication flow
+    ```
+    
+    **How it works:**
+    - Converts your query to a vector embedding
+    - Finds code with similar semantic meaning
+    - Returns ranked results with relevance scores
+    
+    **Use cases:**
+    - "How do I validate user input?" → finds validation functions
+    - "Database connection setup" → finds DB initialization code
+    - "Error handling patterns" → finds try/catch blocks
+    """
+    try:
+        results = await service.semantic_search(
+            project_name=project,
+            query=q,
+            limit=limit
+        )
+        
+        return SearchResponse(**results)
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error performing semantic search: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.get("/projects", response_model=List[ProjectResponse])
+async def list_projects(
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    List all indexed projects
+    
+    Returns metadata for all projects including:
+    - Indexing statistics
+    - File and symbol counts
+    - Last indexed timestamp
+    - Project status
+    """
+    try:
+        projects = service.list_projects()
+        return [ProjectResponse(**p) for p in projects]
+        
+    except Exception as e:
+        logger.error(f"Error listing projects: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list projects: {str(e)}")
+
+
+@router.get("/projects/{project_id}", response_model=ProjectResponse)
+async def get_project(
+    project_id: int,
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """Get project details by ID"""
+    try:
+        projects = service.list_projects()
+        project = next((p for p in projects if p["id"] == project_id), None)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        
+        return ProjectResponse(**project)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get project: {str(e)}")
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(
+    project_id: int,
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    Delete a project and all associated data
+    
+    **Warning:** This permanently deletes:
+    - All symbols and code snippets
+    - All relationships and call graphs
+    - All search history
+    - File metadata
+    
+    This action cannot be undone.
+    """
+    try:
+        result = service.delete_project(project_id)
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting project: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+
+
+@router.post("/projects/{project_id}/reindex")
+async def reindex_project(
+    project_id: int,
+    service: CodeGraphService = Depends(get_codegraph_service)
+):
+    """
+    Re-index an existing project
+    
+    **Use cases:**
+    - Code has been updated
+    - Need to refresh embeddings
+    - Fix indexing errors
+    
+    **Note:** Existing data will be replaced.
+    """
+    try:
+        # Get project details
+        projects = service.list_projects()
+        project = next((p for p in projects if p["id"] == project_id), None)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        
+        if project["source_type"] != "github":
+            raise HTTPException(
+                status_code=400,
+                detail="Re-indexing only supported for GitHub projects"
+            )
+        
+        # Re-index using existing settings
+        result = await service.index_github_project(
+            project_name=project["name"],
+            github_url=project["source_url"],
+            branch=project["branch"] or "main"
+        )
+        
+        return {
+            "message": "Project re-indexed successfully",
+            **result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error re-indexing project: {e}")
+        raise HTTPException(status_code=500, detail=f"Re-indexing failed: {str(e)}")
+
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "codegraph",
+        "openai_configured": bool(OPENAI_API_KEY)
+    }
+
+

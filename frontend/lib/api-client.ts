@@ -1263,19 +1263,79 @@
       return this.request('/api/workflow-templates/categories/list')
     }
 
-    // Code graph endpoints
-    async codegraphIndex(data: { project: string, root_dir: string }) {
-      return this.request('/api/knowledge/codegraph/index', {
+    // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
+    
+    /** Index a GitHub repository */
+    async codegraphIndexGithub(data: {
+      project_name: string
+      github_url: string
+      branch?: string
+      auth_token?: string
+      exclude_patterns?: string[]
+    }) {
+      return this.request('/api/code-graph/index/github', {
         method: 'POST',
         body: JSON.stringify(data)
       })
     }
 
-    async codegraphSearch(data: { project: string, q: string, limit?: number }) {
-      return this.request('/api/knowledge/codegraph/search', {
-        method: 'POST',
-        body: JSON.stringify(data)
+    /** Search symbols by name (fuzzy matching) */
+    async codegraphSearchSymbols(params: {
+      project: string
+      q: string
+      symbol_type?: string
+      limit?: number
+    }) {
+      const searchParams = new URLSearchParams({
+        project: params.project,
+        q: params.q,
+        ...(params.symbol_type && { symbol_type: params.symbol_type }),
+        ...(params.limit && { limit: params.limit.toString() })
       })
+      return this.request(`/api/code-graph/search/symbols?${searchParams}`)
+    }
+
+    /** Semantic search using vector similarity */
+    async codegraphSearchSemantic(params: {
+      project: string
+      q: string
+      limit?: number
+    }) {
+      const searchParams = new URLSearchParams({
+        project: params.project,
+        q: params.q,
+        ...(params.limit && { limit: params.limit.toString() })
+      })
+      return this.request(`/api/code-graph/search/semantic?${searchParams}`)
+    }
+
+    /** List all indexed projects */
+    async codegraphListProjects() {
+      return this.request('/api/code-graph/projects')
+    }
+
+    /** Get project details */
+    async codegraphGetProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}`)
+    }
+
+    /** Delete a project */
+    async codegraphDeleteProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}`, {
+        method: 'DELETE'
+      })
+    }
+
+    /** Re-index a project */
+    async codegraphReindexProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}/reindex`, {
+        method: 'POST'
+      })
+    }
+
+    /** Health check */
+    async codegraphHealth() {
+      return this.request('/api/code-graph/health')
     }
   
     // ===== DOCUMENT ENDPOINTS =====

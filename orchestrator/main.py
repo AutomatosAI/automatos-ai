@@ -41,7 +41,7 @@ from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
 from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
-from api.api_code_graph import router as code_graph_router
+from api.codegraph import router as codegraph_router  # PRD-11: New CodeGraph implementation
 from api.api_playbooks import router as playbooks_router
 from api.patterns import router as patterns_router
 from api.context import router as context_router
@@ -368,7 +368,7 @@ app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
 app.include_router(context_policy_router)
-app.include_router(code_graph_router)
+app.include_router(codegraph_router)  # PRD-11: CodeGraph
 app.include_router(playbooks_router)
 app.include_router(patterns_router)
 app.include_router(context_router)
