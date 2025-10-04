@@ -1880,7 +1880,7 @@
   }
 
   async getMemoryStats() {
-    return this.request('/api/v1/memory/stats')
+    return this.request('/api/v1/memory/stats/real')  // REAL data from database!
   }
 
   // ===== CONTEXT ENDPOINTS (All Working ✅) =====

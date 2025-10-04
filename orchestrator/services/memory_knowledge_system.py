@@ -252,9 +252,18 @@ class HierarchicalMemorySystem:
         # Enforce working memory capacity (remove least important if over limit)
         await self._enforce_working_memory_capacity(agent_id)
         
-        # Step 2: If important enough, also store in short-term memory (PostgreSQL)
-        if importance > 0.6:
+        # Step 2: Store in PostgreSQL with appropriate memory level based on importance
+        if importance > 0.5:  # Threshold for persistent storage
             embedding = await self.generate_embedding(str(experience))
+            
+            # Determine memory level based on importance (PRD-05 5-tier system)
+            # Adjusted thresholds based on actual importance distribution (0.6-0.8 typical)
+            if importance >= 0.78:
+                memory_level = MemoryLevel.LONG_TERM  # High-value, permanent
+            elif importance >= 0.72:
+                memory_level = MemoryLevel.SHORT_TERM  # Recent, valuable
+            else:  # 0.5 - 0.72
+                memory_level = MemoryLevel.WORKING  # Active session
             
             async with self.async_session() as session:
                 memory_item = MemoryItem(
@@ -262,7 +271,7 @@ class HierarchicalMemorySystem:
                     agent_id=agent_id,
                     content=json.dumps(experience),
                     memory_type=MemoryType.EXPERIENCE,
-                    memory_level=MemoryLevel.SHORT_TERM,
+                    memory_level=memory_level,
                     importance=importance,
                     embedding=embedding.tolist(),
                     metadata={

@@ -8,7 +8,7 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
 import asyncio
@@ -991,6 +991,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "total_estimated_time": decomposition_result.get("total_estimated_time"),
                     "complexity_assessment": decomposition_result.get("complexity_assessment")
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
@@ -1028,6 +1029,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, matches in agent_assignments.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(f"✅ Agent selection complete: {selection_summary['avg_match_score']:.2f} avg match score")
@@ -1049,56 +1051,65 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+            
+            # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
+            logger.info(f"🧠 Initializing memory system...")
+            memory_integrator = None
+            memory_retrieval_results = {}
+            try:
+                # Initialize memory system (ALWAYS create, even if retrieval fails)
+                memory_system = HierarchicalMemorySystem(
+                    redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
+                    redis_port=int(os.getenv("REDIS_PORT", 6379)),
+                    redis_password=os.getenv("REDIS_PASSWORD"),
+                    postgres_url=os.getenv("DATABASE_URL"),
+                    openai_api_key=os.getenv("OPENAI_API_KEY")
+                )
+                
+                memory_integrator = WorkflowMemoryIntegrator(memory_system)
+                logger.info(f"✅ Memory system initialized")
+                    
+                # Get agent IDs from assignments
+                agent_ids = []
+                for subtask_id, matches in agent_assignments.items():
+                    if matches and len(matches) > 0:
+                        agent_ids.append(matches[0].agent_id)
+                
+                # Retrieve memories for context
+                logger.info(f"🧠 Retrieving memories for {len(agent_ids)} agents...")
+                memory_retrieval_results = await memory_integrator.retrieve_workflow_memories(
+                    workflow_id=execution.workflow_id,
+                    workflow_description=task_description,
+                    agent_ids=list(set(agent_ids))  # Unique agent IDs
+                )
+                
+                execution.input_data["memory_retrieval"] = {
+                    "is_real": True,
+                    "results": memory_retrieval_results
+                }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
-                # MEMORY RETRIEVAL (PRD 04 & 05 Integration)
-                logger.info(f"🧠 Retrieving agent memories...")
-                memory_retrieval_results = {}
-                try:
-                    # Initialize memory system
-                    memory_system = HierarchicalMemorySystem(
-                        redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
-                        redis_port=int(os.getenv("REDIS_PORT", 6379)),
-                        redis_password=os.getenv("REDIS_PASSWORD"),
-                        postgres_url=os.getenv("DATABASE_URL"),
-                        openai_api_key=os.getenv("OPENAI_API_KEY")
-                    )
-                    
-                    memory_integrator = WorkflowMemoryIntegrator(memory_system)
-                    
-                    # Get agent IDs from assignments
-                    agent_ids = []
-                    for subtask_id, matches in agent_assignments.items():
-                        if matches and len(matches) > 0:
-                            agent_ids.append(matches[0].agent_id)
-                    
-                    # Retrieve memories for context
-                    memory_retrieval_results = await memory_integrator.retrieve_workflow_memories(
-                        workflow_id=execution.workflow_id,
-                        workflow_description=task_description,
-                        agent_ids=list(set(agent_ids))  # Unique agent IDs
-                    )
-                    
-                    execution.input_data["memory_retrieval"] = {
-                        "is_real": True,
-                        "results": memory_retrieval_results
-                    }
-                    db.commit()
-                    
-                    logger.info(
-                        f"✅ Retrieved {memory_retrieval_results.get('total_memories_retrieved', 0)} memories "
-                        f"for {len(memory_retrieval_results.get('agent_memories', {}))} agents"
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"❌ Memory retrieval failed: {e}, continuing without memories")
-                    execution.input_data["memory_retrieval"] = {
-                        "is_real": False,
-                        "error": str(e)
-                    }
-                    db.commit()
+                logger.info(
+                    f"✅ Retrieved {memory_retrieval_results.get('total_memories_retrieved', 0)} memories "
+                    f"for {len(memory_retrieval_results.get('agent_memories', {}))} agents"
+                )
                 
-                # CONTEXT ENGINEERING INTEGRATION
+            except Exception as e:
+                logger.error(f"❌ Memory initialization or retrieval failed: {e}")
+                logger.warning(f"⚠️ Continuing workflow without memory system")
+                execution.input_data["memory_retrieval"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                # Ensure memory_integrator is None so we know it's not available
+                memory_integrator = None
+            
+            # CONTEXT ENGINEERING INTEGRATION
             logger.info(f"📚 Enhancing subtasks with RAG context...")
             try:
                 context_integrator = ContextEngineeringIntegrator(db_session=db)
@@ -1137,6 +1148,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, enh in context_enhancements.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1160,6 +1172,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 # Initialize empty context_enhancements if error occurred
                 context_enhancements = {}
@@ -1210,6 +1223,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, result in subtask_results.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1238,6 +1252,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 # Fallback: simulate execution
@@ -1278,6 +1293,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "total_retries": aggregated_results.total_retries
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1307,13 +1323,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # MEMORY STORAGE (Store experiences in agent memory)
             logger.info(f"💾 Storing execution experiences...")
             memory_storage_results = {}
             try:
-                if 'memory_integrator' in locals():
+                if memory_integrator is not None:
                     memory_storage_results = await memory_integrator.store_execution_experiences(
                         workflow_id=execution.workflow_id,
                         execution_id=execution_id,
@@ -1325,6 +1342,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "is_real": True,
                         "results": memory_storage_results
                     }
+                    attributes.flag_modified(execution, "input_data")
                     db.commit()
                     
                     logger.info(
@@ -1340,6 +1358,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # LEARNING SYSTEM UPDATE
@@ -1361,6 +1380,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "updates": learning_updates,
                     "summary": learning_updater.get_learning_summary()
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1374,13 +1394,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # MEMORY CONSOLIDATION (Consolidate learnings to long-term memory)
             logger.info(f"🧠 Consolidating learnings to long-term memory...")
             memory_consolidation_results = {}
             try:
-                if 'memory_integrator' in locals():
+                if memory_integrator is not None:
                     memory_consolidation_results = await memory_integrator.consolidate_workflow_learnings(
                         workflow_id=execution.workflow_id,
                         execution_id=execution_id,
@@ -1401,6 +1422,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     )
                     
                     execution.input_data["memory_integration_summary"] = memory_summary
+                    attributes.flag_modified(execution, "input_data")
                     db.commit()
                     
                     logger.info(
@@ -1418,6 +1440,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # Complete execution with COMPLETE orchestration pipeline data

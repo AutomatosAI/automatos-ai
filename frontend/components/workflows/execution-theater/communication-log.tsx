@@ -65,7 +65,7 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
         try {
           // Fetch stats and time-series data in parallel
           const [stats, accessPatterns, consolidation] = await Promise.all([
-            apiClient.request('/api/v1/memory/stats'),
+            apiClient.request('/api/v1/memory/stats/real'),  // REAL data from database!
             apiClient.request('/api/v1/memory/stats/timeseries/access-patterns?hours=24').catch(() => []),
             apiClient.request('/api/v1/memory/stats/timeseries/consolidation?hours=24').catch(() => [])
           ])
@@ -512,52 +512,52 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                 <div className="grid grid-cols-12 gap-3 h-full">
                   {/* Top Section: Health Score & Quick Metrics */}
                   <div className="col-span-12 grid grid-cols-4 gap-3">
-                    {/* Memory System Health Score */}
+                    {/* Total Memories */}
                     <div className="col-span-1 bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <Brain className="w-5 h-5 text-purple-400" />
-                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Healthy</Badge>
+                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Active</Badge>
                       </div>
                       <div className="text-3xl font-bold text-white mb-1">
-                        {memoryStats?.system_stats?.system_performance?.health_score?.toFixed(0) || 87}%
+                        {memoryStats?.system_stats?.total_memories || 0}
                       </div>
-                      <div className="text-xs text-muted-foreground">System Health</div>
+                      <div className="text-xs text-muted-foreground">Total Memories</div>
                     </div>
 
                     {/* Hit Rate */}
                     <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <TrendingUp className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs text-blue-400">↑ 12%</span>
+                        {memoryStats?.is_real_data && <Badge variant="outline" className="text-xs">Real</Badge>}
                       </div>
                       <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.hit_rate * 100 || 92).toFixed(1)}%
+                        {memoryStats?.access_metrics?.hit_rate ? (memoryStats.access_metrics.hit_rate * 100).toFixed(1) : '0.0'}%
                       </div>
                       <div className="text-xs text-green-400">Cache Hit Rate</div>
                     </div>
 
-                    {/* Cache Utilization */}
+                    {/* Total Accesses */}
                     <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <Activity className="w-4 h-4 text-orange-400" />
                         <span className="text-xs text-orange-400">Active</span>
                       </div>
                       <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.cache_utilization * 100 || 67).toFixed(0)}%
+                        {memoryStats?.access_metrics?.total_accesses || 0}
                       </div>
-                      <div className="text-xs text-green-400">Cache Usage</div>
+                      <div className="text-xs text-green-400">Total Accesses</div>
                     </div>
 
-                    {/* Avg Response Time */}
+                    {/* Avg Importance */}
                     <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <Clock className="w-4 h-4 text-green-400" />
-                        <span className="text-xs text-green-400">Fast</span>
+                        <span className="text-xs text-green-400">Score</span>
                       </div>
                       <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.avg_response_time * 1000 || 230).toFixed(0)}ms
+                        {memoryStats?.access_metrics?.avg_importance ? (memoryStats.access_metrics.avg_importance * 100).toFixed(0) : '0'}
                       </div>
-                      <div className="text-xs text-green-400">Avg Response</div>
+                      <div className="text-xs text-green-400">Avg Importance</div>
                     </div>
                   </div>
 
@@ -570,12 +570,15 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                     <ResponsiveContainer width="100%" height={180}>
                       <PieChart>
                         <Pie
-                          data={[
-                            { name: 'Immediate', value: memoryStats?.system_stats?.memory_levels?.immediate || 24, color: '#ef4444' },
-                            { name: 'Working', value: memoryStats?.system_stats?.memory_levels?.working || 156, color: '#f97316' },
-                            { name: 'Short-term', value: memoryStats?.system_stats?.memory_levels?.short_term || 432, color: '#eab308' },
-                            { name: 'Long-term', value: memoryStats?.system_stats?.memory_levels?.long_term || 2847, color: '#3b82f6' }
-                          ]}
+                          data={(() => {
+                            const levels = memoryStats?.system_stats?.memory_levels || {}
+                            return [
+                              { name: 'Immediate', value: levels.immediate || 0, color: '#ef4444' },
+                              { name: 'Working', value: levels.working || 0, color: '#f97316' },
+                              { name: 'Short-term', value: levels.short_term || 0, color: '#eab308' },
+                              { name: 'Long-term', value: levels.long_term || 0, color: '#3b82f6' }
+                            ].filter(item => item.value > 0)
+                          })()}
                           cx="50%"
                           cy="50%"
                           innerRadius={50}

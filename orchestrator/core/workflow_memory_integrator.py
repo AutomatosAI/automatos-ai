@@ -92,8 +92,14 @@ class WorkflowMemoryIntegrator:
                         top_k=5
                     )
                     
+                    # Convert datetime objects to ISO strings for JSON serialization
+                    serialized_memories = []
+                    for m in memories:
+                        serialized = {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in m.items()}
+                        serialized_memories.append(serialized)
+                    
                     agent_memories[agent_id] = {
-                        "memories": memories,
+                        "memories": serialized_memories,
                         "count": len(memories),
                         "types": list(set(m.get("type") for m in memories if m.get("type")))
                     }
