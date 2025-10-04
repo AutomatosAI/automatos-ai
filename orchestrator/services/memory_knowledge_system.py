@@ -417,9 +417,9 @@ class HierarchicalMemorySystem:
         # Apply forgetting curve
         retention = math.exp(-time_since_access / (strength * 24))  # Decay over days
         
-        # Calculate similarity
+        # Calculate similarity (FIXED: removed incorrect inversion)
         memory_embedding = np.array(memory.embedding)
-        similarity = 1 - np.dot(query_embedding, memory_embedding) / (
+        similarity = np.dot(query_embedding, memory_embedding) / (
             np.linalg.norm(query_embedding) * np.linalg.norm(memory_embedding)
         )
         
