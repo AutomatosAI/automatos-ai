@@ -139,7 +139,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
         skill.description?.toLowerCase().includes(searchTerm.toLowerCase())
       
       const matchesCategory = categoryFilter === 'all' || skill.category === categoryFilter
-      const matchesDifficulty = difficultyFilter === 'all' || skill.difficulty === difficultyFilter
+      const matchesDifficulty = difficultyFilter === 'all' || skill.skill_type === difficultyFilter
       
       return matchesSearch && matchesCategory && matchesDifficulty
     })
@@ -342,13 +342,13 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           
           <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
             <SelectTrigger className="w-48">
-              <SelectValue placeholder="All Difficulties" />
+              <SelectValue placeholder="All Types" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Difficulties</SelectItem>
-              <SelectItem value="beginner">Beginner</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="technical">Technical</SelectItem>
+              <SelectItem value="cognitive">Cognitive</SelectItem>
+              <SelectItem value="analytical">Analytical</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -376,12 +376,12 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                           <div className={`p-2 rounded-lg ${category.bgColor}`}>
                             <category.icon className={`w-5 h-5 ${category.color}`} />
                           </div>
-                          <div>
-                            <CardTitle className="text-lg">{skill.name}</CardTitle>
-                            <Badge variant="secondary" className="text-xs mt-1">
-                              {skill.difficulty}
-                            </Badge>
-                          </div>
+                        <div>
+                          <CardTitle className="text-lg">{skill.name}</CardTitle>
+                          <Badge variant="secondary" className="text-xs mt-1">
+                            {skill.skill_type || 'technical'}
+                          </Badge>
+                        </div>
                         </div>
                         
                         <DropdownMenu>
@@ -490,7 +490,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                             <div>
                               <CardTitle className="text-lg">{skill.name}</CardTitle>
                               <Badge variant="secondary" className="text-xs mt-1">
-                                {skill.difficulty}
+                                {skill.skill_type || 'technical'}
                               </Badge>
                             </div>
                           </div>
@@ -628,4 +628,3 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
     </div>
   )
 }
-

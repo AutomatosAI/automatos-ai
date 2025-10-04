@@ -1,46 +1,44 @@
-
+/**
+ * Edit MCP Tool Modal
+ * ===================
+ * Complete edit functionality matching create modal
+ */
 
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useEffect } from 'react'
+import { motion } from 'framer-motion'
 import { 
   X, 
-  Settings, 
-  Key, 
-  Shield, 
-  CheckCircle, 
-  AlertTriangle, 
-  Eye, 
-  EyeOff,
-  Globe,
-  Server,
-  Lock,
-  Zap,
-  AlertCircle,
-  Save,
+  Zap, 
+  Save, 
+  AlertCircle, 
+  Key,
+  Shield,
   TestTube,
-  RefreshCw,
-  Copy,
-  ExternalLink
+  RefreshCw
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
+import { useUpdateMCPTool, useTestMCPToolConnection } from '@/hooks/use-mcp-tools-api'
 
 interface Tool {
   id: number
@@ -50,18 +48,12 @@ interface Tool {
   icon: string
   provider: string
   status: string
-  isInstalled: boolean
-  isConfigured: boolean
   version: string
-  pricing: string
-  rating: number
-  usageCount: number
   tags: string[]
-  permissions: string[]
-  requiredCredentials: string[]
-  supportedEnvironments: string[]
-  lastUpdated: string
-  configuration?: Record<string, any>
+  capabilities: any
+  credentials_schema: any
+  metadata: any
+  mcp_server_url?: string
 }
 
 interface ToolConfigModalProps {
@@ -69,614 +61,445 @@ interface ToolConfigModalProps {
   onClose: () => void
   tool: Tool | null
   onSave: (toolId: number, config: Record<string, any>) => void
+  onUpdate?: (toolId: number, toolData: Partial<Tool>) => void
 }
 
-const environmentColors = {
-  development: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  staging: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  production: 'bg-green-500/10 text-green-400 border-green-500/20'
-}
+const TOOL_CATEGORIES = [
+  { value: 'developer', label: 'Developer Tools', icon: '⚡' },
+  { value: 'communication', label: 'Communication', icon: '💬' },
+  { value: 'cloud', label: 'Cloud Services', icon: '☁️' },
+  { value: 'analytics', label: 'Analytics', icon: '📊' },
+  { value: 'productivity', label: 'Productivity', icon: '✨' },
+  { value: 'security', label: 'Security', icon: '🛡️' },
+  { value: 'data_analysis', label: 'Data Analysis', icon: '📈' },
+  { value: 'automation', label: 'Automation', icon: '🤖' },
+]
 
-const credentialTypes = {
-  api_token: { label: 'API Token', type: 'password', icon: Key },
-  api_key: { label: 'API Key', type: 'password', icon: Key },
-  secret_key: { label: 'Secret Key', type: 'password', icon: Lock },
-  oauth2_token: { label: 'OAuth2 Token', type: 'password', icon: Shield },
-  webhook_url: { label: 'Webhook URL', type: 'url', icon: Globe },
-  bot_token: { label: 'Bot Token', type: 'password', icon: Key },
-  domain: { label: 'Domain', type: 'text', icon: Server },
-  region: { label: 'Region', type: 'text', icon: Globe },
-  access_key: { label: 'Access Key', type: 'password', icon: Key },
-  property_id: { label: 'Property ID', type: 'text', icon: Server },
-  service_account_key: { label: 'Service Account Key', type: 'textarea', icon: Key },
-  app_key: { label: 'App Key', type: 'password', icon: Key },
-  registry_token: { label: 'Registry Token', type: 'password', icon: Key }
-}
+const COMMON_ICONS = ['⚡', '💬', '☁️', '📊', '✨', '🛡️', '📈', '🤖', '🔧', '🚀', '🔐', '📝', '🐳', '📁', '🔍', '⚙️']
 
-export function ToolConfigModal({ open, onClose, tool, onSave }: ToolConfigModalProps) {
-  const [activeTab, setActiveTab] = useState('credentials')
-  const [configuration, setConfiguration] = useState<Record<string, any>>({})
-  const [credentials, setCredentials] = useState<Record<string, any>>({})
-  const [selectedEnvironment, setSelectedEnvironment] = useState('development')
-  const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({})
-  const [testConnection, setTestConnection] = useState<{
-    testing: boolean
-    status: 'success' | 'error' | null
-    message: string
-  }>({
-    testing: false,
-    status: null,
-    message: ''
+export function ToolConfigModal({ open, onClose, tool, onSave, onUpdate }: ToolConfigModalProps) {
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    mcp_server_url: '',
+    provider: '',
+    version: '1.0.0',
+    icon: '⚡',
+    category: 'developer',
+    status: 'active',
+    capabilities: '{\n  "methods": ["example.method"]\n}',
+    credentials_schema: '{\n  "required": ["api_key"],\n  "optional": []\n}',
+    tags: '',
+    metadata: '{}',
   })
-  const [saving, setSaving] = useState(false)
+
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const updateMutation = useUpdateMCPTool()
+  const testMutation = useTestMCPToolConnection()
 
   useEffect(() => {
     if (tool) {
-      // Initialize configuration from tool data
-      setConfiguration(tool?.configuration || {})
-      setCredentials({})
-      setSelectedEnvironment(tool?.supportedEnvironments?.[0] || 'development')
-      setShowCredentials({})
-      setTestConnection({ testing: false, status: null, message: '' })
+      setFormData({
+        name: tool.name || '',
+        description: tool.description || '',
+        mcp_server_url: tool.mcp_server_url || '',
+        provider: tool.provider || '',
+        version: tool.version || '1.0.0',
+        icon: tool.icon || '⚡',
+        category: tool.category || 'developer',
+        status: tool.status || 'active',
+        capabilities: JSON.stringify(tool.capabilities || {}, null, 2),
+        credentials_schema: JSON.stringify(tool.credentials_schema || {}, null, 2),
+        tags: (tool.tags || []).join(', '),
+        metadata: JSON.stringify(tool.metadata || {}, null, 2),
+      })
+      setErrors({})
     }
   }, [tool])
 
-  const handleCredentialChange = (key: string, value: string) => {
-    setCredentials(prev => ({
-      ...prev,
-      [key]: value
-    }))
+  const validateJSON = (field: string, value: string) => {
+    try {
+      JSON.parse(value)
+      setErrors(prev => ({ ...prev, [field]: '' }))
+      return true
+    } catch (e: any) {
+      setErrors(prev => ({ ...prev, [field]: `Invalid JSON: ${e.message}` }))
+      return false
+    }
   }
 
-  const handleConfigurationChange = (key: string, value: any) => {
-    setConfiguration(prev => ({
-      ...prev,
-      [key]: value
-    }))
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {}
+
+    if (!formData.name.trim()) {
+      newErrors.name = 'Name is required'
+    }
+    if (!formData.provider.trim()) {
+      newErrors.provider = 'Provider is required'
+    }
+
+    // Validate JSON fields
+    if (!validateJSON('capabilities', formData.capabilities)) {
+      newErrors.capabilities = errors.capabilities || 'Invalid JSON'
+    }
+    if (!validateJSON('credentials_schema', formData.credentials_schema)) {
+      newErrors.credentials_schema = errors.credentials_schema || 'Invalid JSON'
+    }
+    if (!validateJSON('metadata', formData.metadata)) {
+      newErrors.metadata = errors.metadata || 'Invalid JSON'
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
   }
 
-  const toggleShowCredential = (key: string) => {
-    setShowCredentials(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }))
+  const handleSubmit = async () => {
+    if (!validateForm() || !tool) return
+
+    try {
+      const updateData = {
+        name: formData.name,
+        description: formData.description,
+        mcp_server_url: formData.mcp_server_url || undefined,
+        provider: formData.provider,
+        version: formData.version,
+        icon: formData.icon,
+        category: formData.category,
+        status: formData.status,
+        capabilities: JSON.parse(formData.capabilities),
+        credentials_schema: JSON.parse(formData.credentials_schema),
+        tags: formData.tags ? formData.tags.split(',').map(t => t.trim()) : [],
+        metadata: JSON.parse(formData.metadata),
+      }
+
+      await updateMutation.mutateAsync({
+        id: tool.id,
+        data: updateData
+      })
+
+      if (onUpdate) {
+        onUpdate(tool.id, updateData)
+      }
+
+      handleClose()
+    } catch (error: any) {
+      console.error('Failed to update tool:', error)
+    }
   }
 
   const handleTestConnection = async () => {
-    if (!tool) return
-
-    setTestConnection(prev => ({ ...prev, testing: true }))
+    if (!formData.mcp_server_url || !tool) {
+      setErrors(prev => ({ ...prev, mcp_server_url: 'URL required for testing' }))
+      return
+    }
 
     try {
-      // Simulate API call to test connection
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      // Mock success/failure based on credentials
-      const hasRequiredCredentials = tool?.requiredCredentials?.every(cred => credentials[cred])
-      
-      if (hasRequiredCredentials) {
-        setTestConnection({
-          testing: false,
-          status: 'success',
-          message: 'Connection successful! All credentials are valid.'
-        })
-      } else {
-        setTestConnection({
-          testing: false,
-          status: 'error',
-          message: 'Connection failed. Please check your credentials.'
-        })
-      }
-    } catch (error) {
-      setTestConnection({
-        testing: false,
-        status: 'error',
-        message: 'Connection test failed. Please try again.'
+      await testMutation.mutateAsync({
+        toolId: tool.id,
+        serverUrl: formData.mcp_server_url
       })
+    } catch (error: any) {
+      console.error('Connection test failed:', error)
     }
   }
 
-  const handleSave = async () => {
-    if (!tool) return
-
-    setSaving(true)
-    try {
-      // Simulate API call to save configuration
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const finalConfig = {
-        ...configuration,
-        credentials: credentials,
-        environment: selectedEnvironment,
-        configured_at: new Date().toISOString()
-      }
-
-      onSave(tool.id, finalConfig)
-      onClose()
-    } catch (error) {
-      console.error('Failed to save configuration:', error)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
+  const handleClose = () => {
+    setErrors({})
+    onClose()
   }
 
   if (!tool) return null
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="glass-card max-w-4xl max-h-[90vh] overflow-hidden">
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-              <span className="text-lg">{tool?.icon}</span>
-            </div>
-            <div>
-              <h2 className="text-xl font-semibold">Configure {tool?.name}</h2>
-              <p className="text-sm text-muted-foreground font-normal">
-                Set up credentials and configuration for {tool?.provider}
-              </p>
-            </div>
+          <DialogTitle className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-brand-primary" />
+            Edit MCP Tool: {tool.name}
           </DialogTitle>
+          <DialogDescription>
+            Update the configuration and settings for this Model Context Protocol tool
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
-              <TabsTrigger value="credentials" className="flex items-center space-x-2">
-                <Key className="w-4 h-4" />
-                <span>Credentials</span>
-              </TabsTrigger>
-              <TabsTrigger value="configuration" className="flex items-center space-x-2">
-                <Settings className="w-4 h-4" />
-                <span>Configuration</span>
-              </TabsTrigger>
-              <TabsTrigger value="security" className="flex items-center space-x-2">
-                <Shield className="w-4 h-4" />
-                <span>Security</span>
-              </TabsTrigger>
-              <TabsTrigger value="testing" className="flex items-center space-x-2">
-                <TestTube className="w-4 h-4" />
-                <span>Testing</span>
-              </TabsTrigger>
-            </TabsList>
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+        >
+          {/* Basic Information */}
+          <div className="space-y-4">
+            <h4 className="font-medium text-sm">Basic Information</h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">
+                  Tool Name <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g., GitHub MCP"
+                  className={errors.name ? 'border-destructive' : ''}
+                />
+                {errors.name && (
+                  <p className="text-xs text-destructive">{errors.name}</p>
+                )}
+              </div>
 
-            <TabsContent value="credentials" className="space-y-6">
-              {/* Environment Selection */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center space-x-2">
-                    <Globe className="w-5 h-5" />
-                    <span>Environment</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {tool?.supportedEnvironments?.map((env) => (
-                      <Button
-                        key={env}
-                        variant={selectedEnvironment === env ? 'default' : 'outline'}
-                        onClick={() => setSelectedEnvironment(env)}
-                        className={`flex items-center space-x-2 ${
-                          selectedEnvironment === env ? 'icon-gradient' : 'hover:border-orange-500/50'
-                        }`}
-                      >
-                        <span>{env}</span>
-                        {selectedEnvironment === env && <CheckCircle className="w-4 h-4" />}
-                      </Button>
-                    )) || []}
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="space-y-2">
+                <Label htmlFor="provider">
+                  Provider <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="provider"
+                  value={formData.provider}
+                  onChange={(e) => setFormData({ ...formData, provider: e.target.value })}
+                  placeholder="e.g., GitHub"
+                  className={errors.provider ? 'border-destructive' : ''}
+                />
+                {errors.provider && (
+                  <p className="text-xs text-destructive">{errors.provider}</p>
+                )}
+              </div>
+            </div>
 
-              {/* Credentials Form */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center space-x-2">
-                    <Key className="w-5 h-5" />
-                    <span>API Credentials</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {tool?.requiredCredentials?.map((credKey) => {
-                    const credType = credentialTypes[credKey as keyof typeof credentialTypes]
-                    if (!credType) return null
+            <div className="space-y-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Describe what this tool does"
+                rows={2}
+              />
+            </div>
 
-                    const CredIcon = credType.icon
-                    const isPassword = credType.type === 'password'
-                    const showValue = showCredentials[credKey]
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="category">Category</Label>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => setFormData({ ...formData, category: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TOOL_CATEGORIES.map(cat => (
+                      <SelectItem key={cat.value} value={cat.value}>
+                        <span className="flex items-center gap-2">
+                          <span>{cat.icon}</span>
+                          <span>{cat.label}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-                    return (
-                      <div key={credKey} className="space-y-2">
-                        <Label htmlFor={credKey} className="flex items-center space-x-2">
-                          <CredIcon className="w-4 h-4" />
-                          <span>{credType.label}</span>
-                          {tool?.requiredCredentials?.includes(credKey) && (
-                            <Badge variant="outline" className="text-xs">Required</Badge>
-                          )}
-                        </Label>
-                        <div className="relative">
-                          {credType.type === 'textarea' ? (
-                            <Textarea
-                              id={credKey}
-                              placeholder={`Enter your ${credType.label.toLowerCase()}`}
-                              value={credentials[credKey] || ''}
-                              onChange={(e) => handleCredentialChange(credKey, e.target.value)}
-                              rows={3}
-                            />
-                          ) : (
-                            <Input
-                              id={credKey}
-                              type={isPassword && !showValue ? 'password' : 'text'}
-                              placeholder={`Enter your ${credType.label.toLowerCase()}`}
-                              value={credentials[credKey] || ''}
-                              onChange={(e) => handleCredentialChange(credKey, e.target.value)}
-                            />
-                          )}
-                          {isPassword && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
-                              onClick={() => toggleShowCredential(credKey)}
-                            >
-                              {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </Button>
-                          )}
-                        </div>
-                        {credentials[credKey] && (
-                          <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                            <CheckCircle className="w-3 h-3 text-green-400" />
-                            <span>Credential provided</span>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  }) || []}
+              <div className="space-y-2">
+                <Label htmlFor="version">Version</Label>
+                <Input
+                  id="version"
+                  value={formData.version}
+                  onChange={(e) => setFormData({ ...formData, version: e.target.value })}
+                  placeholder="1.0.0"
+                />
+              </div>
 
-                  {/* Credential Help */}
-                  <Alert>
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="text-sm">
-                      All credentials are encrypted and stored securely. They are only accessible by agents with proper permissions.
-                      <Button variant="link" className="p-0 h-auto text-xs ml-2" asChild>
-                        <a href="#" target="_blank" rel="noopener noreferrer">
-                          Learn more about {tool?.provider} API keys
-                          <ExternalLink className="w-3 h-3 ml-1" />
-                        </a>
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                </CardContent>
-              </Card>
-            </TabsContent>
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData({ ...formData, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="deprecated">Deprecated</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
-            <TabsContent value="configuration" className="space-y-6">
-              {/* Tool-specific Configuration */}
-              {tool?.name === 'GitHub' && (
-                <Card className="bg-secondary/30 border-border/30">
-                  <CardHeader>
-                    <CardTitle className="text-base">GitHub Configuration</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Webhook URL</Label>
-                      <Input
-                        value={configuration.webhook_url || ''}
-                        onChange={(e) => handleConfigurationChange('webhook_url', e.target.value)}
-                        placeholder="https://your-app.com/webhooks/github"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={configuration.branch_protection || false}
-                        onCheckedChange={(checked) => handleConfigurationChange('branch_protection', checked)}
-                      />
-                      <Label>Enable branch protection</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={configuration.auto_merge || false}
-                        onCheckedChange={(checked) => handleConfigurationChange('auto_merge', checked)}
-                      />
-                      <Label>Enable auto-merge for approved PRs</Label>
-                    </div>
-                  </CardContent>
-                </Card>
+            <div className="space-y-2">
+              <Label htmlFor="icon">Icon (Emoji)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="icon"
+                  value={formData.icon}
+                  onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                  placeholder="⚡"
+                  className="w-20"
+                  maxLength={2}
+                />
+                <div className="flex gap-1 flex-wrap">
+                  {COMMON_ICONS.map(icon => (
+                    <Button
+                      key={icon}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-lg px-2"
+                      onClick={() => setFormData({ ...formData, icon })}
+                    >
+                      {icon}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Connection Details */}
+          <div className="space-y-4">
+            <h4 className="font-medium text-sm">Connection Details</h4>
+            
+            <div className="space-y-2">
+              <Label htmlFor="mcp_server_url">MCP Server URL</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="mcp_server_url"
+                  value={formData.mcp_server_url}
+                  onChange={(e) => setFormData({ ...formData, mcp_server_url: e.target.value })}
+                  placeholder="http://localhost:3000/mcp/tool"
+                  className={errors.mcp_server_url ? 'border-destructive' : ''}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTestConnection}
+                  disabled={testMutation.isPending}
+                >
+                  {testMutation.isPending ? 'Testing...' : 'Test'}
+                </Button>
+              </div>
+              {errors.mcp_server_url && (
+                <p className="text-xs text-destructive">{errors.mcp_server_url}</p>
               )}
+            </div>
 
-              {tool?.name === 'Slack' && (
-                <Card className="bg-secondary/30 border-border/30">
-                  <CardHeader>
-                    <CardTitle className="text-base">Slack Configuration</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Default Channel</Label>
-                      <Input
-                        value={configuration.default_channel || ''}
-                        onChange={(e) => handleConfigurationChange('default_channel', e.target.value)}
-                        placeholder="#general"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={configuration.notifications_enabled || false}
-                        onCheckedChange={(checked) => handleConfigurationChange('notifications_enabled', checked)}
-                      />
-                      <Label>Enable notifications</Label>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Notification Frequency</Label>
-                      <Select value={configuration.notification_frequency || 'immediate'} onValueChange={(value) => handleConfigurationChange('notification_frequency', value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select frequency" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="immediate">Immediate</SelectItem>
-                          <SelectItem value="hourly">Hourly</SelectItem>
-                          <SelectItem value="daily">Daily</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {tool?.name === 'AWS S3' && (
-                <Card className="bg-secondary/30 border-border/30">
-                  <CardHeader>
-                    <CardTitle className="text-base">AWS S3 Configuration</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Default Bucket</Label>
-                      <Input
-                        value={configuration.default_bucket || ''}
-                        onChange={(e) => handleConfigurationChange('default_bucket', e.target.value)}
-                        placeholder="my-app-bucket"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Region</Label>
-                      <Select value={configuration.region || 'us-east-1'} onValueChange={(value) => handleConfigurationChange('region', value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select region" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
-                          <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
-                          <SelectItem value="eu-west-1">Europe (Ireland)</SelectItem>
-                          <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        checked={configuration.encryption_enabled || false}
-                        onCheckedChange={(checked) => handleConfigurationChange('encryption_enabled', checked)}
-                      />
-                      <Label>Enable server-side encryption</Label>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Generic Configuration for other tools */}
-              {!['GitHub', 'Slack', 'AWS S3'].includes(tool?.name || '') && (
-                <Card className="bg-secondary/30 border-border/30">
-                  <CardHeader>
-                    <CardTitle className="text-base">General Configuration</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Custom Settings</Label>
-                      <Textarea
-                        value={JSON.stringify(configuration, null, 2)}
-                        onChange={(e) => {
-                          try {
-                            const parsed = JSON.parse(e.target.value)
-                            setConfiguration(parsed)
-                          } catch (error) {
-                            // Invalid JSON, ignore
-                          }
-                        }}
-                        placeholder="Enter configuration as JSON"
-                        rows={6}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </TabsContent>
-
-            <TabsContent value="security" className="space-y-6">
-              {/* Agent Permissions */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center space-x-2">
-                    <Shield className="w-5 h-5" />
-                    <span>Agent Permissions</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      This tool can be accessed by the following agent types:
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {tool?.permissions?.map((permission) => (
-                        <Badge key={permission} className="bg-green-500/10 text-green-400 border-green-500/20">
-                          {permission.replace('_', ' ').toUpperCase()}
-                        </Badge>
-                      )) || []}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Security Settings */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base">Security Settings</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Credential Encryption</p>
-                      <p className="text-sm text-muted-foreground">All credentials are encrypted at rest</p>
-                    </div>
-                    <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
-                      Enabled
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tags (comma-separated)</Label>
+              <Input
+                id="tags"
+                value={formData.tags}
+                onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+                placeholder="github, version_control, api"
+              />
+              {formData.tags && (
+                <div className="flex gap-1 flex-wrap">
+                  {formData.tags.split(',').map((tag, i) => (
+                    <Badge key={i} variant="secondary" className="text-xs">
+                      {tag.trim()}
                     </Badge>
-                  </div>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Access Logging</p>
-                      <p className="text-sm text-muted-foreground">Log all tool access attempts</p>
-                    </div>
-                    <Switch
-                      checked={configuration.access_logging !== false}
-                      onCheckedChange={(checked) => handleConfigurationChange('access_logging', checked)}
-                    />
-                  </div>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Rate Limiting</p>
-                      <p className="text-sm text-muted-foreground">Limit API requests per minute</p>
-                    </div>
-                    <Switch
-                      checked={configuration.rate_limiting !== false}
-                      onCheckedChange={(checked) => handleConfigurationChange('rate_limiting', checked)}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="testing" className="space-y-6">
-              {/* Connection Test */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center space-x-2">
-                    <TestTube className="w-5 h-5" />
-                    <span>Test Connection</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Test your configuration to ensure the tool is properly connected and configured.
-                  </p>
-                  
-                  <Button
-                    onClick={handleTestConnection}
-                    disabled={testConnection.testing}
-                    className="w-full"
-                  >
-                    {testConnection.testing ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Testing Connection...
-                      </>
-                    ) : (
-                      <>
-                        <TestTube className="w-4 h-4 mr-2" />
-                        Test Connection
-                      </>
-                    )}
-                  </Button>
-
-                  {testConnection.status && (
-                    <Alert className={testConnection.status === 'success' 
-                      ? 'border-green-500/50 bg-green-500/10' 
-                      : 'border-red-500/50 bg-red-500/10'
-                    }>
-                      {testConnection.status === 'success' ? (
-                        <CheckCircle className="h-4 w-4 text-green-400" />
-                      ) : (
-                        <AlertTriangle className="h-4 w-4 text-red-400" />
-                      )}
-                      <AlertDescription className={testConnection.status === 'success' ? 'text-green-400' : 'text-red-400'}>
-                        {testConnection.message}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Configuration Preview */}
-              <Card className="bg-secondary/30 border-border/30">
-                <CardHeader>
-                  <CardTitle className="text-base">Configuration Preview</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="bg-background/50 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <Label className="text-sm font-medium">Final Configuration</Label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(JSON.stringify({ ...configuration, credentials: '***' }, null, 2))}
-                        >
-                          <Copy className="w-4 h-4 mr-1" />
-                          Copy
-                        </Button>
-                      </div>
-                      <pre className="text-xs text-muted-foreground overflow-auto">
-                        {JSON.stringify({ 
-                          environment: selectedEnvironment,
-                          ...configuration,
-                          credentials: Object.keys(credentials).reduce((acc, key) => ({
-                            ...acc,
-                            [key]: credentials[key] ? '***CONFIGURED***' : 'NOT SET'
-                          }), {})
-                        }, null, 2)}
-                      </pre>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-4 border-t border-border/30">
-          <div className="text-sm text-muted-foreground">
-            Environment: <Badge className={environmentColors[selectedEnvironment as keyof typeof environmentColors]}>
-              {selectedEnvironment}
-            </Badge>
-          </div>
-          <div className="flex space-x-3">
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleSave}
-              disabled={saving}
-              className="icon-gradient"
-            >
-              {saving ? (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Configuration
-                </>
+                  ))}
+                </div>
               )}
-            </Button>
+            </div>
           </div>
-        </div>
+
+          {/* Capabilities JSON */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-sm">Capabilities (JSON)</h4>
+              {errors.capabilities && (
+                <div className="flex items-center gap-1 text-destructive text-xs">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{errors.capabilities}</span>
+                </div>
+              )}
+            </div>
+            <Textarea
+              value={formData.capabilities}
+              onChange={(e) => {
+                setFormData({ ...formData, capabilities: e.target.value })
+                validateJSON('capabilities', e.target.value)
+              }}
+              placeholder='{"methods": ["repos.list", "repos.create"]}'
+              rows={4}
+              className={`font-mono text-xs ${errors.capabilities ? 'border-destructive' : ''}`}
+            />
+            <p className="text-xs text-muted-foreground">
+              Define the methods and parameters available for this tool
+            </p>
+          </div>
+
+          {/* Credentials Schema JSON */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-sm">Credentials Schema (JSON)</h4>
+              {errors.credentials_schema && (
+                <div className="flex items-center gap-1 text-destructive text-xs">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{errors.credentials_schema}</span>
+                </div>
+              )}
+            </div>
+            <Textarea
+              value={formData.credentials_schema}
+              onChange={(e) => {
+                setFormData({ ...formData, credentials_schema: e.target.value })
+                validateJSON('credentials_schema', e.target.value)
+              }}
+              placeholder='{"required": ["api_token"], "optional": ["webhook_url"]}'
+              rows={4}
+              className={`font-mono text-xs ${errors.credentials_schema ? 'border-destructive' : ''}`}
+            />
+            <p className="text-xs text-muted-foreground">
+              Define the credentials required for this tool
+            </p>
+          </div>
+
+          {/* Metadata JSON */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-sm">Metadata (JSON) - Optional</h4>
+              {errors.metadata && (
+                <div className="flex items-center gap-1 text-destructive text-xs">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{errors.metadata}</span>
+                </div>
+              )}
+            </div>
+            <Textarea
+              value={formData.metadata}
+              onChange={(e) => {
+                setFormData({ ...formData, metadata: e.target.value })
+                validateJSON('metadata', e.target.value)
+              }}
+              placeholder='{"documentation": "https://example.com/docs"}'
+              rows={3}
+              className={`font-mono text-xs ${errors.metadata ? 'border-destructive' : ''}`}
+            />
+          </div>
+        </motion.div>
+
+        <DialogFooter className="flex justify-between">
+          <Button variant="outline" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={updateMutation.isPending}
+            className="bg-brand-primary hover:bg-brand-primary/90"
+          >
+            {updateMutation.isPending ? (
+              <>Updating...</>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-2" />
+                Update Tool
+              </>
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

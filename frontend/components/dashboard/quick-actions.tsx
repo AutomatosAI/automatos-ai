@@ -124,7 +124,7 @@ export function QuickActions() {
         transition={{ duration: 0.8, delay: 0.2 }}
       >
         <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {actions.map((action, index) => (
             <motion.div
               key={action.label}
@@ -141,9 +141,9 @@ export function QuickActions() {
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
                       <action.icon className="w-5 h-5 text-primary" />
                     </div>
-                    <div className="text-center">
+                    <div className="text-center space-y-1">
                       <div className="font-medium text-sm">{action.label}</div>
-                      <div className="text-xs text-muted-foreground">{action.description}</div>
+                      <div className="text-xs text-muted-foreground leading-tight">{action.description}</div>
                     </div>
                   </Button>
                 </Link>

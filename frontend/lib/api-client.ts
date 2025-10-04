@@ -67,7 +67,7 @@
     
     // Settings/Admin Pages
     'settings': true,          // 🔄 Use mocks until backend endpoints ready
-    'tools': true,             // 🔄 Use mocks until backend endpoints ready
+    'tools': false,            // ✅ Use real APIs - MCP tools endpoints working
     'credentials': true,       // 🔄 Use mocks until backend endpoints ready
     
     // Testing/Development
@@ -1428,11 +1428,16 @@
   
     // ===== SKILLS ENDPOINTS =====
     async getSkills() {
-      return this.request('/api/skills/')
+      const skills = await this.request('/api/skills/') as any[]
+      // Add default difficulty field if missing
+      return skills.map((skill: any) => ({
+        ...skill,
+        difficulty: skill.difficulty || 'intermediate' // Default difficulty
+      }))
     }
   
     async createSkill(data: any) {
-      return this.request('/api/skills/', {
+      return this.request('/api/skills/single', {
         method: 'POST',
         body: JSON.stringify(data)
       })
@@ -1948,4 +1953,3 @@
   
 export const apiClient = new ApiClient()
 export default apiClient
-  

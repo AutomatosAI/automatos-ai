@@ -36,7 +36,12 @@ import {
   Star,
   TrendingUp,
   Users,
-  Activity
+  Activity,
+  Trash2,
+  MoreVertical,
+  Edit,
+  Power,
+  PowerOff
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,6 +50,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
 import { ToolConfigModal } from './tool-config-modal'
 import { AgentToolAssignment } from './agent-tool-assignment'
@@ -56,14 +68,12 @@ const toolCategories = [
   {
     id: 'all',
     name: 'All Tools',
-    icon: Grid3X3,
     color: 'text-gray-400',
     count: 0
   },
   {
     id: 'developer',
     name: 'Developer Tools',
-    icon: '⚡',
     color: 'text-blue-400',
     description: 'Code repositories, project management, CI/CD',
     count: 12
@@ -71,7 +81,6 @@ const toolCategories = [
   {
     id: 'communication',
     name: 'Communication',
-    icon: '💬',
     color: 'text-green-400',
     description: 'Team chat, email, video conferencing',
     count: 8
@@ -79,7 +88,6 @@ const toolCategories = [
   {
     id: 'cloud',
     name: 'Cloud Services',
-    icon: '☁️',
     color: 'text-purple-400',
     description: 'AWS, Azure, GCP infrastructure tools',
     count: 15
@@ -87,7 +95,6 @@ const toolCategories = [
   {
     id: 'analytics',
     name: 'Analytics',
-    icon: '📊',
     color: 'text-orange-400',
     description: 'Data analysis, monitoring, reporting',
     count: 10
@@ -95,7 +102,6 @@ const toolCategories = [
   {
     id: 'productivity',
     name: 'Productivity',
-    icon: '✨',
     color: 'text-pink-400',
     description: 'Task management, documentation, scheduling',
     count: 7
@@ -103,195 +109,14 @@ const toolCategories = [
   {
     id: 'security',
     name: 'Security',
-    icon: '🛡️',
     color: 'text-red-400',
     description: 'Security scanning, compliance, monitoring',
     count: 6
   }
 ]
 
-// Mock tools data (in real app, this would come from API)
-const mockTools = [
-  // Developer Tools
-  {
-    id: 1,
-    name: 'GitHub',
-    description: 'Code repository management and version control',
-    category: 'developer',
-    icon: '⚡',
-    provider: 'GitHub Inc.',
-    status: 'available',
-    isInstalled: true,
-    isConfigured: true,
-    version: '2.0.1',
-    pricing: 'Free/Pro',
-    rating: 4.9,
-    usageCount: 1250,
-    tags: ['git', 'repository', 'collaboration'],
-    permissions: ['code_architect', 'custom'],
-    requiredCredentials: ['api_token'],
-    supportedEnvironments: ['development', 'staging', 'production'],
-    lastUpdated: '2024-01-15',
-    configuration: {
-      webhook_url: 'configured',
-      branch_protection: true,
-      auto_merge: false
-    }
-  },
-  {
-    id: 2,
-    name: 'Jira',
-    description: 'Project management and issue tracking',
-    category: 'developer',
-    icon: '📋',
-    provider: 'Atlassian',
-    status: 'available',
-    isInstalled: false,
-    isConfigured: false,
-    version: '1.8.3',
-    pricing: 'Free/Pro',
-    rating: 4.6,
-    usageCount: 890,
-    tags: ['project-management', 'tracking', 'agile'],
-    permissions: ['code_architect', 'custom'],
-    requiredCredentials: ['api_token', 'domain'],
-    supportedEnvironments: ['development', 'production'],
-    lastUpdated: '2024-01-10'
-  },
-  // Communication Tools
-  {
-    id: 3,
-    name: 'Slack',
-    description: 'Team communication and collaboration platform',
-    category: 'communication',
-    icon: '💬',
-    provider: 'Slack Technologies',
-    status: 'available',
-    isInstalled: true,
-    isConfigured: true,
-    version: '3.2.1',
-    pricing: 'Free/Pro',
-    rating: 4.8,
-    usageCount: 2100,
-    tags: ['chat', 'team', 'notifications'],
-    permissions: ['custom', 'infrastructure_manager'],
-    requiredCredentials: ['bot_token', 'webhook_url'],
-    supportedEnvironments: ['production'],
-    lastUpdated: '2024-01-12',
-    configuration: {
-      channels_configured: 3,
-      notifications_enabled: true,
-      bot_active: true
-    }
-  },
-  {
-    id: 4,
-    name: 'Gmail',
-    description: 'Email management and automation',
-    category: 'communication',
-    icon: '📧',
-    provider: 'Google',
-    status: 'available',
-    isInstalled: false,
-    isConfigured: false,
-    version: '2.1.0',
-    pricing: 'Free',
-    rating: 4.7,
-    usageCount: 560,
-    tags: ['email', 'automation', 'notifications'],
-    permissions: ['custom'],
-    requiredCredentials: ['oauth2_token'],
-    supportedEnvironments: ['production'],
-    lastUpdated: '2024-01-08'
-  },
-  // Cloud Services
-  {
-    id: 5,
-    name: 'AWS S3',
-    description: 'Cloud object storage and file management',
-    category: 'cloud',
-    icon: '☁️',
-    provider: 'Amazon Web Services',
-    status: 'available',
-    isInstalled: true,
-    isConfigured: false,
-    version: '1.9.2',
-    pricing: 'Pay-per-use',
-    rating: 4.9,
-    usageCount: 1800,
-    tags: ['storage', 'cloud', 'files'],
-    permissions: ['infrastructure_manager'],
-    requiredCredentials: ['access_key', 'secret_key', 'region'],
-    supportedEnvironments: ['development', 'staging', 'production'],
-    lastUpdated: '2024-01-14'
-  },
-  {
-    id: 6,
-    name: 'Docker',
-    description: 'Container management and deployment',
-    category: 'cloud',
-    icon: '🐳',
-    provider: 'Docker Inc.',
-    status: 'available',
-    isInstalled: true,
-    isConfigured: true,
-    version: '4.1.0',
-    pricing: 'Free/Pro',
-    rating: 4.8,
-    usageCount: 920,
-    tags: ['containers', 'deployment', 'orchestration'],
-    permissions: ['infrastructure_manager', 'code_architect'],
-    requiredCredentials: ['registry_token'],
-    supportedEnvironments: ['development', 'staging', 'production'],
-    lastUpdated: '2024-01-13',
-    configuration: {
-      registries_connected: 2,
-      images_managed: 15,
-      auto_deployment: true
-    }
-  },
-  // Analytics Tools
-  {
-    id: 7,
-    name: 'Google Analytics',
-    description: 'Web analytics and user behavior tracking',
-    category: 'analytics',
-    icon: '📊',
-    provider: 'Google',
-    status: 'available',
-    isInstalled: false,
-    isConfigured: false,
-    version: '2.3.1',
-    pricing: 'Free/Pro',
-    rating: 4.5,
-    usageCount: 340,
-    tags: ['analytics', 'tracking', 'insights'],
-    permissions: ['data_analyst'],
-    requiredCredentials: ['property_id', 'service_account_key'],
-    supportedEnvironments: ['production'],
-    lastUpdated: '2024-01-11'
-  },
-  {
-    id: 8,
-    name: 'DataDog',
-    description: 'Application performance monitoring and observability',
-    category: 'analytics',
-    icon: '🔍',
-    provider: 'DataDog Inc.',
-    status: 'available',
-    isInstalled: false,
-    isConfigured: false,
-    version: '3.0.2',
-    pricing: 'Pro',
-    rating: 4.7,
-    usageCount: 180,
-    tags: ['monitoring', 'apm', 'logs'],
-    permissions: ['infrastructure_manager', 'performance_optimizer'],
-    requiredCredentials: ['api_key', 'app_key'],
-    supportedEnvironments: ['staging', 'production'],
-    lastUpdated: '2024-01-09'
-  }
-]
+// MCP Tools data comes from the database via useMCPTools hook
+// No mock data needed - using real MCP server metadata
 
 const statusIcons = {
   available: CheckCircle,
@@ -327,6 +152,7 @@ interface Tool {
   supportedEnvironments: string[]
   lastUpdated: string
   configuration?: Record<string, any>
+  metadata?: Record<string, any>
 }
 
 export function ToolsDashboard() {
@@ -460,22 +286,54 @@ export function ToolsDashboard() {
     )
   }
 
-  const handleToolInstall = async (tool: Tool) => {
+  const handleToolToggle = async (tool: Tool, enabled: boolean) => {
+    console.log(`🔄 TOGGLE CLICKED: ${tool.name} -> ${enabled ? 'ENABLE' : 'DISABLE'}`)
+    console.log('📊 Tool data:', tool)
+    
     setLoading(true)
     try {
-      console.log(`Installing tool: ${tool.name} (ID: ${tool.id})`)
+      console.log(`🚀 Calling API to ${enabled ? 'enable' : 'disable'} tool: ${tool.name} (ID: ${tool.id})`)
       
-      // Use the mutation hook which automatically invalidates queries
-      await updateToolMutation.mutateAsync({
-        id: tool.id,
-        data: { status: 'active' }
+      // Update local state immediately for better UX
+      setTools(prevTools => {
+        console.log('📝 Before update:', prevTools.find(t => t?.id === tool.id)?.isInstalled)
+        const updated = prevTools.map(t => 
+          t?.id === tool.id 
+            ? { ...t, isInstalled: enabled, isConfigured: enabled }
+            : t
+        )
+        console.log('📝 After update:', updated.find(t => t?.id === tool.id)?.isInstalled)
+        return updated
       })
       
-      console.log('Tool installed successfully')
+      // For now, just update the tool status in the database
+      // TODO: Later we should manage agent-tool assignments instead
+      await updateToolMutation.mutateAsync({
+        id: tool.id,
+        data: { 
+          status: enabled ? 'active' : 'inactive',
+          // Add metadata to track installation state
+          metadata: {
+            ...(tool.metadata || {}),
+            is_installed: enabled,
+            installed_at: enabled ? new Date().toISOString() : null
+          }
+        }
+      })
+      
+      console.log(`✅ Tool ${enabled ? 'enabled' : 'disabled'} successfully`)
       
     } catch (error) {
-      console.error('Failed to install tool:', error)
-      alert(`❌ Failed to install ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
+      // Revert local state on error
+      setTools(prevTools => 
+        prevTools.map(t => 
+          t?.id === tool.id 
+            ? { ...t, isInstalled: !enabled, isConfigured: !enabled }
+            : t
+        )
+      )
+      alert(`❌ Failed to ${enabled ? 'enable' : 'disable'} ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -486,10 +344,10 @@ export function ToolsDashboard() {
     setConfigModalOpen(true)
   }
 
-  const handleToolUninstall = async (tool: Tool) => {
+  const handleToolDelete = async (tool: Tool) => {
     setLoading(true)
     try {
-      console.log(`Uninstalling tool: ${tool.name} (ID: ${tool.id})`)
+      console.log(`Deleting tool: ${tool.name} (ID: ${tool.id})`)
       
       // Use the mutation hook which automatically invalidates queries
       await updateToolMutation.mutateAsync({
@@ -497,11 +355,11 @@ export function ToolsDashboard() {
         data: { status: 'inactive' }
       })
       
-      console.log('Tool uninstalled successfully')
+      console.log('Tool deleted successfully')
       
     } catch (error) {
-      console.error('Failed to uninstall tool:', error)
-      alert(`❌ Failed to uninstall ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error('Failed to delete tool:', error)
+      alert(`❌ Failed to delete ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -517,30 +375,36 @@ export function ToolsDashboard() {
       }
       return acc
     }, []).length,
-    installed: (mcpTools as any[]).filter((tool: any) => tool.status === 'active').length,
+    installed: tools.filter(tool => tool?.isInstalled)?.length || 0, // Use actual enabled tools count
     configured: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
     available: (mcpTools as any[]).filter((tool: any) => tool.status === 'available').length,
     total: (mcpTools as any[]).length
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="flex items-center justify-between"
+        transition={{ duration: 0.5 }}
+        className="flex justify-between items-start"
       >
         <div>
           <h1 className="text-3xl font-bold mb-2">
             Tools & <span className="gradient-text">Integrations</span>
           </h1>
-          <p className="text-muted-foreground text-lg">
+          <p className="text-muted-foreground mt-1">
             Discover, install, and manage tools to extend your AI agents' capabilities
           </p>
         </div>
-        <div className="flex items-center space-x-3">
+        
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+            {toolsLoading ? 'Loading...' : `${(mcpTools as any[])?.length || 0} Tools`}
+          </Badge>
+          
           <Button
             variant="outline"
             onClick={() => setAssignmentModalOpen(true)}
@@ -549,8 +413,9 @@ export function ToolsDashboard() {
             <Users className="w-4 h-4 mr-2" />
             Agent Assignment
           </Button>
+          
           <Button 
-            className="gradient-accent hover:opacity-90 transition-opacity"
+            className="bg-brand-primary hover:bg-brand-primary/90"
             onClick={() => setCreateToolModalOpen(true)}
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -561,150 +426,177 @@ export function ToolsDashboard() {
 
       {/* Statistics Cards */}
       <motion.div
-        className="grid grid-cols-1 md:grid-cols-4 gap-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, delay: 0.2 }}
+        transition={{ duration: 0.6, delay: 0.1 }}
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
       >
-          <motion.div
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.1 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <CheckCircle className="w-5 h-5 text-green-400" />
+        {[
+          {
+            label: 'Enabled Tools',
+            value: stats.installed.toString(),
+            change: `+${stats.installed} this week`,
+            icon: CheckCircle,
+            color: 'text-green-400'
+          },
+          {
+            label: 'Configured',
+            value: stats.configured.toString(),
+            change: `+${stats.configured} ready`,
+            icon: Settings,
+            color: 'text-blue-400'
+          },
+          {
+            label: 'Available',
+            value: stats.available.toString(),
+            change: 'Ready to install',
+            icon: Zap,
+            color: 'text-purple-400'
+          },
+          {
+            label: 'Total Tools',
+            value: stats.total.toString(),
+            change: 'In marketplace',
+            icon: TrendingUp,
+            color: 'text-orange-400'
+          }
+        ].map((stat, index) => (
+          <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                  <stat.icon className={`w-5 h-5 ${
+                    index === 0 ? 'text-green-400' :
+                    index === 1 ? 'text-blue-400' :
+                    index === 2 ? 'text-purple-400' :
+                    index === 3 ? 'text-orange-400' :
+                    'text-white'
+                  }`} />
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stats.installed}</h3>
-              <p className="text-muted-foreground text-sm">Installed</p>
-              <p className="text-xs text-green-400">+{stats.installed} this week</p>
-            </div>
-          </motion.div>
-          
-          <motion.div
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Settings className="w-5 h-5 text-blue-400" />
+              <div className="space-y-1">
+                <h3 className="text-2xl font-bold">
+                  {toolsLoading ? '...' : stat.value}
+                </h3>
+                <p className="text-muted-foreground text-sm">{stat.label}</p>
+                <p className={`text-xs ${stat.color}`}>
+                  {stat.change}
+                </p>
               </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stats.configured}</h3>
-              <p className="text-muted-foreground text-sm">Configured</p>
-              <p className="text-xs text-blue-400">+{stats.configured} ready</p>
-            </div>
-          </motion.div>
-          
-          <motion.div
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
+            </CardContent>
+          </Card>
+        ))}
+      </motion.div>
+
+      {/* Search and Filters */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.2 }}
+        className="flex flex-col sm:flex-row gap-4"
+      >
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+          <Input
+            placeholder="Search tools by name, provider, or tags..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
+          />
+        </div>
+        
+        <div className="flex gap-2">
+          <Button
+            variant={selectedCategory === 'all' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCategory('all')}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-purple-400" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stats.available}</h3>
-              <p className="text-muted-foreground text-sm">Available</p>
-              <p className="text-xs text-purple-400">Ready to install</p>
-            </div>
-          </motion.div>
-          
-          <motion.div
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
+            All
+          </Button>
+          <Button
+            variant={selectedCategory === 'developer' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCategory('developer')}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-orange-400" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stats.total}</h3>
-              <p className="text-muted-foreground text-sm">Total Tools</p>
-              <p className="text-xs text-orange-400">In marketplace</p>
-            </div>
-          </motion.div>
-        </motion.div>
+            Developer
+          </Button>
+          <Button
+            variant={selectedCategory === 'communication' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCategory('communication')}
+          >
+            Communication
+          </Button>
+          <Button
+            variant={selectedCategory === 'cloud' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setSelectedCategory('cloud')}
+          >
+            Cloud
+          </Button>
+        </div>
+      </motion.div>
 
       {/* Main Content */}
-      <Tabs defaultValue="marketplace" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3 bg-secondary/50">
-          <TabsTrigger value="marketplace" className="flex items-center space-x-2">
-            <Grid3X3 className="w-4 h-4" />
-            <span>Marketplace</span>
-          </TabsTrigger>
-          <TabsTrigger value="installed" className="flex items-center space-x-2">
-            <CheckCircle className="w-4 h-4" />
-            <span>Installed ({stats.installed})</span>
-          </TabsTrigger>
-          <TabsTrigger value="security" className="flex items-center space-x-2">
-            <Shield className="w-4 h-4" />
-            <span>Security</span>
-          </TabsTrigger>
-        </TabsList>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.3 }}
+      >
+        <Tabs defaultValue="marketplace" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid bg-secondary/50">
+            <TabsTrigger value="marketplace" className="flex items-center space-x-2">
+              <Grid3X3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Marketplace</span>
+            </TabsTrigger>
+            <TabsTrigger value="installed" className="flex items-center space-x-2">
+              <CheckCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">Enabled ({stats.installed})</span>
+            </TabsTrigger>
+            <TabsTrigger value="security" className="flex items-center space-x-2">
+              <Shield className="w-4 h-4" />
+              <span className="hidden sm:inline">Security</span>
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="marketplace" className="space-y-6">
-          {/* Filters and Search */}
-          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="flex flex-col md:flex-row gap-4 flex-1">
-              {/* Search */}
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search tools, providers, or tags..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
+          <TabsContent value="marketplace" className="space-y-6">
+            {/* Additional Filters and View Options */}
+            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+              <div className="flex flex-col md:flex-row gap-4 flex-1">
+                {/* Sort */}
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Sort by..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="rating">Rating</SelectItem>
+                    <SelectItem value="usage">Usage</SelectItem>
+                    <SelectItem value="updated">Last Updated</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              {/* Sort */}
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Sort by..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Name</SelectItem>
-                  <SelectItem value="rating">Rating</SelectItem>
-                  <SelectItem value="usage">Usage</SelectItem>
-                  <SelectItem value="updated">Last Updated</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* View Mode Toggle */}
+              <div className="flex items-center space-x-2 bg-secondary/30 rounded-lg p-1">
+                <Button
+                  variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('grid')}
+                  className="h-8 w-8 p-0"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('list')}
+                  className="h-8 w-8 p-0"
+                >
+                  <List className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center space-x-2 bg-secondary/30 rounded-lg p-1">
-              <Button
-                variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => setViewMode('grid')}
-                className="h-8 w-8 p-0"
-              >
-                <Grid3X3 className="w-4 h-4" />
-              </Button>
-              <Button
-                variant={viewMode === 'list' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => setViewMode('list')}
-                className="h-8 w-8 p-0"
-              >
-                <List className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
 
           {/* Categories */}
           <div className="flex flex-wrap gap-2">
@@ -719,11 +611,6 @@ export function ToolsDashboard() {
                     : 'hover:border-orange-500/50'
                 }`}
               >
-                {typeof category.icon === 'string' ? (
-                  <span className="text-sm">{category.icon}</span>
-                ) : (
-                  <category.icon className="w-4 h-4" />
-                )}
                 <span>{category.name}</span>
                 <Badge variant="outline" className="ml-1 text-xs">
                   {getCategoryCount(category.id)}
@@ -733,23 +620,118 @@ export function ToolsDashboard() {
           </div>
 
           {/* Tools Grid/List */}
-          <div className={`grid gap-4 ${
-            viewMode === 'grid' 
-              ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' 
-              : 'grid-cols-1'
-          }`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <AnimatePresence>
               {filteredTools.map((tool, index) => (
-                <ToolCard
+                <motion.div
                   key={tool?.id}
-                  tool={tool}
-                  viewMode={viewMode}
-                  index={index}
-                  onInstall={() => handleToolInstall(tool)}
-                  onConfigure={() => handleToolConfigure(tool)}
-                  onUninstall={() => handleToolUninstall(tool)}
-                  loading={loading}
-                />
+                  className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                >
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                        <span className="text-lg">{tool?.icon}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold truncate">{tool?.name}</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {tool?.provider} • {tool?.category}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Context Menu - Top Right */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleToolConfigure(tool)}>
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => handleToolDelete(tool)}
+                          className="text-red-400"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  {/* Status */}
+                  <div className="flex items-center justify-between mb-4">
+                    <Badge className={tool?.isInstalled 
+                      ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                      : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                    }>
+                      {tool?.isInstalled ? 'installed' : 'available'}
+                    </Badge>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                    {tool?.description}
+                  </p>
+
+                  {/* Tool Info */}
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <p className="text-sm font-medium">Version</p>
+                      <p className="text-xs text-muted-foreground">{tool?.version}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Rating</p>
+                      <p className="text-xs text-muted-foreground">
+                        <div className="flex items-center space-x-1">
+                          <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                          <span>{tool?.rating}</span>
+                        </div>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div className="flex flex-wrap gap-1 mb-4">
+                    {tool?.tags?.slice(0, 2)?.map((tag: string) => (
+                      <Badge key={tag} variant="secondary" className="text-xs">
+                        {tag}
+                      </Badge>
+                    )) || []}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center justify-between">
+                    {/* Custom Toggle Button */}
+                    <button
+                      onClick={() => {
+                        console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                        handleToolToggle(tool, !tool?.isInstalled)
+                      }}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
+                        tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
+                      }`}
+                    >
+                      <span className="sr-only">Toggle tool</span>
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <span className="text-sm text-muted-foreground">
+                      {tool?.isInstalled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                </motion.div>
               ))}
             </AnimatePresence>
           </div>
@@ -784,9 +766,9 @@ export function ToolsDashboard() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-                          <span className="text-lg">{tool?.icon}</span>
-                        </div>
+                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                  <span className="text-lg">{tool?.icon}</span>
+                </div>
                         <div>
                           <h4 className="font-semibold">{tool?.name}</h4>
                           <p className="text-sm text-muted-foreground">{tool?.provider}</p>
@@ -886,6 +868,7 @@ export function ToolsDashboard() {
           </div>
         </TabsContent>
       </Tabs>
+      </motion.div>
 
       {/* Modals */}
       <ToolConfigModal
@@ -944,7 +927,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4 flex-1">
-                <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+                <div className="w-12 h-12 rounded-lg bg-secondary/50 flex items-center justify-center">
                   <span className="text-lg">{tool?.icon}</span>
                 </div>
                 <div className="flex-1">
@@ -1017,7 +1000,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
                 <span className="text-lg">{tool?.icon}</span>
               </div>
               <div>

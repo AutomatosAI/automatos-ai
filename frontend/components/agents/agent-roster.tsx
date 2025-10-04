@@ -82,6 +82,7 @@ interface AgentRosterProps {
   onViewDetails: (agentId: string | null) => void
   selectedAgentId: string | null
   onRefresh: () => void
+  setSearchTerm?: (term: string) => void
 }
 
 export function AgentRoster({ 
@@ -92,7 +93,8 @@ export function AgentRoster({
   onAgentSelect, 
   onViewDetails,
   selectedAgentId, 
-  onRefresh 
+  onRefresh,
+  setSearchTerm
 }: AgentRosterProps) {
   // Modal states
   const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
@@ -168,7 +170,7 @@ export function AgentRoster({
           <Input
             placeholder="Search agents by name, type, or skills..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm?.(e.target.value)}
             className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
           />
         </div>
@@ -195,7 +197,7 @@ export function AgentRoster({
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-lg">
+                  <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center text-lg">
                     {agentIcon}
                   </div>
                   <div>

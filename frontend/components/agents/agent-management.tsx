@@ -32,6 +32,7 @@ import { AgentDetailsModal } from './agent-details-modal'
 
 // API hooks for real data
 import { useAgents, useAgentStats, useAgentTypes } from '@/hooks/use-agent-api'
+import { apiClient } from '@/lib/api-client'
 
 export function AgentManagement() {
   const [activeTab, setActiveTab] = useState('roster')
@@ -48,9 +49,9 @@ export function AgentManagement() {
   // Debug log active tab changes
   useEffect(() => {
     console.log('Active tab changed:', activeTab)
-    if (activeTab === 'configuration' && !selectedAgentId && agents?.length > 0) {
+    if (activeTab === 'configuration' && !selectedAgentId && (agents as any[])?.length > 0) {
       // Auto-select first agent when entering configuration tab with no agent selected
-      setSelectedAgentId(agents[0].id.toString())
+      setSelectedAgentId((agents as any[])[0].id.toString())
     }
   }, [activeTab, agents, selectedAgentId])
 
@@ -58,6 +59,8 @@ export function AgentManagement() {
     setMounted(true)
     // Make sure viewDetailsAgentId starts as null
     setViewDetailsAgentId(null)
+    // Set page context for API client to use real APIs
+    apiClient.setCurrentPage('agents')
   }, [])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -70,29 +73,29 @@ export function AgentManagement() {
   const stats = [
     {
       label: 'Total Agents',
-      value: agentStats?.total_agents || agents.length || '0',
-      change: agentStats?.total_agents ? `${agentStats.total_agents} agents` : '0 agents',
+      value: (agentStats as any)?.total_agents || (agents as any[])?.length || '0',
+      change: (agentStats as any)?.total_agents ? `${(agentStats as any).total_agents} agents` : '0 agents',
       icon: Bot,
       color: 'text-orange-400'
     },
     {
       label: 'Active Agents',
-      value: agentStats?.active_agents || agents.filter((a: any) => a.status === 'active').length || '0',
-      change: agentStats?.active_agents && agentStats?.total_agents ? `${Math.round((agentStats.active_agents / agentStats.total_agents) * 100)}% online` : '0% online',
+      value: (agentStats as any)?.active_agents || (agents as any[])?.filter((a: any) => a.status === 'active')?.length || '0',
+      change: (agentStats as any)?.active_agents && (agentStats as any)?.total_agents ? `${Math.round(((agentStats as any).active_agents / (agentStats as any).total_agents) * 100)}% online` : '0% online',
       icon: Zap,
       color: 'text-green-400'
     },
     {
       label: 'Agent Types',
-      value: agentStats?.agents_by_type ? Object.keys(agentStats.agents_by_type).length : agentTypes.length || '0',
-      change: agentStats?.agents_by_type ? `${Object.keys(agentStats.agents_by_type).length} types` : '0 types',
+      value: (agentStats as any)?.agents_by_type ? Object.keys((agentStats as any).agents_by_type).length : (agentTypes as any[])?.length || '0',
+      change: (agentStats as any)?.agents_by_type ? `${Object.keys((agentStats as any).agents_by_type).length} types` : '0 types',
       icon: Settings,
       color: 'text-blue-400'
     },
     {
       label: 'Avg Performance',
-      value: `${agentStats?.average_performance?.toFixed(1) || '0.0'}%`,
-      change: agentStats?.average_performance ? (agentStats.average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
+      value: `${(agentStats as any)?.average_performance?.toFixed(1) || '0.0'}%`,
+      change: (agentStats as any)?.average_performance ? ((agentStats as any).average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
       icon: BarChart,
       color: 'text-purple-400'
     }
@@ -101,6 +104,13 @@ export function AgentManagement() {
   // Handle refresh
   const handleRefresh = async () => {
     await refetchAgents()
+  }
+
+  // Handle view details
+  const handleViewDetails = (agentId: string | null) => {
+    if (agentId) {
+      setViewDetailsAgentId(agentId)
+    }
   }
 
   return (
@@ -113,7 +123,9 @@ export function AgentManagement() {
         className="flex justify-between items-start"
       >
         <div>
-          <h1 className="text-3xl font-bold gradient-text">Agent Management</h1>
+        <h1 className="text-3xl font-bold mb-2">
+            Agent <span className="gradient-text">Management</span>
+          </h1>
           <p className="text-muted-foreground mt-1">
             Manage your AI agents, skills, and coordination strategies
           </p>
@@ -122,7 +134,7 @@ export function AgentManagement() {
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
-            {agentsLoading ? 'Loading...' : `${agents.length} Agents`}
+            {agentsLoading ? 'Loading...' : `${(agents as any[])?.length || 0} Agents`}
           </Badge>
           
           <Button 
@@ -156,7 +168,7 @@ export function AgentManagement() {
           <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
+                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
                   <stat.icon className={`w-5 h-5 ${
                     index === 0 ? 'text-orange-400' :
                     index === 1 ? 'text-green-400' :
@@ -264,16 +276,17 @@ export function AgentManagement() {
               searchTerm={searchTerm}
               statusFilter={statusFilter}
               onAgentSelect={setSelectedAgentId}
-              onViewDetails={setViewDetailsAgentId}
+              onViewDetails={handleViewDetails}
               selectedAgentId={selectedAgentId}
-              onRefresh={handleRefresh}
+              onRefresh={() => refetchAgents()}
+              setSearchTerm={setSearchTerm}
             />
           </TabsContent>
 
           {/* Skills Tab */}
           <TabsContent value="skills" className="space-y-6">
             <AgentSkills
-              agents={agents}
+              agents={agents as any[]}
               selectedAgentId={selectedAgentId}
               onAgentSelect={setSelectedAgentId}
             />
@@ -282,7 +295,7 @@ export function AgentManagement() {
           {/* Configuration Tab */}
           <TabsContent value="configuration" className="space-y-6">
             <AgentConfiguration
-              agents={agents}
+              agents={agents as any[]}
               selectedAgentId={selectedAgentId}
               onAgentSelect={setSelectedAgentId}
             />
@@ -291,7 +304,7 @@ export function AgentManagement() {
           {/* Coordination Tab */}
           <TabsContent value="coordination" className="space-y-6">
             <AgentCoordination
-              agents={agents}
+              agents={agents as any[]}
               selectedAgentId={selectedAgentId}
             />
           </TabsContent>
@@ -299,7 +312,7 @@ export function AgentManagement() {
           {/* Performance Tab */}
           <TabsContent value="performance" className="space-y-6">
             <AgentPerformance
-              agents={agents}
+              agents={agents as any[]}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
             />
@@ -308,7 +321,7 @@ export function AgentManagement() {
           {/* Analytics Tab */}
           <TabsContent value="analytics" className="space-y-6">
             <AgentPerformance
-              agents={agents}
+              agents={agents as any[]}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
               showAnalytics={true}
