@@ -5,7 +5,7 @@ PRD-05: Memory & Knowledge Systems
 Hierarchical memory system with real Redis TTL, PostgreSQL storage,
 pgvector embeddings, and learning capabilities.
 
-NO MOCK DATA - All operations use real services and produce real results.
+NO MOCK DATA - All operations use real services and produce real results. Test
 """
 
 import json
@@ -49,7 +49,6 @@ class MemoryType(str, Enum):
     PATTERN = "pattern"
     FEEDBACK = "feedback"
 
-
 class MemoryItem(Base):
     """Enhanced memory items with vector embeddings"""
     __tablename__ = 'memory_items'
@@ -72,7 +71,6 @@ class MemoryItem(Base):
     success_rate = Column(Float, default=0.0)
     usage_in_solutions = Column(Integer, default=0)
     average_retrieval_time = Column(Float, default=0.0)
-
 
 class KnowledgeNode(Base):
     """Knowledge graph nodes"""
@@ -1343,3 +1341,4 @@ async def integrate_with_agent_factory(
     
     logger.info("Memory system integrated with AgentFactory and SharedContextManager")
     return True
+
