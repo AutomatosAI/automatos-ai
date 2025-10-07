@@ -206,9 +206,15 @@ class AgentResponse(BaseModel):
     status: str = Field(..., description="Current agent status")
     configuration: Dict[str, Any] = Field({}, description="Agent configuration")
     performance_metrics: Optional[Dict[str, Any]] = Field(None, description="Performance data")
+    priority_level: str = Field("medium", description="Priority level")
+    max_concurrent_tasks: int = Field(5, description="Maximum concurrent tasks")
+    auto_start: bool = Field(False, description="Auto-start on system boot")
     skills: List[Dict[str, Any]] = Field([], description="Associated skills")
+    tools: List[Dict[str, Any]] = Field([], description="MCP Tools assigned to agent")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
+    created_by: Optional[str] = Field(None, description="Creator")
+    agent_model_config: Optional[Dict[str, Any]] = Field(None, description="PRD-15: Model configuration")
     
     class Config:
         schema_extra = {

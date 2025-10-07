@@ -366,11 +366,15 @@ class AgentResponse(BaseModel):
     status: str
     configuration: Optional[Dict[str, Any]]
     performance_metrics: Optional[Dict[str, Any]] = None
+    priority_level: str
+    max_concurrent_tasks: int
+    auto_start: bool
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = None
     skills: List[Dict[str, Any]] = []
     tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools assigned to agent
+    agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
