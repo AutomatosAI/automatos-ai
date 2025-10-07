@@ -71,17 +71,22 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
       const skillData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
+        skill_type: formData.category, // Backend expects skill_type
         category: formData.category,
-        difficulty: formData.difficulty,
-        version: formData.version,
-        prerequisites: formData.prerequisites.trim() || null,
-        learning_objectives: formData.learning_objectives.trim() || null,
-        assessment_criteria: formData.assessment_criteria.trim() || null,
-        resources: formData.resources.trim() || null
+        implementation: formData.prerequisites || '',
+        parameters: {
+          difficulty: formData.difficulty,
+          version: formData.version,
+          learning_objectives: formData.learning_objectives || null,
+          assessment_criteria: formData.assessment_criteria || null,
+          resources: formData.resources || null
+        }
       }
 
       await createSkillMutation.mutateAsync(skillData as any)
+      toast.success('Skill created successfully!')
       onSuccess()
+      onClose()
       
       // Reset form
       setFormData({
@@ -95,8 +100,9 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
         assessment_criteria: '',
         resources: ''
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create skill:', error)
+      toast.error(error?.message || 'Failed to create skill')
     } finally {
       setIsSubmitting(false)
     }

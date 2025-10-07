@@ -271,47 +271,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           Create Skill
         </Button>
 
-        {/* Agent Selector */}
-        <div className="flex items-center gap-4">
-          <div className="min-w-[200px]">
-            <Select value={selectedAgentId || ''} onValueChange={(value) => onAgentSelect(value || null)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select an agent" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Agents</SelectItem>
-                {agents.map(agent => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
       </div>
-
-      {/* Selected Agent Info */}
-      {selectedAgent && (
-        <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xl">
-                🤖
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold">{selectedAgent.name}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {selectedAgent.agent_type?.replace('_', ' ')} • {Array.isArray(agentSkills) ? agentSkills.length : 0} skills assigned
-                </p>
-              </div>
-              <Badge variant="outline" className="capitalize">
-                {selectedAgent.status}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

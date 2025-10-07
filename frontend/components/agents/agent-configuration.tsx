@@ -42,6 +42,7 @@ import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useSkil
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
+import { apiClient } from '@/lib/api-client'
 
 interface AgentConfigurationProps {
   agents: any[]
@@ -152,45 +153,67 @@ export function AgentConfiguration({
     if (!selectedAgentId) return
 
     try {
-      // Sanitize the configuration data to handle null/undefined values
-      const sanitizedConfig = Object.entries(configData).reduce((acc: any, [key, value]) => {
-        // Skip undefined values
-        if (value === undefined) return acc;
-        
-        // For falsy values like 0, false, or empty string, preserve them
-        // But replace null with appropriate defaults
-        if (value === null) {
-          // Assign appropriate defaults for common fields
-          if (key === 'priority_level') acc[key] = 'medium';
-          else if (key === 'max_concurrent_tasks') acc[key] = 5;
-          else if (key === 'retry_attempts') acc[key] = 3;
-          // For other fields, skip null values
-        } else {
-          acc[key] = value;
-        }
-        
-        return acc;
-      }, {});
-
+      toast.loading('Saving configuration...')
+      
+      // 1. Update basic agent info (name, description)
       await updateConfigMutation.mutateAsync({
         agentId: selectedAgentId,
         config: {
-          ...sanitizedConfig,
-          skill_assignments: assignedSkills
+          name: configData.name || (agent as any)?.name,
+          description: configData.description || (agent as any)?.description,
         }
       })
       
-      // PRD-15: Save model configuration
-      if (modelConfigData && Object.keys(modelConfigData).length > 0) {
-        await updateModelConfigMutation.mutateAsync({
-          agentId: Number(selectedAgentId),
-          modelConfig: modelConfigData
-        })
+      // 2. Handle skill assignments separately
+      // Get current skills
+      const currentSkillIds = (agent as any)?.skills?.map((s: any) => s.id) || []
+      const newSkillIds = assignedSkills
+      
+      // Find skills to add and remove
+      const skillsToAdd = newSkillIds.filter((id: number) => !currentSkillIds.includes(id))
+      const skillsToRemove = currentSkillIds.filter((id: number) => !newSkillIds.includes(id))
+      
+      // Add new skills
+      for (const skillId of skillsToAdd) {
+        try {
+          await apiClient.addSkillToAgent(selectedAgentId, String(skillId))
+        } catch (error) {
+          console.error(`Failed to add skill ${skillId}:`, error)
+        }
       }
       
+      // Remove old skills
+      for (const skillId of skillsToRemove) {
+        try {
+          await apiClient.removeSkillFromAgent(selectedAgentId, String(skillId))
+        } catch (error) {
+          console.error(`Failed to remove skill ${skillId}:`, error)
+        }
+      }
+      
+      // 3. Save model configuration (PRD-15)
+      if (modelConfigData && Object.keys(modelConfigData).length > 0) {
+        try {
+          await updateModelConfigMutation.mutateAsync({
+            agentId: Number(selectedAgentId),
+            modelConfig: modelConfigData
+          })
+        } catch (error) {
+          console.error('Failed to save model config:', error)
+          toast.error('Some settings saved, but model configuration failed')
+        }
+      }
+      
+      toast.dismiss()
+      toast.success('Configuration saved successfully!')
       setHasUnsavedChanges(false)
-    } catch (error) {
-      // Error already handled by the hook
+      
+      // Refresh agent data
+      window.location.reload()
+    } catch (error: any) {
+      toast.dismiss()
+      toast.error(error?.message || 'Failed to save configuration')
+      console.error('Save configuration error:', error)
     }
   }
 

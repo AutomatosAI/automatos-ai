@@ -14,6 +14,7 @@ import {
   BarChart,
   Settings
 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -135,38 +136,48 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
   const handleCreate = async () => {
     if (!agentData.name || !agentData.type) {
-      return // Prevent submission with missing required fields
+      toast.error('Please provide agent name and type')
+      return
     }
 
     try {
-      // Prepare agent payload
+      // Prepare agent payload matching backend API expectations
       const agentPayload = {
         name: agentData.name,
         agent_type: agentData.type,
-        description: agentData.description || '', // Ensure empty string for null
-        skills: agentData.skills, // Skills IDs array - passed directly to API
+        description: agentData.description || '',
+        skill_ids: agentData.skills, // Backend expects skill_ids array
+        priority_level: agentData.priority || 'medium', // Backend expects priority_level
+        max_concurrent_tasks: agentData.maxConcurrentTasks || 3, // Backend expects snake_case
+        auto_start: agentData.autoStart !== undefined ? agentData.autoStart : true, // Backend expects snake_case
         configuration: {
-          specializations: agentData.specializations || [],
-          maxConcurrentTasks: agentData.maxConcurrentTasks || 3,
-          priority: agentData.priority || 'normal',
-          autoStart: agentData.autoStart !== undefined ? agentData.autoStart : true
+          specializations: agentData.specializations || []
         }
       }
+      
+      console.log('Creating agent with payload:', agentPayload)
       
       // Create the agent
       const newAgent: any = await (createAgentMutation as any).mutateAsync(agentPayload)
       
+      console.log('Agent created successfully:', newAgent)
+      
       // PRD-15: Update model configuration
       if (newAgent?.id) {
         try {
+          console.log('Setting model config for agent:', newAgent.id)
           await (updateModelConfigMutation as any).mutateAsync({
             agentId: newAgent.id,
             modelConfig
           })
+          console.log('Model config set successfully')
         } catch (error) {
           console.error('Failed to set model config:', error)
+          toast.error('Agent created but model configuration failed')
         }
       }
+      
+      toast.success(`Agent "${agentData.name}" created successfully!`)
       
       // Notify parent component and close modal
       onSuccess() 
@@ -194,8 +205,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         fallback_model_id: null
       })
       setStep(1)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create agent:', error)
+      toast.error(error?.message || 'Failed to create agent')
     }
   }
 
@@ -233,7 +245,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                 </Button>
               </CardHeader>
               
-              <CardContent className="overflow-y-auto">
+              <CardContent className="overflow-y-auto max-h-[70vh] pr-2">
                 <Tabs value={`step-${step}`} className="space-y-6">
                   <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
@@ -251,7 +263,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsList>
 
                   {/* Step 1: Agent Type Selection */}
-                  <TabsContent value="step-1" className="space-y-6">
+                  <TabsContent value="step-1" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Choose Agent Type</h3>
                       <p className="text-muted-foreground mb-6">
@@ -304,7 +316,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 2: Configuration */}
-                  <TabsContent value="step-2" className="space-y-6">
+                  <TabsContent value="step-2" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Agent Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -418,7 +430,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 3: Model Configuration (PRD-15) */}
-                  <TabsContent value="step-3" className="space-y-6">
+                  <TabsContent value="step-3" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -542,7 +554,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 4: Skills & Settings */}
-                  <TabsContent value="step-4" className="space-y-6">
+                  <TabsContent value="step-4" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
                       <p className="text-muted-foreground mb-6">

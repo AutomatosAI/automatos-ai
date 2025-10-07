@@ -62,11 +62,16 @@ export function AgentPerformance({
 }: AgentPerformanceProps) {
   const [timeRange, setTimeRange] = useState('24h')
   const [metricFilter, setMetricFilter] = useState('all')
+  const [internalSelectedAgent, setInternalSelectedAgent] = useState<string | null>(selectedAgentId)
+
+  // Use internal state if onAgentSelect is not provided
+  const effectiveAgentId = selectedAgentId || internalSelectedAgent
+  const effectiveSetAgent = onAgentSelect || setInternalSelectedAgent
 
   // Fetch performance data
-  const { data: selectedAgent } = useAgent(selectedAgentId)
-  const { data: agentPerformance, isLoading: performanceLoading } = useAgentPerformance(selectedAgentId)
-  const { data: agentLogs, isLoading: logsLoading } = useAgentLogs(selectedAgentId)
+  const { data: selectedAgent } = useAgent(effectiveAgentId)
+  const { data: agentPerformance, isLoading: performanceLoading } = useAgentPerformance(effectiveAgentId)
+  const { data: agentLogs, isLoading: logsLoading } = useAgentLogs(effectiveAgentId)
 
   // Calculate performance metrics
   const performanceMetrics = useMemo(() => {
@@ -231,7 +236,7 @@ export function AgentPerformance({
     )
   }
 
-  if (!selectedAgentId) {
+  if (!effectiveAgentId) {
     return (
       <Card className="glass-card">
         <CardHeader>
@@ -246,7 +251,7 @@ export function AgentPerformance({
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Select Agent</Label>
-            <Select onValueChange={(value) => onAgentSelect?.(value)}>
+            <Select onValueChange={(value) => effectiveSetAgent(value)}>
               <SelectTrigger>
                 <SelectValue placeholder="Choose an agent to view performance" />
               </SelectTrigger>
@@ -283,13 +288,34 @@ export function AgentPerformance({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header with Agent Selector */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Agent Performance</h2>
-          <p className="text-muted-foreground">
-            Detailed performance analytics for {selectedAgent?.name || 'selected agent'}
-          </p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-bold">Agent Performance</h2>
+            <p className="text-muted-foreground">
+              Detailed performance analytics
+            </p>
+          </div>
+          <div className="w-64">
+            <Select value={effectiveAgentId || ''} onValueChange={(value) => effectiveSetAgent(value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id.toString()}>
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 rounded-full ${
+                        agent.status === "active" ? "bg-green-400" : "bg-gray-400"
+                      }`} />
+                      <span>{agent.name}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         
         <div className="flex items-center gap-2">

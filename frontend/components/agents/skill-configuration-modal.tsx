@@ -88,20 +88,25 @@ export function SkillConfigurationModal({ open, onClose, onSuccess, skill }: Ski
       const skillData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
+        skill_type: formData.category,
         category: formData.category,
-        difficulty: formData.difficulty,
-        version: formData.version,
-        prerequisites: formData.prerequisites.trim() || null,
-        learning_objectives: formData.learning_objectives.trim() || null,
-        assessment_criteria: formData.assessment_criteria.trim() || null,
-        resources: formData.resources.trim() || null
+        implementation: formData.prerequisites || '',
+        parameters: {
+          difficulty: formData.difficulty,
+          version: formData.version,
+          learning_objectives: formData.learning_objectives || null,
+          assessment_criteria: formData.assessment_criteria || null,
+          resources: formData.resources || null
+        }
       }
 
       await updateSkillMutation.mutateAsync({ id: skill.id.toString(), data: skillData })
+      toast.success('Skill updated successfully!')
       onSuccess()
       onClose()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to update skill:', error)
+      toast.error(error?.message || 'Failed to update skill')
     } finally {
       setIsSubmitting(false)
     }
