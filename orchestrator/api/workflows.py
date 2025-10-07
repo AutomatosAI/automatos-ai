@@ -924,10 +924,13 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from core.learning_system_updater import LearningSystemUpdater
     from core.workflow_memory_integrator import WorkflowMemoryIntegrator
     from services.memory_knowledge_system import HierarchicalMemorySystem
+    from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
     import os
     
     try:
         with get_db_session() as db:
+            # PRD-15: Initialize model usage tracker
+            model_tracker = ModelUsageTracker(db)
             execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
             if not execution:
                 return
@@ -1208,6 +1211,29 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
                 # Store execution results
                 execution_summary = execution_manager.get_execution_summary(subtask_results)
+                
+                # PRD-15: Track model usage for each subtask
+                for subtask_id, result in subtask_results.items():
+                    if result.tokens_used > 0:
+                        # Get agent's model configuration
+                        agent = db.query(Agent).filter(Agent.id == result.agent_id).first()
+                        if agent and agent.model_config:
+                            model_id = agent.model_config.get("model_id", "gpt-4")
+                        else:
+                            model_id = "gpt-4"  # Default fallback
+                        
+                        # Estimate input/output split (70% input, 30% output is typical)
+                        input_tokens = int(result.tokens_used * 0.7)
+                        output_tokens = result.tokens_used - input_tokens
+                        
+                        model_tracker.record_usage(
+                            agent_id=result.agent_id,
+                            model_id=model_id,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            execution_time_ms=result.execution_time_ms
+                        )
+                
                 execution.input_data["agent_execution"] = {
                     "is_real": True,
                     "summary": execution_summary,
@@ -1442,6 +1468,15 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
+            
+            # PRD-15: Save model usage summary to execution
+            usage_summary = model_tracker.get_usage_summary()
+            execution.models_used = usage_summary.get("records", [])
+            
+            logger.info(
+                f"📊 Model Usage Summary: {usage_summary['total_requests']} requests | "
+                f"{usage_summary['total_tokens']} tokens | ${usage_summary['total_cost']:.6f} cost"
+            )
             
             # Complete execution with COMPLETE orchestration pipeline data
             execution.status = ExecutionStatus.COMPLETED.value

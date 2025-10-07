@@ -916,7 +916,10 @@
       }
   
       try {
-        const response = await fetch(url, config)
+        const response = await fetch(url, {
+          ...config,
+          redirect: 'follow' // Follow redirects automatically
+        })
         
         if (!response.ok) {
           console.error('❌ API Error:', response.status, response.statusText)

@@ -54,7 +54,15 @@ import {
 } from '@/hooks/use-agent-api'
 
 import { CreateSkillModal } from "./create-skill-modal"
-const skillCategories = {
+import { SkillConfigurationModal } from "./skill-configuration-modal"
+type SkillCategory = {
+  name: string
+  icon: any
+  color: string
+  bgColor: string
+}
+
+const skillCategories: Record<string, SkillCategory> = {
   development: {
     name: 'Development',
     icon: Code,
@@ -117,6 +125,8 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all-skills')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showConfigureModal, setShowConfigureModal] = useState(false)
+  const [selectedSkillForConfig, setSelectedSkillForConfig] = useState<any>(null)
 
   // Fetch skills data
   const { data: allSkills = [], isLoading: skillsLoading } = useSkills()
@@ -196,9 +206,8 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   
   // Handle skill configuration/editing
   const handleConfigureSkill = (skill: any) => {
-    // This would open a modal to edit the skill
-    // For now, just show a toast as a placeholder
-    toast.success(`Configuring skill: ${skill.name}`)
+    setSelectedSkillForConfig(skill)
+    setShowConfigureModal(true)
   }
   
   // Handle skill deletion
@@ -625,6 +634,23 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           // Skills will auto-refresh via React Query
         }}
       />
+
+      {/* Skill Configuration Modal */}
+      {selectedSkillForConfig && (
+        <SkillConfigurationModal
+          open={showConfigureModal}
+          onClose={() => {
+            setShowConfigureModal(false)
+            setSelectedSkillForConfig(null)
+          }}
+          skill={selectedSkillForConfig}
+          onSuccess={() => {
+            setShowConfigureModal(false)
+            setSelectedSkillForConfig(null)
+            // Skills will auto-refresh via React Query
+          }}
+        />
+      )}
     </div>
   )
 }

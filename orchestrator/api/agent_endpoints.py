@@ -534,3 +534,264 @@ async def agent_system_health():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+
+# ===================================================================
+# PRD-15: Model Configuration Endpoints
+# ===================================================================
+
+@router.get("/{agent_id}/model-config")
+async def get_agent_model_config(
+    agent_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get agent's current model configuration.
+    
+    Returns the model configuration including provider, model_id,
+    and all generation parameters.
+    """
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {agent_id} not found"
+            )
+        
+        return {
+            "agent_id": agent_id,
+            "agent_name": agent.name,
+            "model_config": agent.model_config or {},
+            "model_usage_stats": agent.model_usage_stats or {}
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get model config error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.put("/{agent_id}/model-config")
+async def update_agent_model_config(
+    agent_id: int,
+    model_config: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Update agent's model configuration.
+    
+    Request body:
+    {
+        "provider": "openai",
+        "model_id": "gpt-4",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "top_p": 1.0,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0,
+        "fallback_model_id": "gpt-3.5-turbo"
+    }
+    
+    Note: Agent must be recreated for changes to take effect in runtime.
+    """
+    try:
+        from services.model_registry import ModelRegistry
+        from sqlalchemy import update
+        
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {agent_id} not found"
+            )
+        
+        # Validate model exists
+        model_id = model_config.get("model_id")
+        if model_id:
+            registry = ModelRegistry(db)
+            model = registry.get_model(model_id)
+            if not model:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid model_id: {model_id}"
+                )
+        
+        # Update model config
+        agent.model_config = model_config
+        
+        # Mark for modification tracking
+        from sqlalchemy.orm import attributes
+        attributes.flag_modified(agent, "model_config")
+        
+        db.commit()
+        
+        logger.info(f"Updated model config for agent {agent_id}: {model_id}")
+        
+        return {
+            "status": "success",
+            "message": "Model configuration updated",
+            "agent_id": agent_id,
+            "model_config": agent.model_config,
+            "note": "Agent must be restarted for changes to take effect"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update model config error: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/{agent_id}/model-usage")
+async def get_agent_model_usage(
+    agent_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get agent's model usage statistics.
+    
+    Returns token usage, costs, and request counts.
+    """
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {agent_id} not found"
+            )
+        
+        usage_stats = agent.model_usage_stats or {
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "total_requests": 0,
+            "avg_tokens_per_request": 0,
+            "last_used_at": None
+        }
+        
+        model_config = agent.model_config or {}
+        
+        return {
+            "agent_id": agent_id,
+            "agent_name": agent.name,
+            "current_model": {
+                "provider": model_config.get("provider"),
+                "model_id": model_config.get("model_id"),
+                "temperature": model_config.get("temperature")
+            },
+            "usage_stats": usage_stats,
+            "created_at": agent.created_at.isoformat() if agent.created_at else None,
+            "updated_at": agent.updated_at.isoformat() if agent.updated_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get model usage error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/{agent_id}/switch-model")
+async def switch_agent_model(
+    agent_id: int,
+    request: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """
+    Switch agent to a different model.
+    
+    Request body:
+    {
+        "model_id": "claude-3-sonnet-20240229",
+        "temperature": 0.7,  // Optional
+        "max_tokens": 2000   // Optional
+    }
+    
+    This is a convenience endpoint that:
+    1. Validates the new model
+    2. Updates model configuration
+    3. Provides recommended settings
+    """
+    try:
+        from services.model_registry import ModelRegistry
+        from sqlalchemy.orm import attributes
+        
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Agent {agent_id} not found"
+            )
+        
+        # Validate new model
+        new_model_id = request.get("model_id")
+        if not new_model_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="model_id is required"
+            )
+        
+        registry = ModelRegistry(db)
+        new_model = registry.get_model(new_model_id)
+        if not new_model:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid model_id: {new_model_id}"
+            )
+        
+        # Get current config or create new one
+        current_config = agent.model_config or {}
+        
+        # Update with new model
+        new_config = {
+            "provider": new_model.provider,
+            "model_id": new_model_id,
+            "temperature": request.get("temperature", new_model.default_temperature),
+            "max_tokens": request.get("max_tokens", min(2000, new_model.max_output_tokens)),
+            "top_p": current_config.get("top_p", 1.0),
+            "frequency_penalty": current_config.get("frequency_penalty", 0.0),
+            "presence_penalty": current_config.get("presence_penalty", 0.0),
+            "fallback_model_id": current_config.get("fallback_model_id")
+        }
+        
+        # Store old config for reference
+        old_model_id = current_config.get("model_id", "unknown")
+        
+        # Update agent
+        agent.model_config = new_config
+        attributes.flag_modified(agent, "model_config")
+        db.commit()
+        
+        logger.info(f"Switched agent {agent_id} from {old_model_id} to {new_model_id}")
+        
+        return {
+            "status": "success",
+            "message": f"Model switched from {old_model_id} to {new_model_id}",
+            "agent_id": agent_id,
+            "old_model": old_model_id,
+            "new_model": new_model_id,
+            "model_config": new_config,
+            "model_details": new_model.to_dict(),
+            "note": "Agent must be restarted for changes to take effect"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Switch model error: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

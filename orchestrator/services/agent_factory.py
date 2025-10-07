@@ -50,43 +50,134 @@ DEFAULT_LLM_CONFIG = {
     "context_window": 8192
 }
 
+# PRD-15: Multi-Model Configuration
+@dataclass
+class ModelConfiguration:
+    """
+    Complete model configuration for an agent (PRD-15).
+    
+    This dataclass encapsulates all model-specific settings including
+    provider, model ID, and generation parameters.
+    """
+    provider: str  # 'openai', 'anthropic', 'huggingface'
+    model_id: str  # 'gpt-4', 'claude-3-sonnet-20240229', etc.
+    temperature: float = 0.7
+    max_tokens: int = 2000
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    fallback_model_id: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for storage"""
+        return {
+            "provider": self.provider,
+            "model_id": self.model_id,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "fallback_model_id": self.fallback_model_id
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'ModelConfiguration':
+        """Create from dictionary"""
+        return ModelConfiguration(
+            provider=data.get("provider", "openai"),
+            model_id=data.get("model_id", "gpt-4"),
+            temperature=data.get("temperature", 0.7),
+            max_tokens=data.get("max_tokens", 2000),
+            top_p=data.get("top_p", 1.0),
+            frequency_penalty=data.get("frequency_penalty", 0.0),
+            presence_penalty=data.get("presence_penalty", 0.0),
+            fallback_model_id=data.get("fallback_model_id")
+        )
+    
+    @staticmethod
+    def get_default() -> 'ModelConfiguration':
+        """Get default configuration"""
+        return ModelConfiguration(
+            provider="openai",
+            model_id="gpt-4",
+            temperature=0.7,
+            max_tokens=2000
+        )
+
 @dataclass
 class AgentMetadata:
-    """User-defined agent metadata - completely flexible"""
+    """
+    User-defined agent metadata - completely flexible.
+    
+    Enhanced in PRD-15 to support full model configuration.
+    Maintains backward compatibility with deprecated fields.
+    """
     name: str
     agent_type: str  # User-defined type (e.g., "financial_analyst", "code_reviewer")
     description: Optional[str] = None
     skills: List[str] = field(default_factory=list)  # Semantic tags for matching
+    
+    # PRD-15: New model configuration
+    model_config: Optional[ModelConfiguration] = None
+    
+    # Deprecated: Keep for backward compatibility
     preferred_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None
+    
     custom_metadata: Dict[str, Any] = field(default_factory=dict)  # Any user data
     
-    def get_llm_config(self) -> Dict[str, Any]:
-        """Get LLM configuration with user overrides"""
-        config = DEFAULT_LLM_CONFIG.copy()
+    def get_model_config(self) -> ModelConfiguration:
+        """
+        Get model configuration with fallbacks.
         
+        Priority:
+        1. model_config (new)
+        2. deprecated fields (backward compatibility)
+        3. default configuration
+        
+        Returns:
+            ModelConfiguration object
+        """
+        # Use new model_config if available
+        if self.model_config:
+            return self.model_config
+        
+        # Fall back to deprecated fields for backward compatibility
         if self.preferred_model:
-            # Determine provider from model name
-            if "gpt" in self.preferred_model.lower():
-                config["provider"] = "openai"
-                config["model"] = self.preferred_model
-            elif "claude" in self.preferred_model.lower():
-                config["provider"] = "anthropic"
-                config["model"] = self.preferred_model
-            else:
-                # Future: HuggingFace or custom models
-                config["model"] = self.preferred_model
-        
-        if self.temperature is not None:
-            config["temperature"] = self.temperature
-        if self.max_tokens is not None:
-            config["max_tokens"] = self.max_tokens
-        if self.context_window is not None:
-            config["context_window"] = self.context_window
+            provider = "openai"
+            if "claude" in self.preferred_model.lower():
+                provider = "anthropic"
+            elif "llama" in self.preferred_model.lower() or "mistral" in self.preferred_model.lower():
+                provider = "huggingface"
             
-        return config
+            return ModelConfiguration(
+                provider=provider,
+                model_id=self.preferred_model,
+                temperature=self.temperature or 0.7,
+                max_tokens=self.max_tokens or 2000
+            )
+        
+        # Use default
+        return ModelConfiguration.get_default()
+    
+    def get_llm_config(self) -> Dict[str, Any]:
+        """
+        Get LLM configuration dict (backward compatible).
+        
+        Deprecated: Use get_model_config() instead.
+        Maintained for backward compatibility.
+        """
+        model_config = self.get_model_config()
+        return {
+            "provider": model_config.provider,
+            "model": model_config.model_id,
+            "temperature": model_config.temperature,
+            "max_tokens": model_config.max_tokens,
+            "context_window": self.context_window or 8192
+        }
 
 @dataclass
 class AgentRuntime:
@@ -166,17 +257,27 @@ class AgentFactory:
         
         # Convert dict to AgentMetadata if needed
         if isinstance(metadata, dict):
+            # PRD-15: Handle model_config from dict
+            model_config = None
+            if "model_config" in metadata:
+                model_config = ModelConfiguration.from_dict(metadata["model_config"])
+            
             metadata = AgentMetadata(
                 name=metadata.get("name", "Unnamed Agent"),
                 agent_type=metadata.get("type", "generic"),
                 description=metadata.get("description"),
                 skills=metadata.get("skills", []),
+                model_config=model_config,
+                # Deprecated fields for backward compatibility
                 preferred_model=metadata.get("preferred_model"),
                 temperature=metadata.get("temperature"),
                 max_tokens=metadata.get("max_tokens"),
                 context_window=metadata.get("context_window"),
                 custom_metadata=metadata.get("metadata", {})
             )
+        
+        # PRD-15: Get model configuration
+        model_config = metadata.get_model_config()
         
         # Create database record
         db_agent = Agent(
@@ -186,9 +287,10 @@ class AgentFactory:
             status=AgentLifecycle.INITIALIZING.value,
             configuration={
                 "skills": metadata.skills,
-                "llm_config": metadata.get_llm_config(),
+                "llm_config": metadata.get_llm_config(),  # Backward compatibility
                 "custom_metadata": metadata.custom_metadata
             },
+            model_config=model_config.to_dict(),  # PRD-15: Store model config
             priority_level=PriorityLevel.MEDIUM.value,
             max_concurrent_tasks=5,
             auto_start=False,
@@ -198,34 +300,44 @@ class AgentFactory:
         self.db_session.add(db_agent)
         self.db_session.commit()
         
-        # Initialize LLM connection
+        # PRD-15: Initialize LLM connection with model configuration
         try:
-            llm_config_dict = metadata.get_llm_config()
-            
-            # Determine provider
-            provider = LLMProvider(llm_config_dict["provider"])
-            
-            llm_config = LLMConfig(
-                provider=provider,
-                model=llm_config_dict["model"],
-                temperature=llm_config_dict["temperature"],
-                max_tokens=llm_config_dict["max_tokens"],
-                # api_key will be loaded from environment
-            )
-            
-            llm_manager = LLMManager(llm_config)
+            llm_manager = await self._create_llm_manager(model_config, db_agent.name)
             
             # Verify connection if requested
             if auto_verify:
                 verification_result = await self._verify_llm_connection(llm_manager)
                 if not verification_result["success"]:
-                    self.db_session.delete(db_agent)
-                    self.db_session.commit()
-                    raise Exception(f"LLM verification failed: {verification_result['error']}")
+                    # PRD-15: Try fallback model if configured
+                    if model_config.fallback_model_id:
+                        self.logger.warning(
+                            f"Primary model '{model_config.model_id}' failed, "
+                            f"trying fallback '{model_config.fallback_model_id}'"
+                        )
+                        fallback_config = ModelConfiguration(
+                            provider=model_config.provider,
+                            model_id=model_config.fallback_model_id,
+                            temperature=model_config.temperature,
+                            max_tokens=model_config.max_tokens
+                        )
+                        llm_manager = await self._create_llm_manager(fallback_config, db_agent.name)
+                        verification_result = await self._verify_llm_connection(llm_manager)
+                        
+                        if verification_result["success"]:
+                            # Update db_agent with fallback model
+                            db_agent.model_config = fallback_config.to_dict()
+                            self.db_session.commit()
+                            self.logger.info(f"Fallback model '{model_config.fallback_model_id}' succeeded")
+                    
+                    if not verification_result["success"]:
+                        self.db_session.delete(db_agent)
+                        self.db_session.commit()
+                        raise Exception(f"LLM verification failed: {verification_result['error']}")
                 
                 self.logger.info(
-                    f"Agent '{metadata.name}' LLM verified. "
-                    f"Response time: {verification_result['response_time']:.2f}s"
+                    f"✓ Agent '{metadata.name}' LLM verified: "
+                    f"model={model_config.model_id}, provider={model_config.provider}, "
+                    f"response_time={verification_result['response_time']:.2f}s"
                 )
             
             # Phase 3: Load agent's tools from database
@@ -261,6 +373,59 @@ class AgentFactory:
                 self.db_session.delete(db_agent)
                 self.db_session.commit()
             raise
+    
+    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "") -> LLMManager:
+        """
+        Create LLM manager from model configuration (PRD-15).
+        
+        Args:
+            model_config: ModelConfiguration with provider and model settings
+            agent_name: Agent name for logging
+            
+        Returns:
+            Initialized LLMManager
+            
+        Raises:
+            ValueError: If provider is unsupported
+        """
+        from services.llm_provider import LLMConfig, LLMProvider as LLMProviderEnum
+        
+        # Map provider string to enum
+        provider_map = {
+            "openai": LLMProviderEnum.OPENAI,
+            "anthropic": LLMProviderEnum.ANTHROPIC
+        }
+        
+        if model_config.provider not in provider_map:
+            raise ValueError(f"Unsupported provider: {model_config.provider}")
+        
+        provider = provider_map[model_config.provider]
+        
+        # Get API key from environment
+        api_key = None
+        if provider == LLMProviderEnum.OPENAI:
+            api_key = os.getenv("OPENAI_API_KEY")
+        elif provider == LLMProviderEnum.ANTHROPIC:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        if not api_key:
+            raise ValueError(f"API key not found for provider: {model_config.provider}")
+        
+        # Create LLM config
+        llm_config = LLMConfig(
+            provider=provider,
+            model=model_config.model_id,
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+            api_key=api_key
+        )
+        
+        self.logger.info(
+            f"Creating LLM manager for {agent_name or 'agent'}: "
+            f"provider={model_config.provider}, model={model_config.model_id}"
+        )
+        
+        return LLMManager(config=llm_config)
     
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
         """Verify LLM connection with minimal test"""

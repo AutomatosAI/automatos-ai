@@ -36,7 +36,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills } from '@/hooks/use-agent-api'
+import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useSkills } from '@/hooks/use-agent-api'
+import { ModelSelector } from './model-selector'
+import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -114,39 +116,70 @@ export function AgentConfigurationModal({
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
-  const { data: availableSkills } = useAgentSkills()
+  const { data: availableSkills } = useSkills() // Get ALL available skills
+  const { data: agentSkills } = useAgentSkills(agentId?.toString() || '') // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
+  
+  // PRD-15: Model configuration hooks
+  const { data: agentModelConfig } = useAgentModelConfig(agentId)
+  const updateModelConfigMutation = useUpdateAgentModelConfig()
 
-  const saving = updateConfigMutation.isPending
-  const error = agentError?.message || null
+  const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
+  const error = (agentError as any)?.message || null
 
   useEffect(() => {
-    if (agentConfig && agent) {
+    if (agentConfig && agent && typeof agent === 'object') {
+      // PRD-15: Get model config from agentModelConfig or use defaults
+      const modelConfig = (agentModelConfig as any)?.model_config || {
+        provider: 'openai',
+        model_id: 'gpt-4',
+        temperature: 0.7,
+        max_tokens: 2000,
+        top_p: 1.0,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        fallback_model_id: null
+      }
+      
       // Initialize form data with real agent data
       setFormData({
-        name: agent.name || '',
-        description: agent.description || '',
-        agent_type: agent.agent_type || 'custom',
-        priority_level: agentConfig.priority_level || 'medium',
-        max_concurrent_tasks: agentConfig.max_concurrent_tasks || 5,
-        auto_start: agentConfig.auto_start || false,
-        retry_attempts: agentConfig.retry_attempts || 3,
-        timeout_seconds: agentConfig.timeout_seconds || 300,
-        memory_mb: agentConfig.resource_limits?.memory_mb || 1024,
-        cpu_percent: agentConfig.resource_limits?.cpu_percent || 50,
-        network_bandwidth: agentConfig.resource_limits?.network_bandwidth || 100,
-        environment: agentConfig.environment || 'development',
-        logging_level: agentConfig.logging_level || 'info',
-        performance_monitoring: agentConfig.performance_monitoring || true,
-        assigned_skills: agent.skills?.map(skill => skill.id) || []
+        name: (agent as any).name || '',
+        description: (agent as any).description || '',
+        agent_type: (agent as any).agent_type || 'custom',
+        priority_level: (agentConfig as any).priority_level || 'medium',
+        max_concurrent_tasks: (agentConfig as any).max_concurrent_tasks || 5,
+        auto_start: (agentConfig as any).auto_start || false,
+        retry_attempts: (agentConfig as any).retry_attempts || 3,
+        timeout_seconds: (agentConfig as any).timeout_seconds || 300,
+        memory_mb: (agentConfig as any).resource_limits?.memory_mb || 1024,
+        cpu_percent: (agentConfig as any).resource_limits?.cpu_percent || 50,
+        network_bandwidth: (agentConfig as any).resource_limits?.network_bandwidth || 100,
+        environment: (agentConfig as any).environment || 'development',
+        logging_level: (agentConfig as any).logging_level || 'info',
+        performance_monitoring: (agentConfig as any).performance_monitoring || true,
+        assigned_skills: (agent as any).skills?.map((skill: any) => skill.id) || [],
+        // PRD-15: Model configuration
+        model_config: modelConfig
       })
       setHasChanges(false)
     }
-  }, [agentConfig, agent])
+  }, [agentConfig, agent, agentModelConfig])
 
 
   const updateFormData = (key: string, value: any) => {
     setFormData((prev: any) => ({ ...prev, [key]: value }))
+    setHasChanges(true)
+  }
+  
+  // PRD-15: Helper to update model config
+  const updateModelConfig = (key: string, value: any) => {
+    setFormData((prev: any) => ({
+      ...prev,
+      model_config: {
+        ...prev.model_config,
+        [key]: value
+      }
+    }))
     setHasChanges(true)
   }
 
@@ -160,7 +193,16 @@ export function AgentConfigurationModal({
   }
 
   const handleSave = async () => {
-    if (!agentId) return
+    if (!agentId) {
+      console.error('No agent ID provided')
+      return
+    }
+    
+    console.log('💾 Saving agent configuration...', {
+      agentId,
+      hasChanges,
+      formData: formData
+    })
     
     try {
       const updatePayload = {
@@ -185,20 +227,36 @@ export function AgentConfigurationModal({
         skill_assignments: formData.assigned_skills
       }
       
+      console.log('📝 Saving basic configuration...')
+      // Save agent configuration
       await updateConfigMutation.mutateAsync({
         agentId: agentId.toString(),
         config: updatePayload
       })
+      console.log('✅ Basic configuration saved')
+      
+      // PRD-15: Save model configuration
+      if (formData.model_config) {
+        console.log('🤖 Saving model configuration...', formData.model_config)
+        await updateModelConfigMutation.mutateAsync({
+          agentId: agentId,
+          modelConfig: formData.model_config
+        })
+        console.log('✅ Model configuration saved')
+      }
       
       if (onSave) {
         onSave(agentId, updatePayload)
       }
       
       setHasChanges(false)
+      console.log('🎉 All changes saved successfully!')
       onClose()
       
     } catch (err) {
-      console.error('Error saving agent configuration:', err)
+      console.error('❌ Error saving agent configuration:', err)
+      // Show the full error to help debug
+      alert(`Error saving configuration: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -226,7 +284,7 @@ export function AgentConfigurationModal({
               <div>
                 <span className="text-xl">Agent Configuration</span>
                 <p className="text-sm text-muted-foreground font-normal">
-                  {agent?.name || 'Loading...'}
+                  {(agent as any)?.name || 'Loading...'}
                 </p>
               </div>
             </CardTitle>
@@ -285,7 +343,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -302,9 +360,13 @@ export function AgentConfigurationModal({
                     <Brain className="w-4 h-4" />
                     <span>Skills</span>
                   </TabsTrigger>
+                  <TabsTrigger value="model" className="flex items-center space-x-2">
+                    <Bot className="w-4 h-4" />
+                    <span>Model</span>
+                  </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="general" className="space-y-6 mt-6">
+                <TabsContent value="general" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Basic Information</CardTitle>
@@ -394,7 +456,7 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="performance" className="space-y-6 mt-6">
+                <TabsContent value="performance" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Performance Settings</CardTitle>
@@ -490,7 +552,7 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="resources" className="space-y-6 mt-6">
+                <TabsContent value="resources" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Resource Limits</CardTitle>
@@ -586,7 +648,7 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="skills" className="space-y-6 mt-6">
+                <TabsContent value="skills" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base">Skills Assignment</CardTitle>
@@ -638,6 +700,158 @@ export function AgentConfigurationModal({
                           </p>
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* PRD-15: Model Configuration Tab */}
+                <TabsContent value="model" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Bot className="h-5 w-5 text-purple-400" />
+                        Model Configuration
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Select and configure the LLM model for this agent
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Model Selection */}
+                      <ModelSelector
+                        value={formData.model_config?.model_id || 'gpt-4'}
+                        onChange={(modelId) => updateModelConfig('model_id', modelId)}
+                        agentType={formData.agent_type}
+                      />
+
+                      <Separator />
+
+                      {/* Temperature */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="temperature">Temperature</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {formData.model_config?.temperature?.toFixed(2) || '0.70'}
+                          </span>
+                        </div>
+                        <Slider
+                          id="temperature"
+                          value={[formData.model_config?.temperature || 0.7]}
+                          onValueChange={([value]) => updateModelConfig('temperature', value)}
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Controls randomness. Lower = more focused, Higher = more creative
+                        </p>
+                      </div>
+
+                      {/* Max Tokens */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="max-tokens">Max Output Tokens</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {formData.model_config?.max_tokens || 2000}
+                          </span>
+                        </div>
+                        <Slider
+                          id="max-tokens"
+                          value={[formData.model_config?.max_tokens || 2000]}
+                          onValueChange={([value]) => updateModelConfig('max_tokens', value)}
+                          min={100}
+                          max={4000}
+                          step={100}
+                          className="w-full"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Maximum tokens in the model's response
+                        </p>
+                      </div>
+
+                      {/* Advanced Settings */}
+                      <div className="space-y-4 pt-4 border-t border-border/50">
+                        <h4 className="text-sm font-medium text-foreground">Advanced Settings</h4>
+                        
+                        {/* Top P */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="top-p" className="text-xs">Top P (Nucleus Sampling)</Label>
+                            <span className="text-xs text-muted-foreground">
+                              {formData.model_config?.top_p?.toFixed(2) || '1.00'}
+                            </span>
+                          </div>
+                          <Slider
+                            id="top-p"
+                            value={[formData.model_config?.top_p || 1.0]}
+                            onValueChange={([value]) => updateModelConfig('top_p', value)}
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            className="w-full"
+                          />
+                        </div>
+
+                        {/* Frequency Penalty */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="frequency-penalty" className="text-xs">Frequency Penalty</Label>
+                            <span className="text-xs text-muted-foreground">
+                              {formData.model_config?.frequency_penalty?.toFixed(2) || '0.00'}
+                            </span>
+                          </div>
+                          <Slider
+                            id="frequency-penalty"
+                            value={[formData.model_config?.frequency_penalty || 0.0]}
+                            onValueChange={([value]) => updateModelConfig('frequency_penalty', value)}
+                            min={0}
+                            max={2}
+                            step={0.1}
+                            className="w-full"
+                          />
+                        </div>
+
+                        {/* Presence Penalty */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="presence-penalty" className="text-xs">Presence Penalty</Label>
+                            <span className="text-xs text-muted-foreground">
+                              {formData.model_config?.presence_penalty?.toFixed(2) || '0.00'}
+                            </span>
+                          </div>
+                          <Slider
+                            id="presence-penalty"
+                            value={[formData.model_config?.presence_penalty || 0.0]}
+                            onValueChange={([value]) => updateModelConfig('presence_penalty', value)}
+                            min={0}
+                            max={2}
+                            step={0.1}
+                            className="w-full"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Fallback Model */}
+                      <div className="space-y-2">
+                        <Label htmlFor="fallback-model">Fallback Model (Optional)</Label>
+                        <Select 
+                          value={formData.model_config?.fallback_model_id || 'none'}
+                          onValueChange={(value) => updateModelConfig('fallback_model_id', value === 'none' ? null : value)}
+                        >
+                          <SelectTrigger id="fallback-model" className="bg-background/50 border-border">
+                            <SelectValue placeholder="Select fallback model..." />
+                          </SelectTrigger>
+                          <SelectContent className="bg-gray-900 border-gray-800">
+                            <SelectItem value="none">No fallback</SelectItem>
+                            <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                            <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Model to use if primary model fails or is unavailable
+                        </p>
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>

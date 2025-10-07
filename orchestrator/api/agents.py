@@ -24,6 +24,10 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 def _build_agent_response(agent: Agent) -> AgentResponse:
     """Build agent response with skills and tools"""
+    # PRD-15: Debug logging for model_config
+    model_cfg = getattr(agent, 'model_config', None)
+    logger.info(f"Agent {agent.id} model_config: {model_cfg}")
+    
     # Build tools list from tool_assignments relationship
     tools = []
     if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
@@ -66,6 +70,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
         updated_at=agent.updated_at or agent.created_at,
         performance_metrics=agent.performance_metrics or {},
         created_by=agent.created_by,
+        agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})

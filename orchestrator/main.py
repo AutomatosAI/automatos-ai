@@ -73,6 +73,7 @@ from api.chatbot_suggestions import router as chatbot_suggestions_router
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
+from api.models_endpoints import router as models_router  # PRD-15: Model management
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -360,6 +361,7 @@ def require_api_key(x_api_key: str = Header(None)):
 
 # Include API routers
 app.include_router(agents_router)
+app.include_router(models_router)  # PRD-15: Model management
 app.include_router(workflows_router)
 app.include_router(workflow_templates_router)
 app.include_router(documents_router)

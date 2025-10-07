@@ -23,9 +23,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Slider } from '@/components/ui/slider'
 
 // API hooks
 import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
+import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { ModelSelector } from './model-selector'
 
 interface CreateAgentModalProps {
   open: boolean
@@ -99,9 +102,23 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     autoStart: true
   })
 
+  // PRD-15: Model configuration state
+  const [modelConfig, setModelConfig] = useState({
+    provider: 'openai',
+    model_id: 'gpt-4',
+    temperature: 0.7,
+    max_tokens: 2000,
+    top_p: 1.0,
+    frequency_penalty: 0.0,
+    presence_penalty: 0.0,
+    fallback_model_id: null as string | null
+  })
+
   // API hooks
   const createAgentMutation = useCreateAgent()
   const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
+  const { data: models = [], isLoading: modelsLoading } = useModels()
+  const updateModelConfigMutation = useUpdateAgentModelConfig()
 
   const handleSkillToggle = (skill: string) => {
     setAgentData(prev => ({
@@ -110,6 +127,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         ? prev.skills.filter(s => s !== skill)
         : [...prev.skills, skill]
     }))
+  }
+
+  const handleModelConfigChange = (key: string, value: any) => {
+    setModelConfig(prev => ({ ...prev, [key]: value }))
   }
 
   const handleCreate = async () => {
@@ -133,7 +154,19 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       }
       
       // Create the agent
-      const newAgent = await createAgentMutation.mutateAsync(agentPayload)
+      const newAgent: any = await (createAgentMutation as any).mutateAsync(agentPayload)
+      
+      // PRD-15: Update model configuration
+      if (newAgent?.id) {
+        try {
+          await (updateModelConfigMutation as any).mutateAsync({
+            agentId: newAgent.id,
+            modelConfig
+          })
+        } catch (error) {
+          console.error('Failed to set model config:', error)
+        }
+      }
       
       // Notify parent component and close modal
       onSuccess() 
@@ -149,6 +182,16 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         maxConcurrentTasks: 3,
         priority: 'normal',
         autoStart: true
+      })
+      setModelConfig({
+        provider: 'openai',
+        model_id: 'gpt-4',
+        temperature: 0.7,
+        max_tokens: 2000,
+        top_p: 1.0,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        fallback_model_id: null
       })
       setStep(1)
     } catch (error) {
@@ -192,7 +235,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
               
               <CardContent className="overflow-y-auto">
                 <Tabs value={`step-${step}`} className="space-y-6">
-                  <TabsList className="grid w-full grid-cols-3 bg-secondary/50">
+                  <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
                       1. Agent Type
                     </TabsTrigger>
@@ -200,7 +243,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       2. Configuration
                     </TabsTrigger>
                     <TabsTrigger value="step-3" disabled={step < 3}>
-                      3. Skills & Settings
+                      3. Model
+                    </TabsTrigger>
+                    <TabsTrigger value="step-4" disabled={step < 4}>
+                      4. Skills
                     </TabsTrigger>
                   </TabsList>
 
@@ -371,8 +417,132 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     )}
                   </TabsContent>
 
-                  {/* Step 3: Skills & Settings */}
+                  {/* Step 3: Model Configuration (PRD-15) */}
                   <TabsContent value="step-3" className="space-y-6">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
+                      <p className="text-muted-foreground mb-6">
+                        Select and configure the LLM model for your agent
+                      </p>
+                    </div>
+
+                    <ModelSelector
+                      value={modelConfig.model_id}
+                      onChange={(modelId) => {
+                        const model = (models as any)?.find((m: any) => m.model_id === modelId)
+                        handleModelConfigChange('model_id', modelId)
+                        if (model) {
+                          handleModelConfigChange('provider', model.provider)
+                        }
+                      }}
+                      agentType={agentData.type}
+                      provider={modelConfig.provider}
+                    />
+
+                    <div className="space-y-4 pt-4 border-t">
+                      <h4 className="font-medium">Model Parameters</h4>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Temperature: {modelConfig.temperature.toFixed(2)}</Label>
+                          <Slider
+                            min={0}
+                            max={2}
+                            step={0.01}
+                            value={[modelConfig.temperature]}
+                            onValueChange={([value]) => handleModelConfigChange('temperature', value)}
+                            className="bg-secondary/50"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Controls randomness: 0 is focused, 2 is creative
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Max Output Tokens: {modelConfig.max_tokens}</Label>
+                          <Slider
+                            min={100}
+                            max={8000}
+                            step={100}
+                            value={[modelConfig.max_tokens]}
+                            onValueChange={([value]) => handleModelConfigChange('max_tokens', value)}
+                            className="bg-secondary/50"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Top P: {modelConfig.top_p.toFixed(2)}</Label>
+                          <Slider
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={[modelConfig.top_p]}
+                            onValueChange={([value]) => handleModelConfigChange('top_p', value)}
+                            className="bg-secondary/50"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Nucleus sampling threshold
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Frequency Penalty: {modelConfig.frequency_penalty.toFixed(2)}</Label>
+                          <Slider
+                            min={-2}
+                            max={2}
+                            step={0.01}
+                            value={[modelConfig.frequency_penalty]}
+                            onValueChange={([value]) => handleModelConfigChange('frequency_penalty', value)}
+                            className="bg-secondary/50"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Reduces repetition of token sequences
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Presence Penalty: {modelConfig.presence_penalty.toFixed(2)}</Label>
+                          <Slider
+                            min={-2}
+                            max={2}
+                            step={0.01}
+                            value={[modelConfig.presence_penalty]}
+                            onValueChange={([value]) => handleModelConfigChange('presence_penalty', value)}
+                            className="bg-secondary/50"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Encourages new topics
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Fallback Model (Optional)</Label>
+                          <Select 
+                            value={modelConfig.fallback_model_id || 'none'} 
+                            onValueChange={(value) => handleModelConfigChange('fallback_model_id', value === 'none' ? null : value)}
+                          >
+                            <SelectTrigger className="bg-secondary/50">
+                              <SelectValue placeholder="No fallback" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No fallback</SelectItem>
+                              {(models as any)?.filter((m: any) => m.model_id !== modelConfig.model_id).map((model: any) => (
+                                <SelectItem key={model.model_id} value={model.model_id}>
+                                  {model.display_name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Model to use if primary fails
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  {/* Step 4: Skills & Settings */}
+                  <TabsContent value="step-4" className="space-y-6">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
                       <p className="text-muted-foreground mb-6">
@@ -440,12 +610,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </Button>
                   
                   <div className="text-sm text-muted-foreground">
-                    Step {step} of 3
+                    Step {step} of 4
                   </div>
                   
-                  {step < 3 ? (
+                  {step < 4 ? (
                     <Button
-                      onClick={() => setStep(Math.min(3, step + 1))}
+                      onClick={() => setStep(Math.min(4, step + 1))}
                       disabled={step === 1 && !agentData.type}
                       className="gradient-accent hover:opacity-90"
                     >
@@ -454,10 +624,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      disabled={!agentData.name || !agentData.type || createAgentMutation.isPending}
+                      disabled={!agentData.name || !agentData.type || (createAgentMutation as any).isLoading}
                       className="gradient-accent hover:opacity-90"
                     >
-                      {createAgentMutation.isPending ? 'Creating...' : 'Create Agent'}
+                      {(createAgentMutation as any).isLoading ? 'Creating...' : 'Create Agent'}
                     </Button>
                   )}
                 </div>

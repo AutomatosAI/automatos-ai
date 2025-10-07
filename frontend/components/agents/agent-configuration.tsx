@@ -11,11 +11,11 @@ import {
   CheckCircle,
   Info,
   Cpu,
-  Memory,
   Clock,
   Zap,
   Shield,
-  Database
+  Database,
+  Bot
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -38,7 +38,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'react-hot-toast'
 
 // API hooks
-import { useAgent, useAgentConfig, useUpdateAgentConfig } from '@/hooks/use-agent-api'
+import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useSkills } from '@/hooks/use-agent-api'
+import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { ModelSelector } from './model-selector'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface AgentConfigurationProps {
   agents: any[]
@@ -53,11 +56,19 @@ export function AgentConfiguration({
 }: AgentConfigurationProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [configData, setConfigData] = useState<any>({})
+  const [modelConfigData, setModelConfigData] = useState<any>({})
+  const [assignedSkills, setAssignedSkills] = useState<number[]>([])
 
   // Fetch agent and configuration data
   const { data: agent, isLoading: agentLoading } = useAgent(selectedAgentId)
   const { data: agentConfig, isLoading: configLoading } = useAgentConfig(selectedAgentId)
+  const { data: availableSkills } = useSkills() // Get ALL available skills
+  const { data: agentSkills } = useAgentSkills(selectedAgentId) // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
+  
+  // PRD-15: Model configuration hooks
+  const { data: agentModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
+  const updateModelConfigMutation = useUpdateAgentModelConfig()
 
   // Initialize config data when agent config is loaded
   useEffect(() => {
@@ -66,6 +77,34 @@ export function AgentConfiguration({
       setHasUnsavedChanges(false)
     }
   }, [agentConfig])
+  
+  // PRD-15: Initialize model config data
+  useEffect(() => {
+    if (agentModelConfig) {
+      const modelConfig = (agentModelConfig as any)?.model_config || {
+        provider: 'openai',
+        model_id: 'gpt-4',
+        temperature: 0.7,
+        max_tokens: 2000,
+        top_p: 1.0,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        fallback_model_id: null
+      }
+      setModelConfigData(modelConfig)
+    }
+  }, [agentModelConfig])
+
+  // Initialize assigned skills when agent data loads
+  useEffect(() => {
+    if (agentSkills && Array.isArray(agentSkills)) {
+      const skillIds = agentSkills.map((skill: any) => skill.id)
+      setAssignedSkills(skillIds)
+    } else if (agent && (agent as any).skills && Array.isArray((agent as any).skills)) {
+      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
+      setAssignedSkills(skillIds)
+    }
+  }, [agentSkills, agent])
 
   // Handle form changes
   const handleConfigChange = (key: string, value: any) => {
@@ -86,6 +125,26 @@ export function AgentConfiguration({
       }
     }))
     setHasUnsavedChanges(true)
+  }
+  
+  // PRD-15: Handle model config changes
+  const handleModelConfigChange = (key: string, value: any) => {
+    setModelConfigData((prev: any) => ({
+      ...prev,
+      [key]: value
+    }))
+    setHasUnsavedChanges(true)
+  }
+
+  // Handle skills assignment toggle
+  const toggleSkillAssignment = (skillId: number) => {
+    setAssignedSkills((prev) => {
+      const newSkills = prev.includes(skillId)
+        ? prev.filter((id) => id !== skillId)
+        : [...prev, skillId]
+      setHasUnsavedChanges(true)
+      return newSkills
+    })
   }
 
   // Save configuration
@@ -115,8 +174,20 @@ export function AgentConfiguration({
 
       await updateConfigMutation.mutateAsync({
         agentId: selectedAgentId,
-        config: sanitizedConfig
+        config: {
+          ...sanitizedConfig,
+          skill_assignments: assignedSkills
+        }
       })
+      
+      // PRD-15: Save model configuration
+      if (modelConfigData && Object.keys(modelConfigData).length > 0) {
+        await updateModelConfigMutation.mutateAsync({
+          agentId: Number(selectedAgentId),
+          modelConfig: modelConfigData
+        })
+      }
+      
       setHasUnsavedChanges(false)
     } catch (error) {
       // Error already handled by the hook
@@ -129,6 +200,30 @@ export function AgentConfiguration({
       setConfigData(agentConfig)
       setHasUnsavedChanges(false)
     }
+    if (agentModelConfig) {
+      const modelConfig = (agentModelConfig as any)?.model_config || {
+        provider: 'openai',
+        model_id: 'gpt-4',
+        temperature: 0.7,
+        max_tokens: 2000,
+        top_p: 1.0,
+        frequency_penalty: 0.0,
+        presence_penalty: 0.0,
+        fallback_model_id: null
+      }
+      setModelConfigData(modelConfig)
+    }
+    // Reset skills to original state
+    if (agentSkills && Array.isArray(agentSkills)) {
+      const skillIds = agentSkills.map((skill: any) => skill.id)
+      setAssignedSkills(skillIds)
+    } else if (agent && (agent as any).skills && Array.isArray((agent as any).skills)) {
+      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
+      setAssignedSkills(skillIds)
+    } else {
+      setAssignedSkills([])
+    }
+    setHasUnsavedChanges(false)
   }
 
   if (!selectedAgentId) {
@@ -219,7 +314,7 @@ export function AgentConfiguration({
           <Button 
             variant="outline" 
             onClick={handleReset}
-            disabled={!hasUnsavedChanges || updateConfigMutation.isPending}
+            disabled={!hasUnsavedChanges || updateConfigMutation.isLoading}
           >
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset
@@ -227,10 +322,10 @@ export function AgentConfiguration({
           
           <Button 
             onClick={handleSave}
-            disabled={!hasUnsavedChanges || updateConfigMutation.isPending}
+            disabled={!hasUnsavedChanges || updateConfigMutation.isLoading}
           >
             <Save className="w-4 h-4 mr-2" />
-            {updateConfigMutation.isPending ? 'Saving...' : 'Save Changes'}
+            {updateConfigMutation.isLoading ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
       </div>
@@ -243,9 +338,9 @@ export function AgentConfiguration({
               🤖
             </div>
             <div>
-              <div>{agent?.name}</div>
+              <div>{(agent as any)?.name}</div>
               <p className="text-sm font-normal text-muted-foreground capitalize">
-                {agent?.agent_type?.replace('_', ' ')} • {agent?.status}
+                {(agent as any)?.agent_type?.replace('_', ' ')} • {(agent as any)?.status}
               </p>
             </div>
           </CardTitle>
@@ -267,7 +362,7 @@ export function AgentConfiguration({
               <Label htmlFor="agent-name">Agent Name</Label>
               <Input
                 id="agent-name"
-                value={configData.name || agent?.name || ''}
+                value={configData.name || (agent as any)?.name || ''}
                 onChange={(e) => handleConfigChange('name', e.target.value)}
                 placeholder="Enter agent name"
               />
@@ -277,7 +372,7 @@ export function AgentConfiguration({
               <Label htmlFor="agent-description">Description</Label>
               <Textarea
                 id="agent-description"
-                value={configData.description || agent?.description || ''}
+                value={configData.description || (agent as any)?.description || ''}
                 onChange={(e) => handleConfigChange('description', e.target.value)}
                 placeholder="Describe the agent's purpose and capabilities"
                 rows={3}
@@ -287,7 +382,7 @@ export function AgentConfiguration({
             <div className="space-y-2">
               <Label htmlFor="priority-level">Priority Level</Label>
               <Select
-                value={configData.priority_level || agent?.priority_level || 'medium'}
+                value={configData.priority_level || (agent as any)?.priority_level || 'medium'}
                 onValueChange={(value) => handleConfigChange('priority_level', value)}
               >
                 <SelectTrigger>
@@ -310,7 +405,7 @@ export function AgentConfiguration({
                 </p>
               </div>
               <Switch
-                checked={configData.auto_start || agent?.auto_start || false}
+                checked={configData.auto_start || (agent as any)?.auto_start || false}
                 onCheckedChange={(checked) => handleConfigChange('auto_start', checked)}
               />
             </div>
@@ -330,7 +425,7 @@ export function AgentConfiguration({
               <Label>Max Concurrent Tasks</Label>
               <div className="px-3">
                 <Slider
-                  value={[configData.max_concurrent_tasks || agent?.max_concurrent_tasks || 5]}
+                  value={[configData.max_concurrent_tasks || (agent as any)?.max_concurrent_tasks || 5]}
                   onValueChange={(value) => handleConfigChange('max_concurrent_tasks', value[0])}
                   max={20}
                   min={1}
@@ -339,7 +434,7 @@ export function AgentConfiguration({
                 />
                 <div className="flex justify-between text-sm text-muted-foreground mt-1">
                   <span>1</span>
-                  <span>Current: {configData.max_concurrent_tasks || agent?.max_concurrent_tasks || 5}</span>
+                  <span>Current: {configData.max_concurrent_tasks || (agent as any)?.max_concurrent_tasks || 5}</span>
                   <span>20</span>
                 </div>
               </div>
@@ -520,7 +615,192 @@ export function AgentConfiguration({
             </div>
           </CardContent>
         </Card>
+
+        {/* Skills Assignment */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bot className="w-5 h-5" />
+              Skills Assignment
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Select skills to assign to this agent
+            </p>
+          </CardHeader>
+          <CardContent>
+            {availableSkills && availableSkills.length > 0 ? (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {availableSkills.map((skill: any) => (
+                  <div key={skill.id} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
+                    <Checkbox
+                      id={`skill-${skill.id}`}
+                      checked={assignedSkills.includes(skill.id)}
+                      onCheckedChange={() => toggleSkillAssignment(skill.id)}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor={`skill-${skill.id}`} className="cursor-pointer">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-medium">{skill.name}</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {skill.description || 'No description available'}
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant="outline" className="text-xs">
+                              {skill.skill_type?.replace('_', ' ') || 'Unknown'}
+                            </Badge>
+                            {skill.category && (
+                              <Badge variant="secondary" className="text-xs">
+                                {skill.category}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </Label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <Bot className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Skills Available</h3>
+                <p className="text-muted-foreground">
+                  No skills are available for assignment at this time.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* PRD-15: Model Configuration */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bot className="w-5 h-5 text-purple-400" />
+            Model Configuration
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Select and configure the LLM model for this agent
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Model Selection */}
+          <div className="space-y-3">
+            <Label>AI Model</Label>
+            <ModelSelector
+              value={modelConfigData?.model_id || 'gpt-4'}
+              onChange={(modelId) => handleModelConfigChange('model_id', modelId)}
+              agentType={(agent as any)?.agent_type}
+            />
+          </div>
+
+          <Separator />
+
+          {/* Temperature */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Temperature</Label>
+              <span className="text-sm text-muted-foreground">
+                {modelConfigData?.temperature?.toFixed(2) || '0.70'}
+              </span>
+            </div>
+            <Slider
+              value={[modelConfigData?.temperature || 0.7]}
+              onValueChange={(value) => handleModelConfigChange('temperature', value[0])}
+              min={0}
+              max={2}
+              step={0.1}
+              className="w-full"
+            />
+            <p className="text-xs text-muted-foreground">
+              Controls randomness. Lower = more focused, Higher = more creative
+            </p>
+          </div>
+
+          {/* Max Tokens */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>Max Output Tokens</Label>
+              <span className="text-sm text-muted-foreground">
+                {modelConfigData?.max_tokens || 2000}
+              </span>
+            </div>
+            <Slider
+              value={[modelConfigData?.max_tokens || 2000]}
+              onValueChange={(value) => handleModelConfigChange('max_tokens', value[0])}
+              min={100}
+              max={4000}
+              step={100}
+              className="w-full"
+            />
+            <p className="text-xs text-muted-foreground">
+              Maximum tokens in the model's response
+            </p>
+          </div>
+
+          {/* Advanced Model Settings */}
+          <div className="space-y-4 pt-4 border-t border-border/50">
+            <h4 className="text-sm font-medium">Advanced Model Settings</h4>
+            
+            {/* Top P */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Top P (Nucleus Sampling)</Label>
+                <span className="text-sm text-muted-foreground">
+                  {modelConfigData?.top_p?.toFixed(2) || '1.00'}
+                </span>
+              </div>
+              <Slider
+                value={[modelConfigData?.top_p || 1.0]}
+                onValueChange={(value) => handleModelConfigChange('top_p', value[0])}
+                min={0}
+                max={1}
+                step={0.05}
+                className="w-full"
+              />
+            </div>
+
+            {/* Frequency Penalty */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Frequency Penalty</Label>
+                <span className="text-sm text-muted-foreground">
+                  {modelConfigData?.frequency_penalty?.toFixed(2) || '0.00'}
+                </span>
+              </div>
+              <Slider
+                value={[modelConfigData?.frequency_penalty || 0.0]}
+                onValueChange={(value) => handleModelConfigChange('frequency_penalty', value[0])}
+                min={0}
+                max={2}
+                step={0.1}
+                className="w-full"
+              />
+            </div>
+
+            {/* Presence Penalty */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Presence Penalty</Label>
+                <span className="text-sm text-muted-foreground">
+                  {modelConfigData?.presence_penalty?.toFixed(2) || '0.00'}
+                </span>
+              </div>
+              <Slider
+                value={[modelConfigData?.presence_penalty || 0.0]}
+                onValueChange={(value) => handleModelConfigChange('presence_penalty', value[0])}
+                min={0}
+                max={2}
+                step={0.1}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Advanced Configuration */}
       <Card className="glass-card">
@@ -567,4 +847,3 @@ export function AgentConfiguration({
     </div>
   )
 }
-
