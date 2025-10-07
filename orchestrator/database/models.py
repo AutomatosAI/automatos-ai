@@ -368,6 +368,7 @@ class AgentResponse(BaseModel):
     skills: List[Dict[str, Any]] = []
     tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
+    agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
