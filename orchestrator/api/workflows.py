@@ -190,7 +190,8 @@ async def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
             "default_policy_id": getattr(workflow, 'default_policy_id', None),
             "workflow_definition": workflow.workflow_definition,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
-            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None
+            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None,
+            "last_execution": getattr(workflow, 'last_execution', None)
         }
     except HTTPException:
         raise

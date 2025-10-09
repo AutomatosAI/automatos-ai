@@ -189,7 +189,15 @@ class WorkflowAnalyticsService:
             if not execution.execution_metadata:
                 execution.execution_metadata = {}  # Changed from metadata (reserved word in SQLAlchemy)
             
-            execution.execution_metadata["analytics"] = asdict(analytics)
+            # Convert analytics to dict and handle datetime serialization
+            analytics_dict = asdict(analytics)
+            # Convert datetime objects to ISO format strings
+            if analytics_dict.get("started_at"):
+                analytics_dict["started_at"] = analytics_dict["started_at"].isoformat() if isinstance(analytics_dict["started_at"], datetime) else analytics_dict["started_at"]
+            if analytics_dict.get("completed_at"):
+                analytics_dict["completed_at"] = analytics_dict["completed_at"].isoformat() if isinstance(analytics_dict["completed_at"], datetime) else analytics_dict["completed_at"]
+            
+            execution.execution_metadata["analytics"] = analytics_dict
             self.db.commit()
             
             self.logger.info(

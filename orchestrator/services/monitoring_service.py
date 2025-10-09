@@ -480,3 +480,4 @@ def get_monitoring_service() -> MonitoringService:
         _monitoring_service = MonitoringService()
         _monitoring_service.start()
     return _monitoring_service
+

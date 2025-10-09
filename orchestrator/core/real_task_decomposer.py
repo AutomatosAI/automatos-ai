@@ -57,7 +57,13 @@ class RealTaskDecomposer:
         requirements = requirements or []
         
         # Build the decomposition prompt
-        prompt = f"""You are an expert task decomposition system for an AI orchestration platform.
+        prompt = f"""You are an expert task decomposition system for a multi-agent AI orchestration platform.
+
+CRITICAL DESIGN PRINCIPLES:
+1. Create GRANULAR subtasks - each subtask should focus on ONE primary skill/capability
+2. Design for AGENT COLLABORATION - agents will share results via shared context
+3. Each subtask should be ATOMIC and FOCUSED - not compound tasks
+4. Create clear HANDOFF POINTS between subtasks for inter-agent communication
 
 Break down this complex task into specific, actionable subtasks:
 
@@ -66,13 +72,24 @@ TYPE: {task_type}
 COMPLEXITY: {complexity}
 REQUIREMENTS: {', '.join(requirements) if requirements else 'None specified'}
 
-Please decompose this into {3 if complexity == 'low' else 5 if complexity == 'medium' else 7} subtasks.
+Please decompose this into {5 if complexity == 'low' else 7 if complexity == 'medium' else 10} subtasks.
+
+GRANULARITY EXAMPLES:
+❌ BAD: "Research and analyze the data" (2 skills: research + analysis)
+✅ GOOD: 
+   - Subtask 1: "Collect and organize relevant research materials" (research)
+   - Subtask 2: "Analyze the collected materials for patterns" (analysis)
+
+❌ BAD: "Write and review the documentation" (2 skills: writing + review)
+✅ GOOD:
+   - Subtask 1: "Write comprehensive documentation draft" (writing)
+   - Subtask 2: "Review documentation for accuracy and completeness" (review)
 
 For each subtask, provide:
-1. A clear, specific description
+1. A clear, ATOMIC description focusing on ONE primary skill
 2. The type of agent best suited (e.g., 'researcher', 'analyst', 'developer', 'writer', 'reviewer')
 3. Priority level (high/medium/low)
-4. Dependencies (which subtasks must complete first)
+4. Dependencies (which subtasks must complete first for inter-agent collaboration)
 5. Estimated duration in seconds (30-300 range)
 
 Return ONLY valid JSON in this exact format:
@@ -80,26 +97,37 @@ Return ONLY valid JSON in this exact format:
   "subtasks": [
     {{
       "subtask_id": "unique_id",
-      "description": "Clear description of what needs to be done",
+      "description": "Clear ATOMIC description - focus on ONE primary skill",
       "agent_type": "type_of_agent",
       "priority": "high|medium|low",
-      "dependencies": ["list", "of", "subtask_ids"],
+      "dependencies": ["subtask_ids_that_must_complete_first"],
       "estimated_duration": "60-120 seconds",
-      "skills_required": ["skill1", "skill2"]
+      "primary_skill": "single_main_skill",
+      "skills_required": ["primary_skill_only"]
     }}
   ],
   "execution_strategy": "parallel|sequential|mixed",
-  "total_estimated_time": "2-5 minutes",
+  "total_estimated_time": "5-10 minutes",
   "complexity_assessment": {{
     "technical_complexity": "low|medium|high",
     "coordination_complexity": "low|medium|high",
     "resource_requirements": "low|medium|high"
-  }}
-}}"""
+  }},
+  "collaboration_notes": "How agents will share information via shared context"
+}}
+
+REMEMBER: 
+- Each subtask = ONE primary skill
+- Agents will collaborate via shared context (PRD-04)
+- Design for sequential handoffs where needed
+- Use dependencies to enforce proper order"""
         
         try:
             # Make REAL LLM call
-            logger.info(f"Decomposing task with REAL LLM: {task_description[:100]}...")
+            logger.info(f"🔍 STAGE 1 START: Decomposing task with REAL LLM")
+            logger.info(f"  📝 Task: {task_description[:150]}...")
+            logger.info(f"  ⚙️  Complexity: {complexity} → Target: {5 if complexity == 'low' else 7 if complexity == 'medium' else 10} subtasks")
+            logger.info(f"  🎯 Design: Granular, single-skill, inter-agent collaboration")
             
             messages = [
                 {"role": "system", "content": "You are an expert task decomposition system. Always return valid JSON."},
@@ -113,7 +141,7 @@ Return ONLY valid JSON in this exact format:
             response = await self.llm.generate_response(messages)
             
             elapsed = time.time() - start_time
-            logger.info(f"Real LLM response received in {elapsed:.2f} seconds")
+            logger.info(f"  ✅ LLM response received in {elapsed:.2f} seconds")
             
             # Parse the response
             try:
@@ -153,7 +181,20 @@ Return ONLY valid JSON in this exact format:
                 result["decomposition_time"] = elapsed
                 result["is_real_decomposition"] = True  # Proof this is NOT mock data
                 
-                logger.info(f"Successfully decomposed task into {len(result.get('subtasks', []))} subtasks")
+                # Enhanced debug logging
+                subtasks = result.get('subtasks', [])
+                logger.info(f"🎯 STAGE 1 COMPLETE: Decomposed into {len(subtasks)} subtasks")
+                logger.info(f"  📊 Strategy: {result.get('execution_strategy', 'N/A')}")
+                logger.info(f"  ⏱️  Total estimated time: {result.get('total_estimated_time', 'N/A')}")
+                
+                for i, subtask in enumerate(subtasks):
+                    skills = subtask.get('skills_required', subtask.get('primary_skill', []))
+                    if isinstance(skills, str):
+                        skills = [skills]
+                    logger.info(f"  📋 Subtask {i+1}: {subtask.get('description', 'N/A')[:80]}...")
+                    logger.info(f"      🤖 Agent type: {subtask.get('agent_type', 'N/A')}")
+                    logger.info(f"      🎯 Skills: {skills}")
+                    logger.info(f"      🔗 Dependencies: {subtask.get('dependencies', [])}")
                 
                 return result
                 

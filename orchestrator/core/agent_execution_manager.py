@@ -298,41 +298,105 @@ class AgentExecutionManager:
         """Execute a single subtask with assigned agent"""
         
         description = subtask.get("description", subtask.get("name", "Unknown"))
+        
+        # Enhanced Debug Logging for Agent Extraction
+        self.logger.info(f"🔍 DEBUG: Extracting agent from agent_match (type: {type(agent_match)})")
+        
         # Handle different agent_match types
         if hasattr(agent_match, 'agent_id'):  # AgentMatch object
             agent_id = agent_match.agent_id
             agent_name = agent_match.agent_name
+            self.logger.info(f"🔍 DEBUG: Extracted from AgentMatch object: agent_id={agent_id}, agent_name='{agent_name}'")
         elif isinstance(agent_match, dict):
             agent_id = agent_match.get("agent_id")
             agent_name = agent_match.get("agent_name", "Unknown")
+            self.logger.info(f"🔍 DEBUG: Extracted from dict: agent_id={agent_id}, agent_name='{agent_name}'")
+            self.logger.info(f"🔍 DEBUG: agent_match keys: {list(agent_match.keys())}")
         else:
             agent_id = None
             agent_name = "No Agent"
+            self.logger.error(f"❌ ERROR: Unrecognized agent_match type: {type(agent_match)}")
         
-        self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name}")
+        if not agent_id:
+            self.logger.error(
+                f"❌ CRITICAL: No agent_id extracted for subtask! "
+                f"agent_match type: {type(agent_match)}, "
+                f"agent_name: '{agent_name}'"
+            )
+        
+        self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name} (ID: {agent_id})")
         
         # Create execution tracking
         # Handle context_enh as dataclass or dict
+        self.logger.info(f"🔍 DEBUG: Processing context enhancement (provided: {context_enh is not None})")
+        
         if context_enh:
             if hasattr(context_enh, 'context_quality_score'):  # ContextEnhancement object
                 context_quality = context_enh.context_quality_score
                 prompt_used = context_enh.enhanced_prompt
+                self.logger.info(
+                    f"🔍 DEBUG: Context from ContextEnhancement object: "
+                    f"quality={context_quality:.2%}, "
+                    f"prompt_length={len(prompt_used)}"
+                )
             else:  # dict
                 context_quality = context_enh.get("context_quality", 0.0)
                 prompt_used = context_enh.get("enhanced_prompt", description)
+                self.logger.info(
+                    f"🔍 DEBUG: Context from dict: "
+                    f"quality={context_quality:.2%}, "
+                    f"prompt_length={len(prompt_used)}, "
+                    f"keys={list(context_enh.keys())}"
+                )
         else:
             context_quality = 0.0
             prompt_used = description
+            self.logger.warning(
+                f"⚠️  WARNING: No context enhancement provided! "
+                f"context_quality will be 0%, using raw description as prompt"
+            )
         
         # Inject memory into the prompt if available
+        self.logger.info(
+            f"🔍 DEBUG: Memory injection check: "
+            f"memory_retrieval_results={'provided' if memory_retrieval_results else 'none'}, "
+            f"agent_id={agent_id}"
+        )
+        
         if memory_retrieval_results and agent_id:
+            if memory_retrieval_results.get('results', {}).get('agent_memories', {}).get(str(agent_id)):
+                memories = memory_retrieval_results['results']['agent_memories'][str(agent_id)]
+                self.logger.info(
+                    f"✅ Injecting {memories.get('count', 0)} memories for agent {agent_id}"
+                )
+            else:
+                self.logger.warning(
+                    f"⚠️  Memory retrieval results exist but no memories found for agent_id={agent_id}"
+                )
+            
             prompt_used = self.memory_injector.inject_memory_into_prompt(
                 original_prompt=prompt_used,
                 agent_id=agent_id,
                 memory_retrieval_results=memory_retrieval_results,
                 subtask_id=subtask_id
             )
+        elif not memory_retrieval_results:
+            self.logger.warning("⚠️  No memory retrieval results available")
+        elif not agent_id:
+            self.logger.warning("⚠️  Cannot inject memories: agent_id is missing")
             
+        # Enhanced Debug Logging for Agent ID
+        self.logger.info(
+            f"🔍 DEBUG: Creating SubtaskExecution for {subtask_id}: "
+            f"agent_id={agent_id} (type: {type(agent_id)}), "
+            f"agent_name='{agent_name}'"
+        )
+        if not agent_id or agent_id == 0:
+            self.logger.warning(
+                f"⚠️  WARNING: agent_id is {agent_id} for {subtask_id}! "
+                f"This will prevent memory consolidation."
+            )
+        
         execution = SubtaskExecution(
             subtask_id=subtask_id,
             subtask_description=description,
@@ -342,6 +406,11 @@ class AgentExecutionManager:
             start_time=datetime.now(),
             context_quality=context_quality,
             prompt_used=prompt_used
+        )
+        
+        self.logger.info(
+            f"✅ SubtaskExecution created: agent_id={execution.agent_id}, "
+            f"agent_name='{execution.agent_name}'"
         )
         
         self.active_executions[subtask_id] = execution

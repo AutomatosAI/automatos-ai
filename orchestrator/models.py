@@ -547,6 +547,7 @@ class WorkflowResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str] = None
     agents: List[Dict[str, Any]] = []
+    last_execution: Optional[Dict[str, Any]] = None  # Latest execution summary
 
 class WorkflowExecutionCreate(BaseModel):
     workflow_id: int

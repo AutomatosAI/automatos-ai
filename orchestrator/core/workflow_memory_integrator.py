@@ -294,13 +294,32 @@ Retries: {execution.retry_count}
             # 1. Consolidate agent memories (short-term → long-term)
             agent_id_map = {}  # Store agent_name -> agent_id mapping
             
+            self.logger.info(f"🔍 DEBUG: Starting agent ID mapping extraction")
+            self.logger.info(f"🔍 DEBUG: subtask_executions provided: {subtask_executions is not None}")
+            
             # First, build a complete mapping of agent names to IDs
             if subtask_executions:
-                for execution in subtask_executions.values():
+                self.logger.info(f"🔍 DEBUG: Processing {len(subtask_executions)} subtask executions")
+                for subtask_id, execution in subtask_executions.items():
+                    self.logger.info(
+                        f"🔍 DEBUG: Subtask {subtask_id}: "
+                        f"agent_id={execution.agent_id}, "
+                        f"agent_name='{execution.agent_name}', "
+                        f"status={execution.status}"
+                    )
+                    
                     if execution.agent_id and execution.agent_id != 0 and execution.agent_name:
                         agent_id_map[execution.agent_name] = execution.agent_id
+                        self.logger.info(f"✅ Added to map: {execution.agent_name} → {execution.agent_id}")
+                    else:
+                        self.logger.warning(
+                            f"⚠️  Skipping {execution.agent_name}: "
+                            f"agent_id={execution.agent_id} (valid: {execution.agent_id and execution.agent_id != 0})"
+                        )
+            else:
+                self.logger.warning("⚠️  No subtask_executions provided for agent ID mapping!")
                         
-            self.logger.info(f"Agent ID mapping: {agent_id_map}")
+            self.logger.info(f"📋 Final Agent ID mapping: {agent_id_map}")
             
             for agent_name, performance in aggregated_results.agent_performance.items():
                 try:

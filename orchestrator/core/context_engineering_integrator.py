@@ -198,17 +198,35 @@ class ContextEngineeringIntegrator:
         agent_type = subtask.get("agent_type", "worker")
         priority = subtask.get("priority", "medium")
         
+        self.logger.info(f"🔍 STAGE 2 START: Enhancing {subtask_id}")
+        self.logger.info(f"  📝 Description: {description[:100]}...")
+        self.logger.info(f"  🤖 Agent Type: {agent_type}")
+        self.logger.info(f"  ⚡ Priority: {priority}")
+        
         # 1. Build RAG query
         rag_query = self._build_rag_query(description, agent_type, workflow_description)
+        self.logger.info(f"  🔍 RAG Query built: '{rag_query[:150]}...'")
         
         # 2. Retrieve RAG context (primary) - UNCHANGED
         rag_context = await self._retrieve_rag_context(rag_query)
+        
+        # Debug RAG retrieval results
+        chunks = rag_context.get("chunks", [])
+        self.logger.info(f"  📚 RAG Retrieved: {len(chunks)} chunks, {rag_context.get('total_tokens', 0)} tokens")
+        if chunks:
+            for i, chunk in enumerate(chunks[:2]):  # Log first 2 chunks
+                similarity = chunk.get("similarity_score", chunk.get("similarity", "NO_SCORE"))
+                content_preview = chunk.get("content", chunk.get("text", ""))[:80]
+                self.logger.info(f"    Chunk {i+1}: similarity={similarity}, content='{content_preview}...'")
+        else:
+            self.logger.warning(f"  ⚠️  RAG returned NO chunks!")
         
         # 3. Optional: Semantic search for targeted enrichment
         semantic_results = []
         if self.use_semantic_enrichment and self._should_use_semantic_search(subtask):
             semantic_query = self._build_semantic_query(description, agent_type)
             semantic_results = await self._retrieve_semantic_results(semantic_query)
+            self.logger.info(f"  🔍 Semantic Search: {len(semantic_results)} results")
         
         # PHASE 2: 4. Optional: CodeGraph search for code context
         code_results = []
@@ -253,6 +271,10 @@ class ContextEngineeringIntegrator:
         context_quality = self._calculate_context_quality(rag_context, semantic_results, code_results)  # PHASE 2: Include code
         
         retrieval_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        self.logger.info(f"🎯 STAGE 2 COMPLETE: {subtask_id}")
+        self.logger.info(f"  📊 Quality={context_quality:.2%}, Sources={num_sources}, Tokens={total_tokens}, Time={retrieval_time}ms")
+        self.logger.info(f"  ✅ Optimization={'YES' if used_optimization else 'NO'}, Prompt_length={len(enhanced_prompt)} chars")
         
         return ContextEnhancement(
             subtask_id=subtask_id,
@@ -644,40 +666,48 @@ class ContextEngineeringIntegrator:
     ) -> float:
         """Calculate quality score for retrieved context"""
         
+        self.logger.info(f"  📊 Calculating context quality...")
+        
         score = 0.0
         total_weight = 0.0
         
         # RAG context quality (50% weight)
         chunks = rag_context.get("chunks", [])
         if chunks:
-            avg_similarity = sum(
-                c.get("similarity_score", c.get("similarity", 0))
-                for c in chunks
-            ) / len(chunks)
+            similarities = [c.get("similarity_score", c.get("similarity", 0)) for c in chunks]
+            avg_similarity = sum(similarities) / len(chunks)
             score += avg_similarity * 0.5
             total_weight += 0.5
+            self.logger.info(f"    RAG: {len(chunks)} chunks, similarities={similarities}, avg={avg_similarity:.3f}, weighted_score={avg_similarity * 0.5:.3f}")
+        else:
+            self.logger.warning(f"    RAG: NO CHUNKS (0 contribution to quality)")
         
         # Semantic results quality (20% weight)
         if semantic_results:
-            avg_similarity = sum(
-                r.get("similarity", 0)
-                for r in semantic_results
-            ) / len(semantic_results)
+            similarities = [r.get("similarity", 0) for r in semantic_results]
+            avg_similarity = sum(similarities) / len(semantic_results)
             score += avg_similarity * 0.2
             total_weight += 0.2
+            self.logger.info(f"    Semantic: {len(semantic_results)} results, similarities={similarities}, avg={avg_similarity:.3f}, weighted_score={avg_similarity * 0.2:.3f}")
+        else:
+            self.logger.info(f"    Semantic: No results (0 contribution)")
         
         # PHASE 2: Code context quality (30% weight)
         if code_results:
-            avg_similarity = sum(
-                c.get("similarity", 0)
-                for c in code_results
-            ) / len(code_results)
+            similarities = [c.get("similarity", 0) for c in code_results]
+            avg_similarity = sum(similarities) / len(code_results)
             score += avg_similarity * 0.3
             total_weight += 0.3
+            self.logger.info(f"    Code: {len(code_results)} results, similarities={similarities}, avg={avg_similarity:.3f}, weighted_score={avg_similarity * 0.3:.3f}")
+        else:
+            self.logger.info(f"    Code: No results (0 contribution)")
         
         # Normalize by actual weights used
         if total_weight > 0:
             score = score / total_weight
+            self.logger.info(f"  ✅ Final quality: {score:.3f} (total_weight={total_weight})")
+        else:
+            self.logger.error(f"  ❌ CRITICAL: total_weight=0! No context sources had data!")
         
         return min(score, 1.0)
     

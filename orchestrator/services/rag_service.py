@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hashlib
 # from sklearn.metrics.pairwise import cosine_similarity  # Removed sklearn dependency
-import openai
+from openai import OpenAI  # NEW API >= 1.0.0
 import os
 import pickle
 from pathlib import Path
@@ -137,10 +137,14 @@ class RAGService:
     
     def __init__(self, openai_api_key: Optional[str] = None):
         self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        
+        # Initialize OpenAI client with new API (>= 1.0.0)
         if self.api_key:
-            openai.api_key = self.api_key
+            self.openai_client = OpenAI(api_key=self.api_key)
+            logger.info("✅ OpenAI client initialized with API key")
         else:
-            logger.warning("No OpenAI API key found - embeddings will be simulated")
+            self.openai_client = None
+            logger.warning("⚠️  No OpenAI API key found - embeddings will be simulated")
         
         self.vector_store = VectorStore()
         self.cache = {}  # Simple query cache
@@ -209,16 +213,18 @@ class RAGService:
     
     def _generate_embedding(self, text: str) -> np.ndarray:
         """Generate embedding for text using OpenAI or fallback to simple method"""
-        if self.api_key:
+        if self.openai_client:
             try:
-                import openai
-                response = openai.Embedding.create(
+                logger.debug(f"🔍 Generating OpenAI embedding for text ({len(text)} chars)")
+                response = self.openai_client.embeddings.create(
                     model="text-embedding-ada-002",
                     input=text
                 )
-                return np.array(response['data'][0]['embedding'])
+                embedding = np.array(response.data[0].embedding)
+                logger.debug(f"✅ Generated embedding: shape={embedding.shape}, norm={np.linalg.norm(embedding):.3f}")
+                return embedding
             except Exception as e:
-                logger.warning(f"Failed to generate OpenAI embedding: {e}, using fallback")
+                logger.error(f"❌ Failed to generate OpenAI embedding: {e}, using fallback")
         
         # Fallback: Simple hash-based pseudo-embedding
         # This is just for testing - real embeddings are much better
@@ -271,32 +277,47 @@ class RAGService:
             List of SearchResult objects
         """
         
+        logger.info(f"🔍 RAG retrieve_context called: query='{query[:100]}', top_k={top_k}, min_similarity={min_similarity}")
+        
         # Check cache
         cache_key = f"{query}_{top_k}_{min_similarity}_{category_filter}"
         if cache_key in self.cache:
             cached_time, cached_results = self.cache[cache_key]
             if datetime.now() - cached_time < timedelta(seconds=self.cache_ttl):
-                logger.info(f"Using cached results for query: {query[:50]}")
+                logger.info(f"✅ Using cached results: {len(cached_results)} results")
                 return cached_results
         
         # Generate query embedding
         query_embedding = self._generate_embedding(query)
+        logger.debug(f"📊 Query embedding generated: shape={query_embedding.shape}")
         
         # Search vector store
+        logger.debug(f"🔍 Searching {len(self.vector_store.embeddings)} documents in vector store...")
         search_results = self.vector_store.search(query_embedding, top_k * 2)  # Get extra for filtering
+        logger.info(f"📚 Vector search found {len(search_results)} raw results")
         
         # Convert to SearchResult objects
         results = []
+        filtered_out = {"low_similarity": 0, "no_doc": 0, "category": 0}
+        
         for doc_id, score in search_results:
+            logger.debug(f"  Candidate: doc_id={doc_id[:8]}..., score={score:.4f}")
+            
             if score < min_similarity:
+                filtered_out["low_similarity"] += 1
+                logger.debug(f"    ❌ Filtered: score {score:.4f} < min_similarity {min_similarity}")
                 continue
             
             doc = self.vector_store.documents.get(doc_id)
             if not doc:
+                filtered_out["no_doc"] += 1
+                logger.warning(f"    ⚠️  Document {doc_id} not found in store!")
                 continue
             
             # Apply category filter if specified
             if category_filter and doc.metadata.get('category') != category_filter:
+                filtered_out["category"] += 1
+                logger.debug(f"    ❌ Filtered: category mismatch")
                 continue
             
             # Determine relevance level
@@ -307,6 +328,7 @@ class RAGService:
                 score=score,
                 relevance=relevance
             ))
+            logger.debug(f"    ✅ Added: score={score:.4f}, relevance={relevance}, content_len={len(doc.content)}")
             
             if len(results) >= top_k:
                 break
@@ -314,7 +336,11 @@ class RAGService:
         # Cache results
         self.cache[cache_key] = (datetime.now(), results)
         
-        logger.info(f"Retrieved {len(results)} results for query: {query[:50]}")
+        logger.info(f"✅ RAG Retrieved {len(results)} results (filtered: {filtered_out})")
+        if results:
+            scores = [r.score for r in results]
+            logger.info(f"   Similarity scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f}")
+        
         return results
     
     def enhance_prompt_with_context(
@@ -362,7 +388,10 @@ class RAGService:
                 "id": result.document.id,
                 "source": result.document.source,
                 "relevance": result.relevance,
-                "score": result.score
+                "score": result.score,
+                "similarity_score": result.score,  # Add this field for context_engineering_integrator
+                "similarity": result.score,  # Alias for compatibility
+                "content": result.document.content  # Include content for easier access
             })
         
         if not context_parts:
@@ -387,7 +416,15 @@ Please complete the task using the provided context as guidance where relevant."
             "enhancement_timestamp": datetime.now().isoformat()
         }
         
-        logger.info(f"Enhanced prompt with {len(used_documents)} context documents")
+        if used_documents:
+            scores = [doc["score"] for doc in used_documents]
+            logger.info(
+                f"✅ Enhanced prompt with {len(used_documents)} documents "
+                f"(scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f})"
+            )
+        else:
+            logger.warning("⚠️  No documents used in prompt enhancement")
+        
         return enhanced_prompt, metadata
     
     def clear_cache(self):

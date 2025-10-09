@@ -214,6 +214,7 @@ class Workflow(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    last_execution = Column(JSON, default=None)  # Quick access to latest execution summary
     
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
@@ -458,6 +459,7 @@ class WorkflowResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str]
     agents: List[Dict[str, Any]] = []
+    last_execution: Optional[Dict[str, Any]] = None
 
 class WorkflowExecutionCreate(BaseModel):
     workflow_id: int
