@@ -71,8 +71,8 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
       const skillData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
-        skill_type: formData.category, // Backend expects skill_type
-        category: formData.category,
+        skill_type: 'technical', // Backend expects: cognitive, technical, or communication
+        category: formData.category, // Backend expects: development, security, infrastructure, analytics
         implementation: formData.prerequisites || '',
         parameters: {
           difficulty: formData.difficulty,
@@ -83,6 +83,7 @@ export function CreateSkillModal({ open, onClose, onSuccess }: CreateSkillModalP
         }
       }
 
+      console.log('Creating skill with payload:', skillData)
       await createSkillMutation.mutateAsync(skillData as any)
       toast.success('Skill created successfully!')
       onSuccess()

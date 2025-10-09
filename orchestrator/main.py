@@ -37,6 +37,9 @@ from api.documents_v2 import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
+from api.analytics import router as analytics_router
+from api.workflow_history import router as workflow_history_router
+from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
 from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
@@ -49,7 +52,7 @@ from api.patterns import router as patterns_router
 from api.context import router as context_router
 from api.credentials import router as credentials_router
 from api.tools import router as tools_router
-from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools
+from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools - Fixed import
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -74,6 +77,7 @@ from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
 from api.models_endpoints import router as models_router  # PRD-15: Model management
+from api.execution_history import router as execution_history_router  # Enhanced execution history
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -369,6 +373,10 @@ app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
 app.include_router(memory_stats_router)  # Real memory stats from database
+app.include_router(analytics_router)
+app.include_router(workflow_history_router)
+app.include_router(execution_history_router)  # Enhanced execution history API
+app.include_router(benchmarking_router)  # Workflow and agent analytics
 app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)

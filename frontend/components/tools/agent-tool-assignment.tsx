@@ -105,7 +105,9 @@ function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps)
   // Use real API data instead of mock data
   const { data: agentsData = [], isLoading: agentsLoading } = useAgents()
   const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ limit: 100 })
-  const { data: toolAssignments = [] } = useMCPToolAssignments()
+  // Temporarily disable assignments API until backend endpoint is ready
+  // const { data: toolAssignments = [] } = useMCPToolAssignments()
+  const toolAssignments: any[] = [] // Mock empty assignments for now
   
   // Convert API data to match expected format
   const agents = (agentsData as any[]).map((agent: any) => ({
@@ -452,7 +454,7 @@ function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps)
                                 c.agentId === agent?.id && c.toolId === tool?.id
                               )
 
-                              console.log(`Agent: ${agent?.name} (${agent?.agent_type}), Tool: ${tool?.name}, Allowed: ${isAllowed}, Assigned: ${isAssigned}`)
+                              // console.log(`Agent: ${agent?.name} (${agent?.agent_type}), Tool: ${tool?.name}, Allowed: ${isAllowed}, Assigned: ${isAssigned}`)
 
                               return (
                                 <td key={tool?.id} className="p-3 text-center">
@@ -463,11 +465,6 @@ function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps)
                                       onClick={(e) => {
                                         e.preventDefault()
                                         e.stopPropagation()
-                                        console.log(`✅ Button clicked: Agent ${agent?.id} (${agent?.name}), Tool ${tool?.id} (${tool?.name})`)
-                                        console.log(`   - Agent Type: ${agent?.agent_type}`)
-                                        console.log(`   - Tool Name: ${tool?.name}`)
-                                        console.log(`   - Is Allowed: ${isAllowed}`)
-                                        console.log(`   - Currently Assigned: ${isAssigned}`)
                                         toggleAssignment(agent?.id || 0, tool?.id || 0)
                                       }}
                                       disabled={!isAllowed}

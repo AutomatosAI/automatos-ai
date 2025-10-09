@@ -71,6 +71,21 @@ export function AgentConfiguration({
   const { data: agentModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
+  // Initialize assigned skills when agent or agentSkills loads
+  useEffect(() => {
+    if (agentSkills && agentSkills.length > 0) {
+      const skillIds = agentSkills.map((skill: any) => skill.id)
+      console.log('Initializing assigned skills:', skillIds)
+      setAssignedSkills(skillIds)
+    } else if ((agent as any)?.skills && (agent as any).skills.length > 0) {
+      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
+      console.log('Initializing assigned skills from agent:', skillIds)
+      setAssignedSkills(skillIds)
+    } else {
+      setAssignedSkills([])
+    }
+  }, [agentSkills, agent])
+
   // Initialize config data when agent config is loaded
   useEffect(() => {
     if (agentConfig) {
@@ -169,25 +184,37 @@ export function AgentConfiguration({
       const currentSkillIds = (agent as any)?.skills?.map((s: any) => s.id) || []
       const newSkillIds = assignedSkills
       
+      console.log('Skill assignment - Current:', currentSkillIds)
+      console.log('Skill assignment - New:', newSkillIds)
+      
       // Find skills to add and remove
       const skillsToAdd = newSkillIds.filter((id: number) => !currentSkillIds.includes(id))
       const skillsToRemove = currentSkillIds.filter((id: number) => !newSkillIds.includes(id))
       
+      console.log('Skills to add:', skillsToAdd)
+      console.log('Skills to remove:', skillsToRemove)
+      
       // Add new skills
       for (const skillId of skillsToAdd) {
         try {
-          await apiClient.addSkillToAgent(selectedAgentId, String(skillId))
+          console.log(`Adding skill ${skillId} to agent ${selectedAgentId}`)
+          const result = await apiClient.addSkillToAgent(selectedAgentId, String(skillId))
+          console.log(`Successfully added skill ${skillId}:`, result)
         } catch (error) {
           console.error(`Failed to add skill ${skillId}:`, error)
+          toast.error(`Failed to add skill ${skillId}`)
         }
       }
       
       // Remove old skills
       for (const skillId of skillsToRemove) {
         try {
-          await apiClient.removeSkillFromAgent(selectedAgentId, String(skillId))
+          console.log(`Removing skill ${skillId} from agent ${selectedAgentId}`)
+          const result = await apiClient.removeSkillFromAgent(selectedAgentId, String(skillId))
+          console.log(`Successfully removed skill ${skillId}:`, result)
         } catch (error) {
           console.error(`Failed to remove skill ${skillId}:`, error)
+          toast.error(`Failed to remove skill ${skillId}`)
         }
       }
       
@@ -205,11 +232,12 @@ export function AgentConfiguration({
       }
       
       toast.dismiss()
-      toast.success('Configuration saved successfully!')
+      toast.success(`Configuration saved! Added ${skillsToAdd.length} skills, removed ${skillsToRemove.length} skills.`)
       setHasUnsavedChanges(false)
       
-      // Refresh agent data
-      window.location.reload()
+      // Force refresh agent data
+      console.log('Reloading page to refresh agent data...')
+      setTimeout(() => window.location.reload(), 500)
     } catch (error: any) {
       toast.dismiss()
       toast.error(error?.message || 'Failed to save configuration')

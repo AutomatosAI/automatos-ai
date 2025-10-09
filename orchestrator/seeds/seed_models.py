@@ -93,6 +93,37 @@ def seed_models():
              'active', 'Fastest and most cost-effective Claude model for high-volume operations')
         """))
         
+        # Google Gemini Models
+        db.execute(text("""
+            INSERT INTO llm_models (
+                provider, model_id, display_name, model_family,
+                capabilities, context_window, max_output_tokens,
+                input_cost_per_1k_tokens, output_cost_per_1k_tokens,
+                supports_functions, supports_vision, supports_streaming,
+                recommended_for, status, description
+            ) VALUES
+            -- Gemini 2.5 Pro
+            ('google', 'gemini-2.5-pro', 'Gemini 2.5 Pro', 'gemini-2.5',
+             '{"reasoning": "excellent", "coding": "excellent", "analysis": "excellent", "multimodal": "advanced"}',
+             1000000, 8192, 0.00125, 0.005, true, true, true,
+             '["complex_reasoning", "code_security", "multimodal_analysis", "long_context"]',
+             'active', 'Google''s most intelligent AI model with 1M token context window'),
+            
+            -- Gemini 2.5 Flash
+            ('google', 'gemini-2.5-flash', 'Gemini 2.5 Flash', 'gemini-2.5',
+             '{"speed": "very fast", "reasoning": "excellent", "efficiency": "excellent", "cost": "low"}',
+             1000000, 8192, 0.000075, 0.0003, true, true, true,
+             '["high_volume", "fast_processing", "real_time", "cost_efficient"]',
+             'active', 'Fast and efficient model with excellent performance at low cost'),
+            
+            -- Gemini 1.5 Pro
+            ('google', 'gemini-1.5-pro', 'Gemini 1.5 Pro', 'gemini-1.5',
+             '{"reasoning": "excellent", "context": "very large", "analysis": "excellent"}',
+             2000000, 8192, 0.00125, 0.005, true, true, true,
+             '["long_document_analysis", "complex_tasks", "research", "code_analysis"]',
+             'active', 'Previous generation Gemini with exceptional 2M token context window')
+        """))
+        
         db.commit()
         
         # Verify

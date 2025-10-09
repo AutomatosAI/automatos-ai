@@ -285,10 +285,10 @@ export function DocumentManagement() {
       >
         <div>
           <h1 className="text-3xl font-bold mb-2">
-            Document <span className="gradient-text">Management</span>
+            Knowledge <span className="gradient-text">Bases</span>
           </h1>
           <p className="text-muted-foreground text-lg">
-            Manage your knowledge base and document processing pipeline
+            Manage documents, code repositories, and knowledge sources
           </p>
         </div>
         

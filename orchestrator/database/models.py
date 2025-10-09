@@ -232,6 +232,8 @@ class WorkflowExecution(Base):
     started_at = Column(DateTime, default=func.now())
     completed_at = Column(DateTime)
     error_message = Column(Text)
+    execution_metadata = Column(JSON, default={})  # Analytics and tracking data (renamed from metadata - reserved word)
+    models_used = Column(JSON, default=list)  # Model usage tracking
     
     # Relationships
     workflow = relationship("Workflow", back_populates="executions")
@@ -317,6 +319,12 @@ class SkillCategory(str, Enum):
     SECURITY = "security"
     INFRASTRUCTURE = "infrastructure"
     ANALYTICS = "analytics"
+    DATA = "data"
+    PERFORMANCE = "performance"
+    AI = "ai"
+    DOCUMENTATION = "documentation"
+    SYSTEM = "system"
+    MONITORING = "monitoring"
 
 class WorkflowStatus(str, Enum):
     DRAFT = "draft"
@@ -333,7 +341,7 @@ class ExecutionStatus(str, Enum):
 class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    agent_type: AgentType
+    agent_type: str  # Flexible agent type - no enum restriction
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Support for tool assignment during creation

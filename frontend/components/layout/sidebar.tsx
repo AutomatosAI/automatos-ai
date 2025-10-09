@@ -16,7 +16,9 @@ import {
   ChevronLeft,
   Bot,
   MessageCircle,
-  Wrench
+  Wrench,
+  Database,
+  Lightbulb
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -30,55 +32,57 @@ const navigationItems = [
     name: 'Dashboard',
     href: '/',
     icon: LayoutDashboard,
+    iconColor: 'text-blue-400',
     description: 'System overview and metrics'
-  },
-  {
-    name: 'Agent Management',
-    href: '/agents',
-    icon: Bot,
-    description: 'Manage AI agents and skills'
-  },
-  {
-    name: 'AI Assistant',
-    href: '/chat',
-    icon: MessageCircle,
-    description: 'Chat with AI assistant'
-  },
-  {
-    name: 'Document Management',
-    href: '/documents',
-    icon: FileText,
-    description: 'Knowledge base and documents'
   },
   {
     name: 'Workflow Management',
     href: '/workflows',
     icon: GitBranch,
+    iconColor: 'text-purple-400',
     description: 'Create and monitor workflows'
   },
   {
-    name: 'Tools Dashboard',
+    name: 'Agent Management',
+    href: '/agents',
+    icon: Bot,
+    iconColor: 'text-orange-400',
+    description: 'Manage AI agents and skills'
+  },
+  {
+    name: 'Tools & Integrations',
     href: '/tools',
     icon: Wrench,
+    iconColor: 'text-yellow-400',
     description: 'Development and utility tools'
+  },
+  {
+    name: 'Knowledge Bases',
+    href: '/documents',
+    icon: Database,
+    iconColor: 'text-green-400',
+    description: 'Documents, code-graph & databases'
   },
   {
     name: 'Context Engineering',
     href: '/context',
     icon: Brain,
+    iconColor: 'text-pink-400',
     description: 'RAG system and field theory'
   },
   {
-    name: 'Performance Analytics',
+    name: 'Intelligence & Learning',
     href: '/analytics',
-    icon: BarChart3,
-    description: 'Metrics and system performance'
+    icon: Lightbulb,
+    iconColor: 'text-cyan-400',
+    description: 'AI insights and system learning'
   },
   {
-    name: 'Playbooks',
-    href: '/playbooks',
-    icon: FileText,
-    description: 'Mine and manage playbooks'
+    name: 'AI Assistant',
+    href: '/chat',
+    icon: MessageCircle,
+    iconColor: 'text-indigo-400',
+    description: 'Chat with AI assistant'
   }
 ]
 
@@ -151,7 +155,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 )}>
                   <Icon className={cn(
                     'w-5 h-5 transition-colors',
-                    isActive ? 'text-white' : 'text-muted-foreground group-hover:text-foreground'
+                    isActive ? 'text-white' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
                   )} />
                 </div>
                 

@@ -99,7 +99,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     skills: [] as string[],
     specializations: [] as string[],
     maxConcurrentTasks: 3,
-    priority: 'normal',
+    priority: 'medium',  // Backend expects: low, medium, high, critical
     autoStart: true
   })
 
@@ -135,11 +135,15 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   }
 
   const handleCreate = async () => {
+    console.log('🔥 CREATE AGENT CLICKED', { agentData, modelConfig })
+    
     if (!agentData.name || !agentData.type) {
+      console.error('❌ Validation failed:', { name: agentData.name, type: agentData.type })
       toast.error('Please provide agent name and type')
       return
     }
 
+    console.log('✅ Validation passed, creating agent...')
     try {
       // Prepare agent payload matching backend API expectations
       const agentPayload = {
@@ -155,12 +159,14 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         }
       }
       
-      console.log('Creating agent with payload:', agentPayload)
+      console.log('Creating agent with payload:', JSON.stringify(agentPayload, null, 2))
+      alert('Creating agent: ' + agentData.name)
       
       // Create the agent
       const newAgent: any = await (createAgentMutation as any).mutateAsync(agentPayload)
       
       console.log('Agent created successfully:', newAgent)
+      alert('Agent created! ID: ' + newAgent.id)
       
       // PRD-15: Update model configuration
       if (newAgent?.id) {
@@ -173,7 +179,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
           console.log('Model config set successfully')
         } catch (error) {
           console.error('Failed to set model config:', error)
-          toast.error('Agent created but model configuration failed')
+          alert('Model config failed: ' + JSON.stringify(error))
         }
       }
       
@@ -191,7 +197,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         skills: [],
         specializations: [],
         maxConcurrentTasks: 3,
-        priority: 'normal',
+        priority: 'medium',
         autoStart: true
       })
       setModelConfig({
@@ -206,8 +212,11 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       })
       setStep(1)
     } catch (error: any) {
-      console.error('Failed to create agent:', error)
-      toast.error(error?.message || 'Failed to create agent')
+      console.error('❌ CREATE AGENT ERROR:', error)
+      const errorMsg = error?.response?.data?.detail || error?.message || JSON.stringify(error)
+      console.error('Error details:', errorMsg)
+      alert('FAILED TO CREATE: ' + errorMsg)
+      toast.error('Failed: ' + errorMsg)
     }
   }
 
@@ -245,7 +254,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                 </Button>
               </CardHeader>
               
-              <CardContent className="overflow-y-auto max-h-[70vh] pr-2">
+              <CardContent className="pr-2">
                 <Tabs value={`step-${step}`} className="space-y-6">
                   <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
@@ -263,7 +272,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsList>
 
                   {/* Step 1: Agent Type Selection */}
-                  <TabsContent value="step-1" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
+                  <TabsContent value="step-1" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Choose Agent Type</h3>
                       <p className="text-muted-foreground mb-6">
@@ -316,7 +325,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 2: Configuration */}
-                  <TabsContent value="step-2" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
+                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Agent Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -361,7 +370,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="low">Low</SelectItem>
-                              <SelectItem value="normal">Normal</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
                               <SelectItem value="high">High</SelectItem>
                               <SelectItem value="critical">Critical</SelectItem>
                             </SelectContent>
@@ -430,7 +439,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 3: Model Configuration (PRD-15) */}
-                  <TabsContent value="step-3" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
+                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -448,7 +457,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         }
                       }}
                       agentType={agentData.type}
-                      provider={modelConfig.provider}
                     />
 
                     <div className="space-y-4 pt-4 border-t">
@@ -554,7 +562,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 4: Skills & Settings */}
-                  <TabsContent value="step-4" className="space-y-6 max-h-[calc(70vh-120px)] overflow-y-auto">
+                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
                       <p className="text-muted-foreground mb-6">

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata
 from database.models import Agent
+from core.memory_prompt_injector import MemoryPromptInjector
 
 # PHASE 2: Import communication components
 try:
@@ -99,6 +100,7 @@ class AgentExecutionManager:
         self.max_parallel_executions = max_parallel_executions
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
+        self.memory_injector = MemoryPromptInjector()  # Memory injection support
         
         # Execution tracking
         self.active_executions: Dict[str, SubtaskExecution] = {}
@@ -125,7 +127,9 @@ class AgentExecutionManager:
         agent_assignments: Dict[str, Any],
         context_enhancements: Dict[str, Any],
         execution_id: int,
-        workflow_id: int
+        workflow_id: int,
+        memory_retrieval_results: Optional[Dict[str, Any]] = None,
+        execution_strategy: str = "parallel"  # Add strategy parameter
     ) -> Dict[str, SubtaskExecution]:
         """
         Execute all workflow subtasks with assigned agents.
@@ -173,17 +177,24 @@ class AgentExecutionManager:
             except Exception as e:
                 self.logger.warning(f"Failed to create shared context: {e}")
         
-        # 1. Create execution plan
-        execution_plan = self._create_execution_plan(subtasks)
+        # 1. Create execution plan based on strategy
+        execution_plan = self._create_execution_plan(subtasks, execution_strategy)
         
-        # 2. Execute subtasks in parallel groups
+        # 2. Execute subtasks based on strategy
         all_results = {}
         self.shared_context = shared_context  # Store for use in subtask execution
         
+        # Store results for memory sharing between sequential tasks
+        if execution_strategy == "sequential":
+            self.execution_memory = {}  # Store outputs for next task
+        
         for group_idx, parallel_group in enumerate(execution_plan.parallel_groups):
-            self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
+            if execution_strategy == "sequential":
+                self.logger.info(f"📦 Executing task {group_idx + 1}/{len(execution_plan.parallel_groups)} sequentially")
+            else:
+                self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
             
-            # Execute this group in parallel
+            # Execute this group (1 task if sequential, multiple if parallel)
             group_tasks = []
             for subtask_id in parallel_group:
                 subtask_idx = int(subtask_id.split("_")[1])
@@ -204,7 +215,8 @@ class AgentExecutionManager:
                     agent_match=agent_match,
                     context_enh=context_enh,
                     execution_id=execution_id,
-                    workflow_id=workflow_id
+                    workflow_id=workflow_id,
+                    memory_retrieval_results=memory_retrieval_results
                 )
                 group_tasks.append(task)
             
@@ -226,27 +238,39 @@ class AgentExecutionManager:
         
         return all_results
     
-    def _create_execution_plan(self, subtasks: List[Dict[str, Any]]) -> ExecutionPlan:
+    def _create_execution_plan(self, subtasks: List[Dict[str, Any]], execution_strategy: str = "parallel") -> ExecutionPlan:
         """
-        Create execution plan with parallelization strategy.
+        Create execution plan based on execution strategy.
         
-        For now: simple sequential plan (can be enhanced with dependency analysis)
+        Args:
+            subtasks: List of subtasks to execute
+            execution_strategy: "sequential" or "parallel"
         """
         
-        # Simple strategy: execute in order, max N in parallel
         parallel_groups = []
-        current_group = []
         
-        for idx in range(len(subtasks)):
-            subtask_id = f"subtask_{idx}"
-            current_group.append(subtask_id)
+        if execution_strategy == "sequential":
+            # Sequential: each task in its own group
+            for idx in range(len(subtasks)):
+                subtask_id = f"subtask_{idx}"
+                parallel_groups.append([subtask_id])
+                if idx < len(subtasks):
+                    task_desc = subtasks[idx].get('description', '')[:50] if idx < len(subtasks) else ''
+                    self.logger.info(f"📝 Task {idx + 1} will execute sequentially: {task_desc}")
+        else:
+            # Parallel: group tasks up to max_parallel_executions
+            current_group = []
             
-            if len(current_group) >= self.max_parallel_executions:
+            for idx in range(len(subtasks)):
+                subtask_id = f"subtask_{idx}"
+                current_group.append(subtask_id)
+                
+                if len(current_group) >= self.max_parallel_executions:
+                    parallel_groups.append(current_group)
+                    current_group = []
+            
+            if current_group:
                 parallel_groups.append(current_group)
-                current_group = []
-        
-        if current_group:
-            parallel_groups.append(current_group)
         
         # Estimate duration
         total_duration = sum(
@@ -268,7 +292,8 @@ class AgentExecutionManager:
         agent_match: Dict[str, Any],
         context_enh: Dict[str, Any],
         execution_id: int,
-        workflow_id: int
+        workflow_id: int,
+        memory_retrieval_results: Optional[Dict[str, Any]] = None
     ) -> SubtaskExecution:
         """Execute a single subtask with assigned agent"""
         
@@ -298,6 +323,15 @@ class AgentExecutionManager:
         else:
             context_quality = 0.0
             prompt_used = description
+        
+        # Inject memory into the prompt if available
+        if memory_retrieval_results and agent_id:
+            prompt_used = self.memory_injector.inject_memory_into_prompt(
+                original_prompt=prompt_used,
+                agent_id=agent_id,
+                memory_retrieval_results=memory_retrieval_results,
+                subtask_id=subtask_id
+            )
             
         execution = SubtaskExecution(
             subtask_id=subtask_id,

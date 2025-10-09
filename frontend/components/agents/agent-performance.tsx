@@ -77,16 +77,21 @@ export function AgentPerformance({
   const performanceMetrics = useMemo(() => {
     if (!agentPerformance) return null
 
+    const perf = agentPerformance as any
+    // Check if agent has any real performance data
+    const hasRealData = perf.total_tasks > 0
+
     return {
-      overallScore: agentPerformance.overall_score || 95,
-      successRate: agentPerformance.success_rate || 92,
-      averageResponseTime: agentPerformance.average_response_time || 1.2,
-      totalTasks: agentPerformance.total_tasks || 156,
-      completedTasks: agentPerformance.completed_tasks || 144,
-      failedTasks: agentPerformance.failed_tasks || 12,
-      averageMemoryUsage: agentPerformance.average_memory_usage || 65,
-      averageCpuUsage: agentPerformance.average_cpu_usage || 35,
-      uptime: agentPerformance.uptime_percentage || 99.8
+      overallScore: perf.overall_score || 0,
+      successRate: perf.success_rate || 0,
+      averageResponseTime: perf.average_response_time || 0,
+      totalTasks: perf.total_tasks || 0,
+      completedTasks: perf.completed_tasks || 0,
+      failedTasks: perf.failed_tasks || 0,
+      averageMemoryUsage: perf.average_memory_usage || 0,
+      averageCpuUsage: perf.average_cpu_usage || 0,
+      uptime: perf.uptime_percentage || 0,
+      hasRealData
     }
   }, [agentPerformance])
 
@@ -114,127 +119,6 @@ export function AgentPerformance({
   // TODO: Fetch performance trend data from API endpoint
   // For now, using empty array - will be populated when API endpoint is ready
   const performanceTrend: Array<{time: string, performance: number}> = []
-
-  if (showAnalytics) {
-    // Show system-wide analytics
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">System Analytics</h2>
-            <p className="text-muted-foreground">
-              Comprehensive performance analytics across all agents
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <Select value={timeRange} onValueChange={setTimeRange}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1h">Last Hour</SelectItem>
-                <SelectItem value="24h">Last 24h</SelectItem>
-                <SelectItem value="7d">Last 7 Days</SelectItem>
-                <SelectItem value="30d">Last 30 Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* System Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
-                  <Activity className="w-5 h-5 text-blue-400" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">{systemAnalytics?.totalAgents || 0}</h3>
-                <p className="text-muted-foreground text-sm">Total Agents</p>
-                <p className="text-xs text-muted-foreground">
-                  {systemAnalytics?.activeAgents || 0} active
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
-                  <TrendingUp className="w-5 h-5 text-green-400" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">{systemAnalytics?.averagePerformance.toFixed(1) || '0'}%</h3>
-                <p className="text-muted-foreground text-sm">Avg Performance</p>
-                <p className="text-xs text-green-400">+2.3%</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
-                  <Target className="w-5 h-5 text-orange-400" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">{systemAnalytics?.utilizationRate.toFixed(0) || 0}%</h3>
-                <p className="text-muted-foreground text-sm">Utilization</p>
-                <p className="text-xs text-orange-400">CPU usage based</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
-                  <CheckCircle className="w-5 h-5 text-purple-400" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">
-                  {systemAnalytics?.totalExecutions > 0 
-                    ? ((systemAnalytics.successfulExecutions / systemAnalytics.totalExecutions) * 100).toFixed(1)
-                    : '0'
-                  }%
-                </h3>
-                <p className="text-muted-foreground text-sm">Success Rate</p>
-                <p className="text-xs text-purple-400">
-                  {systemAnalytics?.successfulExecutions || 0} / {systemAnalytics?.totalExecutions || 0} tasks
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Agent Types Distribution */}
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle>Agent Distribution by Type</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Object.entries(systemAnalytics?.agentsByType || {}).map(([type, count]) => (
-                <div key={type} className="text-center">
-                  <div className="text-2xl font-bold text-primary">{count as number}</div>
-                  <div className="text-sm text-muted-foreground capitalize">
-                    {type.replace('_', ' ')}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
 
   if (!effectiveAgentId) {
     return (
@@ -347,13 +231,13 @@ export function AgentPerformance({
                 🤖
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold">{selectedAgent.name}</h3>
+                <h3 className="text-lg font-semibold">{(selectedAgent as any).name}</h3>
                 <p className="text-sm text-muted-foreground capitalize">
-                  {selectedAgent.agent_type?.replace('_', ' ')} • Created {new Date(selectedAgent.created_at).toLocaleDateString()}
+                  {(selectedAgent as any).agent_type?.replace('_', ' ')} • Created {new Date((selectedAgent as any).created_at).toLocaleDateString()}
                 </p>
               </div>
               <Badge variant="outline" className="capitalize">
-                {selectedAgent.status}
+                {(selectedAgent as any).status}
               </Badge>
             </div>
           </CardContent>
@@ -378,7 +262,7 @@ export function AgentPerformance({
             </Card>
         ))}
       </div>
-      ) : performanceMetrics ? (
+      ) : performanceMetrics && performanceMetrics.hasRealData ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
             <CardContent className="p-6">
@@ -448,6 +332,21 @@ export function AgentPerformance({
             </CardContent>
           </Card>
         </div>
+      ) : performanceMetrics ? (
+        <Card className="glass-card">
+          <CardContent className="p-12">
+            <div className="text-center space-y-4">
+              <Activity className="w-16 h-16 mx-auto text-muted-foreground opacity-50" />
+              <div>
+                <h3 className="text-lg font-semibold mb-2">No Performance Data Yet</h3>
+                <p className="text-muted-foreground text-sm">
+                  This agent hasn't executed any workflow tasks yet.<br />
+                  Performance metrics will appear after the first workflow execution.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Detailed Performance Tabs */}

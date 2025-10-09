@@ -292,17 +292,21 @@ Retries: {execution.retry_count}
         
         try:
             # 1. Consolidate agent memories (short-term → long-term)
+            agent_id_map = {}  # Store agent_name -> agent_id mapping
+            
+            # First, build a complete mapping of agent names to IDs
+            if subtask_executions:
+                for execution in subtask_executions.values():
+                    if execution.agent_id and execution.agent_id != 0 and execution.agent_name:
+                        agent_id_map[execution.agent_name] = execution.agent_id
+                        
+            self.logger.info(f"Agent ID mapping: {agent_id_map}")
+            
             for agent_name, performance in aggregated_results.agent_performance.items():
                 try:
-                    # Find agent ID from the execution data if provided
-                    agent_id = None
-                    if subtask_executions:
-                        for execution in subtask_executions.values():
-                            if execution.agent_name == agent_name and execution.agent_id != 0:
-                                agent_id = execution.agent_id
-                                break
+                    # Get agent ID from our mapping
+                    agent_id = agent_id_map.get(agent_name)
                     
-                    # If no agent_id found, skip consolidation for this agent
                     if agent_id is None:
                         self.logger.warning(f"Could not find agent_id for {agent_name}, skipping consolidation")
                         continue
@@ -310,17 +314,17 @@ Retries: {execution.retry_count}
                     # Consolidate if quality was high
                     if aggregated_results.quality_scores.overall >= 0.7:
                         try:
-                            await self.memory_system.consolidate_memories(agent_id)
+                            # Actually consolidate memories
+                            consolidation_result = await self.memory_system.consolidate_memories(agent_id)
                             consolidation["agents_consolidated"].append(agent_name)
-                            self.logger.info(f"Consolidated memories for agent {agent_name} (ID: {agent_id})")
+                            
+                            # Track actual patterns extracted
+                            if hasattr(consolidation_result, 'patterns_extracted'):
+                                consolidation["patterns_extracted"] += consolidation_result.patterns_extracted
+                            
+                            self.logger.info(f"✅ Consolidated memories for agent {agent_name} (ID: {agent_id})")
                         except Exception as consolidate_error:
                             self.logger.error(f"Failed to consolidate memories for {agent_name}: {consolidate_error}")
-                    
-                    # Consolidate if quality was high
-                    if aggregated_results.quality_scores.overall >= 0.7:
-                        # In real implementation, this would call memory_system.consolidate_memories()
-                        # For now, we track that consolidation should happen
-                        consolidation["agents_consolidated"].append(agent_name)
                         
                 except Exception as e:
                     self.logger.warning(f"Failed to consolidate for agent {agent_name}: {e}")

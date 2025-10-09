@@ -30,6 +30,19 @@ from database.models import (
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
 
+# Import new services (lazy import to avoid circular deps)
+def get_action_executor():
+    from services.agent_action_executor import get_action_executor as _get_executor
+    return _get_executor()
+
+def get_monitoring_service():
+    from services.monitoring_service import get_monitoring_service as _get_monitor
+    return _get_monitor()
+
+def get_rag_service():
+    from services.rag_service import get_rag_service as _get_rag
+    return _get_rag()
+
 logger = logging.getLogger(__name__)
 
 # Agent lifecycle states
@@ -537,7 +550,8 @@ class AgentFactory:
         system_prompt: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         use_memory: bool = True,
-        max_retries: int = 2
+        max_retries: int = 2,
+        enable_actions: bool = True
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
@@ -593,6 +607,21 @@ class AgentFactory:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
             
+            # Check if actions are needed and add capabilities
+            action_executor = None
+            if enable_actions and self._requires_actions(prompt):
+                action_executor = get_action_executor()
+                action_prompt = """\n\nYou have access to perform real actions:
+- read_file(path) - Read file contents
+- write_file(path, content) - Create/update files
+- execute_command(cmd) - Run shell commands
+- list_directory(path) - List directory contents
+
+To use actions, respond with JSON blocks like:
+{"action": "write_file", "params": {"path": "test.py", "content": "print('hello')"}}
+\nYou can include multiple action blocks in your response."""
+                prompt = prompt + action_prompt
+            
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
@@ -603,6 +632,11 @@ class AgentFactory:
                     # REAL LLM API CALL
                     response = await agent_runtime.llm_manager.generate_response(messages)
                     execution_time = time.time() - start_time
+                    
+                    # Process any action requests in the response
+                    action_results = []
+                    if action_executor and response and response.content and '{"action"' in response.content:
+                        action_results = await self._process_agent_actions(response.content, action_executor)
                     
                     if response and response.content:
                         # Success! Update metrics
@@ -627,6 +661,17 @@ class AgentFactory:
                         # Update lifecycle state
                         agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
                         
+                        # Record in monitoring service
+                        monitoring = get_monitoring_service()
+                        monitoring.record_agent_execution(
+                            agent_id=agent_runtime.agent_id,
+                            agent_name=agent_runtime.metadata.name,
+                            task=prompt[:100],
+                            execution_time_ms=execution_time * 1000,
+                            tokens_used=tokens_used,
+                            success=True
+                        )
+                        
                         # Return successful result
                         return {
                             "status": "success",
@@ -641,8 +686,11 @@ class AgentFactory:
                                 "tokens_used": tokens_used,
                                 "model": response.model,
                                 "provider": response.provider,
-                                "attempt": attempt + 1
+                                "attempt": attempt + 1,
+                                "actions_enabled": enable_actions,
+                                "actions_executed": len(action_results)
                             },
+                            "action_results": action_results,
                             "metrics": {
                                 "total_executions": agent_runtime.execution_count,
                                 "success_rate": agent_runtime.performance_metrics.get("success_rate", 1.0),
@@ -830,6 +878,92 @@ class AgentFactory:
         }
         
         return test_results
+    
+    # ======================================================================
+    # ACTION EXECUTOR HELPER METHODS
+    # ======================================================================
+    
+    def _requires_actions(self, prompt: str) -> bool:
+        """Check if the prompt requires action capabilities"""
+        action_keywords = [
+            'write', 'create', 'file', 'save', 'execute', 'run',
+            'command', 'shell', 'list', 'read', 'directory', 'folder',
+            'delete', 'remove', 'mkdir', 'code', 'script', 'program'
+        ]
+        prompt_lower = prompt.lower()
+        return any(keyword in prompt_lower for keyword in action_keywords)
+    
+    async def _process_agent_actions(self, response: str, action_executor) -> List[Dict[str, Any]]:
+        """Process action requests from agent response"""
+        import re
+        results = []
+        
+        # Find all JSON action blocks in the response
+        action_pattern = r'\{"action":\s*"([^"]+)"[^}]+\}'
+        matches = re.finditer(action_pattern, response)
+        
+        for match in matches:
+            try:
+                action_json = match.group(0)
+                action_data = json.loads(action_json)
+                
+                action_type = action_data.get('action')
+                params = action_data.get('params', {})
+                
+                # Execute the requested action
+                if action_type == 'read_file':
+                    success, content = action_executor.read_file(params.get('path', ''))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': content
+                    })
+                elif action_type == 'write_file':
+                    success, message = action_executor.write_file(
+                        params.get('path', ''),
+                        params.get('content', '')
+                    )
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': message
+                    })
+                elif action_type == 'execute_command':
+                    success, output = action_executor.execute_command(params.get('command', ''))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': output
+                    })
+                elif action_type == 'list_directory':
+                    success, items = action_executor.list_directory(params.get('path', '.'))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': items
+                    })
+                else:
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': False,
+                        'result': f"Unknown action: {action_type}"
+                    })
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to process action: {e}")
+                results.append({
+                    'action': 'unknown',
+                    'params': {},
+                    'success': False,
+                    'result': str(e)
+                })
+        
+        return results
     
     # ======================================================================
     # PHASE 3: MCP TOOLS INTEGRATION METHODS

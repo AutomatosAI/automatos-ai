@@ -96,8 +96,12 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
 
   return (
     <div className="space-y-6">
-      {/* Live Status Indicator */}
-      <div className="flex justify-end">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">Document Processing</h2>
+          <p className="text-muted-foreground">Real-time processing pipeline and queue management</p>
+        </div>
         <LiveIndicator isConnected={isConnected} lastUpdate={lastUpdate} />
       </div>
 
@@ -110,8 +114,8 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-sm font-medium text-muted-foreground">Processed Today</p>
                 <p className="text-2xl font-bold">{processingStats.total_processed_today}</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
-                <CheckCircle className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-400" />
               </div>
             </div>
           </CardContent>
@@ -124,8 +128,8 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-sm font-medium text-muted-foreground">Currently Processing</p>
                 <p className="text-2xl font-bold">{liveProcessingDocuments.length || processingDocuments.length}</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
-                <Zap className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-blue-400" />
               </div>
             </div>
           </CardContent>
@@ -138,8 +142,8 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-sm font-medium text-muted-foreground">Avg Time</p>
                 <p className="text-2xl font-bold">{processingStats.average_processing_time}s</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
-                <Clock className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-purple-400" />
               </div>
             </div>
           </CardContent>
@@ -152,8 +156,8 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
                 <p className="text-sm font-medium text-muted-foreground">Success Rate</p>
                 <p className="text-2xl font-bold">{processingStats.success_rate}%</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
-                <BarChart3 className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <BarChart3 className="w-5 h-5 text-orange-400" />
               </div>
             </div>
           </CardContent>

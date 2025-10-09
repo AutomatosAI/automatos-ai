@@ -744,7 +744,7 @@ async def get_queue_status(db: Session = Depends(get_db)):
                 "file_type": doc.file_type,
                 "file_size": doc.file_size,
                 "failed_at": doc.processed_date.isoformat() if doc.processed_date else None,
-                "error": doc.processing_metadata.get('error', 'Unknown error') if doc.processing_metadata else 'Unknown error'
+                "error": doc.doc_metadata.get('error', 'Unknown error') if doc.doc_metadata else 'Processing failed'
             })
         
         # Calculate stats for today

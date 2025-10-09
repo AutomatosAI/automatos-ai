@@ -203,7 +203,9 @@ class AgentCommunicationProtocol:
                 if ack_received:
                     self.delivery_tracking[message.id]["status"] = "acknowledged"
             
-            self.logger.info(f"Message {message.id} sent from agent {from_id} to {to_id}")
+            self.logger.info(f"📨 Message {message.id} sent from agent {from_id} to {to_id}")
+            self.logger.info(f"  📤 Type: {message_type.value} | Priority: {priority}")
+            self.logger.info(f"  📝 Content: {str(content)[:200]}...")
             
             return MessageResult(
                 success=True,

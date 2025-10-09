@@ -1180,6 +1180,13 @@
     })
   }
 
+  async duplicateWorkflow(workflowId: number, data?: any) {
+    return this.request(`/api/workflows/${workflowId}/duplicate`, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined
+    })
+  }
+
   async cleanupOldWorkflows(days: number = 30) {
     return this.request(`/api/workflows/cleanup/old?days=${days}`, {
       method: 'DELETE'

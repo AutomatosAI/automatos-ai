@@ -88,7 +88,7 @@ export function SkillConfigurationModal({ open, onClose, onSuccess, skill }: Ski
       const skillData = {
         name: formData.name.trim(),
         description: formData.description.trim(),
-        skill_type: formData.category,
+        skill_type: skill.skill_type || 'technical', // Preserve existing skill_type
         category: formData.category,
         implementation: formData.prerequisites || '',
         parameters: {
@@ -100,6 +100,7 @@ export function SkillConfigurationModal({ open, onClose, onSuccess, skill }: Ski
         }
       }
 
+      console.log('Updating skill with payload:', skillData)
       await updateSkillMutation.mutateAsync({ id: skill.id.toString(), data: skillData })
       toast.success('Skill updated successfully!')
       onSuccess()

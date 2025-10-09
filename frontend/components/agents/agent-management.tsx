@@ -241,7 +241,7 @@ export function AgentManagement() {
         transition={{ duration: 0.6, delay: 0.3 }}
       >
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:grid-cols-6">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
             <TabsTrigger value="roster" className="flex items-center gap-2">
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Agent Roster</span>
@@ -262,16 +262,12 @@ export function AgentManagement() {
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
-              <BarChart className="w-4 h-4" />
-              <span className="hidden sm:inline">Analytics</span>
-            </TabsTrigger>
           </TabsList>
 
           {/* Agent Roster Tab */}
           <TabsContent value="roster" className="space-y-6">
             <AgentRoster
-              agents={agents}
+              agents={agents as any[]}
               loading={agentsLoading}
               searchTerm={searchTerm}
               statusFilter={statusFilter}
@@ -315,16 +311,6 @@ export function AgentManagement() {
               agents={agents as any[]}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
-            />
-          </TabsContent>
-
-          {/* Analytics Tab */}
-          <TabsContent value="analytics" className="space-y-6">
-            <AgentPerformance
-              agents={agents as any[]}
-              agentStats={agentStats}
-              selectedAgentId={selectedAgentId}
-              showAnalytics={true}
             />
           </TabsContent>
         </Tabs>

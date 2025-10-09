@@ -311,29 +311,42 @@ class ContextEngineeringIntegrator:
     async def _retrieve_rag_context(self, query: str) -> Dict[str, Any]:
         """Call existing RAG endpoint for context retrieval"""
         
+        # Use real RAG service with vector search
         try:
-            url = f"{self.api_base_url}/api/documents/rag/retrieve"
+            from services.rag_service import get_rag_service
+            rag_service = get_rag_service()
             
-            params = {
+            # Get enhanced prompt with context
+            enhanced_prompt, metadata = rag_service.enhance_prompt_with_context(
+                original_prompt=query,
+                max_context_tokens=2000
+            )
+            
+            # Extract the context portion
+            context_start = enhanced_prompt.find("## Relevant Context")
+            context_end = enhanced_prompt.find("## Original Task")
+            
+            if context_start != -1 and context_end != -1:
+                context = enhanced_prompt[context_start:context_end].strip()
+            else:
+                context = ""
+            
+            return {
                 "query": query,
-                "max_chunks": self.rag_settings["max_chunks"],
-                "max_tokens": self.rag_settings["max_tokens"],
-                "diversity": self.rag_settings["diversity"]
+                "chunks": metadata.get("sources", []),
+                "context": context,
+                "total_tokens": metadata.get("total_context_tokens", 0),
+                "enhanced": metadata.get("enhanced", False),
+                "documents_used": metadata.get("documents_used", 0)
             }
-            
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, params=params)
-                response.raise_for_status()
-                return response.json()
-                
         except Exception as e:
-            self.logger.error(f"RAG retrieval failed: {e}")
+            self.logger.warning(f"RAG retrieval failed: {e}, returning empty context")
             return {
                 "query": query,
                 "chunks": [],
                 "context": "",
                 "total_tokens": 0,
-                "error": str(e)
+                "note": f"RAG service error: {str(e)}"
             }
     
     def _should_use_semantic_search(self, subtask: Dict[str, Any]) -> bool:

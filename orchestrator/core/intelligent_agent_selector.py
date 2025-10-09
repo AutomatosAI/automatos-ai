@@ -84,7 +84,7 @@ class IntelligentAgentSelector:
         max_agents_per_task: int = 3
     ) -> Dict[str, List[AgentMatch]]:
         """
-        Select best agents for each subtask.
+        Select best agents for each subtask with DIVERSITY preference.
         
         Args:
             subtasks: List of subtask dicts from RealTaskDecomposer
@@ -94,6 +94,7 @@ class IntelligentAgentSelector:
             Dict mapping subtask index to ranked list of agent matches
         """
         results = {}
+        assigned_agents = {}  # Track agent assignments {agent_id: count}
         
         for idx, subtask in enumerate(subtasks):
             subtask_id = f"subtask_{idx}"
@@ -104,16 +105,38 @@ class IntelligentAgentSelector:
             # Find matching agents
             agent_matches = await self._find_matching_agents(requirements)
             
+            # Apply diversity bonus/penalty to encourage using different agents
+            for match in agent_matches:
+                assignment_count = assigned_agents.get(match.agent_id, 0)
+                
+                # Reduce score for already-assigned agents (20% penalty per assignment)
+                if assignment_count > 0:
+                    diversity_penalty = assignment_count * 0.2
+                    match.match_score = max(0.1, match.match_score - diversity_penalty)
+                    match.reasoning += f" (Score reduced by {diversity_penalty:.1f} for diversity - already assigned {assignment_count} times)"
+            
             # Rank and filter
             ranked_matches = self._rank_agent_matches(agent_matches)
             top_matches = ranked_matches[:max_agents_per_task]
             
-            results[subtask_id] = top_matches
+            # Track assignment of best agent
+            if top_matches:
+                best_agent = top_matches[0]
+                assigned_agents[best_agent.agent_id] = assigned_agents.get(best_agent.agent_id, 0) + 1
+                
+                self.logger.info(
+                    f"✅ Subtask {idx}: '{subtask.get('description', 'Unknown')[:50]}' - "
+                    f"Assigned to {best_agent.agent_name} (ID: {best_agent.agent_id})"
+                )
+            else:
+                self.logger.warning(f"⚠️ Subtask {idx}: No suitable agents found")
             
-            self.logger.info(
-                f"✅ Subtask {idx}: '{subtask.get('description', 'Unknown')[:50]}' - "
-                f"Found {len(top_matches)} suitable agents"
-            )
+            results[subtask_id] = top_matches
+        
+        # Log diversity statistics
+        unique_agents = len(assigned_agents)
+        total_tasks = len(subtasks)
+        self.logger.info(f"📊 Agent Diversity: {unique_agents} unique agents used for {total_tasks} tasks")
         
         return results
     

@@ -328,6 +328,18 @@ class SkillType(str, Enum):
     TECHNICAL = "technical"
     COMMUNICATION = "communication"
 
+class SkillCategory(str, Enum):
+    DEVELOPMENT = "development"
+    SECURITY = "security"
+    INFRASTRUCTURE = "infrastructure"
+    ANALYTICS = "analytics"
+    DATA = "data"
+    PERFORMANCE = "performance"
+    AI = "ai"
+    DOCUMENTATION = "documentation"
+    SYSTEM = "system"
+    MONITORING = "monitoring"
+
 class WorkflowStatus(str, Enum):
     DRAFT = "draft"
     ACTIVE = "active"
@@ -343,7 +355,7 @@ class ExecutionStatus(str, Enum):
 class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    agent_type: AgentType
+    agent_type: str  # Flexible agent type - no enum restriction
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Phase 3 - Tools

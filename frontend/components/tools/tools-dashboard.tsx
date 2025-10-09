@@ -17,7 +17,7 @@
 
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Search, 
@@ -156,20 +156,26 @@ interface Tool {
 }
 
 export function ToolsDashboard() {
-  // Fetch real data from API
-  const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ limit: 100 })
-  const { data: statsData } = useMCPToolsStats()
-  const { data: categoriesData } = useMCPToolCategories()
-  const { data: toolAssignments = [] } = useMCPToolAssignments()
+  // Fetch real data from API with error handling
+  const { data: mcpTools = [], isLoading: toolsLoading, error: toolsError } = useMCPTools({ limit: 100 })
+  const { data: statsData, error: statsError } = useMCPToolsStats()
+  const { data: categoriesData, error: categoriesError } = useMCPToolCategories()
+  // Temporarily disable assignments API until backend endpoint is ready
+  // const { data: toolAssignments = [], error: assignmentsError } = useMCPToolAssignments(false)
+  const toolAssignments: any[] = [] // Mock empty assignments for now
   const updateToolMutation = useUpdateMCPTool()
 
-  const [filteredTools, setFilteredTools] = useState<any[]>([])
-  const [tools, setTools] = useState<any[]>([])
+  // Log any API errors (but don't spam the console)
+  if (toolsError && !toolsError.message?.includes('422')) console.error('Tools API Error:', toolsError)
+  if (statsError && !statsError.message?.includes('422')) console.error('Stats API Error:', statsError)
+  if (categoriesError && !categoriesError.message?.includes('422')) console.error('Categories API Error:', categoriesError)
+
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState('name')
   const [loading, setLoading] = useState(false)
+  const [toolModifications, setToolModifications] = useState<Record<number, Partial<Tool>>>({})
   
   // Modal states
   const [configModalOpen, setConfigModalOpen] = useState(false)
@@ -178,35 +184,40 @@ export function ToolsDashboard() {
   const [createToolModalOpen, setCreateToolModalOpen] = useState(false) // Phase 3
 
   // Convert MCP tools to match Tool interface for UI compatibility
-  useEffect(() => {
-    const convertedTools = (mcpTools as any[]).map((tool: any) => {
-      // Check if this tool is assigned to any agent
-      const isAssigned = (toolAssignments as any[]).some((assignment: any) => 
-        assignment.tool_id === tool.id && assignment.enabled
-      )
-      
-      return {
-        ...tool,
-        isInstalled: isAssigned, // Use real assignment status
-        isConfigured: isAssigned, // Assume configured if assigned
-        rating: 0, // TODO: Add ratings system
-        usageCount: 0, // TODO: Track from usage logs
-        permissions: [], // TODO: Map from tool data
-        requiredCredentials: Object.keys(tool.credentials_schema?.required || {}),
-        supportedEnvironments: ['production', 'staging'], // TODO: Get from tool metadata
-        lastUpdated: tool.updated_at,
-        pricing: 'Free' // TODO: Add pricing info to backend
-      }
-    })
-    setTools(convertedTools)
-  }, [mcpTools, toolAssignments])
+  const tools = useMemo(() => {
+    try {
+      return (mcpTools as any[]).map((tool: any) => {
+        // Check if this tool is assigned to any agent
+        const isAssigned = (toolAssignments as any[]).some((assignment: any) => 
+          assignment.tool_id === tool.id && assignment.enabled
+        )
+        
+        const baseTool = {
+          ...tool,
+          isInstalled: isAssigned, // Use real assignment status
+          isConfigured: isAssigned, // Assume configured if assigned
+          rating: 0, // TODO: Add ratings system
+          usageCount: 0, // TODO: Track from usage logs
+          permissions: [], // TODO: Map from tool data
+          requiredCredentials: Object.keys(tool.credentials_schema?.required || {}),
+          supportedEnvironments: ['production', 'staging'], // TODO: Get from tool metadata
+          lastUpdated: tool.updated_at,
+          pricing: 'Free' // TODO: Add pricing info to backend
+        }
+        
+        // Apply any local modifications
+        const modifications = toolModifications[tool.id]
+        return modifications ? { ...baseTool, ...modifications } : baseTool
+      })
+    } catch (error) {
+      console.error('Error converting tools:', error)
+      return []
+    }
+  }, [mcpTools, toolAssignments, toolModifications])
 
-  useEffect(() => {
-    filterTools()
-  }, [selectedCategory, searchQuery, sortBy, tools])
-
-  const filterTools = () => {
-    let filtered = tools
+  // Filter and sort tools using useMemo to avoid infinite loops
+  const filteredTools = useMemo(() => {
+    let filtered = [...tools]
 
     // Filter by category
     if (selectedCategory !== 'all') {
@@ -240,8 +251,8 @@ export function ToolsDashboard() {
       }
     })
 
-    setFilteredTools(filtered)
-  }
+    return filtered
+  }, [tools, selectedCategory, searchQuery, sortBy])
 
   const getToolStats = () => {
     // Use real stats from API if available and has the expected structure
@@ -274,37 +285,70 @@ export function ToolsDashboard() {
     return tools.filter(tool => tool?.category === categoryId)?.length || 0
   }
 
-  // Show loading state
+  // Show loading state with skeleton components
   if (toolsLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Activity className="h-12 w-12 animate-spin mx-auto mb-4 text-primary" />
-          <p className="text-muted-foreground">Loading tools...</p>
+      <div className="space-y-6">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-8 w-48 bg-secondary/50 rounded mb-2" />
+            <div className="h-5 w-80 bg-secondary/50 rounded" />
+          </div>
+          <div className="h-10 w-32 bg-secondary/50 rounded" />
+        </div>
+
+        {/* Stats skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="glass-card">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="h-4 w-24 bg-secondary/50 rounded mb-2" />
+                    <div className="h-8 w-16 bg-secondary/50 rounded mb-1" />
+                    <div className="h-3 w-20 bg-secondary/50 rounded" />
+                  </div>
+                  <div className="w-10 h-10 bg-secondary/50 rounded-lg" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* Tools grid skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i} className="glass-card">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="h-8 w-8 bg-secondary/50 rounded" />
+                  <div className="h-6 w-16 bg-secondary/50 rounded" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="h-5 w-3/4 bg-secondary/50 rounded mb-2" />
+                <div className="h-4 w-1/2 bg-secondary/50 rounded mb-4" />
+                <div className="flex justify-between">
+                  <div className="h-4 w-16 bg-secondary/50 rounded" />
+                  <div className="h-4 w-20 bg-secondary/50 rounded" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </div>
     )
   }
 
   const handleToolToggle = async (tool: Tool, enabled: boolean) => {
-    console.log(`🔄 TOGGLE CLICKED: ${tool.name} -> ${enabled ? 'ENABLE' : 'DISABLE'}`)
-    console.log('📊 Tool data:', tool)
-    
     setLoading(true)
     try {
-      console.log(`🚀 Calling API to ${enabled ? 'enable' : 'disable'} tool: ${tool.name} (ID: ${tool.id})`)
-      
       // Update local state immediately for better UX
-      setTools(prevTools => {
-        console.log('📝 Before update:', prevTools.find(t => t?.id === tool.id)?.isInstalled)
-        const updated = prevTools.map(t => 
-          t?.id === tool.id 
-            ? { ...t, isInstalled: enabled, isConfigured: enabled }
-            : t
-        )
-        console.log('📝 After update:', updated.find(t => t?.id === tool.id)?.isInstalled)
-        return updated
-      })
+      setToolModifications(prev => ({
+        ...prev,
+        [tool.id]: { isInstalled: enabled, isConfigured: enabled }
+      }))
       
       // For now, just update the tool status in the database
       // TODO: Later we should manage agent-tool assignments instead
@@ -321,18 +365,13 @@ export function ToolsDashboard() {
         }
       })
       
-      console.log(`✅ Tool ${enabled ? 'enabled' : 'disabled'} successfully`)
-      
     } catch (error) {
       console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
       // Revert local state on error
-      setTools(prevTools => 
-        prevTools.map(t => 
-          t?.id === tool.id 
-            ? { ...t, isInstalled: !enabled, isConfigured: !enabled }
-            : t
-        )
-      )
+      setToolModifications(prev => ({
+        ...prev,
+        [tool.id]: { isInstalled: !enabled, isConfigured: !enabled }
+      }))
       alert(`❌ Failed to ${enabled ? 'enable' : 'disable'} ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setLoading(false)
@@ -394,7 +433,7 @@ export function ToolsDashboard() {
           <h1 className="text-3xl font-bold mb-2">
             Tools & <span className="gradient-text">Integrations</span>
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground text-lg">
             Discover, install, and manage tools to extend your AI agents' capabilities
           </p>
         </div>
@@ -478,10 +517,10 @@ export function ToolsDashboard() {
                 <h3 className="text-2xl font-bold">
                   {toolsLoading ? '...' : stat.value}
                 </h3>
-                <p className="text-muted-foreground text-sm">{stat.label}</p>
-                <p className={`text-xs ${stat.color}`}>
+                <div className="text-muted-foreground text-sm">{stat.label}</div>
+                <div className={`text-xs ${stat.color}`}>
                   {stat.change}
-                </p>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -876,13 +915,10 @@ export function ToolsDashboard() {
         onClose={() => setConfigModalOpen(false)}
         tool={selectedTool}
         onSave={(toolId, config) => {
-          setTools(prevTools => 
-            prevTools.map(t => 
-              t?.id === toolId 
-                ? { ...t, isConfigured: true, configuration: config }
-                : t
-            )
-          )
+          setToolModifications(prev => ({
+            ...prev,
+            [toolId]: { ...prev[toolId], isConfigured: true, configuration: config }
+          }))
         }}
       />
 
@@ -936,7 +972,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
                     <Badge variant="outline">{tool?.category}</Badge>
                     <StatusIcon className={`w-4 h-4 ${statusColor}`} />
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">{tool?.description}</p>
+                  <div className="text-sm text-muted-foreground mt-1">{tool?.description}</div>
                   <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
                     <span>{tool?.provider}</span>
                     <span>v{tool?.version}</span>

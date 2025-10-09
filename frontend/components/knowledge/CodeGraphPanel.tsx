@@ -217,51 +217,69 @@ export function CodeGraphPanel() {
 
   return (
     <div className="codegraph-panel space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-2xl font-bold">Code Graph</h2>
+        <p className="text-muted-foreground">Repository indexing and code relationship analysis</p>
+      </div>
+
       {/* Header Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="glass-card">
-          <CardContent className="pt-6">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <Database className="w-5 h-5 text-blue-400 mb-2" />
-                <div className="text-2xl font-bold">{stats.totalProjects}</div>
-                <div className="text-sm text-muted-foreground">Projects</div>
+                <p className="text-sm font-medium text-muted-foreground">Projects</p>
+                <p className="text-2xl font-bold">{stats.totalProjects}</p>
+                <p className="text-xs text-blue-400 mt-1">Active repositories</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Database className="w-5 h-5 text-blue-400" />
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="glass-card">
-          <CardContent className="pt-6">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <FileCode className="w-5 h-5 text-green-400 mb-2" />
-                <div className="text-2xl font-bold">{stats.totalFiles.toLocaleString()}</div>
-                <div className="text-sm text-muted-foreground">Files Indexed</div>
+                <p className="text-sm font-medium text-muted-foreground">Files Indexed</p>
+                <p className="text-2xl font-bold">{stats.totalFiles.toLocaleString()}</p>
+                <p className="text-xs text-green-400 mt-1">Source files tracked</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <FileCode className="w-5 h-5 text-green-400" />
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="glass-card">
-          <CardContent className="pt-6">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <Code2 className="w-5 h-5 text-purple-400 mb-2" />
-                <div className="text-2xl font-bold">{(stats.totalSymbols / 1000).toFixed(1)}K</div>
-                <div className="text-sm text-muted-foreground">Code Symbols</div>
+                <p className="text-sm font-medium text-muted-foreground">Code Symbols</p>
+                <p className="text-2xl font-bold">{(stats.totalSymbols / 1000).toFixed(1)}K</p>
+                <p className="text-xs text-purple-400 mt-1">Functions & classes</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Code2 className="w-5 h-5 text-purple-400" />
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="glass-card">
-          <CardContent className="pt-6">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <Activity className="w-5 h-5 text-orange-400 mb-2" />
-                <div className="text-2xl font-bold">{(stats.totalRelationships / 1000).toFixed(1)}K</div>
-                <div className="text-sm text-muted-foreground">Relationships</div>
+                <p className="text-sm font-medium text-muted-foreground">Relationships</p>
+                <p className="text-2xl font-bold">{(stats.totalRelationships / 1000).toFixed(1)}K</p>
+                <p className="text-xs text-orange-400 mt-1">Code connections</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Network className="w-5 h-5 text-orange-400" />
               </div>
             </div>
           </CardContent>
