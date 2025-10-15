@@ -712,3 +712,7 @@ Provide your response as:
             ),
             "avg_confidence": sum(e['confidence'] for e in self.intervention_history) / total
         }
+
+
+
+

@@ -747,3 +747,4 @@ Provide insights and recommendations.
             'strategy_performance': strategy_stats,
             'best_strategy': max(strategy_stats, key=lambda s: strategy_stats[s]['avg_quality']) if strategy_stats else None
         }
+

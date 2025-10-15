@@ -10,49 +10,36 @@ import {
   Maximize2,
   Minimize2,
   Settings,
-  Activity
+  Activity,
+  Brain,
+  BarChart3
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { WorkflowCanvas } from './execution-theater/workflow-canvas'
+// Removed WorkflowCanvas - was just mock data
 import { AgentWorkspaceTabs } from './execution-theater/agent-workspace-tabs'
 import { OrchestratorControl } from './execution-theater/orchestrator-control'
 import { CommunicationLog } from './execution-theater/communication-log'
-import { MemoryVisualization } from './execution-theater/memory-visualization'
-import { HumanInteractionChat } from './execution-theater/human-interaction-chat'
 import { EnhancedOrchestratorView } from './execution-theater/enhanced-orchestrator-view'
 import { apiClient } from '@/lib/api-client'
-import { useRouter } from 'next/navigation'
 import { useWorkflowWebSocket } from '@/hooks/use-workflow-websocket'
+import { cn } from '@/lib/utils'
 
-interface ExecutionTheaterProps {
+interface ExecutionTheaterV2Props {
   workflowId: number
   onBack: () => void
   autoStart?: boolean
 }
 
-// Import the new V2 component
-import { ExecutionTheaterV2 } from './execution-theater-v2'
-
-// Use V2 by default - can toggle back if needed
-const USE_V2 = true
-
-export function ExecutionTheater({ workflowId, onBack, autoStart = false }: ExecutionTheaterProps) {
-  // Use the new V2 design
-  if (USE_V2) {
-    return <ExecutionTheaterV2 workflowId={workflowId} onBack={onBack} autoStart={autoStart} />
-  }
-  
-  // Original implementation below...
-  const router = useRouter()
+export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: ExecutionTheaterV2Props) {
   const [isExecuting, setIsExecuting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showMemory, setShowMemory] = useState(false)
   const [showEnhancedView, setShowEnhancedView] = useState(false)
   const [executionData, setExecutionData] = useState<any>(null)
   const [selectedAgent, setSelectedAgent] = useState<number | null>(null)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
   const [currentExecutionId, setCurrentExecutionId] = useState<number | null>(null)
+  const [activeView, setActiveView] = useState<'orchestrator' | 'analytics'>('orchestrator')
 
   // WebSocket for real-time updates
   const handleWebSocketMessage = useCallback((message: any) => {
@@ -68,21 +55,16 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         if (message.data?.execution_id) {
           setCurrentExecutionId(message.data.execution_id)
           setIsExecuting(true)
-          // Immediately load execution details
-          console.log('📥 Loading execution details for ID:', message.data.execution_id)
           loadExecutionById(message.data.execution_id)
         }
         break
 
       case 'subtask_execution_update':
-        // Real-time subtask progress - update immediately
         console.log('📊 SUBTASK UPDATE RECEIVED:', message.data?.subtask_id, message.data?.status)
         const execId = currentExecutionId || message.data?.execution_id
         if (execId) {
           console.log('🔄 Refreshing execution data for ID:', execId)
           loadExecutionById(execId)
-        } else {
-          console.warn('⚠️ No execution ID available for subtask update')
         }
         break
 
@@ -92,7 +74,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       case 'agent_assigned':
       case 'decomposition_complete':
         console.log('📈 Progress update:', message.type)
-        // Reload execution data to show latest progress
         if (currentExecutionId || message.data?.execution_id) {
           loadExecutionById(currentExecutionId || message.data.execution_id)
         }
@@ -117,7 +98,7 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     workflowId,
     executionId: currentExecutionId || undefined,
     onMessage: handleWebSocketMessage,
-    autoConnect: !!currentExecutionId  // Only auto-connect when we have execution ID
+    autoConnect: !!currentExecutionId
   })
 
   const loadExecutionById = async (executionId: number) => {
@@ -133,7 +114,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         ...prev,
         execution: executionDetails
       }))
-      console.log('✅ UI updated with new execution data')
     } catch (err) {
       console.error('❌ Error loading execution by ID:', err)
     }
@@ -143,7 +123,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   useEffect(() => {
     loadWorkflowData()
     
-    // Set up polling for live updates
     const interval = setInterval(() => {
       if (isExecuting) {
         loadLiveProgress()
@@ -157,7 +136,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   useEffect(() => {
     if (autoStart && !hasAutoStarted && executionData) {
       setHasAutoStarted(true)
-      // Small delay to ensure UI is ready
       setTimeout(() => {
         handleStartExecution()
       }, 1000)
@@ -166,16 +144,11 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
   const loadWorkflowData = async () => {
     try {
-      // Load workflow metadata
       const workflow = await apiClient.getWorkflow(workflowId.toString())
-      
-      // Load live progress to get current or most recent execution
       const progress = await apiClient.getWorkflowLiveProgress(workflowId.toString()).catch(() => ({}))
       
-      // If there's a current execution or recent executions, load the details
       let executionDetails = null
       if (progress?.current_execution?.id) {
-        // Load current running execution
         try {
           executionDetails = await apiClient.getWorkflowExecution(progress.current_execution.id.toString())
           setIsExecuting(true)
@@ -183,7 +156,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           console.error('Error loading current execution:', err)
         }
       } else if (progress?.recent_executions && progress.recent_executions.length > 0) {
-        // Load most recent completed execution
         try {
           const recentId = progress.recent_executions[0].id
           executionDetails = await apiClient.getWorkflowExecution(recentId.toString())
@@ -191,15 +163,12 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           console.error('Error loading recent execution:', err)
         }
       } else {
-        // Fallback: Query executions for this workflow directly
         try {
           const execResponse = await apiClient.getWorkflowExecutions(workflowId.toString())
           const executions = execResponse?.items || execResponse || []
           if (executions && executions.length > 0) {
-            // Sort by ID descending to get most recent
             const sortedExecs = executions.sort((a: any, b: any) => b.id - a.id)
             executionDetails = sortedExecs[0]
-            console.log('Loaded most recent execution from executions API:', executionDetails.id)
           }
         } catch (err) {
           console.error('Error loading executions:', err)
@@ -213,7 +182,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       })
     } catch (error) {
       console.error('Error loading workflow:', error)
-      // Set minimal data so UI doesn't crash
       setExecutionData({
         id: workflowId,
         name: 'Loading...',
@@ -227,7 +195,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     try {
       const progress = await apiClient.getWorkflowLiveProgress(workflowId.toString()).catch(() => ({}))
       
-      // Update execution details if there's an active execution
       let executionDetails = null
       if (progress?.current_execution?.id) {
         try {
@@ -236,11 +203,9 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           console.error('Error loading execution details:', err)
         }
       } else if (progress?.recent_executions && progress.recent_executions.length > 0) {
-        // Fallback: Load most recent execution
         try {
           const recentId = progress.recent_executions[0].id
           executionDetails = await apiClient.getWorkflowExecution(recentId.toString())
-          // If execution is completed, stop polling
           if (executionDetails?.status === 'completed' || executionDetails?.status === 'failed') {
             setIsExecuting(false)
           }
@@ -248,14 +213,12 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           console.error('Error loading recent execution:', err)
         }
       } else {
-        // Fallback: Query executions directly if live-progress returns nothing
         try {
           const execResponse = await apiClient.getWorkflowExecutions(workflowId.toString())
           const executions = execResponse?.items || execResponse || []
           if (executions.length > 0) {
             const latestExec = executions[0]
             executionDetails = await apiClient.getWorkflowExecution(latestExec.id.toString())
-            // If execution is completed, stop polling
             if (executionDetails?.status === 'completed' || executionDetails?.status === 'failed') {
               setIsExecuting(false)
             }
@@ -291,7 +254,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         await loadExecutionById(execId)
       }
       
-      // Immediately load live progress
       setTimeout(() => {
         loadLiveProgress()
       }, 1000)
@@ -304,19 +266,17 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
   const handlePauseExecution = () => {
     setIsExecuting(false)
-    // TODO: Implement pause API
   }
 
   const handleStopExecution = () => {
     setIsExecuting(false)
-    // TODO: Implement stop API
   }
 
   if (!executionData) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
-          <Activity className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
+          <Activity className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
           <p className="text-muted-foreground">Loading workflow...</p>
         </div>
       </div>
@@ -324,11 +284,11 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   }
 
   return (
-    <div className={`h-screen flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-background' : ''}`}>
-      {/* Header */}
-      <div className="border-b border-border/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-between p-4">
-          <div className="flex items-center space-x-4">
+    <div className={cn("h-screen flex flex-col bg-background", isFullscreen && "fixed inset-0 z-50")}>
+      {/* Header - Compact and Professional */}
+      <div className="border-b border-border bg-card/50 backdrop-blur-sm">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-4">
             <Button
               variant="ghost"
               size="sm"
@@ -340,71 +300,93 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
             </Button>
             
             <div className="max-w-2xl">
-              <h1 className="text-xl font-bold">{executionData.name}</h1>
-              <p className="text-sm text-muted-foreground line-clamp-2" title={executionData.description}>
+              <h1 className="text-lg font-semibold">{executionData.name}</h1>
+              <p className="text-xs text-muted-foreground line-clamp-1">
                 {executionData.description}
               </p>
             </div>
 
-            <Badge variant={isExecuting ? 'default' : 'secondary'}>
+            <Badge 
+              variant={isExecuting ? 'default' : 'secondary'}
+              className={cn(
+                "font-medium",
+                isExecuting && "bg-blue-500/20 text-blue-400 border-blue-500/30"
+              )}
+            >
               {isExecuting ? 'Running' : 'Ready'}
             </Badge>
 
-            {/* WebSocket Status Indicator */}
+            {/* WebSocket Status */}
             <Badge 
-              variant={isConnected ? 'default' : 'secondary'} 
-              className={isConnected ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}
+              variant="outline"
+              className={cn(
+                "text-xs",
+                isConnected 
+                  ? "bg-green-500/10 text-green-400 border-green-500/30" 
+                  : "bg-gray-500/10 text-gray-400 border-gray-500/30"
+              )}
             >
-              <div className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></div>
-              {isConnected ? 'Live' : 'Disconnected'}
+              <div className={cn(
+                "w-2 h-2 rounded-full mr-2",
+                isConnected ? "bg-green-400 animate-pulse" : "bg-gray-400"
+              )} />
+              {isConnected ? 'Live' : 'Offline'}
             </Badge>
-            {wsError && (
-              <span className="text-xs text-red-400" title={wsError}>⚠️</span>
-            )}
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             {!isExecuting ? (
-              <Button onClick={handleStartExecution} className="bg-green-500 hover:bg-green-600">
+              <Button 
+                onClick={handleStartExecution} 
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                size="sm"
+              >
                 <Play className="w-4 h-4 mr-2" />
                 Start Execution
               </Button>
             ) : (
               <>
-                <Button onClick={handlePauseExecution} variant="outline">
+                <Button onClick={handlePauseExecution} variant="outline" size="sm">
                   <Pause className="w-4 h-4 mr-2" />
                   Pause
                 </Button>
-                <Button onClick={handleStopExecution} variant="outline" className="text-red-500">
+                <Button 
+                  onClick={handleStopExecution} 
+                  variant="outline" 
+                  size="sm"
+                  className="text-red-500 hover:text-red-600"
+                >
                   <Square className="w-4 h-4 mr-2" />
                   Stop
                 </Button>
               </>
             )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowMemory(!showMemory)}
-              title="Memory Visualization"
-            >
-              <Settings className="w-4 h-4" />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowEnhancedView(!showEnhancedView)}
-              className={showEnhancedView ? "bg-primary/10" : ""}
-              title="Enhanced Orchestrator View"
-            >
-              <Activity className="w-4 h-4" />
-            </Button>
+            {/* View Toggle Buttons */}
+            <div className="flex items-center gap-1 border-l border-border ml-2 pl-2">
+              <Button
+                variant={activeView === 'orchestrator' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setActiveView('orchestrator')}
+                className="h-8 px-3"
+              >
+                <Brain className="w-4 h-4" />
+              </Button>
+              <Button
+                variant={activeView === 'analytics' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setActiveView('analytics')}
+                className="h-8 px-3"
+              >
+                <BarChart3 className="w-4 h-4" />
+              </Button>
+            </div>
 
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setIsFullscreen(!isFullscreen)}
+              className="h-8 w-8"
             >
               {isFullscreen ? (
                 <Minimize2 className="w-4 h-4" />
@@ -416,10 +398,9 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         </div>
       </div>
 
-      {/* Main Theater Layout */}
+      {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Show Enhanced View or Regular View */}
-        {showEnhancedView ? (
+        {activeView === 'analytics' ? (
           <div className="flex-1 p-4 overflow-auto">
             <EnhancedOrchestratorView
               workflowId={workflowId}
@@ -429,39 +410,34 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           </div>
         ) : (
           <>
-            {/* Top: Communication & Events (45%) - Full Width with Data Tabs */}
-            <div className="h-[45%] p-4 pb-2">
-              <div className="h-full border border-border/30 rounded-lg bg-background/30 overflow-hidden">
-                <CommunicationLog
-                  workflowId={workflowId}
-                  isExecuting={isExecuting}
-                  workflow={executionData}
-                />
+            {/* Top Section: Communication Log (40%) */}
+            <div className="h-[40%] border-b border-border">
+              <div className="h-full p-4">
+                <div className="h-full border border-border/30 rounded-lg bg-card/30 overflow-hidden">
+                  <CommunicationLog
+                    workflowId={workflowId}
+                    isExecuting={isExecuting}
+                    workflow={executionData}
+                  />
+                </div>
               </div>
             </div>
 
-        {/* Middle: Split Layout (45%) - Agent Workspace + Human Chat */}
-        <div className="h-[45%] flex gap-4 px-4 pb-2">
-          {/* Left: Agent Workspaces (50%) */}
-          <div className="w-1/2 border border-border/30 rounded-lg bg-background/30 overflow-hidden">
-            <AgentWorkspaceTabs
-              workflow={executionData}
-              selectedAgent={selectedAgent}
-              onAgentSelect={setSelectedAgent}
-              isExecuting={isExecuting}
-            />
-          </div>
+            {/* Middle Section: Agent Workspaces (50%) */}
+            <div className="flex-1 border-b border-border">
+              <div className="h-full p-4">
+                <div className="h-full border border-border/30 rounded-lg bg-card/30 overflow-hidden">
+                  <AgentWorkspaceTabs
+                    workflow={executionData}
+                    selectedAgent={selectedAgent}
+                    onAgentSelect={setSelectedAgent}
+                    isExecuting={isExecuting}
+                  />
+                </div>
+              </div>
+            </div>
 
-          {/* Right: Human Interaction Chat (50%) */}
-          <div className="w-1/2 border border-border/30 rounded-lg bg-background/30 overflow-hidden">
-            <HumanInteractionChat
-              workflowId={workflowId}
-              isExecuting={isExecuting}
-            />
-          </div>
-        </div>
-
-            {/* Bottom: Progress & System Status (10%) */}
+            {/* Bottom Section: Progress Bar (10%) */}
             <div className="h-[10%] min-h-[60px]">
               <OrchestratorControl
                 workflow={executionData}
@@ -471,18 +447,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           </>
         )}
       </div>
-
-      {/* Memory Visualization Panel (Slide-over) */}
-      <AnimatePresence>
-        {showMemory && (
-          <MemoryVisualization
-            workflowId={workflowId}
-            agents={executionData.agents || []}
-            onClose={() => setShowMemory(false)}
-          />
-        )}
-      </AnimatePresence>
     </div>
   )
 }
-

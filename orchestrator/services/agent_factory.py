@@ -551,7 +551,8 @@ class AgentFactory:
         context: Optional[Dict[str, Any]] = None,
         use_memory: bool = True,
         max_retries: int = 2,
-        enable_actions: bool = True
+        enable_actions: bool = True,
+        action_executor: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
@@ -622,6 +623,28 @@ To use actions, respond with JSON blocks like:
 \nYou can include multiple action blocks in your response."""
                 prompt = prompt + action_prompt
             
+            # ALWAYS add platform research tools
+            platform_tools_prompt = """
+
+## 🔍 Platform Research Tools Available:
+
+If you need more information to complete this task, you can search the Automatos platform knowledge bases:
+
+1. **search_knowledge** - Search documentation and knowledge base
+   {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
+
+2. **semantic_search** - Find semantically similar content
+   {"action": "semantic_search", "params": {"query": "concept to find", "limit": 5}}
+
+3. **search_codebase** - Search code implementations  
+   {"action": "search_codebase", "params": {"query": "function or class name"}}
+
+**IMPORTANT**: Use these tools to research! Don't say "I don't have information" - search for it first!
+Multiple tool calls are allowed before your final answer."""
+            
+            prompt = prompt + platform_tools_prompt
+            action_executor = action_executor or get_action_executor()  # Ensure executor exists
+            
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
@@ -633,10 +656,62 @@ To use actions, respond with JSON blocks like:
                     response = await agent_runtime.llm_manager.generate_response(messages)
                     execution_time = time.time() - start_time
                     
-                    # Process any action requests in the response
+                    # Process any action requests in the response and iterate if needed
                     action_results = []
                     if action_executor and response and response.content and '{"action"' in response.content:
+                        self.logger.info(f"🔧 Agent requested tool calls, executing...")
                         action_results = await self._process_agent_actions(response.content, action_executor)
+                        
+                        # If tools were executed, feed results back to agent for final answer
+                        if action_results:
+                            self.logger.info(f"  ✅ {len(action_results)} tool(s) executed, feeding results back to agent")
+                            
+                            # Add agent's tool request to messages
+                            messages.append({"role": "assistant", "content": response.content})
+                            
+                            # Create tool results message - agent-friendly format
+                            tool_results_text = "Research Results:\n\n"
+                            for idx, result in enumerate(action_results, 1):
+                                action_name = result.get('action', result.get('tool', 'unknown'))
+                                tool_results_text += f"=== Tool {idx}: {action_name} ===\n"
+                                
+                                if result.get('success', result.get('status') == 'success'):
+                                    # Success case - show actual content
+                                    result_data = result.get('result', result.get('data', []))
+                                    count = result.get('count', 0)
+                                    
+                                    if isinstance(result_data, list) and len(result_data) > 0:
+                                        tool_results_text += f"Found {count} results:\n\n"
+                                        # Show top 3 results with full content
+                                        for i, item in enumerate(result_data[:3], 1):
+                                            if isinstance(item, dict):
+                                                content = item.get('content', str(item))
+                                                relevance = item.get('relevance', item.get('similarity', 0))
+                                                source = item.get('source', 'Unknown')
+                                                tool_results_text += f"{i}. {content}\n"
+                                                tool_results_text += f"   [Relevance: {relevance:.2f}, Source: {source}]\n\n"
+                                            else:
+                                                tool_results_text += f"{i}. {str(item)[:500]}\n\n"
+                                        
+                                        if count > 3:
+                                            tool_results_text += f"(+ {count - 3} more results available)\n\n"
+                                    else:
+                                        tool_results_text += f"Result: {str(result_data)[:800]}\n\n"
+                                else:
+                                    # Error case
+                                    error_msg = result.get('error', result.get('result', 'Unknown error'))
+                                    tool_results_text += f"ERROR: {error_msg}\n"
+                                    tool_results_text += f"Action: Continue with available knowledge.\n\n"
+                            
+                            tool_results_text += "\n📝 INSTRUCTIONS: Use the research results above to provide a detailed, accurate answer to the original task. Cite sources where appropriate."
+                            
+                            messages.append({"role": "user", "content": tool_results_text})
+                            
+                            # Call LLM again with tool results
+                            self.logger.info("  🔄 Calling agent again with tool results for final answer...")
+                            response = await agent_runtime.llm_manager.generate_response(messages)
+                            execution_time = time.time() - start_time
+                            self.logger.info("  ✅ Agent provided final answer after research")
                     
                     if response and response.content:
                         # Success! Update metrics
@@ -898,8 +973,8 @@ To use actions, respond with JSON blocks like:
         import re
         results = []
         
-        # Find all JSON action blocks in the response
-        action_pattern = r'\{"action":\s*"([^"]+)"[^}]+\}'
+        # Find all JSON action blocks in the response - match complete JSON objects
+        action_pattern = r'\{"action":\s*"[^"]+",\s*"params":\s*\{[^}]*\}\}'
         matches = re.finditer(action_pattern, response)
         
         for match in matches:
@@ -946,6 +1021,44 @@ To use actions, respond with JSON blocks like:
                         'success': success,
                         'result': items
                     })
+                
+                # Platform research tools
+                elif action_type == 'search_knowledge':
+                    self.logger.info(f"  🔍 Executing search_knowledge with params: {params}")
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='search_knowledge',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    self.logger.info(f"  📊 Knowledge search result: success={result.get('success')}, count={result.get('count', 0)}")
+                    self.logger.info(f"  📄 First result preview: {str(result.get('results', [{}])[0] if result.get('results') else 'NO RESULTS')[:200]}")
+                    results.append(result)
+                    self.logger.info(f"  ✅ Knowledge search: {result.get('count', 0)} results found")
+                
+                elif action_type == 'semantic_search':
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='semantic_search',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    results.append(result)
+                    self.logger.info(f"  ✅ Semantic search: {result.get('count', 0)} results found")
+                
+                elif action_type == 'search_codebase':
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='search_codebase',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    results.append(result)
+                    self.logger.info(f"  ✅ Codebase search: {result.get('count', 0)} results found")
+                
                 else:
                     results.append({
                         'action': action_type,
@@ -954,6 +1067,20 @@ To use actions, respond with JSON blocks like:
                         'result': f"Unknown action: {action_type}"
                     })
                     
+            except json.JSONDecodeError as e:
+                # Try to fix common JSON issues
+                self.logger.warning(f"JSON parse error at column {e.colno}: {e.msg}")
+                self.logger.warning(f"  Full problematic JSON: {match.group(0)}")
+                try:
+                    fixed_json = match.group(0)
+                    fixed_json = fixed_json.replace("'", '"')  # Single to double quotes
+                    fixed_json = re.sub(r',\s*}', '}', fixed_json)  # Trailing commas in objects
+                    fixed_json = re.sub(r',\s*\]', ']', fixed_json)  # Trailing commas in arrays
+                    action_data = json.loads(fixed_json)
+                    self.logger.info(f"  ✅ JSON fixed and parsed successfully")
+                    # Note: Would need to reprocess the fixed action_data here
+                except Exception as fix_error:
+                    self.logger.error(f"Failed to fix JSON: {fix_error}")
             except Exception as e:
                 self.logger.error(f"Failed to process action: {e}")
                 results.append({

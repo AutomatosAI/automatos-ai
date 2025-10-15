@@ -40,7 +40,11 @@ export function useWorkflowWebSocket({
 
     // Redis WebSocket requires both workflowId and executionId
     if (!workflowId || !executionId) {
-      console.warn('⚠️ Cannot connect WebSocket: workflowId and executionId required')
+      console.warn('⚠️ Cannot connect WebSocket: workflowId and executionId required', {
+        workflowId,
+        executionId
+      })
+      setError('Missing workflowId or executionId')
       return
     }
 
