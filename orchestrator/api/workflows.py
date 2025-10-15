@@ -1109,13 +1109,75 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # INTELLIGENT AGENT SELECTION
             logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
             
+            # Check if we should use smart grouping
+            use_smart_selection = True  # Enable smart selection by default
+            if workflow and workflow.context:
+                try:
+                    ctx = json.loads(workflow.context) if isinstance(workflow.context, str) else workflow.context
+                    use_smart_selection = ctx.get("use_smart_selection", True)
+                except:
+                    pass
+            
             # Check if tasks have specific agent requirements
             has_agent_requirements = any(
                 task.get("required_agent_id") for task in steps
             ) if isinstance(steps, list) else False
             
             try:
-                if has_agent_requirements:
+                logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
+                
+                if use_smart_selection and not has_agent_requirements:
+                    # Use LLM-based intelligent agent selection
+                    logger.info("🧠 Using LLM-based intelligent agent selection with task grouping")
+                    logger.info(f"  📋 Number of steps to assign: {len(steps)}")
+                    task_desc_str = str(task_description)
+                    logger.info(f"  🎯 Task description: {task_desc_str[:100]}...")
+                    
+                    try:
+                        from core.llm.enhanced_agent_selector import EnhancedLLMAgentSelector
+                        logger.info("  ✅ EnhancedLLMAgentSelector imported successfully")
+                    except ImportError as e:
+                        logger.error(f"  ❌ Failed to import EnhancedLLMAgentSelector: {e}")
+                        raise
+                    
+                    logger.info("  🏗️ Creating LLM selector instance...")
+                    llm_selector = EnhancedLLMAgentSelector(db_session=db)
+                    logger.info("  ✅ LLM selector created")
+                    
+                    logger.info("  📡 Calling select_agents_with_grouping...")
+                    agent_assignments = await llm_selector.select_agents_with_grouping(
+                        steps,
+                        workflow_context={
+                            "description": task_description,
+                            "workflow_id": execution.workflow_id
+                        }
+                    )
+                    logger.info(f"  ✅ Agent selection returned: {len(agent_assignments)} assignments")
+                    
+                    # Create selection summary
+                    unique_agents = set()
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            unique_agents.add(match.agent_id)
+                    
+                    # Calculate average match score
+                    total_score = 0
+                    count = 0
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            total_score += match.match_score
+                            count += 1
+                    avg_score = total_score / count if count > 0 else 0.9
+                    
+                    selection_summary = {
+                        "total_subtasks": len(steps),
+                        "unique_agents": len(unique_agents),
+                        "selection_method": "llm_intelligent",
+                        "efficiency_ratio": len(steps) / len(unique_agents) if unique_agents else 0,
+                        "avg_match_score": avg_score
+                    }
+                    
+                elif has_agent_requirements:
                     # Use specified agents from predefined tasks
                     logger.info("📌 Using specified agents from task definitions")
                     agent_assignments = {}
@@ -1159,7 +1221,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "unique_agents": len(set(matches[0].agent_id for matches in agent_assignments.values() if matches)),
                         "avg_match_score": 1.0  # All explicit matches are perfect
                     }
+                elif use_smart_selection:
+                    # Summary already created above for LLM selection
+                    logger.info(f"  Using LLM selection summary: {selection_summary}")
                 else:
+                    # Get summary from regular agent selector
                     selection_summary = agent_selector.get_selection_summary(agent_assignments)
                 execution.input_data["agent_selection"] = {
                     "is_real": True,
@@ -1195,12 +1261,15 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
             except Exception as e:
                 logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
+                logger.error(f"❌ Full traceback:", exc_info=True)
                 execution.input_data["agent_selection"] = {
                     "is_real": False,
                     "error": str(e)
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
+                # Initialize empty assignments to prevent error
+                agent_assignments = {}
             
             # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
             logger.info(f"🧠 Initializing memory system...")
@@ -1698,9 +1767,44 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 stages_completed.append("Memory Storage")
             if execution.input_data.get("memory_consolidation"):
                 stages_completed.append("Memory Consolidation")
+            
+            # Extract the final report - AGGREGATE ALL SUBTASK RESULTS for comprehensive output
+            final_report = None
+            if subtask_results:
+                # Strategy: Combine ALL subtask results into a comprehensive report
+                # This ensures code examples, analysis, and summaries are all included
+                report_sections = []
+                
+                # Sort subtasks by ID to maintain logical order
+                sorted_subtasks = sorted(
+                    subtask_results.items(), 
+                    key=lambda x: int(x[0].split('_')[-1]) if '_' in x[0] and x[0].split('_')[-1].isdigit() else 0
+                )
+                
+                for subtask_id, subtask in sorted_subtasks:
+                    if subtask and hasattr(subtask, 'llm_response') and subtask.llm_response:
+                        # Get subtask description for context
+                        description = subtask.subtask_description if hasattr(subtask, 'subtask_description') else subtask_id
+                        
+                        # Add section header and content
+                        section = f"\n\n{'='*80}\n"
+                        section += f"## {description}\n"
+                        section += f"{'='*80}\n\n"
+                        section += subtask.llm_response
+                        report_sections.append(section)
+                        
+                        logger.info(f"  📄 Added section from {subtask_id}: {len(subtask.llm_response)} chars")
+                
+                # Combine all sections into final report
+                if report_sections:
+                    final_report = "\n".join(report_sections)
+                    logger.info(f"📄 Aggregated final report from {len(report_sections)} subtasks: {len(final_report)} chars total")
+                else:
+                    logger.warning(f"⚠️ No subtask results had content to aggregate")
                 
             execution.output_data = {
                 "result": f"Workflow completed with {len(stages_completed)} stages: {', '.join(stages_completed)}",
+                "final_report": final_report,  # The actual report content!
                 "is_real_decomposition": execution.input_data.get("decomposition", {}).get("is_real", False),
                 "is_real_agent_selection": execution.input_data.get("agent_selection", {}).get("is_real", False),
                 "is_real_memory_retrieval": execution.input_data.get("memory_retrieval", {}).get("is_real", False),

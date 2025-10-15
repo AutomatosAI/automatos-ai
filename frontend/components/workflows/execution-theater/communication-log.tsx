@@ -268,7 +268,7 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
   const getIcon = (type: string, status?: string) => {
     switch (type) {
       case 'orchestrator':
-        return <Bot className="w-4 h-4 text-orange-400" />
+        return <Bot className="w-4 h-4 text-blue-400" />
       case 'agent_message':
         return <MessageCircle className="w-4 h-4 text-blue-400" />
       case 'tool_call':
@@ -387,8 +387,9 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
       </div>
 
       {/* Tab Content */}
-      <ScrollArea className="flex-1">
-        <div className="p-3 space-y-2">
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="p-3 space-y-2">
           {/* Results Tab - Final Report */}
           {activeTab === 'results' && (
             <div className="space-y-4">
@@ -406,9 +407,15 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                   )
                 }
                 
-                // Find the last subtask (usually the summary/report)
-                const lastSubtask = subtasks[subtasks.length - 1]
-                const finalReport = lastSubtask?.execution_result?.llm_response || ''
+                // Get the aggregated final report from backend (includes ALL subtask results)
+                const finalReport = execution?.output_data?.final_report || ''
+                
+                // Fallback to last subtask if aggregated report not available
+                if (!finalReport) {
+                  const lastSubtask = subtasks[subtasks.length - 1]
+                  const fallbackReport = lastSubtask?.execution_result?.llm_response || ''
+                  console.warn('⚠️ No aggregated final_report found, falling back to last subtask')
+                }
                 
                 if (!finalReport) {
                   return (
@@ -537,10 +544,10 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                     </div>
 
                     {/* Total Accesses */}
-                    <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                    <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
-                        <Activity className="w-4 h-4 text-orange-400" />
-                        <span className="text-xs text-orange-400">Active</span>
+                        <Activity className="w-4 h-4 text-cyan-400" />
+                        <span className="text-xs text-cyan-400">Active</span>
                       </div>
                       <div className="text-2xl font-bold text-white mb-1">
                         {memoryStats?.access_metrics?.total_accesses || 0}
@@ -832,8 +839,8 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
           {activeTab === 'tools' && (
             <div className="p-4 h-full flex flex-col items-center justify-center">
               <div className="max-w-md text-center space-y-4">
-                <div className="inline-flex p-4 bg-orange-500/10 border border-orange-500/30 rounded-full mb-2">
-                  <Zap className="w-12 h-12 text-orange-400" />
+                <div className="inline-flex p-4 bg-cyan-500/10 border border-cyan-500/30 rounded-full mb-2">
+                  <Zap className="w-12 h-12 text-cyan-400" />
                 </div>
                 <h3 className="text-lg font-semibold text-white">Tools Usage Tracking</h3>
                 <p className="text-sm text-muted-foreground">
@@ -950,9 +957,10 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
               ))}
             </AnimatePresence>
           )}
-          <div ref={scrollRef} />
-        </div>
-      </ScrollArea>
+            <div ref={scrollRef} />
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   )
 }

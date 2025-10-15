@@ -92,11 +92,21 @@ class ContextEngineeringIntegrator:
         use_code_context: bool = True   # PHASE 2: Enable CodeGraph integration
     ):
         self.db = db_session
-        self.api_base_url = api_base_url or os.getenv("API_URL", "https://api.automatos.app")
+        # Use localhost for local development, not external API
+        self.api_base_url = api_base_url or os.getenv("API_URL", "http://localhost:8000")
+        
+        # CRITICAL FIX: Ensure api_base_url is never empty
+        if not self.api_base_url or not self.api_base_url.startswith("http"):
+            self.api_base_url = "http://localhost:8000"
+            logger.warning(f"⚠️ api_base_url was invalid, forcing to: {self.api_base_url}")
+        
         self.use_semantic_enrichment = use_semantic_enrichment
         self.use_optimization = use_optimization and CONTEXT_OPTIMIZER_AVAILABLE
         self.use_code_context = use_code_context  # PHASE 2
         self.logger = logging.getLogger(__name__)
+        
+        # Log the actual URL being used
+        self.logger.info(f"🌐 ContextEngineeringIntegrator initialized with api_base_url: {self.api_base_url}")
         
         # Context enhancement settings
         self.rag_settings = {
