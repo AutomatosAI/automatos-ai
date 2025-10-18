@@ -72,7 +72,7 @@ from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 from api.websocket_api import router as websocket_api_router
 from api.chatbot_llm import router as chatbot_router
-from api.chatbot_suggestions import router as chatbot_suggestions_router
+# from api.chatbot_suggestions import router as chatbot_suggestions_router  # TODO: File missing
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
@@ -409,7 +409,7 @@ app.include_router(synthesis_router)
 app.include_router(websocket_api_router)
 app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
 app.include_router(chatbot_router)
-app.include_router(chatbot_suggestions_router)
+# app.include_router(chatbot_suggestions_router)  # TODO: File missing
 app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
 

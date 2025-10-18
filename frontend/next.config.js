@@ -3,15 +3,14 @@ const nextConfig = {
   typescript: { 
     ignoreBuildErrors: true 
   },
-  // Commented out proxy - we'll handle API calls with mock fallback
-  // async rewrites() {
-  //   return [
-  //     {
-  //       source: '/api/:path*',
-  //       destination: 'http://localhost:8000/api/:path*',
-  //     },
-  //   ]
-  // }
+  async rewrites() {
+    return [
+      {
+        source: '/chatbot-api/:path*',
+        destination: '/api/chatbot/:path*',
+      },
+    ]
+  }
 }
 
 module.exports = nextConfig

@@ -1,7 +1,7 @@
 """Tool Registry Schema - PRD-17
 
 Revision ID: 004_tool_registry
-Revises: 003_memory_system
+Revises: 20251006_models
 Create Date: 2025-10-18
 
 Description:
@@ -17,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = '004_tool_registry'
-down_revision = '003_memory_system'
+down_revision = '20251006_models'
 branch_labels = None
 depends_on = None
 

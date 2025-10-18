@@ -10,6 +10,7 @@ import pytest
 from services.tool_registry import (
     ToolRegistry,
     ToolCategory,
+    SecurityLevel,
     get_tool_registry,
     reset_tool_registry
 )

@@ -329,18 +329,19 @@ class ToolCapabilityMapper:
         """
         description_lower = task_description.lower()
         
-        # Keyword-based inference
+        # Keyword-based inference (expanded for better matching)
         keyword_mappings = {
-            "code_review": ["review code", "code review", "pr review", "pull request"],
-            "bug_fix": ["fix bug", "debug", "issue", "error", "broken"],
-            "security_audit": ["security", "vulnerability", "audit", "penetration"],
-            "server_restart": ["restart server", "reboot", "restart service"],
-            "deployment": ["deploy", "release", "publish"],
-            "database_update": ["database", "sql", "update db", "migrate"],
+            "code_review": ["review code", "code review", "pr review", "pull request", "review this", "review pr"],
+            "bug_fix": ["fix bug", "debug", "issue", "error", "broken", "fix the", "fix authentication", "resolve issue"],
+            "security_audit": ["security", "vulnerability", "audit", "penetration", "vulnerabilities", "security issues"],
+            "server_restart": ["restart server", "reboot", "restart service", "restart the", "web server"],
+            "deployment": ["deploy", "release", "publish", "deploy to", "deploy the"],
+            "database_update": ["database", "sql", "update db", "migrate", "schema", "update the user database"],
             "create_pr": ["create pr", "pull request", "github pr"],
             "documentation": ["document", "write docs", "readme"],
             "data_analysis": ["analyze data", "data analysis", "statistics"],
             "testing": ["test", "unit test", "integration test", "qa"],
+            "research": ["research", "best practices", "find information", "learn about"],
         }
         
         # Score each task type based on keyword matches
