@@ -626,10 +626,11 @@ To use actions, respond with JSON blocks like:
             # ALWAYS add platform research tools
             platform_tools_prompt = """
 
-## 🔍 Platform Research Tools Available:
+## 🔍 YOU HAVE REAL RESEARCH TOOLS - USE THEM!
 
-If you need more information to complete this task, you can search the Automatos platform knowledge bases:
+⚠️  CRITICAL: You can execute real search tools. DO NOT describe what you would search for - ACTUALLY EXECUTE THE SEARCHES!
 
+Available Tools:
 1. **search_knowledge** - Search documentation and knowledge base
    {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
 
@@ -639,8 +640,14 @@ If you need more information to complete this task, you can search the Automatos
 3. **search_codebase** - Search code implementations  
    {"action": "search_codebase", "params": {"query": "function or class name"}}
 
-**IMPORTANT**: Use these tools to research! Don't say "I don't have information" - search for it first!
-Multiple tool calls are allowed before your final answer."""
+❌ WRONG RESPONSE: "I would use search_knowledge to find information about X"
+✅ CORRECT RESPONSE: Immediately output the JSON block: {"action": "search_knowledge", "params": {"query": "X", "limit": 5}}
+
+**EXECUTION RULES**:
+- If you lack information → SEARCH FOR IT immediately using tools
+- You can call multiple tools in sequence
+- NEVER say "I don't have information" - USE THE TOOLS
+- After receiving tool results, use them to provide a detailed, factual answer"""
             
             prompt = prompt + platform_tools_prompt
             action_executor = action_executor or get_action_executor()  # Ensure executor exists

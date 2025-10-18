@@ -83,6 +83,13 @@ interface EnhancedOrchestratorViewProps {
   isExecuting: boolean
 }
 
+// Helper function to get agent name from execution data
+const getAgentName = (executionData: any, agentId: number): string => {
+  const subtasks = executionData.output_data?.subtasks || []
+  const subtask = subtasks.find((t: any) => t.selected_agent?.agent_id === agentId)
+  return subtask?.selected_agent?.agent_name || `Agent ${agentId}`
+}
+
 export function EnhancedOrchestratorView({ 
   workflowId, 
   executionId,
@@ -115,11 +122,11 @@ export function EnhancedOrchestratorView({
         // Try to get the latest execution for this workflow
         try {
           setIsLoading(true)
-          const response = await apiClient.get(`/v1/workflows/${workflowId}/executions`)
-          if (response.data && response.data.length > 0) {
-            const latestExecution = response.data[0]
-            await loadExecutionData(latestExecution.id)
-          }
+          const response = await apiClient.getWorkflowExecutions(workflowId.toString())
+            if (response && Array.isArray(response) && response.length > 0) {
+              const latestExecution = response[0]
+              await loadExecutionData(latestExecution.id)
+            }
         } catch (error) {
           console.error('Error loading workflow executions:', error)
         } finally {
@@ -137,14 +144,8 @@ export function EnhancedOrchestratorView({
     try {
       setIsLoading(true)
       
-      // Get execution details with analytics
-      const [executionResponse, analyticsResponse] = await Promise.all([
-        apiClient.get(`/v1/workflows/executions/${execId}`),
-        apiClient.get(`/v1/analytics/workflow/${workflowId}`)
-      ])
-
-      const execution = executionResponse.data
-      const analytics = analyticsResponse.data
+      // Get execution details
+      const execution = await apiClient.getWorkflowExecution(execId.toString()) as any
 
       // Extract memory activities from execution data
       if (execution?.input_data?.memory_retrieval) {
@@ -241,23 +242,22 @@ export function EnhancedOrchestratorView({
         setLearningInsights(insights)
       }
 
-      // Update metrics from analytics
-      if (analytics) {
-        setMetrics({
-          totalTasks: analytics.total_subtasks || 0,
-          completedTasks: analytics.completed_subtasks || 0,
-          activeAgents: analytics.unique_agents || 0,
-          memoryOperations: analytics.memory_operations || 0,
-          messagesExchanged: analytics.total_messages || 0,
-          patternsLearned: analytics.patterns_learned || 0,
-          avgResponseTime: analytics.avg_response_time || 0,
-          successRate: analytics.overall_success_rate || 0,
-          tokenUsage: analytics.total_tokens || 0,
-          estimatedCost: analytics.total_cost || 0
-        })
-      }
+      // Update metrics from execution data
+      const subtasks = execution?.output_data?.subtasks || []
+      setMetrics({
+        totalTasks: subtasks.length,
+        completedTasks: subtasks.filter((t: any) => t.completed).length,
+        activeAgents: 0,
+        memoryOperations: 0,
+        messagesExchanged: 0,
+        patternsLearned: 0,
+        avgResponseTime: 0,
+        successRate: 0,
+        tokenUsage: 0,
+        estimatedCost: 0
+      })
 
-      setHistoricalData({ execution, analytics })
+      setHistoricalData({ execution })
     } catch (error) {
       console.error('Error loading execution data:', error)
     } finally {
@@ -273,8 +273,7 @@ export function EnhancedOrchestratorView({
       // Fetch real-time data from API
       if (executionId) {
         try {
-          const response = await apiClient.get(`/v1/workflows/${workflowId}/live-progress`)
-          const liveData = response.data
+          const liveData = await apiClient.getWorkflowLiveProgress(workflowId.toString()) as any
           
           // Update metrics with live data
           if (liveData.metrics) {
@@ -325,42 +324,175 @@ export function EnhancedOrchestratorView({
         }
       }
 
-      // Also add some simulated updates for demo purposes
-      // Add new memory activity
-      if (Math.random() > 0.7) {
-        const types: MemoryActivity['type'][] = ['working', 'short_term', 'long_term', 'collective']
-        const actions: MemoryActivity['action'][] = ['store', 'retrieve', 'consolidate']
+      // Fetch REAL execution data and extract memory/communication activities
+      let executionData: any = null
+      let subtasks: any[] = []
+      let realMemoryActivities: MemoryActivity[] = []
+      let realCommunications: CommunicationEvent[] = []
+      
+      try {
+        if (!executionId) return
+        executionData = await apiClient.getWorkflowExecution(executionId) as any
+        if (!executionData) return
         
-        const agentNames = ['Python Developer', 'Code Analyzer', 'QA Engineer', 'Technical Writer', 'Orchestrator']
-        const agentId = Math.floor(Math.random() * 5) + 1
-        setMemoryActivities(prev => [{
-          id: `mem_${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          type: types[Math.floor(Math.random() * types.length)],
-          action: actions[Math.floor(Math.random() * actions.length)],
-          agentId: agentId,
-          agentName: agentNames[Math.min(agentId - 1, agentNames.length - 1)],
-          content: `Memory operation: Processing context for subtask ${Math.floor(Math.random() * 10) + 1}`,
-          relevance: Math.random(),
-          itemCount: Math.floor(Math.random() * 20) + 1
-        }, ...prev].slice(0, 50))
-      }
-
-      // Add new communication
-      if (Math.random() > 0.6) {
-        const messageTypes: CommunicationEvent['messageType'][] = ['query', 'response', 'broadcast', 'coordination']
-        const priorities: CommunicationEvent['priority'][] = ['low', 'normal', 'high', 'critical']
+        // CLEAR OLD FAKE DATA - start fresh each time
+        subtasks = executionData.output_data?.subtasks || []
         
-        setCommunications(prev => [{
-          id: `comm_${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          fromAgent: `Agent ${Math.floor(Math.random() * 5) + 1}`,
-          toAgent: Math.random() > 0.5 ? `Agent ${Math.floor(Math.random() * 5) + 1}` : 'Orchestrator',
-          messageType: messageTypes[Math.floor(Math.random() * messageTypes.length)],
-          priority: priorities[Math.floor(Math.random() * priorities.length)],
-          content: `Inter-agent communication: Coordinating on task execution strategy`,
-          status: 'sent'
-        }, ...prev].slice(0, 50))
+        // Memory retrieval activities (from PRD 04/05)
+        if (executionData.input_data?.memory_retrieval?.is_real) {
+          const memRetrieval = executionData.input_data.memory_retrieval.results
+          const agentMemories = memRetrieval?.agent_memories || {}
+          
+          Object.entries(agentMemories).forEach(([agentId, memories]: [string, any]) => {
+            const workingMem = memories.working_memory || []
+            const shortTerm = memories.short_term || []
+            const longTerm = memories.long_term || []
+            
+            if (workingMem.length > 0) {
+              realMemoryActivities.push({
+                id: `mem_retrieve_working_${agentId}`,
+                timestamp: new Date().toISOString(),
+                type: 'working',
+                action: 'retrieve',
+                agentId: parseInt(agentId),
+                agentName: getAgentName(executionData, parseInt(agentId)),
+                content: `Memory operation: Processing context for subtask execution`,
+                relevance: 0.9,
+                itemCount: workingMem.length
+              })
+            }
+            
+            if (shortTerm.length > 0) {
+              realMemoryActivities.push({
+                id: `mem_retrieve_short_${agentId}`,
+                timestamp: new Date().toISOString(),
+                type: 'short_term',
+                action: 'retrieve',
+                agentId: parseInt(agentId),
+                agentName: getAgentName(executionData, parseInt(agentId)),
+                content: `Recent interactions and task history retrieved`,
+                relevance: 0.75,
+                itemCount: shortTerm.length
+              })
+            }
+            
+            if (longTerm.length > 0) {
+              realMemoryActivities.push({
+                id: `mem_retrieve_long_${agentId}`,
+                timestamp: new Date().toISOString(),
+                type: 'long_term',
+                action: 'retrieve',
+                agentId: parseInt(agentId),
+                agentName: getAgentName(executionData, parseInt(agentId)),
+                content: `Historical patterns and learned knowledge retrieved`,
+                relevance: 0.85,
+                itemCount: longTerm.length
+              })
+            }
+          })
+        }
+        
+        // Memory storage activities
+        if (executionData.input_data?.memory_storage?.is_real) {
+          const memStorage = executionData.input_data.memory_storage.results
+          const perAgent = memStorage?.per_agent || {}
+          
+          Object.entries(perAgent).forEach(([agentId, storage]: [string, any]) => {
+            if (storage.experiences_stored > 0) {
+              realMemoryActivities.push({
+                id: `mem_store_${agentId}`,
+                timestamp: new Date().toISOString(),
+                type: 'short_term',
+                action: 'store',
+                agentId: parseInt(agentId),
+                agentName: getAgentName(executionData, parseInt(agentId)),
+                content: `Stored ${storage.experiences_stored} task experiences`,
+                relevance: 0.8,
+                itemCount: storage.experiences_stored
+              })
+            }
+          })
+        }
+        
+        // Memory consolidation activities
+        if (executionData.input_data?.memory_consolidation?.is_real) {
+          const memConsol = executionData.input_data.memory_consolidation.results
+          const agentsConsolidated = memConsol?.agents_consolidated || []
+          
+          agentsConsolidated.forEach((agentId: number) => {
+            realMemoryActivities.push({
+              id: `mem_consolidate_${agentId}`,
+              timestamp: new Date().toISOString(),
+              type: 'long_term',
+              action: 'consolidate',
+              agentId,
+              agentName: getAgentName(executionData, agentId),
+              content: `Consolidated learnings to long-term memory (${memConsol.patterns_extracted || 0} patterns extracted)`,
+              relevance: 0.95,
+              itemCount: memConsol.knowledge_nodes_created || 0
+              })
+          })
+        }
+        
+        // IF NO MEMORY DATA from PRD 04/05, create activities from subtasks anyway
+        if (realMemoryActivities.length === 0 && subtasks.length > 0) {
+          subtasks.forEach((task: any, index: number) => {
+            if (task.selected_agent) {
+              realMemoryActivities.push({
+                id: `mem_subtask_${index}`,
+                timestamp: new Date().toISOString(),
+                type: 'working',
+                action: 'retrieve',
+                agentId: task.selected_agent.agent_id,
+                agentName: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+                content: `Processing context for subtask: ${task.description?.substring(0, 60)}...`,
+                relevance: 0.8,
+                itemCount: 1
+              })
+            }
+          })
+        }
+        
+        // REPLACE old data entirely (don't append to prev)
+        setMemoryActivities(realMemoryActivities.slice(0, 50))
+        
+        // Extract REAL inter-agent communication from subtasks
+        
+        subtasks.forEach((task: any, index: number) => {
+          if (task.selected_agent) {
+            // Task assignment is a form of communication from orchestrator to agent
+            realCommunications.push({
+              id: `comm_assign_${index}`,
+              timestamp: new Date().toISOString(),
+              fromAgent: 'Orchestrator',
+              toAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+              messageType: 'query',
+              priority: task.priority === 'high' ? 'high' : 'normal',
+              content: `Task assigned: ${task.description?.substring(0, 60)}...`,
+              status: 'sent'
+            })
+            
+            // Task completion is a response from agent to orchestrator
+            if (task.execution_result) {
+              realCommunications.push({
+                id: `comm_result_${index}`,
+                timestamp: new Date().toISOString(),
+                fromAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+                toAgent: 'Orchestrator',
+                messageType: 'response',
+                priority: task.execution_result.status === 'completed' ? 'normal' : 'high',
+                content: `Task completed: ${task.execution_result.status} (${task.execution_result.tokens_used || 0} tokens)`,
+                status: 'sent'
+              })
+            }
+          }
+        })
+        
+        // REPLACE old communication data entirely (don't append to prev)
+        setCommunications(realCommunications.slice(0, 50))
+        
+      } catch (error) {
+        console.error('Error fetching real execution data for orchestrator view:', error)
       }
 
       // Add learning insights
@@ -379,19 +511,45 @@ export function EnhancedOrchestratorView({
         }, ...prev].slice(0, 20))
       }
 
-      // Update metrics
-      setMetrics(prev => ({
-        ...prev,
-        completedTasks: Math.min(prev.totalTasks, prev.completedTasks + (Math.random() > 0.7 ? 1 : 0)),
-        activeAgents: Math.floor(Math.random() * 5) + 1,
-        memoryOperations: prev.memoryOperations + (Math.random() > 0.5 ? 1 : 0),
-        messagesExchanged: prev.messagesExchanged + (Math.random() > 0.4 ? 1 : 0),
-        patternsLearned: prev.patternsLearned + (Math.random() > 0.9 ? 1 : 0),
-        avgResponseTime: 150 + Math.random() * 100,
-        successRate: 0.85 + Math.random() * 0.15,
-        tokenUsage: prev.tokenUsage + Math.floor(Math.random() * 1000),
-        estimatedCost: prev.estimatedCost + Math.random() * 0.5
-      }))
+      // Update metrics with REAL data (already have executionData and subtasks from above)
+      try {
+        if (executionData && subtasks.length > 0) {
+          const completedSubtasks = subtasks.filter((t: any) => t.execution_result?.status === 'completed')
+          const uniqueAgents = new Set(subtasks.map((t: any) => t.selected_agent?.agent_id).filter(Boolean))
+          
+          // Calculate real token usage
+          const totalTokens = subtasks.reduce((sum: number, task: any) => 
+            sum + (task.execution_result?.tokens_used || 0), 0)
+          
+          // Calculate success rate
+          const successRate = subtasks.length > 0 
+            ? completedSubtasks.length / subtasks.length 
+            : 0
+          
+          // Calculate average response time
+          const avgTime = subtasks.length > 0
+            ? subtasks.reduce((sum: number, t: any) => sum + (t.execution_result?.execution_time_ms || 0), 0) / subtasks.length
+            : 0
+          
+          // Calculate estimated cost (rough estimate: $0.01 per 1000 tokens for GPT-4)
+          const estimatedCost = totalTokens * 0.00001
+          
+          setMetrics({
+            totalTasks: subtasks.length,
+            completedTasks: completedSubtasks.length,
+            activeAgents: uniqueAgents.size,
+            memoryOperations: realMemoryActivities.length,
+            messagesExchanged: realCommunications.length,
+            patternsLearned: executionData.input_data?.memory_consolidation?.results?.patterns_extracted || 0,
+            avgResponseTime: avgTime,
+            successRate: successRate,
+            tokenUsage: totalTokens,
+            estimatedCost: estimatedCost
+          })
+        }
+      } catch (error) {
+        console.error('Error updating metrics:', error)
+      }
     }, 2000)
 
     return () => clearInterval(interval)

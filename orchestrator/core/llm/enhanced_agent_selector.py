@@ -494,7 +494,7 @@ Provide your analysis and selection:"""
         
         self.logger.info(f"✅ Fallback assigned {len(subtasks)} tasks to {len(used_agents)} unique agents")
         if assignments:
-            agent_names = [match[0].name for match in list(assignments.values())[:3] if match]
+            agent_names = [match[0].agent_name for match in list(assignments.values())[:3] if match]
             self.logger.info(f"  Agents used: {', '.join(agent_names)}")
         
         return assignments

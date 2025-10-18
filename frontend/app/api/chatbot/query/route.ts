@@ -25,7 +25,25 @@ function detectIntent(query: string): {
   
   console.log(`[Intent] Analyzing query: "${query}"`)
   
-  // CodeGraph patterns (code-related questions)
+  // Document patterns (RAG) - CHECK FIRST!
+  const docPatterns = [
+    /\b(document|file|pdf|upload|search documents|find in documents)\b/i,
+    /\b(documentation|guide|tutorial|readme|manual|docs)\b/i,
+    /^(show|find|search|get).*\b(document|documentation|guide|manual|readme|setup)\b/i,
+    /^(what|where|how).*\b(documentation|docs|guide|manual|setup|deploy|install|configure)\b/i,
+    /\b(deployment|setup|installation|configuration|infrastructure|architecture)\b/i, // Match these words directly
+    /\b(deploy|install|configure|readme|prd|spec|specification|requirement)\b/i, // Common doc-related terms
+    /^(tell me about|explain|describe|what is|how to).*\b(deploy|setup|architecture|design|system|platform)\b/i // Explanatory questions
+  ]
+  
+  for (const pattern of docPatterns) {
+    if (pattern.test(query)) {
+      console.log(`[Intent] Matched document pattern: ${pattern}`)
+      return { intent: 'document_search', confidence: 0.85, source: 'rag' }
+    }
+  }
+  
+  // CodeGraph patterns (code-related questions) - CHECK AFTER DOCUMENTS!
   const codePatterns = [
     /\b(function|class|method|variable|code|implementation)\b/i,
     /\b(show|find|get|explain|where).*\b(code|function|class|method|factory|service|component|api|endpoint)\b/i,
@@ -40,23 +58,6 @@ function detectIntent(query: string): {
     if (pattern.test(query)) {
       console.log(`[Intent] Matched code pattern: ${pattern}`)
       return { intent: 'code_search', confidence: 0.9, source: 'codegraph' }
-    }
-  }
-  
-  // Document patterns (RAG)
-  const docPatterns = [
-    /\b(document|file|pdf|upload|search documents|find in documents)\b/i,
-    /\b(documentation|guide|tutorial|readme|manual|docs)\b/i,
-    /^(show|find|search|get).*\b(document|documentation|guide|manual|readme|setup)\b/i,
-    /^(what|where).*\b(documentation|docs|guide|manual|setup)\b/i,
-    /\b(deployment|setup|installation|configuration)\b/i, // Match these words directly
-    /\b(deploy|install|configure|readme)\b/i // Common doc-related terms
-  ]
-  
-  for (const pattern of docPatterns) {
-    if (pattern.test(query)) {
-      console.log(`[Intent] Matched document pattern: ${pattern}`)
-      return { intent: 'document_search', confidence: 0.85, source: 'rag' }
     }
   }
   
@@ -173,7 +174,7 @@ async function searchDocuments(query: string): Promise<any> {
     // Try semantic search first (pgvector, just like CodeGraph)
     // Note: Backend uses POST with query params (FastAPI Query parameters)
     const semanticResponse = await fetch(
-      `${API_BASE_URL}/api/documents/search?query=${encodeURIComponent(searchTerms)}&limit=5&min_similarity=0.7`,
+      `${API_BASE_URL}/api/documents/search?query=${encodeURIComponent(searchTerms)}&limit=8&min_similarity=0.65`,
       { 
         method: 'POST',  // Backend expects POST!
         headers: { 'Accept': 'application/json' },
@@ -395,25 +396,75 @@ export async function POST(request: NextRequest) {
 
     const startTime = Date.now()
     
-    // Detect intent
-    const { intent, confidence, source } = detectIntent(query)
+    console.log(`[Chatbot] Query received: "${query}"`)
+    
+    // Use Claude to decide what to search with function calling
+    const decisionMessage = await anthropic.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 1024,
+      tools: [
+        {
+          name: 'search_code',
+          description: 'Search the codebase for functions, classes, methods, and code implementations. Use this when the user asks about code, how something works, implementation details, or specific code symbols.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'The search query for code'
+              }
+            },
+            required: ['query']
+          }
+        },
+        {
+          name: 'search_documents',
+          description: 'Search documentation, guides, PDFs, and uploaded documents. Use this when the user asks about documentation, guides, architecture, deployment, setup, or general information.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'The search query for documents'
+              }
+            },
+            required: ['query']
+          }
+        }
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: `User query: "${query}"\n\nDecide whether to search code or documents based on this query. If asking about code implementation or specific functions/classes, use search_code. If asking about documentation, guides, or general information, use search_documents.`
+        }
+      ]
+    })
     
     let codeSnippets: any[] = []
     let documents: any[] = []
-    let contextText = ''
+    let source = 'llm'
     
-    // Route to appropriate service
-    if (source === 'codegraph') {
-      const codeResults = await searchCodeGraph(query)
-      codeSnippets = codeResults.results
-    } else if (source === 'rag') {
-      const docResults = await searchDocuments(query)
-      documents = docResults.chunks.map((chunk: any) => ({
-        id: chunk.chunk_id || chunk.id,
-        filename: chunk.source?.filename || chunk.filename || chunk.document_name || 'Document',
-        excerpt: chunk.content || chunk.text || '',
-        similarity: chunk.similarity || chunk.score || 0.8
-      }))
+    // Execute the tool calls Claude decided on
+    if (decisionMessage.content) {
+      for (const block of decisionMessage.content) {
+        if (block.type === 'tool_use') {
+          console.log(`[Claude] Chose tool: ${block.name}`)
+          if (block.name === 'search_code') {
+            source = 'codegraph'
+            const codeResults = await searchCodeGraph(query)
+            codeSnippets = codeResults.results
+          } else if (block.name === 'search_documents') {
+            source = 'rag'
+            const docResults = await searchDocuments(query)
+            documents = docResults.chunks.map((chunk: any) => ({
+              id: chunk.chunk_id || chunk.id,
+              filename: chunk.source?.filename || chunk.filename || chunk.document_name || 'Document',
+              excerpt: chunk.content || chunk.text || '',
+              similarity: chunk.similarity || chunk.score || 0.8
+            }))
+          }
+        }
+      }
     }
     
     // Generate intelligent response using Claude with context
@@ -429,10 +480,9 @@ export async function POST(request: NextRequest) {
         code_snippets: codeSnippets,
         documents: documents,
         metadata: {
-          intent,
-          confidence,
           source,
-          processing_time: processingTime
+          processing_time: processingTime,
+          llm_decision: true
         }
       },
       session_id

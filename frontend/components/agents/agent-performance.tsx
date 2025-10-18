@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { 
   BarChart3, 
@@ -64,9 +64,16 @@ export function AgentPerformance({
   const [metricFilter, setMetricFilter] = useState('all')
   const [internalSelectedAgent, setInternalSelectedAgent] = useState<string | null>(selectedAgentId)
 
+  // Sync internal state when prop changes
+  useEffect(() => {
+    if (selectedAgentId !== undefined && selectedAgentId !== null) {
+      setInternalSelectedAgent(selectedAgentId)
+    }
+  }, [selectedAgentId])
+
   // Use internal state if onAgentSelect is not provided
-  const effectiveAgentId = selectedAgentId || internalSelectedAgent
-  const effectiveSetAgent = onAgentSelect || setInternalSelectedAgent
+  const effectiveAgentId = selectedAgentId ?? internalSelectedAgent
+  const effectiveSetAgent = onAgentSelect ?? setInternalSelectedAgent
 
   // Fetch performance data
   const { data: selectedAgent } = useAgent(effectiveAgentId)

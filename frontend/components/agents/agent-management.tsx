@@ -311,6 +311,7 @@ export function AgentManagement() {
               agents={agents as any[]}
               agentStats={agentStats}
               selectedAgentId={selectedAgentId}
+              onAgentSelect={setSelectedAgentId}
             />
           </TabsContent>
         </Tabs>

@@ -264,20 +264,36 @@ class ResultAggregator:
         """
         Efficiency: Token usage and execution time vs benchmarks
         Score = average(token_efficiency, time_efficiency)
+        
+        Uses inverse ratio scoring (benchmark/actual) so values never go negative.
+        Perfect score (1.0) when actual ≤ benchmark, decreases as actual exceeds benchmark.
         """
         total = len(executions)
+        if total == 0:
+            return 0.0
         
-        # Token efficiency
+        # Token efficiency - inverse ratio
         total_tokens = sum(e.tokens_used for e in executions.values())
-        avg_tokens = total_tokens / total if total > 0 else 0
-        token_efficiency = max(0, 1 - (avg_tokens - self.benchmarks["tokens_per_subtask"]) / self.benchmarks["tokens_per_subtask"])
-        token_efficiency = max(0, min(1, token_efficiency))  # Clamp 0-1
+        avg_tokens = total_tokens / total
+        if avg_tokens > 0:
+            # If avg_tokens ≤ benchmark: score = 1.0
+            # If avg_tokens > benchmark: score = benchmark / avg_tokens (e.g., 500/1843 = 0.27)
+            token_efficiency = min(1.0, self.benchmarks["tokens_per_subtask"] / avg_tokens)
+        else:
+            token_efficiency = 1.0
         
-        # Time efficiency
+        # Time efficiency - inverse ratio
         total_time = sum(e.execution_time_ms for e in executions.values())
-        avg_time = total_time / total if total > 0 else 0
-        time_efficiency = max(0, 1 - (avg_time - self.benchmarks["time_per_subtask_ms"]) / self.benchmarks["time_per_subtask_ms"])
-        time_efficiency = max(0, min(1, time_efficiency))  # Clamp 0-1
+        avg_time = total_time / total
+        if avg_time > 0:
+            time_efficiency = min(1.0, self.benchmarks["time_per_subtask_ms"] / avg_time)
+        else:
+            time_efficiency = 1.0
+        
+        self.logger.debug(
+            f"📊 Efficiency: tokens={token_efficiency:.2%} (avg {avg_tokens:.0f} vs benchmark {self.benchmarks['tokens_per_subtask']}), "
+            f"time={time_efficiency:.2%} (avg {avg_time:.0f}ms vs benchmark {self.benchmarks['time_per_subtask_ms']}ms)"
+        )
         
         return (token_efficiency * 0.5 + time_efficiency * 0.5)
     

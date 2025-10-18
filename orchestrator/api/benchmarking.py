@@ -7,7 +7,7 @@ faster, and more cost-effective over time.
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, cast, String
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import statistics
@@ -19,7 +19,7 @@ from services.orchestration_tracker import orchestration_tracker
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/benchmarking", tags=["benchmarking"])
+router = APIRouter(prefix="/api/v1/benchmarking", tags=["benchmarking"])
 
 @router.get("/performance-summary")
 async def get_performance_summary(
@@ -35,8 +35,8 @@ async def get_performance_summary(
         
         # Get all executions in time window
         executions = db.query(WorkflowExecution)\
-            .filter(WorkflowExecution.created_at >= cutoff_date)\
-            .order_by(WorkflowExecution.created_at)\
+            .filter(WorkflowExecution.started_at >= cutoff_date)\
+            .order_by(WorkflowExecution.started_at)\
             .all()
         
         if not executions:
@@ -113,6 +113,24 @@ async def get_performance_summary(
             improvements.get("token_efficiency", {}).get("improvement_percentage", 0) * 0.15
         ])
         
+        # Generate trend data for charts (sample every N executions for performance)
+        max_points = 20
+        step = max(1, len(executions) // max_points)
+        sampled_executions = executions[::step][:max_points]
+        
+        trend_data = []
+        for i, execution in enumerate(sampled_executions):
+            metrics = _extract_execution_metrics(execution)
+            # Format timestamp for display
+            time_label = execution.started_at.strftime("%m/%d %H:%M") if execution.started_at else f"Ex {i+1}"
+            trend_data.append({
+                "time": time_label,
+                "execution_time": round(metrics.get("execution_time", 0), 2),
+                "cost": round(metrics.get("cost", 0), 4),
+                "tokens_used": metrics.get("tokens", 0),
+                "success": 1 if metrics.get("success") else 0
+            })
+        
         return {
             "period": {
                 "days": days,
@@ -125,6 +143,7 @@ async def get_performance_summary(
             "overall_improvement": round(overall_score, 1),
             "status": _get_overall_status(overall_score),
             "key_insights": _generate_insights(improvements, learning_metrics),
+            "trend_data": trend_data,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -146,7 +165,7 @@ async def get_workflow_performance_trend(
         executions = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
             .filter(WorkflowExecution.status == "completed")\
-            .order_by(WorkflowExecution.created_at)\
+            .order_by(WorkflowExecution.started_at)\
             .limit(limit)\
             .all()
         
@@ -162,7 +181,7 @@ async def get_workflow_performance_trend(
             trend_data.append({
                 "execution_number": i,
                 "execution_id": execution.id,
-                "timestamp": execution.created_at.isoformat() if execution.created_at else None,
+                "timestamp": execution.started_at.isoformat() if execution.started_at else None,
                 "execution_time": metrics["execution_time"],
                 "tokens_used": metrics["tokens"],
                 "cost": metrics["cost"],
@@ -236,14 +255,15 @@ async def get_agent_performance_metrics(
         cutoff_date = datetime.now() - timedelta(days=days)
         
         # Get all agents
-        agents = db.query(Agent).filter(Agent.is_active == True).all()
+        agents = db.query(Agent).filter(Agent.status == 'active').all()
         
         agent_metrics = []
         for agent in agents:
             # Get workflow executions where this agent was used
+            # Cast JSONB to text to use LIKE operator
             executions = db.query(WorkflowExecution)\
-                .filter(WorkflowExecution.created_at >= cutoff_date)\
-                .filter(WorkflowExecution.input_data.contains(f'"agent_id":{agent.id}'))\
+                .filter(WorkflowExecution.started_at >= cutoff_date)\
+                .filter(cast(WorkflowExecution.input_data, String).like(f'%"agent_id":{agent.id}%'))\
                 .all()
             
             if not executions:
@@ -251,7 +271,7 @@ async def get_agent_performance_metrics(
             
             # Calculate metrics from workflow executions
             success_count = sum(1 for e in executions if e.status == "completed")
-            total_time = sum((e.completed_at - e.created_at).total_seconds() if e.completed_at and e.created_at else 0 for e in executions)
+            total_time = sum((e.completed_at - e.started_at).total_seconds() if e.completed_at and e.started_at else 0 for e in executions)
             total_tokens = sum(e.input_data.get("analytics", {}).get("total_tokens", 0) if e.input_data else 0 for e in executions)
             total_cost = sum(e.input_data.get("analytics", {}).get("total_cost", 0) if e.input_data else 0 for e in executions)
             
@@ -260,8 +280,8 @@ async def get_agent_performance_metrics(
                 first_half = executions[:len(executions)//2]
                 second_half = executions[len(executions)//2:]
                 
-                first_avg_time = statistics.mean([(e.completed_at - e.created_at).total_seconds() if e.completed_at and e.created_at else 0 for e in first_half])
-                second_avg_time = statistics.mean([(e.completed_at - e.created_at).total_seconds() if e.completed_at and e.created_at else 0 for e in second_half])
+                first_avg_time = statistics.mean([(e.completed_at - e.started_at).total_seconds() if e.completed_at and e.started_at else 0 for e in first_half])
+                second_avg_time = statistics.mean([(e.completed_at - e.started_at).total_seconds() if e.completed_at and e.started_at else 0 for e in second_half])
                 
                 improvement = ((first_avg_time - second_avg_time) / first_avg_time * 100) if first_avg_time > 0 else 0
             else:
@@ -313,7 +333,7 @@ async def get_learning_effectiveness(
         # Get recent executions with learning data
         recent_executions = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.input_data.isnot(None))\
-            .order_by(desc(WorkflowExecution.created_at))\
+            .order_by(desc(WorkflowExecution.started_at))\
             .limit(100)\
             .all()
         
@@ -363,10 +383,42 @@ async def get_learning_effectiveness(
         # Get performance trends from tracker
         tracker_trends = await orchestration_tracker.get_performance_trends()
         
+        # Generate trend data for learning charts
+        # Reverse so oldest is first for trend visualization
+        ordered_executions = list(reversed(recent_executions[-50:]))  # Last 50 executions
+        trend_data = []
+        for i, execution in enumerate(ordered_executions, 1):
+            learning_data = execution.input_data.get("learning_system", {}) if execution.input_data else {}
+            memory_data = execution.input_data.get("memory_retrieval", {}) if execution.input_data else {}
+            
+            # Count patterns applied
+            patterns_applied = execution.input_data.get("patterns_applied", 0) if execution.input_data else 0
+            
+            # Calculate memory hits
+            memory_hits = 0
+            if memory_data:
+                for memories in memory_data.get("agent_memories", {}).values():
+                    memory_hits += len(memories.get("working_memory", []))
+                    memory_hits += len(memories.get("short_term", []))
+                    memory_hits += len(memories.get("long_term", []))
+            
+            # Quality score from output
+            quality_score = 85  # Default
+            if execution.output_data and "quality_scores" in execution.output_data:
+                quality_score = execution.output_data["quality_scores"].get("overall_score", 85)
+            
+            trend_data.append({
+                "execution_number": i,
+                "patterns_applied": patterns_applied,
+                "memory_hits": min(100, memory_hits * 10),  # Normalize to percentage
+                "quality_score": quality_score
+            })
+        
         return {
             "learning_metrics": learning_metrics,
             "summary": summary,
             "tracker_trends": tracker_trends,
+            "trend_data": trend_data,
             "effectiveness_score": _calculate_effectiveness_score(summary, tracker_trends),
             "insights": _generate_learning_insights(summary, tracker_trends)
         }
@@ -417,14 +469,23 @@ def _extract_execution_metrics(execution: WorkflowExecution) -> Dict[str, Any]:
         "quality": 0
     }
     
-    if execution.created_at and execution.completed_at:
-        metrics["execution_time"] = (execution.completed_at - execution.created_at).total_seconds()
+    if execution.started_at and execution.completed_at:
+        metrics["execution_time"] = (execution.completed_at - execution.started_at).total_seconds()
     
-    if execution.input_data:
+    # Check output_data first (new location), then input_data (legacy)
+    if execution.output_data:
+        metrics["tokens"] = execution.output_data.get("total_tokens_used", 0)
+        metrics["cost"] = execution.output_data.get("total_cost", 0)
+        metrics["quality"] = execution.output_data.get("quality_scores", {}).get("overall_score", 0)
+    elif execution.input_data:
+        # Fallback to input_data for older executions
         analytics = execution.input_data.get("analytics", {})
         metrics["tokens"] = analytics.get("total_tokens", 0)
         metrics["cost"] = analytics.get("total_cost", 0)
         metrics["quality"] = analytics.get("overall_quality", 0)
+    
+    # Memory and pattern data from input_data
+    if execution.input_data:
         metrics["memory_hits"] = execution.input_data.get("memory_operation_count", 0)
         metrics["patterns_applied"] = execution.input_data.get("patterns_learned", 0)
     

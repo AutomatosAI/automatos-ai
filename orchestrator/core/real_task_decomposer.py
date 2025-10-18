@@ -64,6 +64,15 @@ CRITICAL DESIGN PRINCIPLES:
 2. Design for AGENT COLLABORATION - agents will share results via shared context
 3. Each subtask should be ATOMIC and FOCUSED - not compound tasks
 4. Create clear HANDOFF POINTS between subtasks for inter-agent communication
+5. TOOL-AUGMENTED TASKS - agents have access to search tools and MUST use them
+
+🔧 AVAILABLE TOOLS FOR AGENTS:
+- search_knowledge(query) - Search documentation, PDFs, markdown files
+- search_codebase(query) - Search code functions, classes, implementations  
+- semantic_search(query) - Find semantically similar content
+- read_document(doc_id) - Read full document content
+
+⚠️  IMPORTANT: When creating research/analysis subtasks, include SPECIFIC search queries the agent should use!
 
 Break down this complex task into specific, actionable subtasks:
 
@@ -85,25 +94,32 @@ GRANULARITY EXAMPLES:
    - Subtask 1: "Write comprehensive documentation draft" (writing)
    - Subtask 2: "Review documentation for accuracy and completeness" (review)
 
+🔧 TOOL USAGE EXAMPLES (for research/documentation tasks):
+✅ EXCELLENT: "Search platform documentation using search_knowledge('Automatos AI architecture'), search_knowledge('deployment guide'), and search_knowledge('9-stage orchestration'). Find at least 5 relevant documentation files. Extract key architectural concepts, technology stack, and core features. Provide detailed quotes with source citations [Source: filename.md]."
+
+✅ EXCELLENT: "Find AgentFactory code using search_codebase('AgentFactory class'), search_codebase('create_agent method'), and search_codebase('agent lifecycle'). Analyze the implementation and extract 3-5 code examples showing: agent creation, configuration, and execution. Include file paths and line numbers for each example."
+
 For each subtask, provide:
 1. A clear, ATOMIC description focusing on ONE primary skill
 2. The type of agent best suited (e.g., 'researcher', 'analyst', 'developer', 'writer', 'reviewer')
 3. Priority level (high/medium/low)
 4. Dependencies (which subtasks must complete first for inter-agent collaboration)
 5. Estimated duration in seconds (30-300 range)
+6. **TOOL GUIDANCE** - Specific search queries if the subtask needs research
 
 Return ONLY valid JSON in this exact format:
 {{
   "subtasks": [
     {{
       "subtask_id": "unique_id",
-      "description": "Clear ATOMIC description - focus on ONE primary skill",
+      "description": "Clear ATOMIC description - focus on ONE primary skill. If research is needed, include: 'Use search_knowledge(\"your query here\") to find X. Use search_codebase(\"ClassName\") to find Y.'",
       "agent_type": "type_of_agent",
       "priority": "high|medium|low",
       "dependencies": ["subtask_ids_that_must_complete_first"],
       "estimated_duration": "60-120 seconds",
       "primary_skill": "single_main_skill",
-      "skills_required": ["primary_skill_only"]
+      "skills_required": ["primary_skill_only"],
+      "tool_guidance": "Optional: List specific search queries like ['search_knowledge(\"architecture docs\")', 'search_codebase(\"AgentFactory\")']"
     }}
   ],
   "execution_strategy": "parallel|sequential|mixed",

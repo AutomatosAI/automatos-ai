@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 import traceback
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum

@@ -119,7 +119,8 @@ Try asking: *"How does authentication work?"* or *"Find documents about deployme
     setIsTyping(true)
 
     try {
-      const response = await fetch('/api/chatbot/query', {
+      console.log('[Chatbot] Sending query:', messageText)
+      const response = await fetch('/chatbot-api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -134,8 +135,11 @@ Try asking: *"How does authentication work?"* or *"Find documents about deployme
         })
       })
 
+      console.log('[Chatbot] Response status:', response.status, response.statusText)
+      
       if (response.ok) {
         const data = await response.json()
+        console.log('[Chatbot] Response data:', data)
         
         const botMessage: ChatMessage = {
           id: data.message.id,
@@ -306,16 +310,22 @@ async def search_symbols(query: str, limit: int = 10):
                             {message.metadata && message.type === 'bot' && (
                               <div className="mt-3 pt-3 border-t border-gray-700/50 flex items-center justify-between text-xs">
                                 <div className="flex items-center space-x-3 text-gray-400">
-                                  <Badge variant="outline" className={`
-                                    ${message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : ''}
-                                    ${message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : ''}
-                                    ${message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' : ''}
-                                    ${message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''}
-                                  `}>
-                                    {message.metadata.source.toUpperCase()}
-                                  </Badge>
-                                  <span>{(message.metadata.processing_time).toFixed(2)}s</span>
-                                  <span>{(message.metadata.confidence * 100).toFixed(0)}% confidence</span>
+                                  {message.metadata.source && (
+                                    <Badge variant="outline" className={`
+                                      ${message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : ''}
+                                      ${message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : ''}
+                                      ${message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' : ''}
+                                      ${message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''}
+                                    `}>
+                                      {message.metadata.source.toUpperCase()}
+                                    </Badge>
+                                  )}
+                                  {message.metadata.processing_time !== undefined && (
+                                    <span>{(message.metadata.processing_time).toFixed(2)}s</span>
+                                  )}
+                                  {message.metadata.confidence !== undefined && (
+                                    <span>{(message.metadata.confidence * 100).toFixed(0)}% confidence</span>
+                                  )}
                                 </div>
                               </div>
                             )}

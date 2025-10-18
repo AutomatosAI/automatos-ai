@@ -12,7 +12,8 @@ import {
   Settings,
   Activity,
   Brain,
-  BarChart3
+  BarChart3,
+  Bot
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,6 +30,136 @@ interface ExecutionTheaterV2Props {
   workflowId: number
   onBack: () => void
   autoStart?: boolean
+}
+
+// Compact Agent List Sidebar Component
+function AgentListSidebar({
+  workflow,
+  selectedAgent,
+  onAgentSelect,
+  isExecuting
+}: {
+  workflow: any
+  selectedAgent: number | null
+  onAgentSelect: (agentId: number) => void
+  isExecuting: boolean
+}) {
+  // Extract real agents from workflow execution subtasks
+  const execution = workflow?.execution
+  const subtasks = execution?.output_data?.subtasks || []
+  
+  // Build agent list from subtasks (deduplicate by agent_id)
+  const agentMap = new Map()
+  subtasks.forEach((subtask: any, index: number) => {
+    const agentId = subtask.selected_agent?.agent_id
+    const agentName = subtask.selected_agent?.agent_name
+    
+    if (agentId && !agentMap.has(agentId)) {
+      agentMap.set(agentId, {
+        id: agentId,
+        name: agentName,
+        agent_type: subtask.agent_type || 'agent',
+        status: execution?.status === 'running' && index === 0 ? 'executing' : 
+                subtask.execution_result?.status || 'pending',
+        tokensUsed: subtask.execution_result?.tokens_used || 0,
+        progress: subtask.execution_result?.status === 'completed' ? 100 : 
+                 subtask.execution_result?.status === 'running' ? 50 : 0
+      })
+    }
+  })
+  
+  const agents = Array.from(agentMap.values())
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'executing': return 'bg-blue-500'
+      case 'running': return 'bg-blue-500'
+      case 'completed': return 'bg-green-500'
+      case 'pending': return 'bg-yellow-500'
+      case 'waiting': return 'bg-yellow-500'
+      case 'failed': return 'bg-red-500'
+      case 'error': return 'bg-red-500'
+      default: return 'bg-gray-500'
+    }
+  }
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'executing': return 'Running'
+      case 'running': return 'Running'
+      case 'completed': return 'Done'
+      case 'pending': return 'Pending'
+      case 'waiting': return 'Waiting'
+      case 'failed': return 'Failed'
+      case 'error': return 'Error'
+      default: return 'Idle'
+    }
+  }
+
+  if (agents.length === 0) {
+    return (
+      <div className="text-center text-muted-foreground text-xs py-8">
+        <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
+        <p>No agents assigned yet</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {agents.map((agent: any) => {
+        const isSelected = selectedAgent === agent.id
+        const isActive = agent.status === 'executing' || agent.status === 'running'
+        
+        return (
+          <motion.button
+            key={agent.id}
+            onClick={() => onAgentSelect(agent.id)}
+            className={cn(
+              "w-full p-3 rounded-lg border transition-all text-left",
+              isSelected
+                ? "bg-primary/10 border-primary shadow-sm"
+                : "bg-card/50 border-border/50 hover:bg-card hover:border-border",
+              isActive && "ring-2 ring-blue-500/30"
+            )}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium truncate flex-1">{agent.name}</span>
+              <div className={cn(
+                "w-2 h-2 rounded-full",
+                getStatusColor(agent.status),
+                isActive && "animate-pulse"
+              )} />
+            </div>
+            
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="truncate">{agent.agent_type}</span>
+              <Badge variant="outline" className="text-xs">
+                {getStatusLabel(agent.status)}
+              </Badge>
+            </div>
+            
+            {agent.progress > 0 && (
+              <div className="mt-2 h-1 bg-border rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-primary transition-all duration-500"
+                  style={{ width: `${agent.progress}%` }}
+                />
+              </div>
+            )}
+            
+            {agent.tokensUsed > 0 && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {agent.tokensUsed.toLocaleString()} tokens
+              </div>
+            )}
+          </motion.button>
+        )
+      })}
+    </div>
+  )
 }
 
 export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: ExecutionTheaterV2Props) {
@@ -300,7 +431,9 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
             </Button>
             
             <div className="max-w-2xl">
-              <h1 className="text-lg font-semibold">{executionData.name}</h1>
+              <h1 className="text-lg font-semibold">
+                <span className="gradient-text">{executionData.name}</span>
+              </h1>
               <p className="text-xs text-muted-foreground line-clamp-1">
                 {executionData.description}
               </p>
@@ -338,7 +471,7 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
             {!isExecuting ? (
               <Button 
                 onClick={handleStartExecution} 
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                variant="outline"
                 size="sm"
               >
                 <Play className="w-4 h-4 mr-2" />
@@ -365,7 +498,7 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
             {/* View Toggle Buttons */}
             <div className="flex items-center gap-1 border-l border-border ml-2 pl-2">
               <Button
-                variant={activeView === 'orchestrator' ? 'default' : 'ghost'}
+                variant={activeView === 'orchestrator' ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveView('orchestrator')}
                 className="h-8 px-3"
@@ -373,7 +506,7 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
                 <Brain className="w-4 h-4" />
               </Button>
               <Button
-                variant={activeView === 'analytics' ? 'default' : 'ghost'}
+                variant={activeView === 'analytics' ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => setActiveView('analytics')}
                 className="h-8 px-3"
@@ -410,10 +543,10 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
           </div>
         ) : (
           <>
-            {/* Top Section: Communication Log (40%) */}
-            <div className="h-[40%] border-b border-border">
+            {/* Top Section: Communication Log (50%) */}
+            <div className="h-[50%] border-b border-border">
               <div className="h-full p-4">
-                <div className="h-full border border-border/30 rounded-lg bg-card/30 overflow-hidden">
+                <div className="h-full glass-card overflow-hidden">
                   <CommunicationLog
                     workflowId={workflowId}
                     isExecuting={isExecuting}
@@ -423,16 +556,32 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
               </div>
             </div>
 
-            {/* Middle Section: Agent Workspaces (50%) */}
-            <div className="flex-1 border-b border-border">
-              <div className="h-full p-4">
-                <div className="h-full border border-border/30 rounded-lg bg-card/30 overflow-hidden">
-                  <AgentWorkspaceTabs
+            {/* Middle Section: Agent List + Workspace Split (40%) */}
+            <div className="h-[40%] border-b border-border">
+              <div className="h-full flex">
+                {/* Left: Agent List Sidebar (20%) */}
+                <div className="w-[20%] border-r border-border p-3 overflow-y-auto">
+                  <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
+                    Active Agents
+                  </h3>
+                  <AgentListSidebar
                     workflow={executionData}
                     selectedAgent={selectedAgent}
                     onAgentSelect={setSelectedAgent}
                     isExecuting={isExecuting}
                   />
+                </div>
+
+                {/* Right: Selected Agent Workspace (80%) */}
+                <div className="flex-1 p-4">
+                  <div className="h-full glass-card overflow-hidden">
+                    <AgentWorkspaceTabs
+                      workflow={executionData}
+                      selectedAgent={selectedAgent}
+                      onAgentSelect={setSelectedAgent}
+                      isExecuting={isExecuting}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

@@ -339,6 +339,12 @@ class OrchestratorLLM:
             )
         }
         
+        # Build response structure conditionally
+        response_structure = '"reasoning": "Your step-by-step reasoning process",\n    "response": "Your final answer/decision",'
+        if require_confidence:
+            response_structure += '\n    "confidence": 0.0 to 1.0,'
+        response_structure += '\n    "key_factors": ["List of key factors considered"]'
+        
         enhanced = f"""
 {mode_instructions[mode]}
 
@@ -348,10 +354,7 @@ TASK: {prompt}
 
 Please provide your response in the following JSON structure:
 {{
-    "reasoning": "Your step-by-step reasoning process",
-    "response": "Your final answer/decision",
-    {"\"confidence\": 0.0 to 1.0," if require_confidence else ""}
-    "key_factors": ["List of key factors considered"]
+    {response_structure}
 }}
 
 Think carefully and explain your reasoning clearly.

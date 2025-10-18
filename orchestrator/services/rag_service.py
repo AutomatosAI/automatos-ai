@@ -26,6 +26,7 @@ import pickle
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from database.models import RAGConfiguration
 
 logger = logging.getLogger(__name__)
 
@@ -500,15 +501,51 @@ Please complete the task using the provided context as guidance where relevant."
     
     # Methods required by /api/context/* endpoints
     def get_retrieval_stats(self, db) -> dict:
-        """Return RAG retrieval statistics for context API"""
-        return {
-            'total_queries': 0,
-            'success_rate': 100.0,
-            'avg_response_time': 0.0,
-            'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
-            'system_status': 'operational',
-            'last_query_time': None
-        }
+        """Return RAG retrieval statistics for context API - REAL DATA from document_usage"""
+        try:
+            # Get real stats from document_usage table
+            stats_query = text("""
+                SELECT 
+                    COUNT(*) as total_queries,
+                    (COUNT(CASE WHEN results_count > 0 THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100) as success_rate,
+                    AVG(execution_time_ms) / 1000.0 as avg_response_time,
+                    MAX(timestamp) as last_query_time
+                FROM document_usage
+                WHERE event_type IN ('document_searched', 'rag_query')
+            """)
+            
+            result = db.execute(stats_query).fetchone()
+            
+            if result and result.total_queries > 0:
+                return {
+                    'total_queries': result.total_queries,
+                    'success_rate': round(result.success_rate or 0, 1),
+                    'avg_response_time': round(result.avg_response_time or 0, 3),
+                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                    'system_status': 'operational',
+                    'last_query_time': result.last_query_time.isoformat() if result.last_query_time else None
+                }
+            else:
+                # No queries yet - return zeros
+                return {
+                    'total_queries': 0,
+                    'success_rate': 0.0,
+                    'avg_response_time': 0.0,
+                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                    'system_status': 'operational',
+                    'last_query_time': None
+                }
+        except Exception as e:
+            logger.error(f"Error getting retrieval stats: {e}")
+            # Fallback to safe defaults
+            return {
+                'total_queries': 0,
+                'success_rate': 0.0,
+                'avg_response_time': 0.0,
+                'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                'system_status': 'error',
+                'last_query_time': None
+            }
     
     def get_context_sources(self, db) -> dict:
         """Return context sources distribution for context API"""
@@ -531,8 +568,51 @@ Please complete the task using the provided context as guidance where relevant."
     
     def get_recent_queries(self, db, limit: int = 10) -> list:
         """Return recent RAG queries for context API"""
-        # For now, return empty list - could be enhanced to track queries
-        return []
+        try:
+            # Query recent RAG queries from document_usage table
+            from sqlalchemy import text
+            query = text("""
+                SELECT 
+                    query,
+                    event_type,
+                    results_count,
+                    execution_time_ms,
+                    timestamp,
+                    metadata
+                FROM document_usage
+                WHERE event_type IN ('document_searched', 'rag_query')
+                ORDER BY timestamp DESC
+                LIMIT :limit
+            """)
+            
+            result = db.execute(query, {"limit": limit}).fetchall()
+            
+            recent_queries = []
+            for row in result:
+                metadata = row.metadata or {}
+                results_count = row.results_count or 0
+                execution_time_ms = row.execution_time_ms or 0
+                
+                # Calculate confidence based on results (more results = higher confidence)
+                confidence = min(0.95, 0.5 + (results_count * 0.1)) if results_count > 0 else 0.3
+                
+                recent_queries.append({
+                    'query': row.query or 'N/A',
+                    'agent': metadata.get('agent') or metadata.get('user_id') or 'System',
+                    'confidence': round(confidence, 2),
+                    'sources': results_count,
+                    'responseTime': f"{execution_time_ms}ms",
+                    'timestamp': row.timestamp.isoformat() if row.timestamp else None,
+                    'category': metadata.get('category') or ('RAG Query' if row.event_type == 'rag_query' else 'Document Search'),
+                    # Include original fields for debugging
+                    'type': row.event_type,
+                    'metadata': metadata
+                })
+            
+            return recent_queries
+        except Exception as e:
+            logger.error(f"Error getting recent queries: {e}")
+            return []
     
     def get_performance_data(self, db: Session, time_range: str = "24h") -> List[Dict[str, Any]]:
         """Get performance data for charts from database"""

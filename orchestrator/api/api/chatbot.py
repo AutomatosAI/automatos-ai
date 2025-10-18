@@ -125,18 +125,25 @@ def get_page_suggestions(page: str) -> List[ChatSuggestion]:
 
 async def generate_response(query: str, intent: str, context: Optional[ChatContext], db: Session) -> Dict[str, Any]:
     """Generate intelligent response based on intent and context"""
+    logger.info(f"[Chatbot] generate_response called with intent='{intent}', query='{query}'")
     
     if intent == "document":
+        logger.info("[Chatbot] Routing to handle_document_query")
         return await handle_document_query(query, context, db)
     elif intent == "system":
+        logger.info("[Chatbot] Routing to handle_system_query")
         return await handle_system_query(query, context, db)
     elif intent == "workflow":
+        logger.info("[Chatbot] Routing to handle_workflow_query")
         return await handle_workflow_query(query, context, db)
     elif intent == "agent":
+        logger.info("[Chatbot] Routing to handle_agent_query")
         return await handle_agent_query(query, context, db)
     elif intent == "analytics":
+        logger.info("[Chatbot] Routing to handle_analytics_query")
         return await handle_analytics_query(query, context, db)
     else:
+        logger.info("[Chatbot] Routing to handle_general_query")
         return await handle_general_query(query, context, db)
 
 async def handle_document_query(query: str, context: Optional[ChatContext], db: Session) -> Dict[str, Any]:
@@ -656,13 +663,18 @@ async def process_chatbot_query(
 ) -> Dict[str, Any]:
     """Process natural language query and return intelligent response"""
     try:
+        logger.info(f"[Chatbot] Received query: '{request.query}'")
+        logger.info(f"[Chatbot] Context: {request.context}")
+        
         session_id = request.session_id or str(uuid.uuid4())
         
         # Classify intent
         intent = classify_intent(request.query)
+        logger.info(f"[Chatbot] Classified intent: '{intent}'")
         
         # Generate response
         response_data = await generate_response(request.query, intent, request.context, db)
+        logger.info(f"[Chatbot] Generated response type: {type(response_data)}, keys: {response_data.keys()}")
         
         # Create message objects
         user_message = ChatMessage(

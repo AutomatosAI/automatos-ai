@@ -172,27 +172,6 @@ function AgentWorkspace({
   return (
     <ScrollArea className="h-full pr-4">
       <div className="space-y-4">
-        {/* Current Task - Compact */}
-        {progress?.current_task && (
-          <Card className="glass-card">
-            <CardContent className="pt-4">
-              <p className="text-sm text-primary font-medium mb-3">
-                {progress.current_task}
-              </p>
-              
-              {progress.progress !== undefined && (
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span>Progress</span>
-                    <span className="font-medium">{Math.round(progress.progress)}%</span>
-                  </div>
-                  <Progress value={progress.progress} className="h-2" />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
         {/* LLM Call Status */}
         {isExecuting && progress?.status === 'executing' && (
           <Card className="glass-card border-blue-500/20">
@@ -217,7 +196,7 @@ function AgentWorkspace({
                 <span className="text-muted-foreground">Elapsed:</span>
                 <span className="font-medium">{progress.elapsed_time || '0'}s</span>
               </div>
-              <div className="h-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full animate-pulse" />
+              <div className="h-1 bg-blue-500/50 rounded-full animate-pulse" />
             </CardContent>
           </Card>
         )}

@@ -1818,6 +1818,10 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 "quality_scores": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}),
                 "steps_completed": len(steps),
                 "execution_time": f"{total_duration:.1f}s",
+                # Performance Analytics - Cost & Token Tracking
+                "total_cost": usage_summary.get("total_cost", 0),
+                "total_tokens_used": usage_summary.get("total_tokens", 0),
+                "total_requests": usage_summary.get("total_requests", 0),
                 "subtasks": [
                     {
                         "description": step.get("description", step.get("name", "Unknown")),

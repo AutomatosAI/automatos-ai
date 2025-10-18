@@ -256,9 +256,14 @@ async def get_agent_performance(
                 detail=f"Agent {agent_id} not found"
             )
         
-        # Get agent runtime status if active
+        # Get agent runtime status if active (with error handling)
         factory = get_agent_factory()
-        agent_status = await factory.get_agent_status(agent_id)
+        agent_status = {}
+        try:
+            agent_status = await factory.get_agent_status(agent_id) or {}
+        except Exception as e:
+            logger.warning(f"Could not get agent runtime status: {e}")
+            agent_status = {"status": agent.status}
         
         # Extract performance_metrics from database
         perf_metrics = agent.performance_metrics or {}
@@ -269,12 +274,12 @@ async def get_agent_performance(
             "agent_id": agent_id,
             "agent_name": agent.name,
             "period": period,
-            "status": agent_status.get("status", agent.status),
+            "status": agent_status.get("status", agent.status) if isinstance(agent_status, dict) else agent.status,
             
-            # Core performance metrics from DB
+            # Core performance metrics from DB (rounded for display)
             "overall_score": min(100, int(perf_metrics.get("success_rate", 0) * 100)) if perf_metrics else 85,
-            "success_rate": perf_metrics.get("success_rate", 0) * 100 if perf_metrics else 0,
-            "average_response_time": perf_metrics.get("avg_execution_time_ms", 0) / 1000 if perf_metrics else 0,
+            "success_rate": round(perf_metrics.get("success_rate", 0) * 100, 2) if perf_metrics else 0,
+            "average_response_time": round(perf_metrics.get("avg_execution_time_ms", 0) / 1000, 2) if perf_metrics else 0,
             "total_tasks": perf_metrics.get("total_tasks_executed", 0),
             "completed_tasks": int(perf_metrics.get("total_tasks_executed", 0) * perf_metrics.get("success_rate", 1)) if perf_metrics else 0,
             "failed_tasks": int(perf_metrics.get("total_tasks_executed", 0) * (1 - perf_metrics.get("success_rate", 1))) if perf_metrics else 0,
@@ -285,9 +290,9 @@ async def get_agent_performance(
             "total_cost": model_stats.get("total_cost", 0.0),
             "total_requests": model_stats.get("total_requests", 0),
             
-            # Resource metrics (estimates - can be enhanced later)
-            "average_memory_usage": 65,  # TODO: Track real memory
-            "average_cpu_usage": 35,     # TODO: Track real CPU
+            # Resource metrics (PLACEHOLDER - not tracking real CPU/Memory yet)
+            "average_memory_usage": 0,  # TODO: Track real memory usage
+            "average_cpu_usage": 0,     # TODO: Track real CPU usage
             "uptime_percentage": 99.8 if agent_status.get("status") == "active" else 0,
             
             # Runtime info (if agent is active)
@@ -334,46 +339,41 @@ async def get_agent_logs(
                 detail=f"Agent {agent_id} not found"
             )
         
-        # Get recent workflow executions for this agent
-        executions = db.query(WorkflowExecution).filter(
-            WorkflowExecution.agent_id == agent_id
-        ).order_by(desc(WorkflowExecution.started_at)).limit(limit).all()
+        # Get recent workflow executions (check all, filter by agent in subtasks)
+        executions = db.query(WorkflowExecution).order_by(
+            desc(WorkflowExecution.started_at)
+        ).limit(limit * 5).all()  # Get more to filter down
         
         logs = []
         for execution in executions:
             # Extract subtask data if available
             output_data = execution.output_data or {}
-            subtasks = output_data.get("subtasks", [])
+            subtasks = output_data.get("subtasks", []) if output_data else []
             
-            # Create log entries for each subtask
-            for subtask in subtasks:
-                if subtask.get("selected_agent", {}).get("agent_id") == agent_id:
-                    result = subtask.get("execution_result", {})
-                    logs.append({
-                        "timestamp": execution.started_at.isoformat() if execution.started_at else None,
-                        "level": "error" if result.get("status") == "failed" else "info",
-                        "message": subtask.get("description", "Task executed"),
-                        "details": result.get("llm_response", result.get("response", ""))[:200],
-                        "tokens_used": result.get("tokens_used", 0),
-                        "execution_time_ms": result.get("execution_time_ms", 0),
-                        "status": result.get("status", "unknown"),
-                        "workflow_id": execution.workflow_id,
-                        "execution_id": execution.id
-                    })
+            # Create log entries for each subtask for this agent
+            if subtasks:
+                for subtask in subtasks:
+                    if subtask and isinstance(subtask, dict):
+                        selected_agent = subtask.get("selected_agent") or {}
+                        if selected_agent.get("agent_id") == agent_id:
+                            result = subtask.get("execution_result") or {}
+                            logs.append({
+                                "timestamp": execution.started_at.isoformat() if execution.started_at else None,
+                                "level": "error" if result.get("status") == "failed" else "info",
+                                "message": subtask.get("description", "Task executed"),
+                                "details": (result.get("llm_response") or result.get("response") or "")[:200],
+                                "tokens_used": result.get("tokens_used", 0),
+                                "execution_time_ms": result.get("execution_time_ms", 0),
+                                "status": result.get("status", "unknown"),
+                                "workflow_id": execution.workflow_id,
+                                "execution_id": execution.id
+                            })
             
-            # If no subtasks, create a simple log entry
-            if not subtasks:
-                logs.append({
-                    "timestamp": execution.started_at.isoformat() if execution.started_at else None,
-                    "level": "error" if execution.status == "failed" else "info",
-                    "message": f"Workflow execution {execution.status}",
-                    "details": execution.error_message or "",
-                    "status": execution.status,
-                    "workflow_id": execution.workflow_id,
-                    "execution_id": execution.id
-                })
+            # Stop if we have enough logs
+            if len(logs) >= limit:
+                break
         
-        return logs[:limit]  # Ensure we don't exceed limit
+        return logs[:limit]  # Return only requested limit
         
     except HTTPException:
         raise

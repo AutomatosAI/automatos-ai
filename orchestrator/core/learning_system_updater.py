@@ -164,12 +164,14 @@ class LearningSystemUpdater:
                     updated_avg_time = new_avg_time
                 
                 # Update agent metrics
+                total_tasks = current_metrics.get("total_tasks_executed", 0) + perf_data["total_tasks"]
                 agent.performance_metrics = {
                     **current_metrics,
                     "success_rate": updated_success_rate,
                     "avg_tokens_per_task": updated_avg_tokens,
                     "avg_execution_time_ms": updated_avg_time,
-                    "total_tasks_executed": current_metrics.get("total_tasks_executed", 0) + perf_data["total_tasks"],
+                    "total_tasks_executed": total_tasks,
+                    "tasks_completed": total_tasks,  # Frontend compatibility
                     "last_updated": datetime.now().isoformat(),
                     "learning_version": current_metrics.get("learning_version", 0) + 1
                 }

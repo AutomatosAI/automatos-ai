@@ -37,9 +37,7 @@ import {
   BookOpen,
   GitBranch,
   Gauge,
-  Database,
-  MessageSquare,
-  Network
+  Database
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -71,6 +69,7 @@ export function PerformanceAnalytics() {
   const [workflowTrends, setWorkflowTrends] = useState<any>(null)
   const [learningMetrics, setLearningMetrics] = useState<any>(null)
   const [agentPerformance, setAgentPerformance] = useState<any>(null)
+  const [systemAlertsData, setSystemAlertsData] = useState<any[]>([])
   const [ref, inView] = useInView({
     triggerOnce: true,
     threshold: 0.1,
@@ -92,12 +91,12 @@ export function PerformanceAnalytics() {
   // Check if any hooks are still loading
   const hooksLoading = successRateLoading || completionTimeLoading || loadTrendLoading || errorRateLoading || allMetricsLoading || costAnalysisLoading
 
-  // Fetch benchmarking data
+  // Fetch benchmarking data + alerts
   useEffect(() => {
     const fetchBenchmarkData = async () => {
       try {
         // Fetch performance summary
-        const perfResponse = await fetch(`/api/v1/benchmarking/performance-summary?days=${selectedTimeRange === '7d' ? 7 : 30}`)
+        const perfResponse = await fetch(`/api/v1/benchmarking/performance-summary?days=${selectedTimeRange === '7d' ? 7 : selectedTimeRange === '30d' ? 30 : 1}`)
         if (perfResponse.ok) {
           const data = await perfResponse.json()
           setBenchmarkData(data)
@@ -111,10 +110,28 @@ export function PerformanceAnalytics() {
         }
 
         // Fetch agent performance
-        const agentResponse = await fetch('/api/v1/benchmarking/agent-performance')
+        const agentResponse = await fetch(`/api/v1/benchmarking/agent-performance?days=${selectedTimeRange === '7d' ? 7 : selectedTimeRange === '30d' ? 30 : 1}`)
         if (agentResponse.ok) {
           const data = await agentResponse.json()
           setAgentPerformance(data)
+        }
+
+        // Fetch predictive alerts from analytics API
+        const alertsResponse = await fetch('/api/analytics/performance/predictive-alerts')
+        if (alertsResponse.ok) {
+          const data = await alertsResponse.json()
+          // Transform alerts into display format
+          const alerts = data.alerts?.map((alert: any, index: number) => ({
+            id: index + 1,
+            type: alert.severity || 'info',
+            title: alert.title || alert.metric || 'System Alert',
+            description: alert.message || alert.recommendation || '',
+            timestamp: alert.timestamp || new Date().toISOString(),
+            metric: alert.metric,
+            value: alert.current_value,
+            threshold: alert.threshold
+          })) || []
+          setSystemAlertsData(alerts)
         }
       } catch (error) {
         console.error('Error fetching benchmark data:', error)
@@ -200,9 +217,17 @@ export function PerformanceAnalytics() {
 
   // Agent utilization data from API ONLY
   const agentUtilizationData = useMemo(() => {
-    // This would come from an agent API call - for now return empty array
+    if (agentPerformance?.agent_metrics) {
+      return agentPerformance.agent_metrics.slice(0, 8).map((agent: any) => ({
+        name: agent.agent_name,
+        active_tasks: agent.total_executions,
+        success_rate: agent.success_rate,
+        avg_response_time: agent.avg_execution_time || 0,
+        utilization: Math.min(100, agent.total_executions * 5) // Estimate utilization %
+      }))
+    }
     return []
-  }, [])
+  }, [agentPerformance])
 
   // Cost analysis data from API ONLY
   const costAnalysisData = useMemo(() => {
@@ -219,9 +244,8 @@ export function PerformanceAnalytics() {
 
   // System alerts from API ONLY
   const systemAlerts: any[] = useMemo(() => {
-    // This would come from an alerts API call - for now return empty array
-    return []
-  }, [])
+    return systemAlertsData
+  }, [systemAlertsData])
 
   return (
     <div className="space-y-8">
@@ -300,110 +324,6 @@ export function PerformanceAnalytics() {
           </motion.div>
         ))}
       </motion.div>
-
-      {/* NEW: Real-Time Orchestration Activity */}
-      {orchestrationData && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.3 }}
-          className="glass-card p-6"
-        >
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-2">
-              <Network className="w-5 h-5 text-primary" />
-              <h3 className="text-lg font-semibold">Live Orchestration Activity</h3>
-              <Badge variant="secondary" className="animate-pulse">
-                <Activity className="w-3 h-3 mr-1" />
-                Real-Time
-              </Badge>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-4 rounded-lg bg-secondary/20">
-              <Database className="w-6 h-6 mx-auto mb-2 text-blue-400" />
-              <p className="text-2xl font-bold">{orchestrationData.totalMemoryOperations}</p>
-              <p className="text-xs text-muted-foreground">Memory Ops</p>
-            </div>
-            <div className="text-center p-4 rounded-lg bg-secondary/20">
-              <MessageSquare className="w-6 h-6 mx-auto mb-2 text-green-400" />
-              <p className="text-2xl font-bold">{orchestrationData.totalCommunications}</p>
-              <p className="text-xs text-muted-foreground">Messages</p>
-            </div>
-            <div className="text-center p-4 rounded-lg bg-secondary/20">
-              <Users className="w-6 h-6 mx-auto mb-2 text-yellow-400" />
-              <p className="text-2xl font-bold">{orchestrationData.topAgents?.length || 0}</p>
-              <p className="text-xs text-muted-foreground">Active Agents</p>
-            </div>
-            <div className="text-center p-4 rounded-lg bg-secondary/20">
-              <Sparkles className="w-6 h-6 mx-auto mb-2 text-purple-400" />
-              <p className="text-2xl font-bold">{((orchestrationData.learningVelocity || 0) * 100).toFixed(1)}%</p>
-              <p className="text-xs text-muted-foreground">Learning Rate</p>
-            </div>
-          </div>
-
-          {/* Memory Utilization Bar */}
-          {orchestrationData.memoryUtilization && (
-            <div className="mt-6">
-              <p className="text-sm font-medium mb-2">Memory Utilization</p>
-              <div className="flex h-4 rounded-lg overflow-hidden bg-secondary/30">
-                <div 
-                  className="bg-blue-500 transition-all duration-300"
-                  style={{ width: `${orchestrationData.memoryUtilization.working}%` }}
-                  title={`Working: ${orchestrationData.memoryUtilization.working}%`}
-                />
-                <div 
-                  className="bg-yellow-500 transition-all duration-300"
-                  style={{ width: `${orchestrationData.memoryUtilization.shortTerm}%` }}
-                  title={`Short-term: ${orchestrationData.memoryUtilization.shortTerm}%`}
-                />
-                <div 
-                  className="bg-green-500 transition-all duration-300"
-                  style={{ width: `${orchestrationData.memoryUtilization.longTerm}%` }}
-                  title={`Long-term: ${orchestrationData.memoryUtilization.longTerm}%`}
-                />
-                <div 
-                  className="bg-purple-500 transition-all duration-300"
-                  style={{ width: `${orchestrationData.memoryUtilization.collective}%` }}
-                  title={`Collective: ${orchestrationData.memoryUtilization.collective}%`}
-                />
-              </div>
-              <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-                <span className="flex items-center"><div className="w-3 h-3 bg-blue-500 rounded mr-1" /> Working</span>
-                <span className="flex items-center"><div className="w-3 h-3 bg-yellow-500 rounded mr-1" /> Short-term</span>
-                <span className="flex items-center"><div className="w-3 h-3 bg-green-500 rounded mr-1" /> Long-term</span>
-                <span className="flex items-center"><div className="w-3 h-3 bg-purple-500 rounded mr-1" /> Collective</span>
-              </div>
-            </div>
-          )}
-
-          {/* Top Performing Agents */}
-          {orchestrationData.topAgents && orchestrationData.topAgents.length > 0 && (
-            <div className="mt-6">
-              <p className="text-sm font-medium mb-3">Top Performing Agents</p>
-              <div className="space-y-2">
-                {orchestrationData.topAgents.map((agent, index) => (
-                  <div key={agent.name} className="flex items-center justify-between p-2 rounded-lg bg-secondary/10">
-                    <div className="flex items-center space-x-2">
-                      <Badge variant="outline" className="w-6 h-6 p-0 flex items-center justify-center">
-                        {index + 1}
-                      </Badge>
-                      <span className="text-sm font-medium">{agent.name}</span>
-                    </div>
-                    <div className="flex items-center space-x-4 text-xs text-muted-foreground">
-                      <span>{agent.executions} runs</span>
-                      <Badge variant="secondary" className={agent.successRate > 80 ? 'text-green-400' : 'text-yellow-400'}>
-                        {agent.successRate.toFixed(0)}% success
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </motion.div>
-      )}
 
       {/* Analytics Tabs */}
       <motion.div

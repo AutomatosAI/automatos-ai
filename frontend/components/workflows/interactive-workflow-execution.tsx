@@ -396,7 +396,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             {!isExecuting ? (
-              <Button onClick={startExecution} className="bg-green-500 hover:bg-green-600">
+              <Button onClick={startExecution} variant="outline">
                 <Play className="w-4 h-4 mr-2" />
                 Start Execution
               </Button>
@@ -406,7 +406,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                   <Pause className="w-4 h-4 mr-2" />
                   Pause
                 </Button>
-                <Button onClick={stopExecution} variant="outline" className="text-red-400 border-red-500/20 hover:bg-red-500/10">
+                <Button onClick={stopExecution} variant="outline" className="text-red-400 hover:bg-red-500/10">
                   <Square className="w-4 h-4 mr-2" />
                   Stop
                 </Button>
@@ -711,7 +711,8 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                 <div className="flex space-x-2">
                   <Button
                     onClick={() => handleHumanResponse(selectedInteraction.id, 'approved')}
-                    className="flex-1 bg-green-500 hover:bg-green-600"
+                    variant="outline"
+                    className="flex-1"
                   >
                     <CheckCircle className="w-4 h-4 mr-2" />
                     Approve
@@ -719,7 +720,7 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
                   <Button
                     variant="outline"
                     onClick={() => handleHumanResponse(selectedInteraction.id, 'rejected')}
-                    className="flex-1 text-red-400 border-red-500/20 hover:bg-red-500/10"
+                    className="flex-1 text-red-400 hover:bg-red-500/10"
                   >
                     <AlertTriangle className="w-4 h-4 mr-2" />
                     Reject
@@ -777,7 +778,9 @@ export function InteractiveWorkflowExecution({ workflowId }: { workflowId: numbe
           className="glass-card p-6 text-center"
         >
           <GitBranch className="w-12 h-12 text-primary mx-auto mb-4" />
-          <h3 className="text-xl font-semibold mb-2">Interactive Workflow Execution</h3>
+          <h3 className="text-xl font-semibold mb-2">
+            Interactive <span className="gradient-text">Workflow Execution</span>
+          </h3>
           <p className="text-muted-foreground mb-6">
             Start the workflow to see real-time orchestrator activities, agent execution status, and provide human input when needed.
           </p>

@@ -71,7 +71,7 @@ from api.recommendations import router as recommendations_router
 from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 from api.websocket_api import router as websocket_api_router
-from api.chatbot import router as chatbot_router
+from api.chatbot_llm import router as chatbot_router
 from api.chatbot_suggestions import router as chatbot_suggestions_router
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router

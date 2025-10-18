@@ -32,7 +32,6 @@ import {
   useSystemHealth,
   useSystemMetrics,
   useSystemAgentStatistics,
-  useSystemActivities,
   useApiHealth
 } from '../../hooks/use-system-config-api'
 
@@ -56,7 +55,7 @@ const TimeDisplay = dynamic(() => Promise.resolve(() => {
 }), { ssr: false });
 
 import { MetricCards } from './metric-cards'
-import { ActivityFeed } from './activity-feed'
+// import { ActivityFeed } from './activity-feed' // Hidden until endpoint implemented
 import { SystemHealth } from './system-health'
 import { QuickActions } from './quick-actions'
 import { PerformanceChart } from './performance-chart'
@@ -72,7 +71,7 @@ export function Dashboard() {
   const { data: systemHealth, isLoading: healthLoading } = useSystemHealth()
   const { data: systemMetrics, isLoading: metricsLoading } = useSystemMetrics()
   const { data: apiHealth, isLoading: apiHealthLoading } = useApiHealth()
-  const { data: activities, isLoading: activitiesLoading } = useSystemActivities()
+  // const { data: activities, isLoading: activitiesLoading } = useSystemActivities() // Hidden until endpoint implemented
   const { data: agents, isLoading: agentsLoading } = useAgents()
   const { data: documents, isLoading: documentsLoading } = useDocuments()
   const { data: workflows, isLoading: workflowsLoading } = useWorkflows()
@@ -83,7 +82,7 @@ export function Dashboard() {
   const { data: performanceData, isLoading: performanceLoading } = usePerformanceAnalytics('24h') // Last 24 hours
 
   // Loading states
-  const isLoading = healthLoading || metricsLoading || activitiesLoading || 
+  const isLoading = healthLoading || metricsLoading || 
                   agentStatsLoading || allMetricsLoading || performanceLoading
 
   return (
@@ -214,14 +213,14 @@ export function Dashboard() {
             <QuickActions />
           </motion.div>
 
-          {/* Recent Activities */}
-          <motion.div
+          {/* Recent Activities - Temporarily hidden until backend endpoint is implemented */}
+          {/* <motion.div
             initial={{ opacity: 0, x: 20 }}
             animate={inView ? { opacity: 1, x: 0 } : {}}
             transition={{ duration: 0.5, delay: 0.3 }}
           >
             <ActivityFeed />
-          </motion.div>
+          </motion.div> */}
 
           {/* System Resources */}
           <motion.div
