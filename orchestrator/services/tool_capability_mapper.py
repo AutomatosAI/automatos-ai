@@ -47,13 +47,13 @@ class ToolCapabilityMapper:
         "code_review": {
             "required": ["research", "file_ops"],
             "optional": ["mcp"],
-            "specific": [],
+            "specific": ["search_codebase", "search_knowledge", "GitHub MCP"],  # PRD-17 Phase 3
             "rationale": "Code review requires reading files and researching best practices"
         },
         "bug_fix": {
             "required": ["research", "file_ops", "shell"],
             "optional": ["mcp"],
-            "specific": [],
+            "specific": ["search_codebase", "GitHub MCP"],  # PRD-17 Phase 3
             "rationale": "Bug fixing requires code analysis, file modifications, and testing via shell"
         },
         "code_refactor": {
@@ -139,8 +139,20 @@ class ToolCapabilityMapper:
         "create_pr": {
             "required": ["file_ops", "mcp"],
             "optional": ["shell", "research"],
-            "specific": [],
+            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: Specific GitHub integration
             "rationale": "Creating PRs requires file operations and GitHub integration"
+        },
+        "repository_management": {
+            "required": ["mcp"],
+            "optional": ["file_ops", "research"],
+            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: GitHub operations
+            "rationale": "Repository management requires GitHub API access"
+        },
+        "clone_repository": {
+            "required": ["mcp", "shell"],
+            "optional": ["file_ops"],
+            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: Get repo details before cloning
+            "rationale": "Cloning requires GitHub API access and shell commands"
         },
         "api_design": {
             "required": ["research", "file_ops"],

@@ -96,14 +96,15 @@ class WorkflowAnalyticsService:
             agent_selection = input_data.get("agent_selection", {})
             agent_assignments = agent_selection.get("assignments", {})
             
-            agents_used = []
+            # Track all agent assignments per subtask
+            all_assignments = []
             total_match_score = 0
             total_skill_coverage = 0
             
             for subtask_id, matches in agent_assignments.items():
                 if matches and len(matches) > 0:
                     best_match = matches[0]
-                    agents_used.append({
+                    all_assignments.append({
                         "agent_id": best_match.get("agent_id"),
                         "agent_name": best_match.get("agent_name"),
                         "subtask": subtask_id,
@@ -115,8 +116,47 @@ class WorkflowAnalyticsService:
                     total_match_score += best_match.get("match_score", 0)
                     total_skill_coverage += best_match.get("skill_coverage", 0)
             
-            avg_match_score = total_match_score / len(agents_used) if agents_used else 0
-            avg_skill_coverage = total_skill_coverage / len(agents_used) if agents_used else 0
+            # Deduplicate agents_used by agent_id (show unique agents, not per-subtask)
+            unique_agents = {}
+            for assignment in all_assignments:
+                agent_id = assignment["agent_id"]
+                if agent_id not in unique_agents:
+                    unique_agents[agent_id] = {
+                        "agent_id": agent_id,
+                        "agent_name": assignment["agent_name"],
+                        "subtasks": [],
+                        "total_match_score": 0,
+                        "total_skill_coverage": 0,
+                        "matched_skills": set(),
+                        "missing_skills": set()
+                    }
+                unique_agents[agent_id]["subtasks"].append(assignment["subtask"])
+                unique_agents[agent_id]["total_match_score"] += assignment["match_score"]
+                unique_agents[agent_id]["total_skill_coverage"] += assignment["skill_coverage"]
+                unique_agents[agent_id]["matched_skills"].update(assignment.get("matched_skills", []))
+                unique_agents[agent_id]["missing_skills"].update(assignment.get("missing_skills", []))
+            
+            # Convert to list with aggregated metrics per agent
+            agents_used = [
+                {
+                    "agent_id": data["agent_id"],
+                    "agent_name": data["agent_name"],
+                    "subtask_count": len(data["subtasks"]),
+                    "subtasks": data["subtasks"],
+                    "avg_match_score": data["total_match_score"] / len(data["subtasks"]),
+                    "avg_skill_coverage": data["total_skill_coverage"] / len(data["subtasks"]),
+                    "matched_skills": list(data["matched_skills"]),
+                    "missing_skills": list(data["missing_skills"])
+                }
+                for data in unique_agents.values()
+            ]
+            
+            logger.info(f"🔍 ANALYTICS DEBUG: all_assignments={len(all_assignments)}, unique_agents={len(unique_agents)}, agents_used={len(agents_used)}")
+            for agent in agents_used:
+                logger.info(f"  - Agent {agent['agent_id']} ({agent['agent_name']}): {agent['subtask_count']} subtasks")
+            
+            avg_match_score = total_match_score / len(all_assignments) if all_assignments else 0
+            avg_skill_coverage = total_skill_coverage / len(all_assignments) if all_assignments else 0
             
             # Extract execution metrics
             agent_execution = input_data.get("agent_execution", {})

@@ -43,6 +43,239 @@ def get_rag_service():
     from services.rag_service import get_rag_service as _get_rag
     return _get_rag()
 
+def get_unified_tool_executor(db_session: Session):
+    """PRD-17 Phase 3: Get UnifiedToolExecutor instance"""
+    from services.unified_tool_executor import UnifiedToolExecutor
+    return UnifiedToolExecutor(db_session)
+
+def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
+    """
+    PRD-17: Convert tool categories to OpenAI function calling schema.
+    
+    Args:
+        required_tools: List of tool categories (e.g., ['research', 'file_ops'])
+        
+    Returns:
+        List of OpenAI function schemas
+    """
+    tools = []
+    
+    # Research tools
+    if "research" in required_tools:
+        tools.extend([
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge",
+                    "description": "Search the knowledge base (RAG) for information about a topic. Returns relevant documentation chunks.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query to find relevant information"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return (default: 5)",
+                                "default": 5
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "semantic_search",
+                    "description": "Find semantically similar content in the document database using vector similarity.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The concept or text to find similar content for"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return (default: 3)",
+                                "default": 3
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_codebase",
+                    "description": "Search the codebase using CodeGraph for classes, functions, or code patterns.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Class name, function name, or code pattern to search for"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }
+        ])
+    
+    # File operation tools
+    if "file_ops" in required_tools:
+        tools.extend([
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the contents of a file from the workspace.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file to read"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write content to a file in the workspace.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path to the file to write"
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Content to write to the file"
+                            }
+                        },
+                        "required": ["path", "content"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "List files and directories in a path.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Directory path to list (default: workspace root)",
+                                "default": "."
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_directory",
+                    "description": "Create a new directory in the workspace.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Path of the directory to create"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            }
+        ])
+    
+    # Shell command tools
+    if "shell" in required_tools:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "execute_command",
+                "description": "Execute a shell command in the workspace. Use with caution.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute"
+                        }
+                    },
+                    "required": ["command"]
+                }
+            }
+        })
+    
+    # PRD-17 Phase 3: MCP tools (GitHub integration)
+    if "mcp" in required_tools:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "GitHub MCP",
+                "description": "Access GitHub API for repository operations, PRs, issues, and file management.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "method": {
+                            "type": "string",
+                            "description": "GitHub API method (repos.get, repos.getContent, pulls.create, issues.create, etc.)",
+                            "enum": ["repos.get", "repos.getContent", "repos.listForAuthenticatedUser", "pulls.create", "pulls.list", "issues.create", "issues.list"]
+                        },
+                        "owner": {
+                            "type": "string",
+                            "description": "Repository owner (username or organization)",
+                            "default": "AutomatosAI"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "File path in repository (for getContent)"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Title for PR or issue"
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "Description/body for PR or issue"
+                        },
+                        "head": {
+                            "type": "string",
+                            "description": "Head branch for PR"
+                        },
+                        "base": {
+                            "type": "string",
+                            "description": "Base branch for PR (default: main)"
+                        }
+                    },
+                    "required": ["method"]
+                }
+            }
+        })
+    
+    return tools
+
 logger = logging.getLogger(__name__)
 
 # Agent lifecycle states
@@ -250,6 +483,79 @@ class AgentFactory:
         
         self.active_agents: Dict[int, AgentRuntime] = {}
         self.logger = logging.getLogger(__name__)
+    
+    def _build_tools_prompt(self, required_tools: List[str]) -> str:
+        """
+        PRD-17: Build dynamic tools prompt based on required tool categories.
+        
+        Args:
+            required_tools: List of tool categories (e.g., ['research', 'file_ops', 'shell'])
+            
+        Returns:
+            Formatted prompt string with available tools
+        """
+        tools_sections = []
+        
+        # Research tools (search_knowledge, semantic_search, search_codebase)
+        if "research" in required_tools:
+            tools_sections.append("""
+## 🔍 RESEARCH TOOLS
+
+Available when you need to find information:
+1. **search_knowledge** - Search documentation and knowledge base
+   {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
+
+2. **semantic_search** - Find semantically similar content
+   {"action": "semantic_search", "params": {"query": "concept to find", "limit": 5}}
+
+3. **search_codebase** - Search code implementations  
+   {"action": "search_codebase", "params": {"query": "function or class name"}}
+
+Use these tools if you need to understand something before acting.""")
+        
+        # File operation tools (read_file, write_file, list_directory, create_directory)
+        if "file_ops" in required_tools:
+            tools_sections.append("""
+## 📁 FILE OPERATION TOOLS
+
+Available File Tools:
+1. **read_file** - Read file contents
+   {"action": "read_file", "params": {"path": "path/to/file.py"}}
+
+2. **write_file** - Create or update files
+   {"action": "write_file", "params": {"path": "path/to/file.py", "content": "file contents here"}}
+
+3. **list_directory** - List directory contents
+   {"action": "list_directory", "params": {"path": "path/to/directory"}}
+
+4. **create_directory** - Create a new directory
+   {"action": "create_directory", "params": {"path": "path/to/new_dir"}}""")
+        
+        # Shell command tools (execute_command)
+        if "shell" in required_tools:
+            tools_sections.append("""
+## 💻 SHELL COMMAND TOOLS
+
+Available Shell Tools:
+1. **execute_command** - Run shell commands (use with caution!)
+   {"action": "execute_command", "params": {"command": "ls -la", "timeout": 30}}
+
+⚠️  Use shell tools carefully - always validate commands before execution""")
+        
+        # Build final prompt
+        if not tools_sections:
+            return ""  # No tools needed
+        
+        final_prompt = "\n".join(tools_sections)
+        final_prompt += """
+
+**EXECUTION RULES**:
+- You have tools available - use them when needed
+- For simple operations (create file, run command), just execute directly
+- For complex tasks requiring understanding, search first then act
+- Be efficient - don't over-research simple tasks
+"""
+        return final_prompt
     
     async def create_agent(
         self,
@@ -552,7 +858,8 @@ class AgentFactory:
         use_memory: bool = True,
         max_retries: int = 2,
         enable_actions: bool = True,
-        action_executor: Optional[Any] = None
+        action_executor: Optional[Any] = None,
+        required_tools: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
@@ -623,33 +930,15 @@ To use actions, respond with JSON blocks like:
 \nYou can include multiple action blocks in your response."""
                 prompt = prompt + action_prompt
             
-            # ALWAYS add platform research tools
-            platform_tools_prompt = """
-
-## 🔍 YOU HAVE REAL RESEARCH TOOLS - USE THEM!
-
-⚠️  CRITICAL: You can execute real search tools. DO NOT describe what you would search for - ACTUALLY EXECUTE THE SEARCHES!
-
-Available Tools:
-1. **search_knowledge** - Search documentation and knowledge base
-   {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
-
-2. **semantic_search** - Find semantically similar content
-   {"action": "semantic_search", "params": {"query": "concept to find", "limit": 5}}
-
-3. **search_codebase** - Search code implementations  
-   {"action": "search_codebase", "params": {"query": "function or class name"}}
-
-❌ WRONG RESPONSE: "I would use search_knowledge to find information about X"
-✅ CORRECT RESPONSE: Immediately output the JSON block: {"action": "search_knowledge", "params": {"query": "X", "limit": 5}}
-
-**EXECUTION RULES**:
-- If you lack information → SEARCH FOR IT immediately using tools
-- You can call multiple tools in sequence
-- NEVER say "I don't have information" - USE THE TOOLS
-- After receiving tool results, use them to provide a detailed, factual answer"""
+            # PRD-17: Dynamic tool injection based on required_tools
+            # Default to research tools for backwards compatibility
+            if required_tools is None:
+                required_tools = ["research"]
             
-            prompt = prompt + platform_tools_prompt
+            # Build OpenAI function calling schemas
+            tool_schemas = _build_tool_schemas(required_tools)
+            self.logger.info(f"📦 PRD-17: Providing {len(tool_schemas)} tools to agent: {[t['function']['name'] for t in tool_schemas]}")
+            
             action_executor = action_executor or get_action_executor()  # Ensure executor exists
             
             # Add the main prompt from orchestrator
@@ -659,11 +948,69 @@ Available Tools:
             last_error = None
             for attempt in range(max(1, max_retries)):
                 try:
-                    # REAL LLM API CALL
-                    response = await agent_runtime.llm_manager.generate_response(messages)
+                    # REAL LLM API CALL WITH FUNCTION CALLING
+                    response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
                     execution_time = time.time() - start_time
                     
-                    # Process any action requests in the response and iterate if needed
+                    # PRD-17: Handle function calling responses
+                    if response and response.tool_calls:
+                        self.logger.info(f"🔧 PRD-17: Agent called {len(response.tool_calls)} tool(s) via function calling")
+                        tool_results = []
+                        tool_executor = get_unified_tool_executor(self.db_session)
+                        
+                        for tool_call in response.tool_calls:
+                            func_name = tool_call['function']['name']
+                            func_args = json.loads(tool_call['function']['arguments'])
+                            self.logger.info(f"  🛠️  Calling {func_name}({func_args})")
+                            
+                            try:
+                                result = await tool_executor.execute_tool(
+                                    tool_name=func_name,
+                                    parameters=func_args,
+                                    agent_id=agent_runtime.agent_id
+                                )
+                                tool_results.append({
+                                    "tool_call_id": tool_call['id'],
+                                    "role": "tool",
+                                    "name": func_name,
+                                    "content": json.dumps(result)
+                                })
+                                self.logger.info(f"    ✅ {func_name} completed successfully")
+                            except Exception as e:
+                                self.logger.error(f"    ❌ {func_name} failed: {e}")
+                                tool_results.append({
+                                    "tool_call_id": tool_call['id'],
+                                    "role": "tool",
+                                    "name": func_name,
+                                    "content": json.dumps({"error": str(e)})
+                                })
+                        
+                        # Add assistant's tool call message and tool results to conversation
+                        messages.append({
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": response.tool_calls
+                        })
+                        messages.extend(tool_results)
+                        
+                        # Call LLM again to process tool results
+                        self.logger.info("  🔄 Calling LLM again with tool results...")
+                        response = await agent_runtime.llm_manager.generate_response(messages, tools=tool_schemas)
+                        execution_time = time.time() - start_time
+                        
+                        # PRD-17: If LLM returns empty content, use tool results as the response
+                        if not response.content or response.content.strip() == "":
+                            self.logger.warning("  ⚠️  LLM returned empty content after tool use, using tool results")
+                            # Format tool results into readable response
+                            tool_summary = "\n\n".join([
+                                f"**{tr['name']}**: {tr['content'][:500]}..." 
+                                for tr in tool_results
+                            ])
+                            response.content = f"Based on the tool results:\n\n{tool_summary}"
+                        
+                        self.logger.info("  ✅ LLM provided final answer after processing tool results")
+                    
+                    # Process any action requests in the response and iterate if needed (fallback for old JSON format)
                     action_results = []
                     if action_executor and response and response.content and '{"action"' in response.content:
                         self.logger.info(f"🔧 Agent requested tool calls, executing...")
@@ -992,87 +1339,25 @@ Available Tools:
                 action_type = action_data.get('action')
                 params = action_data.get('params', {})
                 
-                # Execute the requested action
-                if action_type == 'read_file':
-                    success, content = action_executor.read_file(params.get('path', ''))
-                    results.append({
-                        'action': action_type,
-                        'params': params,
-                        'success': success,
-                        'result': content
-                    })
-                elif action_type == 'write_file':
-                    success, message = action_executor.write_file(
-                        params.get('path', ''),
-                        params.get('content', '')
-                    )
-                    results.append({
-                        'action': action_type,
-                        'params': params,
-                        'success': success,
-                        'result': message
-                    })
-                elif action_type == 'execute_command':
-                    success, output = action_executor.execute_command(params.get('command', ''))
-                    results.append({
-                        'action': action_type,
-                        'params': params,
-                        'success': success,
-                        'result': output
-                    })
-                elif action_type == 'list_directory':
-                    success, items = action_executor.list_directory(params.get('path', '.'))
-                    results.append({
-                        'action': action_type,
-                        'params': params,
-                        'success': success,
-                        'result': items
-                    })
+                # PRD-17 Phase 3: Route all tools through UnifiedToolExecutor
+                tool_executor = get_unified_tool_executor(self.db_session)
+                result = await tool_executor.execute_tool(
+                    tool_name=action_type,
+                    parameters=params,
+                    agent_id=0
+                )
                 
-                # Platform research tools
-                elif action_type == 'search_knowledge':
+                # Enhanced logging for research tools
+                if action_type == 'search_knowledge':
                     self.logger.info(f"  🔍 Executing search_knowledge with params: {params}")
-                    from services.agent_platform_tools import AgentPlatformTools
-                    platform_tools = AgentPlatformTools(self.db_session)
-                    result = await platform_tools.execute_tool(
-                        tool_name='search_knowledge',
-                        parameters=params,
-                        agent_id=0
-                    )
-                    self.logger.info(f"  📊 Knowledge search result: success={result.get('success')}, count={result.get('count', 0)}")
-                    self.logger.info(f"  📄 First result preview: {str(result.get('results', [{}])[0] if result.get('results') else 'NO RESULTS')[:200]}")
-                    results.append(result)
+                    self.logger.info(f"  📊 Result: success={result.get('success')}, count={result.get('count', 0)}")
+                    if result.get('results'):
+                        self.logger.info(f"  📄 First result preview: {str(result.get('results', [{}])[0])[:200]}")
                     self.logger.info(f"  ✅ Knowledge search: {result.get('count', 0)} results found")
+                elif action_type in ['semantic_search', 'search_codebase']:
+                    self.logger.info(f"  ✅ {action_type}: {result.get('count', 0)} results found")
                 
-                elif action_type == 'semantic_search':
-                    from services.agent_platform_tools import AgentPlatformTools
-                    platform_tools = AgentPlatformTools(self.db_session)
-                    result = await platform_tools.execute_tool(
-                        tool_name='semantic_search',
-                        parameters=params,
-                        agent_id=0
-                    )
-                    results.append(result)
-                    self.logger.info(f"  ✅ Semantic search: {result.get('count', 0)} results found")
-                
-                elif action_type == 'search_codebase':
-                    from services.agent_platform_tools import AgentPlatformTools
-                    platform_tools = AgentPlatformTools(self.db_session)
-                    result = await platform_tools.execute_tool(
-                        tool_name='search_codebase',
-                        parameters=params,
-                        agent_id=0
-                    )
-                    results.append(result)
-                    self.logger.info(f"  ✅ Codebase search: {result.get('count', 0)} results found")
-                
-                else:
-                    results.append({
-                        'action': action_type,
-                        'params': params,
-                        'success': False,
-                        'result': f"Unknown action: {action_type}"
-                    })
+                results.append(result)
                     
             except json.JSONDecodeError as e:
                 # Try to fix common JSON issues

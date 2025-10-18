@@ -508,11 +508,42 @@ class AgentExecutionManager:
             # Get enhanced prompt
             enhanced_prompt = execution.prompt_used
             
+            # PRD-17: Extract required_tools from subtask
+            # Map skills_required to tool categories (skills come from LLM, required_tools is what we need)
+            skills = subtask.get("skills_required", subtask.get("skills", []))
+            if isinstance(skills, str):
+                skills = [skills]
+            
+            # If subtask has explicit required_tools, use it; otherwise map from skills
+            if "required_tools" in subtask:
+                required_tools = subtask.get("required_tools")
+            else:
+                # Map common skills to tool categories
+                required_tools = []
+                skill_to_tool_map = {
+                    "research": "research",
+                    "file_ops": "file_ops",
+                    "file_operations": "file_ops",
+                    "shell": "shell",
+                    "shell_commands": "shell",
+                    "mcp": "mcp",
+                    "database": "database"
+                }
+                for skill in skills:
+                    skill_lower = skill.lower().replace(" ", "_").replace("-", "_")
+                    if skill_lower in skill_to_tool_map:
+                        required_tools.append(skill_to_tool_map[skill_lower])
+                
+                # Default to research if no mapping found
+                if not required_tools:
+                    required_tools = ["research"]
+            
             # Execute with agent factory (with retries)
             result = await self._execute_with_retries(
                 agent_id,
                 enhanced_prompt,
-                execution
+                execution,
+                required_tools
             )
             
             # Update execution with result
@@ -568,9 +599,13 @@ class AgentExecutionManager:
         self,
         agent_id: int,
         prompt: str,
-        execution: SubtaskExecution
+        execution: SubtaskExecution,
+        required_tools: List[str] = None
     ) -> Dict[str, Any]:
         """Execute task with agent, with retry logic"""
+        
+        if required_tools is None:
+            required_tools = ["research"]  # Default
         
         last_error = None
         
@@ -589,7 +624,8 @@ class AgentExecutionManager:
                     system_prompt="You are a helpful AI assistant. Complete the task accurately and concisely.",
                     use_memory=True,
                     max_retries=0,  # We handle retries here
-                    action_executor=action_executor  # Enable platform tools
+                    action_executor=action_executor,  # Enable platform tools
+                    required_tools=required_tools  # PRD-17: Dynamic tool assignment
                 )
                 
                 if result.get("status") == "error":

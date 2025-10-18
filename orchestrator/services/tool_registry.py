@@ -634,12 +634,15 @@ class ToolRegistry:
         ))
     
     def _register_mcp_tools(self):
-        """Register MCP tools from database"""
+        """Register MCP tools from database - only load configured tools"""
         try:
             from models import MCPTool
             
+            # PRD-17: Only load tools that are active AND properly configured
             mcp_tools = self.db.query(MCPTool).filter(
-                MCPTool.status == 'active'
+                MCPTool.status == 'active',
+                MCPTool.mcp_server_url.isnot(None),  # Must have server URL
+                MCPTool.credentials_schema.isnot(None)  # Must have credentials schema
             ).all()
             
             for mcp_tool in mcp_tools:
