@@ -103,8 +103,11 @@ class EnhancedLLMAgentSelector:
             try:
                 response = await asyncio.wait_for(
                     self.llm.generate_with_reasoning(
-                        prompt=prompt,
-                        context={"system_instructions": system_context}
+                        prompt=prompt + "\n\n**CRITICAL: Your response MUST be valid JSON only. Do NOT include any text before or after the JSON. Start with { and end with }.**",
+                        context={
+                            "system_instructions": system_context,
+                            "response_format": "json"
+                        }
                     ),
                     timeout=30.0  # 30 second timeout
                 )

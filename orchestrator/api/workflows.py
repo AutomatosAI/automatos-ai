@@ -1338,63 +1338,67 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 # Ensure memory_integrator is None so we know it's not available
                 memory_integrator = None
             
-            # CONTEXT ENGINEERING INTEGRATION
-            logger.info(f"📚 Enhancing subtasks with RAG context...")
+            # CONTEXT ENGINEERING INTEGRATION (LLM-Decided)
+            # PRD-17: Only run context engineering if LLM determined it's needed
+            subtasks_needing_context = [s for s in steps if s.get("requires_context", False)]
+            
             try:
-                context_integrator = ContextEngineeringIntegrator(db_session=db)
-                
-                # Get workflow tags and context for CodeGraph project selection
-                workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
-                workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
-                
-                # If context is a JSON string, parse it
-                if isinstance(workflow_ctx, str):
-                    try:
-                        import json
-                        workflow_ctx = json.loads(workflow_ctx)
-                    except:
-                        workflow_ctx = None
-                
-                context_enhancements = await context_integrator.enhance_subtasks_with_context(
-                    subtasks=steps,
-                    workflow_description=task_description,
-                    workflow_tags=workflow_tags,
-                    workflow_context=workflow_ctx
-                )
-                
-                # Store context enhancement results
-                enhancement_summary = context_integrator.get_enhancement_summary(context_enhancements)
-                execution.input_data["context_engineering"] = {
-                    "is_real": True,
-                    "summary": enhancement_summary,
-                    "enhancements": {
-                        subtask_id: {
-                            "total_tokens": enh.total_tokens,
-                            "num_sources": enh.num_sources,
-                            "context_quality": enh.context_quality_score,
-                            "retrieval_time_ms": enh.retrieval_time_ms
+                if subtasks_needing_context:
+                    logger.info(f"📚 Enhancing {len(subtasks_needing_context)}/{len(steps)} subtasks with context (LLM decided)...")
+                    context_integrator = ContextEngineeringIntegrator(db_session=db)
+                    
+                    # Get workflow tags and context for CodeGraph project selection
+                    workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
+                    workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
+                    
+                    # If context is a JSON string, parse it
+                    if isinstance(workflow_ctx, str):
+                        try:
+                            import json
+                            workflow_ctx = json.loads(workflow_ctx)
+                        except:
+                            workflow_ctx = None
+                    
+                    # Only enhance subtasks that need context
+                    context_enhancements = await context_integrator.enhance_subtasks_with_context(
+                        subtasks=subtasks_needing_context,
+                        workflow_description=task_description,
+                        workflow_tags=workflow_tags,
+                        workflow_context=workflow_ctx
+                    )
+                    
+                    # Store context enhancement results
+                    enhancement_summary = context_integrator.get_enhancement_summary(context_enhancements)
+                    execution.input_data["context_engineering"] = {
+                        "is_real": True,
+                        "summary": enhancement_summary,
+                        "enhancements": {
+                            subtask_id: {
+                                "total_tokens": enh.total_tokens,
+                                "num_sources": enh.num_sources,
+                                "context_quality": enh.context_quality_score,
+                                "retrieval_time_ms": enh.retrieval_time_ms
+                            }
+                            for subtask_id, enh in context_enhancements.items()
                         }
-                        for subtask_id, enh in context_enhancements.items()
                     }
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                
-                logger.info(
-                    f"✅ Context enhancement complete: {enhancement_summary['context_coverage']:.0%} coverage, "
-                    f"{enhancement_summary['total_sources_retrieved']} sources, "
-                    f"{enhancement_summary['avg_context_quality']:.0%} avg quality"
-                )
-                
-                # Inject enhanced prompts into steps
-                for idx, step in enumerate(steps):
-                    subtask_id = f"subtask_{idx}"
-                    if subtask_id in context_enhancements:
-                        enhancement = context_enhancements[subtask_id]
-                        step["enhanced_prompt"] = enhancement.enhanced_prompt
-                        step["context_quality"] = enhancement.context_quality_score
-                        step["context_sources"] = enhancement.num_sources
-                
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+                    
+                    logger.info(
+                        f"✅ Context enhancement complete: {enhancement_summary['context_coverage']:.0%} coverage, "
+                        f"{enhancement_summary['total_sources_retrieved']} sources, "
+                        f"{enhancement_summary['avg_context_quality']:.0%} avg quality"
+                    )
+                    
+                    # Merge enhanced subtasks back into steps (preserve order)
+                    for i, step in enumerate(steps):
+                        if step.get("subtask_id") in context_enhancements:
+                            steps[i]["context_enhancement"] = context_enhancements[step["subtask_id"]]
+                else:
+                    logger.info(f"⚡ Skipping context engineering - LLM determined no subtasks need external context (token savings!)")
+                    context_enhancements = {}
+                    
             except Exception as e:
                 logger.error(f"❌ Context engineering failed: {e}, continuing without enhanced context")
                 execution.input_data["context_engineering"] = {

@@ -17,6 +17,7 @@ from datetime import datetime
 import logging
 import os
 import json
+import uuid
 from pydantic import BaseModel
 from database.database import get_db
 import httpx
@@ -110,9 +111,12 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 # Format results
                 results = []
                 for result in data.get('results', [])[:8]:
+                    content = result.get('content', '')
                     results.append({
+                        "id": result.get('chunk_id', result.get('id', 0)),
                         "filename": result.get('source', {}).get('filename', 'Unknown'),
-                        "content": result.get('content', ''),
+                        "excerpt": content,  # Frontend expects 'excerpt'
+                        "content": content,   # Keep for backwards compatibility
                         "similarity": result.get('similarity', 0.0),
                         "file_type": result.get('source', {}).get('file_type', 'unknown')
                     })
@@ -209,7 +213,9 @@ Then provide a helpful, technical response based on the search results."""
             
             # Check if Claude wants to use tools
             if response.stop_reason == "tool_use":
-                # Extract tool calls
+                # Collect all tool results first
+                tool_results = []
+                
                 for content_block in response.content:
                     if content_block.type == "tool_use":
                         tool_name = content_block.name
@@ -231,18 +237,21 @@ Then provide a helpful, technical response based on the search results."""
                         else:
                             tool_result = {"error": f"Unknown tool: {tool_name}"}
                         
-                        # Add tool result to conversation
-                        messages.append({"role": "assistant", "content": response.content})
-                        messages.append({
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_id,
-                                    "content": json.dumps(tool_result)
-                                }
-                            ]
+                        # Collect tool result
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": json.dumps(tool_result)
                         })
+                
+                # Add assistant message with ALL tool_use blocks
+                messages.append({"role": "assistant", "content": response.content})
+                
+                # Add ONE user message with ALL tool_result blocks
+                messages.append({
+                    "role": "user",
+                    "content": tool_results
+                })
                 
                 # Continue the loop to let Claude process tool results
                 continue

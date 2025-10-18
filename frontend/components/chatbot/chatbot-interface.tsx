@@ -120,7 +120,8 @@ Try asking: *"How does authentication work?"* or *"Find documents about deployme
 
     try {
       console.log('[Chatbot] Sending query:', messageText)
-      const response = await fetch('/chatbot-api/query', {
+      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
+      const response = await fetch(`${API_BASE_URL}/api/chatbot/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

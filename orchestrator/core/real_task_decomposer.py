@@ -57,69 +57,71 @@ class RealTaskDecomposer:
         requirements = requirements or []
         
         # Build the decomposition prompt
-        prompt = f"""You are an expert task decomposition system for a multi-agent AI orchestration platform.
+        prompt = f"""You are a task decomposition system for a multi-agent AI platform.
 
-CRITICAL DESIGN PRINCIPLES:
-1. Create GRANULAR subtasks - each subtask should focus on ONE primary skill/capability
-2. Design for AGENT COLLABORATION - agents will share results via shared context
-3. Each subtask should be ATOMIC and FOCUSED - not compound tasks
-4. Create clear HANDOFF POINTS between subtasks for inter-agent communication
-5. TOOL-AUGMENTED TASKS - agents have access to search tools and MUST use them
-
-🔧 AVAILABLE TOOLS FOR AGENTS:
-- search_knowledge(query) - Search documentation, PDFs, markdown files
-- search_codebase(query) - Search code functions, classes, implementations  
-- semantic_search(query) - Find semantically similar content
-- read_document(doc_id) - Read full document content
-
-⚠️  IMPORTANT: When creating research/analysis subtasks, include SPECIFIC search queries the agent should use!
-
-Break down this complex task into specific, actionable subtasks:
+CRITICAL RULES:
+1. Keep it SIMPLE - match the task complexity (1 step for simple tasks, more for complex ones)
+2. Each subtask = ONE atomic action
+3. Do NOT add research/reports/summaries unless explicitly requested
+4. Use the right tools for each task type
 
 TASK: {task_description}
 TYPE: {task_type}
 COMPLEXITY: {complexity}
-REQUIREMENTS: {', '.join(requirements) if requirements else 'None specified'}
 
-Please decompose this into {5 if complexity == 'low' else 7 if complexity == 'medium' else 10} subtasks.
+EXAMPLES BY TASK TYPE:
 
-GRANULARITY EXAMPLES:
-❌ BAD: "Research and analyze the data" (2 skills: research + analysis)
-✅ GOOD: 
-   - Subtask 1: "Collect and organize relevant research materials" (research)
-   - Subtask 2: "Analyze the collected materials for patterns" (analysis)
+SIMPLE OPERATIONAL TASKS (1-2 subtasks):
+✅ "Restart the API server"
+   → Subtask 1: Execute shell command 'systemctl restart api' (shell)
 
-❌ BAD: "Write and review the documentation" (2 skills: writing + review)
-✅ GOOD:
-   - Subtask 1: "Write comprehensive documentation draft" (writing)
-   - Subtask 2: "Review documentation for accuracy and completeness" (review)
+✅ "Create a test directory"
+   → Subtask 1: Create directory 'test' in workspace (file_ops)
 
-🔧 TOOL USAGE EXAMPLES (for research/documentation tasks):
-✅ EXCELLENT: "Search platform documentation using search_knowledge('Automatos AI architecture'), search_knowledge('deployment guide'), and search_knowledge('9-stage orchestration'). Find at least 5 relevant documentation files. Extract key architectural concepts, technology stack, and core features. Provide detailed quotes with source citations [Source: filename.md]."
+MODERATE TASKS (2-5 subtasks):
+✅ "Update config file and restart service"
+   → Subtask 1: Modify config.yaml with new settings (file_ops)
+   → Subtask 2: Restart service to apply changes (shell)
 
-✅ EXCELLENT: "Find AgentFactory code using search_codebase('AgentFactory class'), search_codebase('create_agent method'), and search_codebase('agent lifecycle'). Analyze the implementation and extract 3-5 code examples showing: agent creation, configuration, and execution. Include file paths and line numbers for each example."
+✅ "Find and fix a bug in AuthService"
+   → Subtask 1: Search codebase for AuthService implementation (research)
+   → Subtask 2: Analyze the code and identify the issue (research)
+   → Subtask 3: Apply the fix to the code (file_ops)
 
-For each subtask, provide:
-1. A clear, ATOMIC description focusing on ONE primary skill
-2. The type of agent best suited (e.g., 'researcher', 'analyst', 'developer', 'writer', 'reviewer')
-3. Priority level (high/medium/low)
-4. Dependencies (which subtasks must complete first for inter-agent collaboration)
-5. Estimated duration in seconds (30-300 range)
-6. **TOOL GUIDANCE** - Specific search queries if the subtask needs research
+COMPLEX TASKS (5-10 subtasks):
+✅ "Write a comprehensive architecture document"
+   → Subtask 1: Research system architecture (research)
+   → Subtask 2: Document core components (file_ops)
+   → Subtask 3: Create diagrams (file_ops)
+   → Subtask 4: Review and validate (research)
+
+AVAILABLE TOOLS:
+- "research" - search_knowledge, search_codebase, semantic_search (for finding info)
+- "file_ops" - read_file, write_file, create_directory, list_directory (for file operations)
+- "shell" - execute_command (for running commands, restarting services, etc.)
+
+For each subtask, decide intelligently:
+- **requires_context**: Does the agent need to research/read docs/code to complete this? (true/false)
+  - Simple operations (create file, run command) = false
+  - Research/analysis/understanding tasks = true
+- **context_type**: What kind of context? ("documentation"/"code"/"both"/null)
+- **required_tools**: What tools are needed? (["file_ops"], ["shell"], ["research"], etc.)
 
 Return ONLY valid JSON in this exact format:
 {{
   "subtasks": [
     {{
       "subtask_id": "unique_id",
-      "description": "Clear ATOMIC description - focus on ONE primary skill. If research is needed, include: 'Use search_knowledge(\"your query here\") to find X. Use search_codebase(\"ClassName\") to find Y.'",
+      "description": "Clear ATOMIC description - ONE action",
       "agent_type": "type_of_agent",
       "priority": "high|medium|low",
       "dependencies": ["subtask_ids_that_must_complete_first"],
       "estimated_duration": "60-120 seconds",
       "primary_skill": "single_main_skill",
       "skills_required": ["primary_skill_only"],
-      "tool_guidance": "Optional: List specific search queries like ['search_knowledge(\"architecture docs\")', 'search_codebase(\"AgentFactory\")']"
+      "required_tools": ["file_ops"],
+      "requires_context": false,
+      "context_type": null
     }}
   ],
   "execution_strategy": "parallel|sequential|mixed",
@@ -239,7 +241,8 @@ REMEMBER:
                     "priority": "high",
                     "dependencies": [],
                     "estimated_duration": "60-120 seconds",
-                    "skills_required": ["analysis", "planning"]
+                    "skills_required": ["analysis", "planning"],
+                    "required_tools": ["research"]
                 },
                 {
                     "subtask_id": f"{task_id}_implement",
@@ -248,7 +251,8 @@ REMEMBER:
                     "priority": "high",
                     "dependencies": [f"{task_id}_analyze"],
                     "estimated_duration": "120-180 seconds",
-                    "skills_required": ["implementation", "problem_solving"]
+                    "skills_required": ["implementation", "problem_solving"],
+                    "required_tools": ["research"]
                 },
                 {
                     "subtask_id": f"{task_id}_validate",
@@ -257,7 +261,8 @@ REMEMBER:
                     "priority": "medium",
                     "dependencies": [f"{task_id}_implement"],
                     "estimated_duration": "60-90 seconds",
-                    "skills_required": ["testing", "validation"]
+                    "skills_required": ["testing", "validation"],
+                    "required_tools": ["research"]
                 }
             ],
             "execution_strategy": "sequential",

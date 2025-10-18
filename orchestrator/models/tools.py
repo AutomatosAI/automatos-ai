@@ -23,6 +23,7 @@ class Tool(Base):
     Supports both marketplace tools and custom integrations.
     """
     __tablename__ = 'tools'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     # Primary identification
     id = Column(Integer, primary_key=True)
@@ -69,6 +70,7 @@ class ToolCredentials(Base):
     Supports multiple credential types and automatic rotation.
     """
     __tablename__ = 'tool_credentials'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -89,11 +91,6 @@ class ToolCredentials(Base):
     
     # Relationships
     tool = relationship("Tool", back_populates="credentials")
-    
-    # Unique constraint to prevent duplicate credentials per tool/environment
-    __table_args__ = (
-        {'schema': None},  # Ensure no schema conflicts
-    )
 
 class ToolConfiguration(Base):
     """
@@ -101,6 +98,7 @@ class ToolConfiguration(Base):
     Stores non-sensitive configuration data and settings.
     """
     __tablename__ = 'tool_configurations'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -127,6 +125,7 @@ class AgentToolPermission(Base):
     Implements role-based access control with environment separation.
     """
     __tablename__ = 'agent_tool_permissions'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     agent_id = Column(Integer, ForeignKey('agents.id'), nullable=False, index=True)
@@ -152,6 +151,7 @@ class ToolUsageLog(Base):
     Tracks all tool interactions and performance metrics.
     """
     __tablename__ = 'tool_usage_logs'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -184,6 +184,7 @@ class CredentialAuditLog(Base):
     Tracks who accessed or modified credentials for security compliance.
     """
     __tablename__ = 'credential_audit_logs'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -207,6 +208,7 @@ class PermissionAuditLog(Base):
     Maintains compliance trail for agent-tool permission modifications.
     """
     __tablename__ = 'permission_audit_logs'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     agent_id = Column(Integer, ForeignKey('agents.id'), nullable=False, index=True)
@@ -235,6 +237,7 @@ class MCPServer(Base):
     Manages connections to external MCP servers for tool integration.
     """
     __tablename__ = 'mcp_servers'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     
@@ -269,6 +272,7 @@ class MCPToolConnection(Base):
     Manages tool-specific MCP integration settings.
     """
     __tablename__ = 'mcp_tool_connections'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -302,6 +306,7 @@ class ToolCategory(Base):
     Provides hierarchical categorization of tools.
     """
     __tablename__ = 'tool_categories'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False, unique=True)
@@ -325,6 +330,7 @@ class ToolReview(Base):
     Supports marketplace-style feedback system.
     """
     __tablename__ = 'tool_reviews'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
@@ -356,6 +362,7 @@ class ToolInstallationRequest(Base):
     Manages the installation workflow and approval process.
     """
     __tablename__ = 'tool_installation_requests'
+    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
     
     id = Column(Integer, primary_key=True)
     tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
