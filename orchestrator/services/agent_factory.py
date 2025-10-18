@@ -439,6 +439,7 @@ class AgentRuntime:
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
     tools: List[Dict[str, Any]] = field(default_factory=list)  # Phase 3: MCP Tools assigned to agent
+    tool_executor: Any = None  # PRD-17: Shared UnifiedToolExecutor (initialized once, reused)
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         """Update agent performance metrics"""
@@ -831,7 +832,8 @@ Available Shell Tools:
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
-                tools=agent_tools
+                tools=agent_tools,
+                tool_executor=get_unified_tool_executor(self.db_session)  # PRD-17: Initialize once, reuse
             )
             
             # Add to active agents
@@ -956,7 +958,7 @@ To use actions, respond with JSON blocks like:
                     if response and response.tool_calls:
                         self.logger.info(f"🔧 PRD-17: Agent called {len(response.tool_calls)} tool(s) via function calling")
                         tool_results = []
-                        tool_executor = get_unified_tool_executor(self.db_session)
+                        tool_executor = agent_runtime.tool_executor  # PRD-17: Reuse executor (no re-init!)
                         
                         for tool_call in response.tool_calls:
                             func_name = tool_call['function']['name']
@@ -1014,7 +1016,7 @@ To use actions, respond with JSON blocks like:
                     action_results = []
                     if action_executor and response and response.content and '{"action"' in response.content:
                         self.logger.info(f"🔧 Agent requested tool calls, executing...")
-                        action_results = await self._process_agent_actions(response.content, action_executor)
+                        action_results = await self._process_agent_actions(response.content, action_executor, agent_runtime)
                         
                         # If tools were executed, feed results back to agent for final answer
                         if action_results:
@@ -1322,7 +1324,7 @@ To use actions, respond with JSON blocks like:
         prompt_lower = prompt.lower()
         return any(keyword in prompt_lower for keyword in action_keywords)
     
-    async def _process_agent_actions(self, response: str, action_executor) -> List[Dict[str, Any]]:
+    async def _process_agent_actions(self, response: str, action_executor, agent_runtime=None) -> List[Dict[str, Any]]:
         """Process action requests from agent response"""
         import re
         results = []
@@ -1339,8 +1341,8 @@ To use actions, respond with JSON blocks like:
                 action_type = action_data.get('action')
                 params = action_data.get('params', {})
                 
-                # PRD-17 Phase 3: Route all tools through UnifiedToolExecutor
-                tool_executor = get_unified_tool_executor(self.db_session)
+                # PRD-17 Phase 3: Reuse agent's tool_executor (initialized once)
+                tool_executor = agent_runtime.tool_executor if agent_runtime else get_unified_tool_executor(self.db_session)
                 result = await tool_executor.execute_tool(
                     tool_name=action_type,
                     parameters=params,
