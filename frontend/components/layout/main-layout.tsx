@@ -6,15 +6,14 @@ import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { Sidebar } from './sidebar'
 import { Header } from './header'
-// ChatWidget removed to prevent errors
-// import { ChatWidget } from '../chat-widget'
+import { ChatWidget } from '../chatbot/chat-widget'
 
 interface MainLayoutProps {
   children: React.ReactNode
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const pathname = usePathname()
 
   // Get current page context for the chat
@@ -23,6 +22,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     if (pathname.startsWith('/agents')) return 'agents'
     if (pathname.startsWith('/documents')) return 'documents'
     if (pathname.startsWith('/workflows')) return 'workflows'
+    if (pathname.startsWith('/tools')) return 'tools'
     if (pathname.startsWith('/analytics')) return 'analytics'
     if (pathname.startsWith('/context')) return 'context'
     if (pathname.startsWith('/playbooks')) return 'playbooks'
@@ -59,14 +59,12 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
       
       {/* Chat Widget - Only show on non-chat pages */}
-      {/* ChatWidget removed to prevent errors
       {pathname !== '/chat' && (
         <ChatWidget 
           position="bottom-right"
           context={chatContext}
         />
       )}
-      */}
     </div>
   )
 }

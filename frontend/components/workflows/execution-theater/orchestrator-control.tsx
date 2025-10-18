@@ -78,7 +78,7 @@ export function OrchestratorControl({ workflow, isExecuting }: OrchestratorContr
         </div>
 
         <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-yellow-400" />
+          <Zap className="w-4 h-4 text-cyan-400" />
           <span className="text-muted-foreground">Tokens:</span>
           <span className="font-medium font-mono">{totalTokens.toLocaleString()}</span>
         </div>

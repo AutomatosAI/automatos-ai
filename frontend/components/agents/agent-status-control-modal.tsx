@@ -104,25 +104,7 @@ export function AgentStatusControlModal({
   const { data: agent, isLoading: agentLoading, error: agentError } = useAgent(agentId?.toString())
   const updateAgentMutation = useUpdateAgentConfig()
 
-  // Generate impact analysis based on current agent data
-  const impactAnalysis: AgentImpactAnalysis | null = agent && targetStatus ? {
-    agent_id: agentId!,
-    agent_name: agent.name || `Agent-${agentId}`,
-    current_status: currentStatus,
-    proposed_status: targetStatus,
-    impact_analysis: {
-      active_workflows: agent.active_workflows || [],
-      queued_tasks: agent.queued_tasks || 0,
-      dependent_agents: agent.dependent_agents || [],
-      system_impact: {
-        performance_degradation: targetStatus === 'inactive' ? 15 : 5,
-        availability_impact: targetStatus === 'inactive' ? 'High' : 'Low',
-        recovery_time_estimate: targetStatus === 'inactive' ? '5-10 minutes' : '1-2 minutes'
-      },
-      recommendations: generateRecommendations(currentStatus, targetStatus)
-    }
-  } : null
-
+  // Helper function to generate recommendations based on status change
   const generateRecommendations = (current: string, target: string): Array<{ type: 'warning' | 'info' | 'critical', message: string }> => {
     const recommendations = []
     
@@ -153,6 +135,25 @@ export function AgentStatusControlModal({
     
     return recommendations
   }
+
+  // Generate impact analysis based on current agent data
+  const impactAnalysis: AgentImpactAnalysis | null = agent && targetStatus ? {
+    agent_id: agentId!,
+    agent_name: agent.name || `Agent-${agentId}`,
+    current_status: currentStatus,
+    proposed_status: targetStatus,
+    impact_analysis: {
+      active_workflows: agent.active_workflows || [],
+      queued_tasks: agent.queued_tasks || 0,
+      dependent_agents: agent.dependent_agents || [],
+      system_impact: {
+        performance_degradation: targetStatus === 'inactive' ? 15 : 5,
+        availability_impact: targetStatus === 'inactive' ? 'High' : 'Low',
+        recovery_time_estimate: targetStatus === 'inactive' ? '5-10 minutes' : '1-2 minutes'
+      },
+      recommendations: generateRecommendations(currentStatus, targetStatus)
+    }
+  } : null
 
   const handleStatusChange = (newStatus: string) => {
     setTargetStatus(newStatus)

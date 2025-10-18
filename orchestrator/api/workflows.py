@@ -8,7 +8,7 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
 import asyncio
@@ -190,7 +190,8 @@ async def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
             "default_policy_id": getattr(workflow, 'default_policy_id', None),
             "workflow_definition": workflow.workflow_definition,
             "created_at": workflow.created_at.isoformat() if workflow.created_at else None,
-            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None
+            "updated_at": workflow.updated_at.isoformat() if workflow.updated_at else None,
+            "last_execution": getattr(workflow, 'last_execution', None)
         }
     except HTTPException:
         raise
@@ -377,6 +378,8 @@ async def create_workflow(
         # Extract required fields
         name = workflow_data.get("name")
         description = workflow_data.get("description", "")
+        goal = workflow_data.get("goal")  # High-level objective (optional)
+        context = workflow_data.get("context")  # Additional context like {"codegraph_project": "my-repo"}
         category = workflow_data.get("category", "automation")
         priority = workflow_data.get("priority", "medium")
         config = workflow_data.get("config", {})
@@ -403,11 +406,19 @@ async def create_workflow(
         }
 
         # Create workflow record
+        import json as json_lib
+        # Default to ACTIVE status so workflows are immediately visible
+        is_active = workflow_data.get("is_active", True)
+        status = WorkflowStatus.ACTIVE.value if is_active else WorkflowStatus.DRAFT.value
+        
         workflow = Workflow(
             name=name,
             description=description,
+            goal=goal,
+            context=json_lib.dumps(context) if context else None,  # Convert dict to JSON string
+            tags=tags,
             workflow_definition=workflow_definition,
-            status=WorkflowStatus.DRAFT.value,
+            status=status,
             created_by=workflow_data.get("created_by", "system")
         )
 
@@ -454,6 +465,82 @@ async def create_workflow(
         logger.error(f"Error creating workflow: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creating workflow: {str(e)}")
+
+@router.post("/{workflow_id}/duplicate")
+async def duplicate_workflow(
+    workflow_id: int,
+    duplicate_data: Dict[str, Any] = Body(None),
+    db: Session = Depends(get_db)
+):
+    """Duplicate an existing workflow with optional modifications"""
+    try:
+        # Get the original workflow
+        original = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        if not original:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+        
+        # Generate new name
+        if duplicate_data and duplicate_data.get("name"):
+            new_name = duplicate_data["name"]
+        else:
+            # Find a unique name
+            base_name = original.name
+            if " (Copy" in base_name:
+                # Remove existing copy suffix
+                base_name = base_name.split(" (Copy")[0]
+            
+            counter = 1
+            new_name = f"{base_name} (Copy)"
+            while db.query(Workflow).filter(Workflow.name == new_name).first():
+                counter += 1
+                new_name = f"{base_name} (Copy {counter})"
+        
+        # Create the duplicate
+        duplicate = Workflow(
+            name=new_name,
+            description=duplicate_data.get("description", original.description) if duplicate_data else original.description,
+            goal=original.goal,
+            context=original.context,
+            tags=duplicate_data.get("tags", original.tags) if duplicate_data else original.tags,
+            workflow_definition=original.workflow_definition,
+            status='active',  # New duplicates are active by default
+            created_by=duplicate_data.get("created_by", "system") if duplicate_data else "system",
+            owner=duplicate_data.get("owner", original.owner) if duplicate_data else original.owner,
+            default_policy_id=original.default_policy_id
+        )
+        
+        # Copy agent associations
+        if original.agents:
+            duplicate.agents = original.agents
+        
+        db.add(duplicate)
+        db.commit()
+        db.refresh(duplicate)
+        
+        # Send real-time update
+        await manager.broadcast({
+            "type": "workflow_duplicated",
+            "original_id": workflow_id,
+            "duplicate_id": duplicate.id,
+            "name": duplicate.name,
+            "status": duplicate.status
+        })
+        
+        return {
+            "id": duplicate.id,
+            "name": duplicate.name,
+            "description": duplicate.description,
+            "status": duplicate.status,
+            "created_at": duplicate.created_at.isoformat() if duplicate.created_at else None,
+            "message": f"Workflow duplicated successfully as '{duplicate.name}'"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error duplicating workflow {workflow_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error duplicating workflow: {str(e)}")
 
 @router.get("/stats/dashboard")
 async def get_workflow_dashboard_stats(db: Session = Depends(get_db)):
@@ -918,10 +1005,13 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from core.learning_system_updater import LearningSystemUpdater
     from core.workflow_memory_integrator import WorkflowMemoryIntegrator
     from services.memory_knowledge_system import HierarchicalMemorySystem
+    from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
     import os
     
     try:
         with get_db_session() as db:
+            # PRD-15: Initialize model usage tracker
+            model_tracker = ModelUsageTracker(db)
             execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
             if not execution:
                 return
@@ -949,63 +1039,194 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             else:
                 logger.warning("Redis client not initialized for execution_started event")
             
-            # REAL TASK DECOMPOSITION using LLM
-            decomposer = RealTaskDecomposer()
-            
-            # Get task description from workflow (prioritize goal > description > name)
-            task_description = workflow.goal or workflow.description or workflow.name
+            # Check if workflow already has explicit tasks defined
             workflow_def = workflow.workflow_definition or {}
-            task_type = workflow_def.get("category", "general")
-            complexity = workflow_def.get("priority", "medium")
+            predefined_tasks = workflow_def.get("tasks", [])
             
-            # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
-            workflow_context = workflow.context or {}
-            
-            logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
-            
-            try:
-                # Call REAL LLM to decompose task
-                decomposition_result = await decomposer.decompose_task(
-                    task_description=task_description,
-                    task_type=task_type,
-                    complexity=complexity,
-                    requirements=[],
-                    max_subtasks=7
-                )
+            if predefined_tasks and len(predefined_tasks) > 0:
+                # Use predefined tasks instead of decomposing
+                logger.info(f"📋 Using {len(predefined_tasks)} predefined tasks from workflow definition")
+                steps = predefined_tasks
                 
-                # Extract real subtasks from LLM response
-                steps = decomposition_result.get("subtasks", [])
-                
-                # Store decomposition metadata
+                # Store metadata
                 execution.input_data = execution.input_data or {}
                 execution.input_data["decomposition"] = {
-                    "is_real": True,
-                    "llm_model": decomposition_result.get("llm_model"),
-                    "execution_strategy": decomposition_result.get("execution_strategy"),
-                    "total_estimated_time": decomposition_result.get("total_estimated_time"),
-                    "complexity_assessment": decomposition_result.get("complexity_assessment")
+                    "is_real": False,
+                    "is_predefined": True,
+                    "task_count": len(steps),
+                    "execution_strategy": workflow_def.get("execution_strategy", "parallel")
                 }
-                db.commit()
+            else:
+                # REAL TASK DECOMPOSITION using LLM
+                decomposer = RealTaskDecomposer()
                 
-                logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
+                # Get task description from workflow (prioritize goal > description > name)
+                task_description = workflow.goal or workflow.description or workflow.name
+                task_type = workflow_def.get("category", "general")
+                complexity = workflow_def.get("priority", "medium")
                 
-            except Exception as e:
-                logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps")
-                # Fallback to simple steps if decomposition fails
-                steps = [
-                    {"description": "Initialize workflow", "estimated_duration": "30 seconds", "agent_type": "orchestrator"},
-                    {"description": "Execute main task", "estimated_duration": "60 seconds", "agent_type": "worker"},
-                    {"description": "Finalize results", "estimated_duration": "20 seconds", "agent_type": "orchestrator"}
-                ]
+                # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
+                workflow_context = workflow.context or {}
+                
+                logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
+                
+                try:
+                    # Call REAL LLM to decompose task
+                    decomposition_result = await decomposer.decompose_task(
+                        task_description=task_description,
+                        task_type=task_type,
+                        complexity=complexity,
+                        requirements=[],
+                        max_subtasks=7
+                    )
+                    
+                    # Extract real subtasks from LLM response
+                    steps = decomposition_result.get("subtasks", [])
+                    
+                    # Store decomposition metadata
+                    execution.input_data = execution.input_data or {}
+                    execution.input_data["decomposition"] = {
+                        "is_real": True,
+                        "llm_model": decomposition_result.get("llm_model"),
+                        "execution_strategy": decomposition_result.get("execution_strategy"),
+                        "total_estimated_time": decomposition_result.get("total_estimated_time"),
+                        "complexity_assessment": decomposition_result.get("complexity_assessment")
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+                    
+                    logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps")
+                    # Fallback to simple steps if decomposition fails
+                    steps = [
+                        {"description": "Initialize workflow", "estimated_duration": "30 seconds", "agent_type": "orchestrator"},
+                        {"description": "Execute main task", "estimated_duration": "60 seconds", "agent_type": "worker"},
+                        {"description": "Finalize results", "estimated_duration": "20 seconds", "agent_type": "orchestrator"}
+                    ]
             
             # INTELLIGENT AGENT SELECTION
             logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
+            
+            # Check if we should use smart grouping
+            use_smart_selection = True  # Enable smart selection by default
+            if workflow and workflow.context:
+                try:
+                    ctx = json.loads(workflow.context) if isinstance(workflow.context, str) else workflow.context
+                    use_smart_selection = ctx.get("use_smart_selection", True)
+                except:
+                    pass
+            
+            # Check if tasks have specific agent requirements
+            has_agent_requirements = any(
+                task.get("required_agent_id") for task in steps
+            ) if isinstance(steps, list) else False
+            
             try:
-                agent_selector = IntelligentAgentSelector(db_session=db)
-                agent_assignments = await agent_selector.select_agents_for_subtasks(steps, max_agents_per_task=1)
+                logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
+                
+                if use_smart_selection and not has_agent_requirements:
+                    # Use LLM-based intelligent agent selection
+                    logger.info("🧠 Using LLM-based intelligent agent selection with task grouping")
+                    logger.info(f"  📋 Number of steps to assign: {len(steps)}")
+                    task_desc_str = str(task_description)
+                    logger.info(f"  🎯 Task description: {task_desc_str[:100]}...")
+                    
+                    try:
+                        from core.llm.enhanced_agent_selector import EnhancedLLMAgentSelector
+                        logger.info("  ✅ EnhancedLLMAgentSelector imported successfully")
+                    except ImportError as e:
+                        logger.error(f"  ❌ Failed to import EnhancedLLMAgentSelector: {e}")
+                        raise
+                    
+                    logger.info("  🏗️ Creating LLM selector instance...")
+                    llm_selector = EnhancedLLMAgentSelector(db_session=db)
+                    logger.info("  ✅ LLM selector created")
+                    
+                    logger.info("  📡 Calling select_agents_with_grouping...")
+                    agent_assignments = await llm_selector.select_agents_with_grouping(
+                        steps,
+                        workflow_context={
+                            "description": task_description,
+                            "workflow_id": execution.workflow_id
+                        }
+                    )
+                    logger.info(f"  ✅ Agent selection returned: {len(agent_assignments)} assignments")
+                    
+                    # Create selection summary
+                    unique_agents = set()
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            unique_agents.add(match.agent_id)
+                    
+                    # Calculate average match score
+                    total_score = 0
+                    count = 0
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            total_score += match.match_score
+                            count += 1
+                    avg_score = total_score / count if count > 0 else 0.9
+                    
+                    selection_summary = {
+                        "total_subtasks": len(steps),
+                        "unique_agents": len(unique_agents),
+                        "selection_method": "llm_intelligent",
+                        "efficiency_ratio": len(steps) / len(unique_agents) if unique_agents else 0,
+                        "avg_match_score": avg_score
+                    }
+                    
+                elif has_agent_requirements:
+                    # Use specified agents from predefined tasks
+                    logger.info("📌 Using specified agents from task definitions")
+                    agent_assignments = {}
+                    
+                    for idx, task in enumerate(steps):
+                        subtask_id = f"subtask_{idx}"
+                        required_agent_id = task.get("required_agent_id")
+                        
+                        if required_agent_id:
+                            # Get the agent details
+                            agent = db.query(Agent).filter(Agent.id == required_agent_id).first()
+                            if agent:
+                                from core.intelligent_agent_selector import AgentMatch
+                                agent_assignments[subtask_id] = [
+                                    AgentMatch(
+                                        agent_id=agent.id,
+                                        agent_name=agent.name,
+                                        agent_type=agent.agent_type,
+                                        match_score=1.0,  # Perfect match since explicitly specified
+                                        skill_coverage=1.0,
+                                        availability_score=1.0,
+                                        performance_score=0.8,
+                                        reasoning=f"Explicitly specified for task: {task.get('name', 'Unknown')}",
+                                        matched_skills=task.get("required_skills", []),
+                                        missing_skills=[]
+                                    )
+                                ]
+                                logger.info(f"✅ Task {idx}: Using specified agent {agent.name} (ID: {agent.id})")
+                            else:
+                                logger.warning(f"⚠️ Task {idx}: Specified agent {required_agent_id} not found")
+                else:
+                    # Normal intelligent agent selection
+                    agent_selector = IntelligentAgentSelector(db_session=db)
+                    agent_assignments = await agent_selector.select_agents_for_subtasks(steps, max_agents_per_task=1)
                 
                 # Store agent selection results
-                selection_summary = agent_selector.get_selection_summary(agent_assignments)
+                if has_agent_requirements:
+                    # Create summary for explicit assignments
+                    selection_summary = {
+                        "total_assignments": len(agent_assignments),
+                        "unique_agents": len(set(matches[0].agent_id for matches in agent_assignments.values() if matches)),
+                        "avg_match_score": 1.0  # All explicit matches are perfect
+                    }
+                elif use_smart_selection:
+                    # Summary already created above for LLM selection
+                    logger.info(f"  Using LLM selection summary: {selection_summary}")
+                else:
+                    # Get summary from regular agent selector
+                    selection_summary = agent_selector.get_selection_summary(agent_assignments)
                 execution.input_data["agent_selection"] = {
                     "is_real": True,
                     "summary": selection_summary,
@@ -1022,6 +1243,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, matches in agent_assignments.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(f"✅ Agent selection complete: {selection_summary['avg_match_score']:.2f} avg match score")
@@ -1039,66 +1261,105 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
             except Exception as e:
                 logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
+                logger.error(f"❌ Full traceback:", exc_info=True)
                 execution.input_data["agent_selection"] = {
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                # Initialize empty assignments to prevent error
+                agent_assignments = {}
+            
+            # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
+            logger.info(f"🧠 Initializing memory system...")
+            memory_integrator = None
+            memory_retrieval_results = {}
+            try:
+                # Initialize memory system (ALWAYS create, even if retrieval fails)
+                memory_system = HierarchicalMemorySystem(
+                    redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
+                    redis_port=int(os.getenv("REDIS_PORT", 6379)),
+                    redis_password=os.getenv("REDIS_PASSWORD"),
+                    postgres_url=os.getenv("DATABASE_URL"),
+                    openai_api_key=os.getenv("OPENAI_API_KEY")
+                )
+                
+                memory_integrator = WorkflowMemoryIntegrator(memory_system)
+                logger.info(f"✅ Memory system initialized")
+                    
+                # Get agent IDs from assignments
+                agent_ids = []
+                for subtask_id, matches in agent_assignments.items():
+                    if matches and len(matches) > 0:
+                        agent_ids.append(matches[0].agent_id)
+                
+                # Retrieve memories for context
+                logger.info(f"🧠 Retrieving memories for {len(agent_ids)} agents...")
+                memory_retrieval_results = await memory_integrator.retrieve_workflow_memories(
+                    workflow_id=execution.workflow_id,
+                    workflow_description=task_description,
+                    agent_ids=list(set(agent_ids))  # Unique agent IDs
+                )
+                
+                execution.input_data["memory_retrieval"] = {
+                    "is_real": True,
+                    "results": memory_retrieval_results
+                }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
-                # MEMORY RETRIEVAL (PRD 04 & 05 Integration)
-                logger.info(f"🧠 Retrieving agent memories...")
-                memory_retrieval_results = {}
-                try:
-                    # Initialize memory system
-                    memory_system = HierarchicalMemorySystem(
-                        redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
-                        redis_port=int(os.getenv("REDIS_PORT", 6379)),
-                        redis_password=os.getenv("REDIS_PASSWORD"),
-                        postgres_url=os.getenv("DATABASE_URL"),
-                        openai_api_key=os.getenv("OPENAI_API_KEY")
-                    )
-                    
-                    memory_integrator = WorkflowMemoryIntegrator(memory_system)
-                    
-                    # Get agent IDs from assignments
-                    agent_ids = []
-                    for subtask_id, matches in agent_assignments.items():
-                        if matches and len(matches) > 0:
-                            agent_ids.append(matches[0].agent_id)
-                    
-                    # Retrieve memories for context
-                    memory_retrieval_results = await memory_integrator.retrieve_workflow_memories(
-                        workflow_id=execution.workflow_id,
-                        workflow_description=task_description,
-                        agent_ids=list(set(agent_ids))  # Unique agent IDs
-                    )
-                    
-                    execution.input_data["memory_retrieval"] = {
-                        "is_real": True,
-                        "results": memory_retrieval_results
-                    }
-                    db.commit()
-                    
-                    logger.info(
-                        f"✅ Retrieved {memory_retrieval_results.get('total_memories_retrieved', 0)} memories "
-                        f"for {len(memory_retrieval_results.get('agent_memories', {}))} agents"
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"❌ Memory retrieval failed: {e}, continuing without memories")
-                    execution.input_data["memory_retrieval"] = {
-                        "is_real": False,
-                        "error": str(e)
-                    }
-                    db.commit()
+                logger.info(
+                    f"✅ Retrieved {memory_retrieval_results.get('total_memories_retrieved', 0)} memories "
+                    f"for {len(memory_retrieval_results.get('agent_memories', {}))} agents"
+                )
                 
-                # CONTEXT ENGINEERING INTEGRATION
+                # Enhanced logging for UI visibility
+                memory_details = []
+                for agent_id, agent_mems in memory_retrieval_results.get('agent_memories', {}).items():
+                    working = len(agent_mems.get('working_memory', []))
+                    short = len(agent_mems.get('short_term', []))
+                    long = len(agent_mems.get('long_term', []))
+                    if working + short + long > 0:
+                        memory_details.append(f"Agent {agent_id}: {working}W/{short}S/{long}L")
+                
+                if memory_details:
+                    logger.info(f"📊 Memory breakdown: {', '.join(memory_details)}")
+                
+            except Exception as e:
+                logger.error(f"❌ Memory initialization or retrieval failed: {e}")
+                logger.warning(f"⚠️ Continuing workflow without memory system")
+                execution.input_data["memory_retrieval"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                # Ensure memory_integrator is None so we know it's not available
+                memory_integrator = None
+            
+            # CONTEXT ENGINEERING INTEGRATION
             logger.info(f"📚 Enhancing subtasks with RAG context...")
             try:
                 context_integrator = ContextEngineeringIntegrator(db_session=db)
+                
+                # Get workflow tags and context for CodeGraph project selection
+                workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
+                workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
+                
+                # If context is a JSON string, parse it
+                if isinstance(workflow_ctx, str):
+                    try:
+                        import json
+                        workflow_ctx = json.loads(workflow_ctx)
+                    except:
+                        workflow_ctx = None
+                
                 context_enhancements = await context_integrator.enhance_subtasks_with_context(
                     subtasks=steps,
-                    workflow_description=task_description
+                    workflow_description=task_description,
+                    workflow_tags=workflow_tags,
+                    workflow_context=workflow_ctx
                 )
                 
                 # Store context enhancement results
@@ -1116,6 +1377,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, enh in context_enhancements.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1139,6 +1401,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 # Initialize empty context_enhancements if error occurred
                 context_enhancements = {}
@@ -1163,17 +1426,63 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 execution_manager.websocket_manager = manager
                 
                 logger.info(f"🔍 DEBUG: About to call execute_workflow_subtasks...")
+                
+                # Check for execution strategy from workflow context
+                execution_strategy = "parallel"  # default
+                
+                # Get workflow definition and context
+                workflow_def = workflow.workflow_definition or {}
+                workflow_context = workflow.context
+                
+                # Check workflow definition first
+                if workflow_def.get("execution_strategy"):
+                    execution_strategy = workflow_def["execution_strategy"]
+                # Then check workflow context
+                elif workflow_context:
+                    if isinstance(workflow_context, str):
+                        import json as json_lib
+                        workflow_context = json_lib.loads(workflow_context)
+                    if isinstance(workflow_context, dict):
+                        execution_strategy = workflow_context.get("execution_mode", "parallel")
+                
+                logger.info(f"📊 Using execution strategy: {execution_strategy}")
+                
                 # Execute all subtasks with real agents
                 subtask_results = await execution_manager.execute_workflow_subtasks(
                     subtasks=steps,
                     agent_assignments=agent_assignments,
                     context_enhancements=context_enhancements,
                     execution_id=execution_id,
-                    workflow_id=execution.workflow_id
+                    workflow_id=execution.workflow_id,
+                    memory_retrieval_results=memory_retrieval_results,
+                    execution_strategy=execution_strategy  # Pass memory to execution
                 )
                 
                 # Store execution results
                 execution_summary = execution_manager.get_execution_summary(subtask_results)
+                
+                # PRD-15: Track model usage for each subtask
+                for subtask_id, result in subtask_results.items():
+                    if result.tokens_used > 0:
+                        # Get agent's model configuration
+                        agent = db.query(Agent).filter(Agent.id == result.agent_id).first()
+                        if agent and agent.model_config:
+                            model_id = agent.model_config.get("model_id", "gpt-4")
+                        else:
+                            model_id = "gpt-4"  # Default fallback
+                        
+                        # Estimate input/output split (70% input, 30% output is typical)
+                        input_tokens = int(result.tokens_used * 0.7)
+                        output_tokens = result.tokens_used - input_tokens
+                        
+                        model_tracker.record_usage(
+                            agent_id=result.agent_id,
+                            model_id=model_id,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            execution_time_ms=result.execution_time_ms
+                        )
+                
                 execution.input_data["agent_execution"] = {
                     "is_real": True,
                     "summary": execution_summary,
@@ -1189,6 +1498,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         for subtask_id, result in subtask_results.items()
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1217,6 +1527,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 # Fallback: simulate execution
@@ -1257,6 +1568,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "total_retries": aggregated_results.total_retries
                     }
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1286,13 +1598,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # MEMORY STORAGE (Store experiences in agent memory)
             logger.info(f"💾 Storing execution experiences...")
             memory_storage_results = {}
             try:
-                if 'memory_integrator' in locals():
+                if memory_integrator is not None:
                     memory_storage_results = await memory_integrator.store_execution_experiences(
                         workflow_id=execution.workflow_id,
                         execution_id=execution_id,
@@ -1304,6 +1617,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "is_real": True,
                         "results": memory_storage_results
                     }
+                    attributes.flag_modified(execution, "input_data")
                     db.commit()
                     
                     logger.info(
@@ -1319,6 +1633,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # LEARNING SYSTEM UPDATE
@@ -1340,6 +1655,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "updates": learning_updates,
                     "summary": learning_updater.get_learning_summary()
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
                 
                 logger.info(
@@ -1353,13 +1669,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
             
             # MEMORY CONSOLIDATION (Consolidate learnings to long-term memory)
             logger.info(f"🧠 Consolidating learnings to long-term memory...")
             memory_consolidation_results = {}
             try:
-                if 'memory_integrator' in locals():
+                if memory_integrator is not None:
                     memory_consolidation_results = await memory_integrator.consolidate_workflow_learnings(
                         workflow_id=execution.workflow_id,
                         execution_id=execution_id,
@@ -1380,6 +1697,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     )
                     
                     execution.input_data["memory_integration_summary"] = memory_summary
+                    attributes.flag_modified(execution, "input_data")
                     db.commit()
                     
                     logger.info(
@@ -1397,14 +1715,97 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
+                attributes.flag_modified(execution, "input_data")
                 db.commit()
+            
+            # PRD-15: Save model usage summary to execution
+            usage_summary = model_tracker.get_usage_summary()
+            execution.models_used = usage_summary.get("records", [])
+            
+            logger.info(
+                f"📊 Model Usage Summary: {usage_summary['total_requests']} requests | "
+                f"{usage_summary['total_tokens']} tokens | ${usage_summary['total_cost']:.6f} cost"
+            )
             
             # Complete execution with COMPLETE orchestration pipeline data
             execution.status = ExecutionStatus.COMPLETED.value
             execution.completed_at = datetime.now()
+            
+            # Update workflow status and last_execution
+            workflow.status = "completed"
+            
+            # Save last execution details to workflow
+            workflow.last_execution = {
+                "id": execution.id,
+                "status": execution.status,
+                "started_at": execution.started_at.isoformat() if execution.started_at else None,
+                "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+                "quality_scores": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}),
+                "agents_used": len(set(match.agent_id for matches in agent_assignments.values() for match in matches if matches)),
+                "tokens_used": execution.input_data.get("agent_execution", {}).get("summary", {}).get("total_tokens_used", 0),
+                "cost": usage_summary.get("total_cost", 0),
+                "subtasks_completed": len(steps)
+            }
+            attributes.flag_modified(workflow, "last_execution")
+            # Build dynamic result based on actual execution
+            stages_completed = []
+            if execution.input_data.get("decomposition", {}).get("is_real"):
+                stages_completed.append("Task Decomposition")
+            if execution.input_data.get("agent_selection", {}).get("is_real"):
+                stages_completed.append("Agent Selection")
+            if execution.input_data.get("memory_retrieval", {}).get("is_real"):
+                stages_completed.append("Memory Retrieval")
+            if execution.input_data.get("context_engineering", {}).get("is_real"):
+                stages_completed.append("Context Engineering")
+            if execution.input_data.get("agent_execution", {}).get("is_real"):
+                stages_completed.append("Agent Execution")
+            if execution.input_data.get("result_aggregation"):
+                stages_completed.append("Result Aggregation")
+            if execution.input_data.get("learning_system"):
+                stages_completed.append("Learning Update")
+            if execution.input_data.get("memory_storage"):
+                stages_completed.append("Memory Storage")
+            if execution.input_data.get("memory_consolidation"):
+                stages_completed.append("Memory Consolidation")
+            
+            # Extract the final report - AGGREGATE ALL SUBTASK RESULTS for comprehensive output
+            final_report = None
+            if subtask_results:
+                # Strategy: Combine ALL subtask results into a comprehensive report
+                # This ensures code examples, analysis, and summaries are all included
+                report_sections = []
+                
+                # Sort subtasks by ID to maintain logical order
+                sorted_subtasks = sorted(
+                    subtask_results.items(), 
+                    key=lambda x: int(x[0].split('_')[-1]) if '_' in x[0] and x[0].split('_')[-1].isdigit() else 0
+                )
+                
+                for subtask_id, subtask in sorted_subtasks:
+                    if subtask and hasattr(subtask, 'llm_response') and subtask.llm_response:
+                        # Get subtask description for context
+                        description = subtask.subtask_description if hasattr(subtask, 'subtask_description') else subtask_id
+                        
+                        # Add section header and content
+                        section = f"\n\n{'='*80}\n"
+                        section += f"## {description}\n"
+                        section += f"{'='*80}\n\n"
+                        section += subtask.llm_response
+                        report_sections.append(section)
+                        
+                        logger.info(f"  📄 Added section from {subtask_id}: {len(subtask.llm_response)} chars")
+                
+                # Combine all sections into final report
+                if report_sections:
+                    final_report = "\n".join(report_sections)
+                    logger.info(f"📄 Aggregated final report from {len(report_sections)} subtasks: {len(final_report)} chars total")
+                else:
+                    logger.warning(f"⚠️ No subtask results had content to aggregate")
+                
             execution.output_data = {
-                "result": "Workflow completed with COMPLETE pipeline (9 stages) + Memory Integration (PRD 04/05)",
-                "is_real_decomposition": True,
+                "result": f"Workflow completed with {len(stages_completed)} stages: {', '.join(stages_completed)}",
+                "final_report": final_report,  # The actual report content!
+                "is_real_decomposition": execution.input_data.get("decomposition", {}).get("is_real", False),
                 "is_real_agent_selection": execution.input_data.get("agent_selection", {}).get("is_real", False),
                 "is_real_memory_retrieval": execution.input_data.get("memory_retrieval", {}).get("is_real", False),
                 "is_real_context_engineering": execution.input_data.get("context_engineering", {}).get("is_real", False),
@@ -1417,6 +1818,10 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 "quality_scores": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}),
                 "steps_completed": len(steps),
                 "execution_time": f"{total_duration:.1f}s",
+                # Performance Analytics - Cost & Token Tracking
+                "total_cost": usage_summary.get("total_cost", 0),
+                "total_tokens_used": usage_summary.get("total_tokens", 0),
+                "total_requests": usage_summary.get("total_requests", 0),
                 "subtasks": [
                     {
                         "description": step.get("description", step.get("name", "Unknown")),
@@ -1473,6 +1878,20 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 memory_info = f", memory: {summary.get('memories_retrieved', 0)} retrieved, {summary.get('experiences_stored', 0)} stored, {summary.get('patterns_extracted', 0)} patterns"
             
             execution.execution_log = f"COMPLETE PIPELINE + MEMORY{agent_selection_info}{context_info}{execution_info}{quality_info}{learning_info}{memory_info} - {len(steps)} subtasks in {total_duration:.1f}s"
+            
+            # Record workflow analytics for monitoring
+            try:
+                from services.workflow_analytics_service import WorkflowAnalyticsService
+                from services.orchestration_tracker import orchestration_tracker
+                analytics_service = WorkflowAnalyticsService(db)
+                analytics = analytics_service.record_workflow_analytics(execution)
+                logger.info(
+                    f"📊 Analytics recorded: {analytics.completed_subtasks}/{analytics.total_subtasks} tasks, "
+                    f"{len(analytics.agents_used)} agents, ${analytics.total_cost:.4f} cost, "
+                    f"{analytics.overall_quality_score:.1%} quality"
+                )
+            except Exception as e:
+                logger.error(f"Failed to record analytics: {e}")
             
             db.commit()
             
@@ -1542,109 +1961,40 @@ async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
             for agent in workflow.agents:
                 common_agents[agent.agent_type] = common_agents.get(agent.agent_type, 0) + 1
         
-        # Generate recommended templates
-        templates = [
-            {
-                "id": "ai-code-review",
-                "name": "AI-Powered Code Review",
-                "description": "Comprehensive code review with security analysis and best practices",
-                "category": "Development",
-                "difficulty": "intermediate",
-                "estimated_time": "5-10 minutes",
-                "recommended_agents": ["code_architect", "security_expert"],
-                "steps": [
-                    "Code Analysis",
-                    "Security Scan", 
-                    "Performance Review",
-                    "Best Practices Check",
-                    "Documentation Review",
-                    "Report Generation"
-                ],
-                "use_cases": ["Pull Request Review", "Code Quality Audit", "Security Assessment"],
-                "popularity": 85,
-                "success_rate": 94
-            },
-            {
-                "id": "data-pipeline-optimization",
-                "name": "Data Pipeline Optimization",
-                "description": "Analyze and optimize data processing pipelines for performance",
-                "category": "Data Processing",
-                "difficulty": "advanced",
-                "estimated_time": "15-30 minutes",
-                "recommended_agents": ["data_analyst", "performance_optimizer"],
-                "steps": [
-                    "Pipeline Analysis",
-                    "Bottleneck Identification",
-                    "Performance Metrics",
-                    "Optimization Recommendations",
-                    "Implementation Plan"
-                ],
-                "use_cases": ["ETL Optimization", "Real-time Processing", "Cost Reduction"],
-                "popularity": 72,
-                "success_rate": 89
-            },
-            {
-                "id": "security-compliance-audit",
-                "name": "Security Compliance Audit",
-                "description": "Complete security audit with compliance checking",
-                "category": "Security",
-                "difficulty": "advanced",
-                "estimated_time": "20-45 minutes",
-                "recommended_agents": ["security_expert"],
-                "steps": [
-                    "Vulnerability Scanning",
-                    "Compliance Check",
-                    "Risk Assessment",
-                    "Remediation Plan",
-                    "Audit Report"
-                ],
-                "use_cases": ["SOC2 Compliance", "GDPR Audit", "Security Assessment"],
-                "popularity": 68,
-                "success_rate": 91
-            },
-            {
-                "id": "infrastructure-monitoring",
-                "name": "Infrastructure Health Check",
-                "description": "Monitor and analyze infrastructure performance and health",
-                "category": "Infrastructure",
-                "difficulty": "beginner",
-                "estimated_time": "5-15 minutes",
-                "recommended_agents": ["infrastructure_manager", "performance_optimizer"],
-                "steps": [
-                    "System Metrics Collection",
-                    "Performance Analysis",
-                    "Resource Utilization",
-                    "Alert Configuration",
-                    "Health Report"
-                ],
-                "use_cases": ["System Monitoring", "Capacity Planning", "Performance Tuning"],
-                "popularity": 79,
-                "success_rate": 96
-            }
-        ]
+        # Generate templates from ACTUAL workflow data - NO HARDCODED TEMPLATES
+        templates = []
         
-        # Sort by popularity and relevance
-        templates.sort(key=lambda x: x["popularity"], reverse=True)
+        # Only generate templates from real workflow executions
+        for workflow in workflows[:5]:  # Top 5 most recent workflows
+            if workflow.last_execution and workflow.status == "completed":
+                # Build template from ACTUAL workflow data
+                template = {
+                    "id": f"workflow_{workflow.id}",
+                    "name": workflow.name,
+                    "description": workflow.description,
+                    "category": workflow.workflow_definition.get("category", "General") if workflow.workflow_definition else "General",
+                    "difficulty": "intermediate",  # Calculate from actual execution time
+                    "estimated_time": f"{workflow.last_execution.get('execution_time', 0):.0f} seconds" if workflow.last_execution else "Unknown",
+                    "recommended_agents": [agent.agent_type for agent in workflow.agents] if workflow.agents else [],
+                    "steps": workflow.workflow_definition.get("steps", []) if workflow.workflow_definition else [],
+                    "use_cases": [],  # To be filled from actual usage
+                    "popularity": workflow.execution_count or 0,
+                    "success_rate": workflow.success_rate or 0
+                }
+                templates.append(template)
+        
+        # If no workflows exist, return empty templates
+        if not templates:
+            logger.warning("No completed workflows found to generate templates")
         
         return {
             "recommended_templates": templates,
             "usage_insights": {
-                "most_popular_category": max(common_categories.items(), key=lambda x: x[1])[0] if common_categories else "Development",
-                "most_used_agent": max(common_agents.items(), key=lambda x: x[1])[0] if common_agents else "code_architect",
+                "most_popular_category": max(common_categories.items(), key=lambda x: x[1])[0] if common_categories else None,
+                "most_used_agent": max(common_agents.items(), key=lambda x: x[1])[0] if common_agents else None,
                 "total_workflows": len(workflows)
             },
-            "personalized_recommendations": [
-                {
-                    "template_id": "ai-code-review",
-                    "reason": "Based on your frequent use of code analysis workflows",
-                    "confidence": 0.85
-                },
-                {
-                    "template_id": "infrastructure-monitoring", 
-                    "reason": "Recommended for maintaining system health",
-                    "confidence": 0.72
-                }
-            ],
+            "personalized_recommendations": [],  # NO HARDCODED DATA - build from actual usage
             "last_updated": datetime.now().isoformat()
         }
         

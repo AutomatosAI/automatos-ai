@@ -126,11 +126,17 @@ export function ContextEngineering() {
 
   // Process context sources from API ONLY
   const contextSourcesData = useMemo(() => {
-    if (contextSources && Array.isArray(contextSources)) {
-      return contextSources.map((source: any) => ({
+    // API returns {sources: [...]} so extract the array
+    const sources = (contextSources as any)?.sources || contextSources
+    
+    if (sources && Array.isArray(sources)) {
+      // Define colors for different sources
+      const colors = ['#60B5FF', '#FF6B9D', '#FFC371', '#4ECDC4', '#95E1D3', '#F38181']
+      
+      return sources.map((source: any, index: number) => ({
         name: source.name || 'Unknown',
-        value: source.value || 0,
-        color: source.color || '#60B5FF'
+        value: source.count || source.value || 0,  // API uses "count", fallback to "value"
+        color: source.color || colors[index % colors.length]
       }))
     }
     return []

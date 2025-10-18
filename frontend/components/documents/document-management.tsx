@@ -285,10 +285,10 @@ export function DocumentManagement() {
       >
         <div>
           <h1 className="text-3xl font-bold mb-2">
-            Document <span className="gradient-text">Management</span>
+            Knowledge <span className="gradient-text">Bases</span>
           </h1>
           <p className="text-muted-foreground text-lg">
-            Manage your knowledge base and document processing pipeline
+            Manage documents, code repositories, and knowledge sources
           </p>
         </div>
         
@@ -404,8 +404,8 @@ export function DocumentManagement() {
                     {/* Header */}
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-                          <TypeIcon className="w-5 h-5 text-white" />
+                        <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                          <TypeIcon className="w-5 h-5 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <h3 className="font-semibold truncate">{doc.filename}</h3>

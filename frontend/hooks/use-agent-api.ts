@@ -88,8 +88,9 @@ export function useAgents() {
   return useQuery({
     queryKey: agentQueryKeys.agents,
     queryFn: () => agentApiClient.getAgents(),
-    refetchInterval: false, // Disable automatic refetching to fix refresh issue
-    staleTime: Infinity // Keep data fresh indefinitely
+    refetchInterval: false, // Disable automatic refetching
+    staleTime: 30000, // Cache for 30 seconds, allows manual refresh
+    refetchOnWindowFocus: false, // Don't refetch on window focus
   })
 }
 

@@ -30,6 +30,19 @@ from database.models import (
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
 
+# Import new services (lazy import to avoid circular deps)
+def get_action_executor():
+    from services.agent_action_executor import get_action_executor as _get_executor
+    return _get_executor()
+
+def get_monitoring_service():
+    from services.monitoring_service import get_monitoring_service as _get_monitor
+    return _get_monitor()
+
+def get_rag_service():
+    from services.rag_service import get_rag_service as _get_rag
+    return _get_rag()
+
 logger = logging.getLogger(__name__)
 
 # Agent lifecycle states
@@ -50,43 +63,134 @@ DEFAULT_LLM_CONFIG = {
     "context_window": 8192
 }
 
+# PRD-15: Multi-Model Configuration
+@dataclass
+class ModelConfiguration:
+    """
+    Complete model configuration for an agent (PRD-15).
+    
+    This dataclass encapsulates all model-specific settings including
+    provider, model ID, and generation parameters.
+    """
+    provider: str  # 'openai', 'anthropic', 'huggingface'
+    model_id: str  # 'gpt-4', 'claude-3-sonnet-20240229', etc.
+    temperature: float = 0.7
+    max_tokens: int = 2000
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    fallback_model_id: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for storage"""
+        return {
+            "provider": self.provider,
+            "model_id": self.model_id,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "fallback_model_id": self.fallback_model_id
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'ModelConfiguration':
+        """Create from dictionary"""
+        return ModelConfiguration(
+            provider=data.get("provider", "openai"),
+            model_id=data.get("model_id", "gpt-4"),
+            temperature=data.get("temperature", 0.7),
+            max_tokens=data.get("max_tokens", 2000),
+            top_p=data.get("top_p", 1.0),
+            frequency_penalty=data.get("frequency_penalty", 0.0),
+            presence_penalty=data.get("presence_penalty", 0.0),
+            fallback_model_id=data.get("fallback_model_id")
+        )
+    
+    @staticmethod
+    def get_default() -> 'ModelConfiguration':
+        """Get default configuration"""
+        return ModelConfiguration(
+            provider="openai",
+            model_id="gpt-4",
+            temperature=0.7,
+            max_tokens=2000
+        )
+
 @dataclass
 class AgentMetadata:
-    """User-defined agent metadata - completely flexible"""
+    """
+    User-defined agent metadata - completely flexible.
+    
+    Enhanced in PRD-15 to support full model configuration.
+    Maintains backward compatibility with deprecated fields.
+    """
     name: str
     agent_type: str  # User-defined type (e.g., "financial_analyst", "code_reviewer")
     description: Optional[str] = None
     skills: List[str] = field(default_factory=list)  # Semantic tags for matching
+    
+    # PRD-15: New model configuration
+    model_config: Optional[ModelConfiguration] = None
+    
+    # Deprecated: Keep for backward compatibility
     preferred_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None
+    
     custom_metadata: Dict[str, Any] = field(default_factory=dict)  # Any user data
     
-    def get_llm_config(self) -> Dict[str, Any]:
-        """Get LLM configuration with user overrides"""
-        config = DEFAULT_LLM_CONFIG.copy()
+    def get_model_config(self) -> ModelConfiguration:
+        """
+        Get model configuration with fallbacks.
         
+        Priority:
+        1. model_config (new)
+        2. deprecated fields (backward compatibility)
+        3. default configuration
+        
+        Returns:
+            ModelConfiguration object
+        """
+        # Use new model_config if available
+        if self.model_config:
+            return self.model_config
+        
+        # Fall back to deprecated fields for backward compatibility
         if self.preferred_model:
-            # Determine provider from model name
-            if "gpt" in self.preferred_model.lower():
-                config["provider"] = "openai"
-                config["model"] = self.preferred_model
-            elif "claude" in self.preferred_model.lower():
-                config["provider"] = "anthropic"
-                config["model"] = self.preferred_model
-            else:
-                # Future: HuggingFace or custom models
-                config["model"] = self.preferred_model
-        
-        if self.temperature is not None:
-            config["temperature"] = self.temperature
-        if self.max_tokens is not None:
-            config["max_tokens"] = self.max_tokens
-        if self.context_window is not None:
-            config["context_window"] = self.context_window
+            provider = "openai"
+            if "claude" in self.preferred_model.lower():
+                provider = "anthropic"
+            elif "llama" in self.preferred_model.lower() or "mistral" in self.preferred_model.lower():
+                provider = "huggingface"
             
-        return config
+            return ModelConfiguration(
+                provider=provider,
+                model_id=self.preferred_model,
+                temperature=self.temperature or 0.7,
+                max_tokens=self.max_tokens or 2000
+            )
+        
+        # Use default
+        return ModelConfiguration.get_default()
+    
+    def get_llm_config(self) -> Dict[str, Any]:
+        """
+        Get LLM configuration dict (backward compatible).
+        
+        Deprecated: Use get_model_config() instead.
+        Maintained for backward compatibility.
+        """
+        model_config = self.get_model_config()
+        return {
+            "provider": model_config.provider,
+            "model": model_config.model_id,
+            "temperature": model_config.temperature,
+            "max_tokens": model_config.max_tokens,
+            "context_window": self.context_window or 8192
+        }
 
 @dataclass
 class AgentRuntime:
@@ -166,17 +270,27 @@ class AgentFactory:
         
         # Convert dict to AgentMetadata if needed
         if isinstance(metadata, dict):
+            # PRD-15: Handle model_config from dict
+            model_config = None
+            if "model_config" in metadata:
+                model_config = ModelConfiguration.from_dict(metadata["model_config"])
+            
             metadata = AgentMetadata(
                 name=metadata.get("name", "Unnamed Agent"),
                 agent_type=metadata.get("type", "generic"),
                 description=metadata.get("description"),
                 skills=metadata.get("skills", []),
+                model_config=model_config,
+                # Deprecated fields for backward compatibility
                 preferred_model=metadata.get("preferred_model"),
                 temperature=metadata.get("temperature"),
                 max_tokens=metadata.get("max_tokens"),
                 context_window=metadata.get("context_window"),
                 custom_metadata=metadata.get("metadata", {})
             )
+        
+        # PRD-15: Get model configuration
+        model_config = metadata.get_model_config()
         
         # Create database record
         db_agent = Agent(
@@ -186,9 +300,10 @@ class AgentFactory:
             status=AgentLifecycle.INITIALIZING.value,
             configuration={
                 "skills": metadata.skills,
-                "llm_config": metadata.get_llm_config(),
+                "llm_config": metadata.get_llm_config(),  # Backward compatibility
                 "custom_metadata": metadata.custom_metadata
             },
+            model_config=model_config.to_dict(),  # PRD-15: Store model config
             priority_level=PriorityLevel.MEDIUM.value,
             max_concurrent_tasks=5,
             auto_start=False,
@@ -198,34 +313,44 @@ class AgentFactory:
         self.db_session.add(db_agent)
         self.db_session.commit()
         
-        # Initialize LLM connection
+        # PRD-15: Initialize LLM connection with model configuration
         try:
-            llm_config_dict = metadata.get_llm_config()
-            
-            # Determine provider
-            provider = LLMProvider(llm_config_dict["provider"])
-            
-            llm_config = LLMConfig(
-                provider=provider,
-                model=llm_config_dict["model"],
-                temperature=llm_config_dict["temperature"],
-                max_tokens=llm_config_dict["max_tokens"],
-                # api_key will be loaded from environment
-            )
-            
-            llm_manager = LLMManager(llm_config)
+            llm_manager = await self._create_llm_manager(model_config, db_agent.name)
             
             # Verify connection if requested
             if auto_verify:
                 verification_result = await self._verify_llm_connection(llm_manager)
                 if not verification_result["success"]:
-                    self.db_session.delete(db_agent)
-                    self.db_session.commit()
-                    raise Exception(f"LLM verification failed: {verification_result['error']}")
+                    # PRD-15: Try fallback model if configured
+                    if model_config.fallback_model_id:
+                        self.logger.warning(
+                            f"Primary model '{model_config.model_id}' failed, "
+                            f"trying fallback '{model_config.fallback_model_id}'"
+                        )
+                        fallback_config = ModelConfiguration(
+                            provider=model_config.provider,
+                            model_id=model_config.fallback_model_id,
+                            temperature=model_config.temperature,
+                            max_tokens=model_config.max_tokens
+                        )
+                        llm_manager = await self._create_llm_manager(fallback_config, db_agent.name)
+                        verification_result = await self._verify_llm_connection(llm_manager)
+                        
+                        if verification_result["success"]:
+                            # Update db_agent with fallback model
+                            db_agent.model_config = fallback_config.to_dict()
+                            self.db_session.commit()
+                            self.logger.info(f"Fallback model '{model_config.fallback_model_id}' succeeded")
+                    
+                    if not verification_result["success"]:
+                        self.db_session.delete(db_agent)
+                        self.db_session.commit()
+                        raise Exception(f"LLM verification failed: {verification_result['error']}")
                 
                 self.logger.info(
-                    f"Agent '{metadata.name}' LLM verified. "
-                    f"Response time: {verification_result['response_time']:.2f}s"
+                    f"✓ Agent '{metadata.name}' LLM verified: "
+                    f"model={model_config.model_id}, provider={model_config.provider}, "
+                    f"response_time={verification_result['response_time']:.2f}s"
                 )
             
             # Phase 3: Load agent's tools from database
@@ -261,6 +386,59 @@ class AgentFactory:
                 self.db_session.delete(db_agent)
                 self.db_session.commit()
             raise
+    
+    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "") -> LLMManager:
+        """
+        Create LLM manager from model configuration (PRD-15).
+        
+        Args:
+            model_config: ModelConfiguration with provider and model settings
+            agent_name: Agent name for logging
+            
+        Returns:
+            Initialized LLMManager
+            
+        Raises:
+            ValueError: If provider is unsupported
+        """
+        from services.llm_provider import LLMConfig, LLMProvider as LLMProviderEnum
+        
+        # Map provider string to enum
+        provider_map = {
+            "openai": LLMProviderEnum.OPENAI,
+            "anthropic": LLMProviderEnum.ANTHROPIC
+        }
+        
+        if model_config.provider not in provider_map:
+            raise ValueError(f"Unsupported provider: {model_config.provider}")
+        
+        provider = provider_map[model_config.provider]
+        
+        # Get API key from environment
+        api_key = None
+        if provider == LLMProviderEnum.OPENAI:
+            api_key = os.getenv("OPENAI_API_KEY")
+        elif provider == LLMProviderEnum.ANTHROPIC:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+        
+        if not api_key:
+            raise ValueError(f"API key not found for provider: {model_config.provider}")
+        
+        # Create LLM config
+        llm_config = LLMConfig(
+            provider=provider,
+            model=model_config.model_id,
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+            api_key=api_key
+        )
+        
+        self.logger.info(
+            f"Creating LLM manager for {agent_name or 'agent'}: "
+            f"provider={model_config.provider}, model={model_config.model_id}"
+        )
+        
+        return LLMManager(config=llm_config)
     
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
         """Verify LLM connection with minimal test"""
@@ -372,7 +550,9 @@ class AgentFactory:
         system_prompt: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         use_memory: bool = True,
-        max_retries: int = 2
+        max_retries: int = 2,
+        enable_actions: bool = True,
+        action_executor: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
@@ -428,6 +608,50 @@ class AgentFactory:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
             
+            # Check if actions are needed and add capabilities
+            action_executor = None
+            if enable_actions and self._requires_actions(prompt):
+                action_executor = get_action_executor()
+                action_prompt = """\n\nYou have access to perform real actions:
+- read_file(path) - Read file contents
+- write_file(path, content) - Create/update files
+- execute_command(cmd) - Run shell commands
+- list_directory(path) - List directory contents
+
+To use actions, respond with JSON blocks like:
+{"action": "write_file", "params": {"path": "test.py", "content": "print('hello')"}}
+\nYou can include multiple action blocks in your response."""
+                prompt = prompt + action_prompt
+            
+            # ALWAYS add platform research tools
+            platform_tools_prompt = """
+
+## 🔍 YOU HAVE REAL RESEARCH TOOLS - USE THEM!
+
+⚠️  CRITICAL: You can execute real search tools. DO NOT describe what you would search for - ACTUALLY EXECUTE THE SEARCHES!
+
+Available Tools:
+1. **search_knowledge** - Search documentation and knowledge base
+   {"action": "search_knowledge", "params": {"query": "your search query", "limit": 5}}
+
+2. **semantic_search** - Find semantically similar content
+   {"action": "semantic_search", "params": {"query": "concept to find", "limit": 5}}
+
+3. **search_codebase** - Search code implementations  
+   {"action": "search_codebase", "params": {"query": "function or class name"}}
+
+❌ WRONG RESPONSE: "I would use search_knowledge to find information about X"
+✅ CORRECT RESPONSE: Immediately output the JSON block: {"action": "search_knowledge", "params": {"query": "X", "limit": 5}}
+
+**EXECUTION RULES**:
+- If you lack information → SEARCH FOR IT immediately using tools
+- You can call multiple tools in sequence
+- NEVER say "I don't have information" - USE THE TOOLS
+- After receiving tool results, use them to provide a detailed, factual answer"""
+            
+            prompt = prompt + platform_tools_prompt
+            action_executor = action_executor or get_action_executor()  # Ensure executor exists
+            
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
@@ -438,6 +662,63 @@ class AgentFactory:
                     # REAL LLM API CALL
                     response = await agent_runtime.llm_manager.generate_response(messages)
                     execution_time = time.time() - start_time
+                    
+                    # Process any action requests in the response and iterate if needed
+                    action_results = []
+                    if action_executor and response and response.content and '{"action"' in response.content:
+                        self.logger.info(f"🔧 Agent requested tool calls, executing...")
+                        action_results = await self._process_agent_actions(response.content, action_executor)
+                        
+                        # If tools were executed, feed results back to agent for final answer
+                        if action_results:
+                            self.logger.info(f"  ✅ {len(action_results)} tool(s) executed, feeding results back to agent")
+                            
+                            # Add agent's tool request to messages
+                            messages.append({"role": "assistant", "content": response.content})
+                            
+                            # Create tool results message - agent-friendly format
+                            tool_results_text = "Research Results:\n\n"
+                            for idx, result in enumerate(action_results, 1):
+                                action_name = result.get('action', result.get('tool', 'unknown'))
+                                tool_results_text += f"=== Tool {idx}: {action_name} ===\n"
+                                
+                                if result.get('success', result.get('status') == 'success'):
+                                    # Success case - show actual content
+                                    result_data = result.get('result', result.get('data', []))
+                                    count = result.get('count', 0)
+                                    
+                                    if isinstance(result_data, list) and len(result_data) > 0:
+                                        tool_results_text += f"Found {count} results:\n\n"
+                                        # Show top 3 results with full content
+                                        for i, item in enumerate(result_data[:3], 1):
+                                            if isinstance(item, dict):
+                                                content = item.get('content', str(item))
+                                                relevance = item.get('relevance', item.get('similarity', 0))
+                                                source = item.get('source', 'Unknown')
+                                                tool_results_text += f"{i}. {content}\n"
+                                                tool_results_text += f"   [Relevance: {relevance:.2f}, Source: {source}]\n\n"
+                                            else:
+                                                tool_results_text += f"{i}. {str(item)[:500]}\n\n"
+                                        
+                                        if count > 3:
+                                            tool_results_text += f"(+ {count - 3} more results available)\n\n"
+                                    else:
+                                        tool_results_text += f"Result: {str(result_data)[:800]}\n\n"
+                                else:
+                                    # Error case
+                                    error_msg = result.get('error', result.get('result', 'Unknown error'))
+                                    tool_results_text += f"ERROR: {error_msg}\n"
+                                    tool_results_text += f"Action: Continue with available knowledge.\n\n"
+                            
+                            tool_results_text += "\n📝 INSTRUCTIONS: Use the research results above to provide a detailed, accurate answer to the original task. Cite sources where appropriate."
+                            
+                            messages.append({"role": "user", "content": tool_results_text})
+                            
+                            # Call LLM again with tool results
+                            self.logger.info("  🔄 Calling agent again with tool results for final answer...")
+                            response = await agent_runtime.llm_manager.generate_response(messages)
+                            execution_time = time.time() - start_time
+                            self.logger.info("  ✅ Agent provided final answer after research")
                     
                     if response and response.content:
                         # Success! Update metrics
@@ -462,6 +743,17 @@ class AgentFactory:
                         # Update lifecycle state
                         agent_runtime.lifecycle_state = AgentLifecycle.ACTIVE
                         
+                        # Record in monitoring service
+                        monitoring = get_monitoring_service()
+                        monitoring.record_agent_execution(
+                            agent_id=agent_runtime.agent_id,
+                            agent_name=agent_runtime.metadata.name,
+                            task=prompt[:100],
+                            execution_time_ms=execution_time * 1000,
+                            tokens_used=tokens_used,
+                            success=True
+                        )
+                        
                         # Return successful result
                         return {
                             "status": "success",
@@ -476,8 +768,11 @@ class AgentFactory:
                                 "tokens_used": tokens_used,
                                 "model": response.model,
                                 "provider": response.provider,
-                                "attempt": attempt + 1
+                                "attempt": attempt + 1,
+                                "actions_enabled": enable_actions,
+                                "actions_executed": len(action_results)
                             },
+                            "action_results": action_results,
                             "metrics": {
                                 "total_executions": agent_runtime.execution_count,
                                 "success_rate": agent_runtime.performance_metrics.get("success_rate", 1.0),
@@ -665,6 +960,144 @@ class AgentFactory:
         }
         
         return test_results
+    
+    # ======================================================================
+    # ACTION EXECUTOR HELPER METHODS
+    # ======================================================================
+    
+    def _requires_actions(self, prompt: str) -> bool:
+        """Check if the prompt requires action capabilities"""
+        action_keywords = [
+            'write', 'create', 'file', 'save', 'execute', 'run',
+            'command', 'shell', 'list', 'read', 'directory', 'folder',
+            'delete', 'remove', 'mkdir', 'code', 'script', 'program'
+        ]
+        prompt_lower = prompt.lower()
+        return any(keyword in prompt_lower for keyword in action_keywords)
+    
+    async def _process_agent_actions(self, response: str, action_executor) -> List[Dict[str, Any]]:
+        """Process action requests from agent response"""
+        import re
+        results = []
+        
+        # Find all JSON action blocks in the response - match complete JSON objects
+        action_pattern = r'\{"action":\s*"[^"]+",\s*"params":\s*\{[^}]*\}\}'
+        matches = re.finditer(action_pattern, response)
+        
+        for match in matches:
+            try:
+                action_json = match.group(0)
+                action_data = json.loads(action_json)
+                
+                action_type = action_data.get('action')
+                params = action_data.get('params', {})
+                
+                # Execute the requested action
+                if action_type == 'read_file':
+                    success, content = action_executor.read_file(params.get('path', ''))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': content
+                    })
+                elif action_type == 'write_file':
+                    success, message = action_executor.write_file(
+                        params.get('path', ''),
+                        params.get('content', '')
+                    )
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': message
+                    })
+                elif action_type == 'execute_command':
+                    success, output = action_executor.execute_command(params.get('command', ''))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': output
+                    })
+                elif action_type == 'list_directory':
+                    success, items = action_executor.list_directory(params.get('path', '.'))
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': success,
+                        'result': items
+                    })
+                
+                # Platform research tools
+                elif action_type == 'search_knowledge':
+                    self.logger.info(f"  🔍 Executing search_knowledge with params: {params}")
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='search_knowledge',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    self.logger.info(f"  📊 Knowledge search result: success={result.get('success')}, count={result.get('count', 0)}")
+                    self.logger.info(f"  📄 First result preview: {str(result.get('results', [{}])[0] if result.get('results') else 'NO RESULTS')[:200]}")
+                    results.append(result)
+                    self.logger.info(f"  ✅ Knowledge search: {result.get('count', 0)} results found")
+                
+                elif action_type == 'semantic_search':
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='semantic_search',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    results.append(result)
+                    self.logger.info(f"  ✅ Semantic search: {result.get('count', 0)} results found")
+                
+                elif action_type == 'search_codebase':
+                    from services.agent_platform_tools import AgentPlatformTools
+                    platform_tools = AgentPlatformTools(self.db_session)
+                    result = await platform_tools.execute_tool(
+                        tool_name='search_codebase',
+                        parameters=params,
+                        agent_id=0
+                    )
+                    results.append(result)
+                    self.logger.info(f"  ✅ Codebase search: {result.get('count', 0)} results found")
+                
+                else:
+                    results.append({
+                        'action': action_type,
+                        'params': params,
+                        'success': False,
+                        'result': f"Unknown action: {action_type}"
+                    })
+                    
+            except json.JSONDecodeError as e:
+                # Try to fix common JSON issues
+                self.logger.warning(f"JSON parse error at column {e.colno}: {e.msg}")
+                self.logger.warning(f"  Full problematic JSON: {match.group(0)}")
+                try:
+                    fixed_json = match.group(0)
+                    fixed_json = fixed_json.replace("'", '"')  # Single to double quotes
+                    fixed_json = re.sub(r',\s*}', '}', fixed_json)  # Trailing commas in objects
+                    fixed_json = re.sub(r',\s*\]', ']', fixed_json)  # Trailing commas in arrays
+                    action_data = json.loads(fixed_json)
+                    self.logger.info(f"  ✅ JSON fixed and parsed successfully")
+                    # Note: Would need to reprocess the fixed action_data here
+                except Exception as fix_error:
+                    self.logger.error(f"Failed to fix JSON: {fix_error}")
+            except Exception as e:
+                self.logger.error(f"Failed to process action: {e}")
+                results.append({
+                    'action': 'unknown',
+                    'params': {},
+                    'success': False,
+                    'result': str(e)
+                })
+        
+        return results
     
     # ======================================================================
     # PHASE 3: MCP TOOLS INTEGRATION METHODS

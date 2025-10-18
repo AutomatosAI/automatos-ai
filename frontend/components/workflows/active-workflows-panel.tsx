@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Play, 
@@ -17,7 +17,11 @@ import {
   MoreVertical,
   RefreshCw,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Search,
+  Filter,
+  X,
+  Copy
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
 import { useActiveWorkflows, useExecuteWorkflowAdvanced } from '@/hooks/use-workflow-api'
 import { LiveProgressPanel } from './live-progress-panel'
 import { apiClient } from '@/lib/api-client'
@@ -104,6 +109,8 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
   const [cleanupDays, setCleanupDays] = useState('30')
   const [workflowToDelete, setWorkflowToDelete] = useState<{id: number, name: string} | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
 
   const queryClient = useQueryClient()
 
@@ -112,6 +119,30 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
   
   // Use mutation hook for executing workflows
   const executeWorkflowMutation = useExecuteWorkflowAdvanced()
+  
+  // Filter workflows based on search and status
+  const filteredWorkflows = useMemo(() => {
+    if (!workflowsData?.active_workflows) return []
+    
+    let filtered = [...workflowsData.active_workflows]
+    
+    // Apply search filter
+    if (searchQuery) {
+      filtered = filtered.filter(workflow => 
+        workflow.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        workflow.description.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+    
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(workflow => 
+        workflow.current_execution.status === statusFilter
+      )
+    }
+    
+    return filtered
+  }, [workflowsData, searchQuery, statusFilter])
   
   // Auto refresh every 5 seconds if enabled
   useEffect(() => {
@@ -131,6 +162,20 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
         timeout: 300
       }
     })
+  }
+
+  const handleDuplicateWorkflow = async (workflowId: number, workflowName: string) => {
+    try {
+      const result = await apiClient.duplicateWorkflow(workflowId)
+      await queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] })
+      await queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      refetch()
+      // Show success message (you could add a toast here)
+      console.log(`✅ Workflow "${workflowName}" duplicated as "${result.name}"`)
+    } catch (error) {
+      console.error('Error duplicating workflow:', error)
+      alert('Failed to duplicate workflow')
+    }
   }
 
   const handleDeleteWorkflow = async () => {
@@ -239,7 +284,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             <span className="text-white">Active</span> <span className="text-orange-500">Workflows</span>
           </h3>
           <p className="text-sm text-muted-foreground">
-            {workflowsData.total_active} active • {workflowsData.system_load}% system load
+            {filteredWorkflows.length} of {workflowsData.total_active} workflows • {workflowsData.system_load}% system load
           </p>
         </div>
         
@@ -266,9 +311,75 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
         </div>
       </div>
 
+      {/* Search and Filter Bar */}
+      <div className="flex gap-3 items-center">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search workflows by name or description..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 pr-10"
+          />
+          {searchQuery && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-1 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+        
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[180px]">
+            <Filter className="w-4 h-4 mr-2" />
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="idle">Idle</SelectItem>
+            <SelectItem value="running">Running</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="failed">Failed</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {(searchQuery || statusFilter !== 'all') && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSearchQuery('')
+              setStatusFilter('all')
+            }}
+          >
+            Clear Filters
+          </Button>
+        )}
+      </div>
+
       {/* Active Workflows Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {workflowsData.active_workflows.map((workflow, index) => {
+      {filteredWorkflows.length === 0 ? (
+        <div className="text-center py-12">
+          <Search className="h-8 w-8 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-2">No workflows match your filters</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSearchQuery('')
+              setStatusFilter('all')
+            }}
+          >
+            Clear Filters
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {filteredWorkflows.map((workflow, index) => {
           const StatusIcon = getStatusIcon(workflow.current_execution.status)
           const statusColor = getStatusColor(workflow.current_execution.status)
           
@@ -310,6 +421,13 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
                     }}>
                       <Play className="w-4 h-4 mr-2" />
                       Execute Workflow
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => {
+                      e.stopPropagation()
+                      handleDuplicateWorkflow(workflow.id, workflow.name)
+                    }}>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Duplicate Workflow
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       onClick={(e) => {
@@ -427,6 +545,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
           )
         })}
       </div>
+      )}
 
       {/* Live Progress Panel */}
       {selectedWorkflow && (

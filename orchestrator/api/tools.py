@@ -95,93 +95,11 @@ class ToolUsageStats(BaseModel):
 # ====================================
 
 def get_mock_marketplace_tools() -> List[Dict[str, Any]]:
-    """Return mock marketplace tools for demonstration"""
-    return [
-        {
-            "id": 1,
-            "name": "GitHub",
-            "description": "Code repository management and version control",
-            "category": "developer",
-            "provider": "GitHub Inc.",
-            "version": "2.0.1",
-            "icon": "⚡",
-            "pricing": "Free/Pro",
-            "rating": 4.9,
-            "tags": ["git", "repository", "collaboration"],
-            "permissions": ["code_architect", "custom"],
-            "required_credentials": ["api_token"],
-            "supported_environments": ["development", "staging", "production"],
-            "status": "available",
-            "mcp_config": {
-                "server_url": "github://api.github.com",
-                "protocol_version": "1.0"
-            }
-        },
-        {
-            "id": 2,
-            "name": "Jira",
-            "description": "Project management and issue tracking",
-            "category": "developer",
-            "provider": "Atlassian",
-            "version": "1.8.3",
-            "icon": "📋",
-            "pricing": "Free/Pro",
-            "rating": 4.6,
-            "tags": ["project-management", "tracking", "agile"],
-            "permissions": ["code_architect", "custom"],
-            "required_credentials": ["api_token", "domain"],
-            "supported_environments": ["development", "production"],
-            "status": "available"
-        },
-        {
-            "id": 3,
-            "name": "Slack",
-            "description": "Team communication and collaboration platform",
-            "category": "communication",
-            "provider": "Slack Technologies",
-            "version": "3.2.1",
-            "icon": "💬",
-            "pricing": "Free/Pro",
-            "rating": 4.8,
-            "tags": ["chat", "team", "notifications"],
-            "permissions": ["custom", "infrastructure_manager"],
-            "required_credentials": ["bot_token", "webhook_url"],
-            "supported_environments": ["production"],
-            "status": "available"
-        },
-        {
-            "id": 4,
-            "name": "AWS S3",
-            "description": "Cloud object storage and file management",
-            "category": "cloud",
-            "provider": "Amazon Web Services",
-            "version": "1.9.2",
-            "icon": "☁️",
-            "pricing": "Pay-per-use",
-            "rating": 4.9,
-            "tags": ["storage", "cloud", "files"],
-            "permissions": ["infrastructure_manager"],
-            "required_credentials": ["access_key", "secret_key", "region"],
-            "supported_environments": ["development", "staging", "production"],
-            "status": "available"
-        },
-        {
-            "id": 5,
-            "name": "Google Analytics",
-            "description": "Web analytics and user behavior tracking",
-            "category": "analytics",
-            "provider": "Google",
-            "version": "2.3.1",
-            "icon": "📊",
-            "pricing": "Free/Pro",
-            "rating": 4.5,
-            "tags": ["analytics", "tracking", "insights"],
-            "permissions": ["data_analyst"],
-            "required_credentials": ["property_id", "service_account_key"],
-            "supported_environments": ["production"],
-            "status": "available"
-        }
-    ]
+    """
+    REMOVED - NO MOCK DATA IN PRODUCTION
+    Returns empty list - populate from real MCP tools only
+    """
+    return []  # NO MOCK DATA
 
 def create_tool_from_dict(tool_data: Dict[str, Any], db: Session) -> Tool:
     """Create a tool record from dictionary data"""
@@ -233,16 +151,10 @@ async def list_tools(
     set_request_id(str(uuid.uuid4()))
     
     try:
-        # Check if database has tools, if not, populate with mock data
+        # NO MOCK DATA - only use real tools from database
         tools_count = db.query(func.count(Tool.id)).scalar()
         if tools_count == 0:
-            logger.info("No tools found in database, populating with marketplace data")
-            mock_tools = get_mock_marketplace_tools()
-            for tool_data in mock_tools:
-                try:
-                    create_tool_from_dict(tool_data, db)
-                except Exception as e:
-                    logger.error(f"Failed to create tool {tool_data.get('name')}: {e}")
+            logger.info("No tools found in database - waiting for real MCP tools to be registered")
         
         query = db.query(Tool)
         

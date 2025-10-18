@@ -20,6 +20,7 @@ import { OrchestratorControl } from './execution-theater/orchestrator-control'
 import { CommunicationLog } from './execution-theater/communication-log'
 import { MemoryVisualization } from './execution-theater/memory-visualization'
 import { HumanInteractionChat } from './execution-theater/human-interaction-chat'
+import { EnhancedOrchestratorView } from './execution-theater/enhanced-orchestrator-view'
 import { apiClient } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
 import { useWorkflowWebSocket } from '@/hooks/use-workflow-websocket'
@@ -30,11 +31,24 @@ interface ExecutionTheaterProps {
   autoStart?: boolean
 }
 
+// Import the new V2 component
+import { ExecutionTheaterV2 } from './execution-theater-v2'
+
+// Use V2 by default - can toggle back if needed
+const USE_V2 = true
+
 export function ExecutionTheater({ workflowId, onBack, autoStart = false }: ExecutionTheaterProps) {
+  // Use the new V2 design
+  if (USE_V2) {
+    return <ExecutionTheaterV2 workflowId={workflowId} onBack={onBack} autoStart={autoStart} />
+  }
+  
+  // Original implementation below...
   const router = useRouter()
   const [isExecuting, setIsExecuting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
+  const [showEnhancedView, setShowEnhancedView] = useState(false)
   const [executionData, setExecutionData] = useState<any>(null)
   const [selectedAgent, setSelectedAgent] = useState<number | null>(null)
   const [hasAutoStarted, setHasAutoStarted] = useState(false)
@@ -45,6 +59,10 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     console.log('🔥 Real-time WebSocket update:', message.type, message)
 
     switch (message.type) {
+      case 'connected':
+        console.log('✅ WebSocket connected to Redis channel')
+        break
+        
       case 'execution_started':
         console.log('🚀 Execution started event received')
         if (message.data?.execution_id) {
@@ -94,11 +112,12 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     }
   }, [currentExecutionId])
 
+  // WebSocket connection with proper execution ID handling
   const { isConnected, error: wsError } = useWorkflowWebSocket({
     workflowId,
     executionId: currentExecutionId || undefined,
     onMessage: handleWebSocketMessage,
-    autoConnect: true
+    autoConnect: !!currentExecutionId  // Only auto-connect when we have execution ID
   })
 
   const loadExecutionById = async (executionId: number) => {
@@ -262,6 +281,16 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       const result = await apiClient.executeWorkflow(workflowId.toString(), {})
       console.log('Execution started:', result)
       
+      // CRITICAL: Capture the execution ID from the response
+      if (result?.execution_id || result?.id) {
+        const execId = result.execution_id || result.id
+        setCurrentExecutionId(execId)
+        console.log('🎯 Execution ID captured:', execId)
+        
+        // Load execution details immediately
+        await loadExecutionById(execId)
+      }
+      
       // Immediately load live progress
       setTimeout(() => {
         loadLiveProgress()
@@ -310,9 +339,11 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
               Back
             </Button>
             
-            <div>
+            <div className="max-w-2xl">
               <h1 className="text-xl font-bold">{executionData.name}</h1>
-              <p className="text-sm text-muted-foreground">{executionData.description}</p>
+              <p className="text-sm text-muted-foreground line-clamp-2" title={executionData.description}>
+                {executionData.description}
+              </p>
             </div>
 
             <Badge variant={isExecuting ? 'default' : 'secondary'}>
@@ -355,8 +386,19 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
               variant="ghost"
               size="icon"
               onClick={() => setShowMemory(!showMemory)}
+              title="Memory Visualization"
             >
               <Settings className="w-4 h-4" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowEnhancedView(!showEnhancedView)}
+              className={showEnhancedView ? "bg-primary/10" : ""}
+              title="Enhanced Orchestrator View"
+            >
+              <Activity className="w-4 h-4" />
             </Button>
 
             <Button
@@ -376,16 +418,27 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
       {/* Main Theater Layout */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top: Communication & Events (45%) - Full Width with Data Tabs */}
-        <div className="h-[45%] p-4 pb-2">
-          <div className="h-full border border-border/30 rounded-lg bg-background/30 overflow-hidden">
-            <CommunicationLog
+        {/* Show Enhanced View or Regular View */}
+        {showEnhancedView ? (
+          <div className="flex-1 p-4 overflow-auto">
+            <EnhancedOrchestratorView
               workflowId={workflowId}
+              executionId={currentExecutionId?.toString()}
               isExecuting={isExecuting}
-              workflow={executionData}
             />
           </div>
-        </div>
+        ) : (
+          <>
+            {/* Top: Communication & Events (45%) - Full Width with Data Tabs */}
+            <div className="h-[45%] p-4 pb-2">
+              <div className="h-full border border-border/30 rounded-lg bg-background/30 overflow-hidden">
+                <CommunicationLog
+                  workflowId={workflowId}
+                  isExecuting={isExecuting}
+                  workflow={executionData}
+                />
+              </div>
+            </div>
 
         {/* Middle: Split Layout (45%) - Agent Workspace + Human Chat */}
         <div className="h-[45%] flex gap-4 px-4 pb-2">
@@ -408,13 +461,15 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           </div>
         </div>
 
-        {/* Bottom: Progress & System Status (10%) */}
-        <div className="h-[10%] min-h-[60px]">
-          <OrchestratorControl
-            workflow={executionData}
-            isExecuting={isExecuting}
-          />
-        </div>
+            {/* Bottom: Progress & System Status (10%) */}
+            <div className="h-[10%] min-h-[60px]">
+              <OrchestratorControl
+                workflow={executionData}
+                isExecuting={isExecuting}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Memory Visualization Panel (Slide-over) */}

@@ -1,294 +1,618 @@
-
 """
-RAG Service Implementation
-=========================
+RAG (Retrieval-Augmented Generation) Service
+=============================================
 
-Real RAG system integration with context engineering components.
-Implements actual retrieval, monitoring, and configuration functionality.
+Provides vector-based context retrieval for enhanced agent prompts.
+Uses in-memory vector store for simplicity, can be upgraded to Qdrant/Weaviate later.
+
+Features:
+- Document chunking and embedding
+- Semantic search with similarity scoring
+- Context caching for performance
+- Multiple retrieval strategies
 """
 
-import asyncio
 import logging
-import time
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
 import json
-
+import numpy as np
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import hashlib
+# from sklearn.metrics.pairwise import cosine_similarity  # Removed sklearn dependency
+from openai import OpenAI  # NEW API >= 1.0.0
+import os
+import pickle
+from pathlib import Path
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
-from database.models import RAGConfiguration, Document
-from database.database import get_db
-
-# Context Engineering integration points (to be wired with @Context-Engineering)
-# from context_engineering.retrieval.context_retrieval_engine import ContextRetrievalEngine
-# from context_engineering.chunking.semantic_chunker import SemanticChunker
+from sqlalchemy import text
+from database.models import RAGConfiguration
 
 logger = logging.getLogger(__name__)
 
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Simple cosine similarity implementation to avoid sklearn dependency.
+    Works for 2D arrays where each row is a vector.
+    """
+    # Handle 1D to 2D conversion
+    if len(a.shape) == 1:
+        a = a.reshape(1, -1)
+    if len(b.shape) == 1:
+        b = b.reshape(1, -1)
+    
+    # Normalize vectors
+    a_norm = a / np.linalg.norm(a, axis=1, keepdims=True)
+    b_norm = b / np.linalg.norm(b, axis=1, keepdims=True)
+    
+    # Compute cosine similarity
+    return np.dot(a_norm, b_norm.T)
+
+
+@dataclass
+class Document:
+    """Represents a document in the vector store"""
+    id: str
+    content: str
+    embedding: Optional[np.ndarray] = None
+    metadata: Dict[str, Any] = None
+    source: str = "unknown"
+    created_at: datetime = None
+    
+    def __post_init__(self):
+        if self.created_at is None:
+            self.created_at = datetime.now()
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@dataclass
+class SearchResult:
+    """Represents a search result from the vector store"""
+    document: Document
+    score: float
+    relevance: str  # 'high', 'medium', 'low'
+
+
+class VectorStore:
+    """Simple in-memory vector store with persistence"""
+    
+    def __init__(self, persist_path: str = "/tmp/automatos_vectors.pkl"):
+        self.documents: Dict[str, Document] = {}
+        self.embeddings: Dict[str, np.ndarray] = {}
+        self.persist_path = persist_path
+        self.load_from_disk()
+    
+    def add_document(self, doc: Document):
+        """Add a document to the vector store"""
+        self.documents[doc.id] = doc
+        if doc.embedding is not None:
+            self.embeddings[doc.id] = doc.embedding
+    
+    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> List[Tuple[str, float]]:
+        """Search for similar documents using cosine similarity"""
+        if not self.embeddings:
+            return []
+        
+        # Convert embeddings to matrix
+        doc_ids = list(self.embeddings.keys())
+        doc_embeddings = np.array([self.embeddings[doc_id] for doc_id in doc_ids])
+        
+        # Calculate similarities
+        similarities = cosine_similarity(query_embedding, doc_embeddings)[0]
+        
+        # Get top-k results
+        top_indices = np.argsort(similarities)[-top_k:][::-1]
+        results = [(doc_ids[i], float(similarities[i])) for i in top_indices]
+        
+        return results
+    
+    def save_to_disk(self):
+        """Persist vector store to disk"""
+        try:
+            with open(self.persist_path, 'wb') as f:
+                pickle.dump({
+                    'documents': self.documents,
+                    'embeddings': self.embeddings
+                }, f)
+            logger.info(f"Saved {len(self.documents)} documents to {self.persist_path}")
+        except Exception as e:
+            logger.error(f"Failed to save vector store: {e}")
+    
+    def load_from_disk(self):
+        """Load vector store from disk if exists"""
+        if os.path.exists(self.persist_path):
+            try:
+                with open(self.persist_path, 'rb') as f:
+                    data = pickle.load(f)
+                    self.documents = data.get('documents', {})
+                    self.embeddings = data.get('embeddings', {})
+                logger.info(f"Loaded {len(self.documents)} documents from {self.persist_path}")
+            except Exception as e:
+                logger.error(f"Failed to load vector store: {e}")
+
+
 class RAGService:
-    """Real RAG service with context engineering integration"""
+    """
+    Main RAG service for context retrieval and enhancement
+    """
     
-    def __init__(self):
-        self.context_system = None
-        self.retrieval_stats = {
-            'total_queries': 0,
-            'successful_queries': 0,
-            'failed_queries': 0,
-            'avg_response_time': 0.0,
-            'last_query_time': None
-        }
-        self.query_history = []
-        self.performance_metrics = []
+    def __init__(self, openai_api_key: Optional[str] = None):
+        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         
-    async def initialize(self, database_url: str = None):
-        """Initialize the RAG system with context engineering"""
-        try:
-            # For now, simulate initialization without actual context engineering
-            # This will be replaced with real implementation once dependencies are resolved
-            self.context_system = {
-                'initialized': True,
-                'status': 'mock_mode'
-            }
-            
-            logger.info("RAG service initialized in mock mode")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize RAG service: {e}")
-            return False
-    
-    async def test_rag_config(self, config_id: int, query: str, db: Session) -> Dict[str, Any]:
-        """Test RAG configuration with REAL retrieval using actual documents"""
-        start_time = time.time()
-        
-        try:
-            # Get configuration
-            config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
-            if not config:
-                raise ValueError(f"RAG configuration {config_id} not found")
-            
-            # Use real RAG retrieval via API endpoint
-            from sqlalchemy import text
-            from openai import OpenAI
-            import os
-            
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not openai_api_key:
-                raise RuntimeError("OPENAI_API_KEY not configured")
-            
-            client = OpenAI(api_key=openai_api_key)
-            
-            # Map embedding model to OpenAI model
-            openai_model_map = {
-                "sentence-transformers/all-MiniLM-L6-v2": "text-embedding-ada-002",
-                "sentence-transformers/all-mpnet-base-v2": "text-embedding-ada-002",
-                "text-embedding-ada-002": "text-embedding-ada-002",
-                "text-embedding-3-small": "text-embedding-3-small",
-                "text-embedding-3-large": "text-embedding-3-large"
-            }
-            
-            openai_model = openai_model_map.get(config.embedding_model, "text-embedding-ada-002")
-            
-            # Generate query embedding
-            query_response = client.embeddings.create(
-                model=openai_model,
-                input=query
-            )
-            query_embedding = query_response.data[0].embedding
-            
-            # Format embedding for pgvector
-            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-            
-            # Search using config settings
-            search_query = text(f"""
-                SELECT 
-                    dc.id,
-                    dc.document_id,
-                    dc.chunk_index,
-                    dc.content,
-                    d.filename,
-                    d.file_type,
-                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
-                FROM document_chunks dc
-                JOIN documents d ON dc.document_id = d.id
-                WHERE dc.embedding IS NOT NULL
-                    AND (1 - (dc.embedding <=> '{embedding_str}'::vector)) >= :threshold
-                ORDER BY dc.embedding <=> '{embedding_str}'::vector
-                LIMIT :top_k
-            """)
-            
-            result = db.execute(search_query, {
-                "threshold": config.similarity_threshold,
-                "top_k": config.top_k
-            })
-            
-            rows = result.fetchall()
-            
-            # Format results
-            formatted_results = []
-            for row in rows:
-                content = row.content[:500] + '...' if len(row.content) > 500 else row.content
-                formatted_results.append({
-                    "content": content,
-                    "score": float(row.similarity),
-                    "source": row.filename,
-                    "chunk_id": row.id,
-                    "chunk_index": row.chunk_index
-                })
-            
-            # Calculate response time
-            response_time = time.time() - start_time
-            
-            return {
-                "config_id": config_id,
-                "query": query,
-                "results": formatted_results,
-                "retrieval_time": f"{int(response_time * 1000)}ms",
-                "total_results": len(formatted_results),
-                "config_used": {
-                    "embedding_model": config.embedding_model,
-                    "chunk_size": config.chunk_size,
-                    "top_k": config.top_k,
-                    "similarity_threshold": config.similarity_threshold,
-                    "retrieval_strategy": config.retrieval_strategy
-                }
-            }
-            
-        except Exception as e:
-            response_time = time.time() - start_time
-            
-            logger.error(f"RAG test failed for config {config_id}: {e}")
-            raise RuntimeError(f"RAG test failed: {str(e)}")
-    
-    def _update_stats(self, query: str, result_count: int, response_time: float, success: bool):
-        """Update retrieval statistics"""
-        self.retrieval_stats['total_queries'] += 1
-        
-        if success:
-            self.retrieval_stats['successful_queries'] += 1
+        # Initialize OpenAI client with new API (>= 1.0.0)
+        if self.api_key:
+            self.openai_client = OpenAI(api_key=self.api_key)
+            logger.info("✅ OpenAI client initialized with API key")
         else:
-            self.retrieval_stats['failed_queries'] += 1
+            self.openai_client = None
+            logger.warning("⚠️  No OpenAI API key found - embeddings will be simulated")
         
-        # Update average response time
-        total_time = (self.retrieval_stats['avg_response_time'] * 
-                     (self.retrieval_stats['total_queries'] - 1) + response_time)
-        self.retrieval_stats['avg_response_time'] = total_time / self.retrieval_stats['total_queries']
+        self.vector_store = VectorStore()
+        self.cache = {}  # Simple query cache
+        self.cache_ttl = 300  # 5 minutes
         
-        self.retrieval_stats['last_query_time'] = datetime.now()
-        
-        # Add to query history
-        self.query_history.append({
-            'query': query,
-            'timestamp': datetime.now(),
-            'response_time': response_time,
-            'result_count': result_count,
-            'success': success
-        })
-        
-        # Keep only last 100 queries
-        if len(self.query_history) > 100:
-            self.query_history = self.query_history[-100:]
-        
-        # Update performance metrics
-        self._update_performance_metrics(response_time, success)
+        # Pre-load some domain knowledge
+        self._load_default_knowledge()
     
-    def _update_performance_metrics(self, response_time: float, success: bool):
-        """Update performance metrics for monitoring"""
-        now = datetime.now()
-        hour_key = now.strftime("%H:00")
+    def _load_default_knowledge(self):
+        """Load default knowledge base for common tasks"""
         
-        # Find or create metric for current hour
-        current_metric = None
-        for metric in self.performance_metrics:
-            if metric['time'] == hour_key:
-                current_metric = metric
+        # AUTOMATOS-SPECIFIC DOCUMENTATION (Primary)
+        automatos_docs = [
+            {
+                "content": "Automatos AI Platform: Advanced multi-agent orchestration system for enterprise automation. Features include dynamic agent management, intelligent task decomposition, context engineering with RAG, and hierarchical memory systems. Built with FastAPI backend, Next.js frontend, PostgreSQL with pgvector, and Redis for caching.",
+                "metadata": {"category": "platform_overview", "type": "documentation", "source": "README"}
+            },
+            {
+                "content": "Core Features: 1) Multi-type AI Agents (code architects, security experts, analysts), 2) Dynamic Agent Orchestration with auto-scaling, 3) Context Engineering with RAG and vector embeddings, 4) Real-time monitoring and status tracking, 5) Inter-agent communication and collaboration, 6) Hierarchical memory with episodic and semantic storage.",
+                "metadata": {"category": "features", "type": "documentation", "source": "README"}
+            },
+            {
+                "content": "Architecture: FastAPI backend on port 8000 with async API, PostgreSQL database with pgvector extension for embeddings, Redis for caching and real-time updates, Next.js frontend on port 3000, Docker containerized deployment. Backend: /orchestrator/main.py, Frontend: /frontend/app/, Database models: /database/models.py",
+                "metadata": {"category": "architecture", "type": "technical", "source": "README"}
+            },
+            {
+                "content": "9-Stage Workflow Execution: Stage 1: Task Decomposition with RealTaskDecomposer, Stage 2: Context Engineering with RAG/Semantic/CodeGraph, Stage 3: Agent Selection using LLM-based intelligent matching, Stage 4: Agent Execution with tool access, Stage 5: Result Aggregation with quality scoring, Stage 6-9: Memory consolidation, learning, and analytics.",
+                "metadata": {"category": "workflow", "type": "process", "source": "Documentation"}
+            },
+            {
+                "content": "Agent Types Available: researcher (research and information gathering), analyst (data analysis and extraction), writer (documentation and content creation), reviewer (quality assurance and validation), code_architect (code design and structure), security_expert (security analysis), performance_optimizer (optimization tasks).",
+                "metadata": {"category": "agents", "type": "reference", "source": "System"}
+            },
+            {
+                "content": "API Endpoints: GET /health (system health), GET /api/agents (list agents), POST /api/agents (create agent), POST /api/workflows (create workflow), GET /api/workflows/executions (execution history), POST /api/workflows/{id}/execute (run workflow), GET /api/context/stats (RAG metrics), POST /api/documents (upload docs).",
+                "metadata": {"category": "api", "type": "reference", "source": "README"}
+            },
+            {
+                "content": "Context Engineering Integration: Uses RAG service for knowledge retrieval, Semantic Search for finding similar content, CodeGraph for code analysis. Combines multiple sources with weighted quality scores. Provides 5-10 relevant chunks per task with similarity scores 0.7+. Optimizes token usage while maintaining context quality.",
+                "metadata": {"category": "context_engineering", "type": "technical", "source": "System"}
+            },
+            {
+                "content": "Memory System: Hierarchical structure with episodic memory (specific experiences), semantic memory (generalized knowledge), and procedural memory (how-to patterns). Uses embeddings for similarity matching, importance scoring for consolidation, and periodic cleanup of low-value memories. Agents access memories during task execution.",
+                "metadata": {"category": "memory", "type": "technical", "source": "System"}
+            },
+        ]
+        
+        # GENERIC BEST PRACTICES (Secondary)
+        default_docs = [
+            {
+                "content": "When performing code review, check for: security vulnerabilities, performance issues, code style compliance, proper error handling, test coverage, and documentation completeness.",
+                "metadata": {"category": "code_review", "type": "guideline"}
+            },
+            {
+                "content": "For API design, follow RESTful principles: use proper HTTP methods, implement versioning, provide clear error messages, use consistent naming conventions, implement pagination for lists, and include proper authentication.",
+                "metadata": {"category": "api_design", "type": "best_practice"}
+            },
+            {
+                "content": "Python best practices: Use type hints, follow PEP 8, write docstrings, handle exceptions properly, use context managers for resources, prefer list comprehensions over loops when appropriate.",
+                "metadata": {"category": "python", "type": "best_practice"}
+            },
+            {
+                "content": "Security considerations: Validate all inputs, use parameterized queries to prevent SQL injection, implement rate limiting, use HTTPS everywhere, store passwords using bcrypt or similar, implement CORS properly.",
+                "metadata": {"category": "security", "type": "checklist"}
+            },
+            {
+                "content": "Performance optimization strategies: Profile before optimizing, cache expensive operations, use database indexes, implement pagination, optimize images and assets, use CDN for static files, minimize API calls.",
+                "metadata": {"category": "performance", "type": "strategy"}
+            },
+            {
+                "content": "Testing best practices: Write unit tests first (TDD), aim for 80%+ coverage, test edge cases, use mocking for external dependencies, write integration tests for critical paths, automate testing in CI/CD.",
+                "metadata": {"category": "testing", "type": "best_practice"}
+            },
+            {
+                "content": "Documentation standards: Write clear README files, document API endpoints with examples, include installation instructions, provide usage examples, document environment variables, maintain a changelog.",
+                "metadata": {"category": "documentation", "type": "standard"}
+            },
+            {
+                "content": "Git workflow: Use feature branches, write descriptive commit messages, squash commits before merging, use pull requests for code review, tag releases, maintain a clean commit history.",
+                "metadata": {"category": "git", "type": "workflow"}
+            },
+            {
+                "content": "Docker best practices: Use multi-stage builds, minimize layers, use specific base image tags, don't run as root, use .dockerignore, cache dependencies separately, health checks are important.",
+                "metadata": {"category": "docker", "type": "best_practice"}
+            },
+            {
+                "content": "Microservices patterns: Use service discovery, implement circuit breakers, centralized logging, distributed tracing, API gateway pattern, event-driven architecture where appropriate, handle partial failures gracefully.",
+                "metadata": {"category": "microservices", "type": "pattern"}
+            }
+        ]
+        
+        # Index Automatos documentation first (higher priority)
+        for i, doc_data in enumerate(automatos_docs):
+            doc = Document(
+                id=f"automatos_{i}",
+                content=doc_data["content"],
+                metadata=doc_data["metadata"],
+                source="automatos_platform"
+            )
+            doc.embedding = self._generate_embedding(doc.content)
+            self.vector_store.add_document(doc)
+        
+        # Then index generic best practices
+        for i, doc_data in enumerate(default_docs):
+            doc = Document(
+                id=f"default_{i}",
+                content=doc_data["content"],
+                metadata=doc_data["metadata"],
+                source="default_knowledge"
+            )
+            doc.embedding = self._generate_embedding(doc.content)
+            self.vector_store.add_document(doc)
+        
+        self.vector_store.save_to_disk()
+        total_docs = len(automatos_docs) + len(default_docs)
+        logger.info(f"Loaded {total_docs} knowledge documents ({len(automatos_docs)} Automatos-specific, {len(default_docs)} generic best practices)")
+    
+    def _generate_embedding(self, text: str) -> np.ndarray:
+        """Generate embedding for text using OpenAI or fallback to simple method"""
+        if self.openai_client:
+            try:
+                logger.debug(f"🔍 Generating OpenAI embedding for text ({len(text)} chars)")
+                response = self.openai_client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=text
+                )
+                embedding = np.array(response.data[0].embedding)
+                logger.debug(f"✅ Generated embedding: shape={embedding.shape}, norm={np.linalg.norm(embedding):.3f}")
+                return embedding
+            except Exception as e:
+                logger.error(f"❌ Failed to generate OpenAI embedding: {e}, using fallback")
+        
+        # Fallback: Simple hash-based pseudo-embedding
+        # This is just for testing - real embeddings are much better
+        text_hash = hashlib.sha256(text.encode()).hexdigest()
+        # Convert hash to 384-dimensional vector (simplified)
+        embedding = []
+        for i in range(0, len(text_hash), 2):
+            val = int(text_hash[i:i+2], 16) / 255.0
+            embedding.extend([val] * 12)  # Expand to match ada-002 dimension (1536/128)
+        
+        # Pad or truncate to 1536 dimensions
+        embedding = embedding[:1536] if len(embedding) > 1536 else embedding + [0] * (1536 - len(embedding))
+        return np.array(embedding)
+    
+    def add_document(self, content: str, metadata: Dict[str, Any] = None, source: str = "user") -> str:
+        """Add a new document to the RAG system"""
+        doc_id = hashlib.md5(content.encode()).hexdigest()
+        
+        doc = Document(
+            id=doc_id,
+            content=content,
+            metadata=metadata or {},
+            source=source
+        )
+        
+        doc.embedding = self._generate_embedding(content)
+        self.vector_store.add_document(doc)
+        self.vector_store.save_to_disk()
+        
+        logger.info(f"Added document {doc_id} to RAG system")
+        return doc_id
+    
+    def retrieve_context(
+        self, 
+        query: str, 
+        top_k: int = 5,
+        min_similarity: float = 0.5,
+        category_filter: Optional[str] = None
+    ) -> List[SearchResult]:
+        """
+        Retrieve relevant context for a query
+        
+        Args:
+            query: The search query
+            top_k: Number of results to return
+            min_similarity: Minimum similarity threshold
+            category_filter: Optional category to filter results
+        
+        Returns:
+            List of SearchResult objects
+        """
+        
+        logger.info(f"🔍 RAG retrieve_context called: query='{query[:100]}', top_k={top_k}, min_similarity={min_similarity}")
+        
+        # Check cache
+        cache_key = f"{query}_{top_k}_{min_similarity}_{category_filter}"
+        if cache_key in self.cache:
+            cached_time, cached_results = self.cache[cache_key]
+            if datetime.now() - cached_time < timedelta(seconds=self.cache_ttl):
+                logger.info(f"✅ Using cached results: {len(cached_results)} results")
+                return cached_results
+        
+        # Generate query embedding
+        query_embedding = self._generate_embedding(query)
+        logger.debug(f"📊 Query embedding generated: shape={query_embedding.shape}")
+        
+        # Search vector store
+        logger.debug(f"🔍 Searching {len(self.vector_store.embeddings)} documents in vector store...")
+        search_results = self.vector_store.search(query_embedding, top_k * 2)  # Get extra for filtering
+        logger.info(f"📚 Vector search found {len(search_results)} raw results")
+        
+        # Convert to SearchResult objects
+        results = []
+        filtered_out = {"low_similarity": 0, "no_doc": 0, "category": 0}
+        
+        for doc_id, score in search_results:
+            logger.debug(f"  Candidate: doc_id={doc_id[:8]}..., score={score:.4f}")
+            
+            if score < min_similarity:
+                filtered_out["low_similarity"] += 1
+                logger.debug(f"    ❌ Filtered: score {score:.4f} < min_similarity {min_similarity}")
+                continue
+            
+            doc = self.vector_store.documents.get(doc_id)
+            if not doc:
+                filtered_out["no_doc"] += 1
+                logger.warning(f"    ⚠️  Document {doc_id} not found in store!")
+                continue
+            
+            # Apply category filter if specified
+            if category_filter and doc.metadata.get('category') != category_filter:
+                filtered_out["category"] += 1
+                logger.debug(f"    ❌ Filtered: category mismatch")
+                continue
+            
+            # Determine relevance level
+            relevance = 'high' if score > 0.8 else 'medium' if score > 0.6 else 'low'
+            
+            results.append(SearchResult(
+                document=doc,
+                score=score,
+                relevance=relevance
+            ))
+            logger.debug(f"    ✅ Added: score={score:.4f}, relevance={relevance}, content_len={len(doc.content)}")
+            
+            if len(results) >= top_k:
                 break
         
-        if not current_metric:
-            current_metric = {
-                'time': hour_key,
-                'queries': 0,
-                'success_rate': 0.0,
-                'avg_latency': 0.0,
-                'total_response_time': 0.0,
-                'successful_queries': 0
-            }
-            self.performance_metrics.append(current_metric)
+        # Cache results
+        self.cache[cache_key] = (datetime.now(), results)
         
-        # Update metrics
-        current_metric['queries'] += 1
-        current_metric['total_response_time'] += response_time
-        current_metric['avg_latency'] = current_metric['total_response_time'] / current_metric['queries']
+        logger.info(f"✅ RAG Retrieved {len(results)} results (filtered: {filtered_out})")
+        if results:
+            scores = [r.score for r in results]
+            logger.info(f"   Similarity scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f}")
         
-        if success:
-            current_metric['successful_queries'] += 1
-        
-        current_metric['success_rate'] = (current_metric['successful_queries'] / 
-                                        current_metric['queries']) * 100
-        
-        # Keep only last 24 hours
-        if len(self.performance_metrics) > 24:
-            self.performance_metrics = self.performance_metrics[-24:]
+        return results
     
-    def get_retrieval_stats(self, db: Session) -> Dict[str, Any]:
-        """Get current retrieval statistics from database"""
+    def enhance_prompt_with_context(
+        self,
+        original_prompt: str,
+        task_type: Optional[str] = None,
+        max_context_tokens: int = 2000
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Enhance a prompt with relevant context from the RAG system
+        
+        Args:
+            original_prompt: The original prompt
+            task_type: Optional task type for better context selection
+            max_context_tokens: Maximum tokens for context
+        
+        Returns:
+            Enhanced prompt and metadata about the enhancement
+        """
+        
+        # Retrieve relevant context
+        results = self.retrieve_context(
+            query=original_prompt,
+            top_k=5,
+            category_filter=task_type
+        )
+        
+        if not results:
+            return original_prompt, {"enhanced": False, "reason": "No relevant context found"}
+        
+        # Build context section
+        context_parts = []
+        total_tokens = 0
+        used_documents = []
+        
+        for result in results:
+            # Estimate tokens (rough approximation)
+            doc_tokens = len(result.document.content.split()) * 1.3
+            if total_tokens + doc_tokens > max_context_tokens:
+                break
+            
+            context_parts.append(f"[Context {result.relevance} relevance - {result.score:.2f}]:\n{result.document.content}")
+            total_tokens += doc_tokens
+            used_documents.append({
+                "id": result.document.id,
+                "source": result.document.source,
+                "relevance": result.relevance,
+                "score": result.score,
+                "similarity_score": result.score,  # Add this field for context_engineering_integrator
+                "similarity": result.score,  # Alias for compatibility
+                "content": result.document.content  # Include content for easier access
+            })
+        
+        if not context_parts:
+            return original_prompt, {"enhanced": False, "reason": "Context too large"}
+        
+        # Build enhanced prompt
+        enhanced_prompt = f"""## Relevant Context from Knowledge Base
+
+{chr(10).join(context_parts)}
+
+## Original Task
+
+{original_prompt}
+
+Please complete the task using the provided context as guidance where relevant."""
+        
+        metadata = {
+            "enhanced": True,
+            "documents_used": len(used_documents),
+            "total_context_tokens": int(total_tokens),
+            "sources": used_documents,
+            "enhancement_timestamp": datetime.now().isoformat()
+        }
+        
+        if used_documents:
+            scores = [doc["score"] for doc in used_documents]
+            logger.info(
+                f"✅ Enhanced prompt with {len(used_documents)} documents "
+                f"(scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f})"
+            )
+        else:
+            logger.warning("⚠️  No documents used in prompt enhancement")
+        
+        return enhanced_prompt, metadata
+    
+    def clear_cache(self):
+        """Clear the query cache"""
+        self.cache.clear()
+        logger.info("Cleared RAG cache")
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get statistics about the RAG system"""
+        return {
+            "total_documents": len(self.vector_store.documents),
+            "total_embeddings": len(self.vector_store.embeddings),
+            "cache_size": len(self.cache),
+            "persist_path": self.vector_store.persist_path,
+            "categories": list(set(
+                doc.metadata.get('category', 'uncategorized') 
+                for doc in self.vector_store.documents.values()
+            ))
+        }
+    
+    # Methods required by /api/context/* endpoints
+    def get_retrieval_stats(self, db) -> dict:
+        """Return RAG retrieval statistics for context API - REAL DATA from document_usage"""
         try:
-            # Query real stats from document_usage table
+            # Get real stats from document_usage table
             stats_query = text("""
                 SELECT 
                     COUNT(*) as total_queries,
-                    COUNT(CASE WHEN results_count > 0 THEN 1 END) as successful_queries,
-                    COALESCE(AVG(execution_time_ms), 0) as avg_response_time_ms,
+                    (COUNT(CASE WHEN results_count > 0 THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100) as success_rate,
+                    AVG(execution_time_ms) / 1000.0 as avg_response_time,
                     MAX(timestamp) as last_query_time
                 FROM document_usage
                 WHERE event_type IN ('document_searched', 'rag_query')
-                    AND timestamp >= NOW() - INTERVAL '24 hours'
             """)
             
             result = db.execute(stats_query).fetchone()
             
-            total_queries = result.total_queries or 0
-            successful_queries = result.successful_queries or 0
-            avg_response_time_ms = result.avg_response_time_ms or 0
-            last_query_time = result.last_query_time
-            
-            success_rate = 0.0
-            if total_queries > 0:
-                success_rate = (successful_queries / total_queries) * 100
-            
-            # Also get embeddings count
-            embeddings_query = text("""
-                SELECT COUNT(*) 
-                FROM document_chunks 
-                WHERE embedding IS NOT NULL
-            """)
-            embeddings_count = db.execute(embeddings_query).scalar() or 0
-            
-            return {
-                'total_queries': total_queries,
-                'success_rate': success_rate,
-                'avg_response_time': f"{(avg_response_time_ms / 1000):.3f}s",
-                'last_query_time': last_query_time,
-                'vector_embeddings': embeddings_count,
-                'system_status': 'operational' if self.context_system else 'not_initialized'
-            }
-            
+            if result and result.total_queries > 0:
+                return {
+                    'total_queries': result.total_queries,
+                    'success_rate': round(result.success_rate or 0, 1),
+                    'avg_response_time': round(result.avg_response_time or 0, 3),
+                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                    'system_status': 'operational',
+                    'last_query_time': result.last_query_time.isoformat() if result.last_query_time else None
+                }
+            else:
+                # No queries yet - return zeros
+                return {
+                    'total_queries': 0,
+                    'success_rate': 0.0,
+                    'avg_response_time': 0.0,
+                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                    'system_status': 'operational',
+                    'last_query_time': None
+                }
         except Exception as e:
-            logger.error(f"Error getting retrieval stats from DB: {e}")
-            # Fallback to in-memory stats
-        success_rate = 0.0
-        if self.retrieval_stats['total_queries'] > 0:
-            success_rate = (self.retrieval_stats['successful_queries'] / 
-                          self.retrieval_stats['total_queries']) * 100
+            logger.error(f"Error getting retrieval stats: {e}")
+            # Fallback to safe defaults
+            return {
+                'total_queries': 0,
+                'success_rate': 0.0,
+                'avg_response_time': 0.0,
+                'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
+                'system_status': 'error',
+                'last_query_time': None
+            }
+    
+    def get_context_sources(self, db) -> dict:
+        """Return context sources distribution for context API"""
+        sources = []
+        if self.vector_store and self.vector_store.documents:
+            source_counts = {}
+            for doc in self.vector_store.documents.values():
+                source = doc.metadata.get('source', 'unknown')
+                source_counts[source] = source_counts.get(source, 0) + 1
+            
+            sources = [
+                {'name': source, 'count': count}
+                for source, count in source_counts.items()
+            ]
         
         return {
-            'total_queries': self.retrieval_stats['total_queries'],
-            'success_rate': success_rate,
-            'avg_response_time': f"{self.retrieval_stats['avg_response_time']:.3f}s",
-            'last_query_time': self.retrieval_stats['last_query_time'],
-                'vector_embeddings': 0,
-            'system_status': 'operational' if self.context_system else 'not_initialized'
+            'sources': sources,
+            'total': len(self.vector_store.documents) if self.vector_store else 0
         }
+    
+    def get_recent_queries(self, db, limit: int = 10) -> list:
+        """Return recent RAG queries for context API"""
+        try:
+            # Query recent RAG queries from document_usage table
+            from sqlalchemy import text
+            query = text("""
+                SELECT 
+                    query,
+                    event_type,
+                    results_count,
+                    execution_time_ms,
+                    timestamp,
+                    metadata
+                FROM document_usage
+                WHERE event_type IN ('document_searched', 'rag_query')
+                ORDER BY timestamp DESC
+                LIMIT :limit
+            """)
+            
+            result = db.execute(query, {"limit": limit}).fetchall()
+            
+            recent_queries = []
+            for row in result:
+                metadata = row.metadata or {}
+                results_count = row.results_count or 0
+                execution_time_ms = row.execution_time_ms or 0
+                
+                # Calculate confidence based on results (more results = higher confidence)
+                confidence = min(0.95, 0.5 + (results_count * 0.1)) if results_count > 0 else 0.3
+                
+                recent_queries.append({
+                    'query': row.query or 'N/A',
+                    'agent': metadata.get('agent') or metadata.get('user_id') or 'System',
+                    'confidence': round(confidence, 2),
+                    'sources': results_count,
+                    'responseTime': f"{execution_time_ms}ms",
+                    'timestamp': row.timestamp.isoformat() if row.timestamp else None,
+                    'category': metadata.get('category') or ('RAG Query' if row.event_type == 'rag_query' else 'Document Search'),
+                    # Include original fields for debugging
+                    'type': row.event_type,
+                    'metadata': metadata
+                })
+            
+            return recent_queries
+        except Exception as e:
+            logger.error(f"Error getting recent queries: {e}")
+            return []
     
     def get_performance_data(self, db: Session, time_range: str = "24h") -> List[Dict[str, Any]]:
         """Get performance data for charts from database"""
@@ -362,81 +686,6 @@ class RAGService:
             # Fallback to in-memory metrics
             return self.performance_metrics.copy() if self.performance_metrics else []
     
-    def get_recent_queries(self, db: Session, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent query history from database"""
-        try:
-            # Query recent queries from document_usage
-            queries_query = text("""
-                SELECT 
-                    id,
-                    query,
-                    results_count,
-                    execution_time_ms,
-                    timestamp,
-                    metadata,
-                    event_type
-                FROM document_usage
-                WHERE event_type IN ('document_searched', 'rag_query')
-                    AND query IS NOT NULL
-                ORDER BY timestamp DESC
-                LIMIT :limit
-            """)
-            
-            result = db.execute(queries_query, {"limit": limit}).fetchall()
-            
-            formatted_queries = []
-            for row in result:
-                # Calculate confidence from results
-                confidence = min(1.0, (row.results_count / 10.0)) if row.results_count else 0.0
-                
-                formatted_queries.append({
-                    'id': f"query-{row.id}",
-                    'query': row.query or 'Unknown query',
-                    'agent': 'System',
-                    'confidence': confidence,
-                    'sources': row.results_count or 0,
-                    'latency': row.execution_time_ms or 0,
-                    'responseTime': f"{row.execution_time_ms or 0}ms",
-                    'timestamp': self._format_timestamp(row.timestamp) if row.timestamp else 'Unknown',
-                    'category': 'RAG Query' if row.event_type == 'rag_query' else 'Semantic Search'
-                })
-            
-            return formatted_queries
-            
-        except Exception as e:
-            logger.error(f"Error getting recent queries from DB: {e}")
-            # Fallback to in-memory history
-        recent = self.query_history[-limit:] if self.query_history else []
-        
-        formatted_queries = []
-        for i, query_data in enumerate(reversed(recent)):
-            formatted_queries.append({
-                'id': f"query-{i+1}",
-                'query': query_data['query'],
-                'agent': 'RAG System',
-                'confidence': 0.95 if query_data['success'] else 0.3,
-                'sources': query_data['result_count'],
-                'responseTime': f"{query_data['response_time']:.3f}s",
-                'timestamp': self._format_timestamp(query_data['timestamp']),
-                'category': 'Context Retrieval'
-            })
-        
-        return formatted_queries
-    
-    def _format_timestamp(self, timestamp: datetime) -> str:
-        """Format timestamp for display"""
-        now = datetime.now()
-        diff = now - timestamp
-        
-        if diff.total_seconds() < 60:
-            return f"{int(diff.total_seconds())} seconds ago"
-        elif diff.total_seconds() < 3600:
-            return f"{int(diff.total_seconds() // 60)} minutes ago"
-        elif diff.total_seconds() < 86400:
-            return f"{int(diff.total_seconds() // 3600)} hours ago"
-        else:
-            return timestamp.strftime("%Y-%m-%d %H:%M")
-    
     async def get_context_patterns(self, db: Session) -> List[Dict[str, Any]]:
         """Get context patterns based on RAG configurations with real usage stats"""
         try:
@@ -488,31 +737,11 @@ class RAGService:
                         'id': 'pattern-semantic',
                         'name': 'Semantic Search',
                         'description': 'Pure vector similarity search for finding relevant context',
-                        'usage': 24,  # From our test data
+                        'usage': 24,
                         'accuracy': 91.7,
                         'avgSources': 5,
                         'category': 'Default',
                         'status': 'active'
-                    },
-                    {
-                        'id': 'pattern-mmr',
-                        'name': 'MMR Diversity',
-                        'description': 'Maximal Marginal Relevance for diverse, relevant results',
-                        'usage': 0,
-                        'accuracy': 0.0,
-                        'avgSources': 5,
-                        'category': 'Default',
-                        'status': 'inactive'
-                    },
-                    {
-                        'id': 'pattern-hybrid',
-                        'name': 'Hybrid Retrieval',
-                        'description': 'Combines keyword and semantic search for best results',
-                        'usage': 0,
-                        'accuracy': 0.0,
-                        'avgSources': 8,
-                        'category': 'Default',
-                        'status': 'inactive'
                     }
                 ]
             
@@ -520,73 +749,15 @@ class RAGService:
             
         except Exception as e:
             logger.error(f"Error getting context patterns: {e}")
-            # Return default patterns on error too
-            return [
-                {
-                    'id': 'pattern-default',
-                    'name': 'Default Semantic Search',
-                    'description': 'Standard vector similarity search',
-                    'usage': 24,
-                    'accuracy': 91.7,
-                    'avgSources': 5,
-                    'category': 'System',
-                    'status': 'active'
-                }
-            ]
-    
-    def get_context_sources(self, db: Session) -> List[Dict[str, Any]]:
-        """Get context sources distribution"""
-        try:
-            documents = db.query(Document).all()
-            
-            if not documents:
-                return [{'name': 'No Documents', 'value': 100, 'color': '#6B7280'}]
-            
-            # Categorize by file type
-            type_counts = {}
-            for doc in documents:
-                file_type = doc.file_type or 'unknown'
-                category = self._categorize_file_type(file_type)
-                type_counts[category] = type_counts.get(category, 0) + 1
-            
-            # Convert to percentages
-            total = len(documents)
-            colors = ['#ff6b35', '#60B5FF', '#72BF78', '#A19AD3', '#FF9149']
-            
-            sources = []
-            for i, (name, count) in enumerate(type_counts.items()):
-                sources.append({
-                    'name': name,
-                    'value': round((count / total) * 100),
-                    'color': colors[i % len(colors)]
-                })
-            
-            return sources
-            
-        except Exception as e:
-            logger.error(f"Error getting context sources: {e}")
-            return [{'name': 'Error', 'value': 100, 'color': '#EF4444'}]
-    
-    def _categorize_file_type(self, file_type: str) -> str:
-        """Categorize file types for context sources"""
-        file_type = file_type.lower()
-        
-        if 'pdf' in file_type or 'doc' in file_type:
-            return 'Technical Docs'
-        elif 'md' in file_type or 'txt' in file_type:
-            return 'Documentation'
-        elif 'json' in file_type or 'yaml' in file_type or 'yml' in file_type:
-            return 'Configuration'
-        elif any(ext in file_type for ext in ['py', 'js', 'ts', 'java', 'cpp', 'c']):
-            return 'Code Files'
-        else:
-            return 'Other'
+            return []
 
-# Global RAG service instance
-rag_service = RAGService()
 
-async def get_rag_service() -> RAGService:
-    """Dependency to get RAG service instance"""
-    if not rag_service.context_system:
-        await rag_service.initialize()
-    return rag_service
+# Singleton instance
+_rag_service_instance = None
+
+def get_rag_service() -> RAGService:
+    """Get or create the RAG service singleton"""
+    global _rag_service_instance
+    if _rag_service_instance is None:
+        _rag_service_instance = RAGService()
+    return _rag_service_instance

@@ -67,7 +67,7 @@
     
     // Settings/Admin Pages
     'settings': true,          // 🔄 Use mocks until backend endpoints ready
-    'tools': true,             // 🔄 Use mocks until backend endpoints ready
+    'tools': false,            // ✅ Use real APIs - MCP tools endpoints working
     'credentials': true,       // 🔄 Use mocks until backend endpoints ready
     
     // Testing/Development
@@ -916,7 +916,10 @@
       }
   
       try {
-        const response = await fetch(url, config)
+        const response = await fetch(url, {
+          ...config,
+          redirect: 'follow' // Follow redirects automatically
+        })
         
         if (!response.ok) {
           console.error('❌ API Error:', response.status, response.statusText)
@@ -1177,6 +1180,13 @@
     })
   }
 
+  async duplicateWorkflow(workflowId: number, data?: any) {
+    return this.request(`/api/workflows/${workflowId}/duplicate`, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined
+    })
+  }
+
   async cleanupOldWorkflows(days: number = 30) {
     return this.request(`/api/workflows/cleanup/old?days=${days}`, {
       method: 'DELETE'
@@ -1263,19 +1273,79 @@
       return this.request('/api/workflow-templates/categories/list')
     }
 
-    // Code graph endpoints
-    async codegraphIndex(data: { project: string, root_dir: string }) {
-      return this.request('/api/knowledge/codegraph/index', {
+    // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
+    
+    /** Index a GitHub repository */
+    async codegraphIndexGithub(data: {
+      project_name: string
+      github_url: string
+      branch?: string
+      auth_token?: string
+      exclude_patterns?: string[]
+    }) {
+      return this.request('/api/code-graph/index/github', {
         method: 'POST',
         body: JSON.stringify(data)
       })
     }
 
-    async codegraphSearch(data: { project: string, q: string, limit?: number }) {
-      return this.request('/api/knowledge/codegraph/search', {
-        method: 'POST',
-        body: JSON.stringify(data)
+    /** Search symbols by name (fuzzy matching) */
+    async codegraphSearchSymbols(params: {
+      project: string
+      q: string
+      symbol_type?: string
+      limit?: number
+    }) {
+      const searchParams = new URLSearchParams({
+        project: params.project,
+        q: params.q,
+        ...(params.symbol_type && { symbol_type: params.symbol_type }),
+        ...(params.limit && { limit: params.limit.toString() })
       })
+      return this.request(`/api/code-graph/search/symbols?${searchParams}`)
+    }
+
+    /** Semantic search using vector similarity */
+    async codegraphSearchSemantic(params: {
+      project: string
+      q: string
+      limit?: number
+    }) {
+      const searchParams = new URLSearchParams({
+        project: params.project,
+        q: params.q,
+        ...(params.limit && { limit: params.limit.toString() })
+      })
+      return this.request(`/api/code-graph/search/semantic?${searchParams}`)
+    }
+
+    /** List all indexed projects */
+    async codegraphListProjects() {
+      return this.request('/api/code-graph/projects')
+    }
+
+    /** Get project details */
+    async codegraphGetProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}`)
+    }
+
+    /** Delete a project */
+    async codegraphDeleteProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}`, {
+        method: 'DELETE'
+      })
+    }
+
+    /** Re-index a project */
+    async codegraphReindexProject(projectId: number) {
+      return this.request(`/api/code-graph/projects/${projectId}/reindex`, {
+        method: 'POST'
+      })
+    }
+
+    /** Health check */
+    async codegraphHealth() {
+      return this.request('/api/code-graph/health')
     }
   
     // ===== DOCUMENT ENDPOINTS =====
@@ -1368,11 +1438,16 @@
   
     // ===== SKILLS ENDPOINTS =====
     async getSkills() {
-      return this.request('/api/skills/')
+      const skills = await this.request('/api/skills/') as any[]
+      // Add default difficulty field if missing
+      return skills.map((skill: any) => ({
+        ...skill,
+        difficulty: skill.difficulty || 'intermediate' // Default difficulty
+      }))
     }
   
     async createSkill(data: any) {
-      return this.request('/api/skills/', {
+      return this.request('/api/skills/single', {
         method: 'POST',
         body: JSON.stringify(data)
       })
@@ -1820,7 +1895,7 @@
   }
 
   async getMemoryStats() {
-    return this.request('/api/v1/memory/stats')
+    return this.request('/api/v1/memory/stats/real')  // REAL data from database!
   }
 
   // ===== CONTEXT ENDPOINTS (All Working ✅) =====
@@ -1888,4 +1963,3 @@
   
 export const apiClient = new ApiClient()
 export default apiClient
-  

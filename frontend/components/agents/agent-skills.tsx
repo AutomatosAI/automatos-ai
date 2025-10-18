@@ -54,7 +54,15 @@ import {
 } from '@/hooks/use-agent-api'
 
 import { CreateSkillModal } from "./create-skill-modal"
-const skillCategories = {
+import { SkillConfigurationModal } from "./skill-configuration-modal"
+type SkillCategory = {
+  name: string
+  icon: any
+  color: string
+  bgColor: string
+}
+
+const skillCategories: Record<string, SkillCategory> = {
   development: {
     name: 'Development',
     icon: Code,
@@ -117,6 +125,8 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   const [difficultyFilter, setDifficultyFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all-skills')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showConfigureModal, setShowConfigureModal] = useState(false)
+  const [selectedSkillForConfig, setSelectedSkillForConfig] = useState<any>(null)
 
   // Fetch skills data
   const { data: allSkills = [], isLoading: skillsLoading } = useSkills()
@@ -139,7 +149,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
         skill.description?.toLowerCase().includes(searchTerm.toLowerCase())
       
       const matchesCategory = categoryFilter === 'all' || skill.category === categoryFilter
-      const matchesDifficulty = difficultyFilter === 'all' || skill.difficulty === difficultyFilter
+      const matchesDifficulty = difficultyFilter === 'all' || skill.skill_type === difficultyFilter
       
       return matchesSearch && matchesCategory && matchesDifficulty
     })
@@ -196,9 +206,8 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   
   // Handle skill configuration/editing
   const handleConfigureSkill = (skill: any) => {
-    // This would open a modal to edit the skill
-    // For now, just show a toast as a placeholder
-    toast.success(`Configuring skill: ${skill.name}`)
+    setSelectedSkillForConfig(skill)
+    setShowConfigureModal(true)
   }
   
   // Handle skill deletion
@@ -262,47 +271,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           Create Skill
         </Button>
 
-        {/* Agent Selector */}
-        <div className="flex items-center gap-4">
-          <div className="min-w-[200px]">
-            <Select value={selectedAgentId || ''} onValueChange={(value) => onAgentSelect(value || null)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select an agent" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Agents</SelectItem>
-                {agents.map(agent => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
       </div>
-
-      {/* Selected Agent Info */}
-      {selectedAgent && (
-        <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xl">
-                🤖
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold">{selectedAgent.name}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {selectedAgent.agent_type?.replace('_', ' ')} • {Array.isArray(agentSkills) ? agentSkills.length : 0} skills assigned
-                </p>
-              </div>
-              <Badge variant="outline" className="capitalize">
-                {selectedAgent.status}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -342,13 +311,13 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           
           <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
             <SelectTrigger className="w-48">
-              <SelectValue placeholder="All Difficulties" />
+              <SelectValue placeholder="All Types" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Difficulties</SelectItem>
-              <SelectItem value="beginner">Beginner</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="technical">Technical</SelectItem>
+              <SelectItem value="cognitive">Cognitive</SelectItem>
+              <SelectItem value="analytical">Analytical</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -376,12 +345,12 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                           <div className={`p-2 rounded-lg ${category.bgColor}`}>
                             <category.icon className={`w-5 h-5 ${category.color}`} />
                           </div>
-                          <div>
-                            <CardTitle className="text-lg">{skill.name}</CardTitle>
-                            <Badge variant="secondary" className="text-xs mt-1">
-                              {skill.difficulty}
-                            </Badge>
-                          </div>
+                        <div>
+                          <CardTitle className="text-lg">{skill.name}</CardTitle>
+                          <Badge variant="secondary" className="text-xs mt-1">
+                            {skill.skill_type || 'technical'}
+                          </Badge>
+                        </div>
                         </div>
                         
                         <DropdownMenu>
@@ -490,7 +459,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
                             <div>
                               <CardTitle className="text-lg">{skill.name}</CardTitle>
                               <Badge variant="secondary" className="text-xs mt-1">
-                                {skill.difficulty}
+                                {skill.skill_type || 'technical'}
                               </Badge>
                             </div>
                           </div>
@@ -625,7 +594,23 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           // Skills will auto-refresh via React Query
         }}
       />
+
+      {/* Skill Configuration Modal */}
+      {selectedSkillForConfig && (
+        <SkillConfigurationModal
+          open={showConfigureModal}
+          onClose={() => {
+            setShowConfigureModal(false)
+            setSelectedSkillForConfig(null)
+          }}
+          skill={selectedSkillForConfig}
+          onSuccess={() => {
+            setShowConfigureModal(false)
+            setSelectedSkillForConfig(null)
+            // Skills will auto-refresh via React Query
+          }}
+        />
+      )}
     </div>
   )
 }
-

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Bot,
   MessageCircle,
@@ -50,70 +51,6 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
   const [activeTab, setActiveTab] = useState<string>('all')
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
-  const [memoryStats, setMemoryStats] = useState<any>(null)
-  const [loadingMemoryStats, setLoadingMemoryStats] = useState(false)
-
-  // Memory time-series data state
-  const [accessPatternsData, setAccessPatternsData] = useState<any[]>([])
-  const [consolidationData, setConsolidationData] = useState<any[]>([])
-
-  // Fetch memory stats when memory tab is active
-  useEffect(() => {
-    const fetchMemoryStats = async () => {
-      if (activeTab === 'memory' && !memoryStats && !loadingMemoryStats) {
-        setLoadingMemoryStats(true)
-        try {
-          // Fetch stats and time-series data in parallel
-          const [stats, accessPatterns, consolidation] = await Promise.all([
-            apiClient.request('/api/v1/memory/stats'),
-            apiClient.request('/api/v1/memory/stats/timeseries/access-patterns?hours=24').catch(() => []),
-            apiClient.request('/api/v1/memory/stats/timeseries/consolidation?hours=24').catch(() => [])
-          ])
-          
-          setMemoryStats(stats)
-          setAccessPatternsData(Array.isArray(accessPatterns) ? accessPatterns : [])
-          setConsolidationData(Array.isArray(consolidation) ? consolidation : [])
-        } catch (error) {
-          console.error('Error fetching memory stats:', error)
-        } finally {
-          setLoadingMemoryStats(false)
-        }
-      }
-    }
-    fetchMemoryStats()
-  }, [activeTab, memoryStats, loadingMemoryStats])
-
-  // RAG data state
-  const [ragStats, setRagStats] = useState<any>(null)
-  const [ragQueries, setRagQueries] = useState<any[]>([])
-  const [ragSources, setRagSources] = useState<any[]>([])
-  const [loadingRagData, setLoadingRagData] = useState(false)
-
-  // Fetch RAG data when RAG tab is active
-  useEffect(() => {
-    const fetchRagData = async () => {
-      if (activeTab === 'rag' && !ragStats && !loadingRagData) {
-        setLoadingRagData(true)
-        try {
-          // Fetch RAG stats, queries, and sources from context API
-          const [stats, queries, sources] = await Promise.all([
-            apiClient.request('/api/context/stats').catch(() => null),
-            apiClient.request('/api/context/queries/recent?limit=10').catch((): any[] => []),
-            apiClient.request('/api/context/sources').catch((): any[] => [])
-          ])
-          
-          setRagStats(stats)
-          setRagQueries(Array.isArray(queries) ? queries : [])
-          setRagSources(Array.isArray(sources) ? sources : [])
-        } catch (error) {
-          console.error('Error fetching RAG data:', error)
-        } finally {
-          setLoadingRagData(false)
-        }
-      }
-    }
-    fetchRagData()
-  }, [activeTab, ragStats, loadingRagData])
 
   useEffect(() => {
     console.log('CommunicationLog - workflow data:', workflow)
@@ -268,7 +205,7 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
   const getIcon = (type: string, status?: string) => {
     switch (type) {
       case 'orchestrator':
-        return <Bot className="w-4 h-4 text-orange-400" />
+        return <Bot className="w-4 h-4 text-blue-400" />
       case 'agent_message':
         return <MessageCircle className="w-4 h-4 text-blue-400" />
       case 'tool_call':
@@ -316,10 +253,7 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
     { id: 'all', label: 'All Messages', icon: MessageCircle },
     { id: 'results', label: 'Final Report', icon: FileText },
     { id: 'orchestrator', label: 'Orchestrator', icon: Bot },
-    { id: 'agents', label: 'Agents', icon: Users },
-    { id: 'memory', label: 'Memory', icon: Brain },
-    { id: 'rag', label: 'Document RAG', icon: Database },
-    { id: 'tools', label: 'Tools', icon: Zap }
+    { id: 'agents', label: 'Agents', icon: Users }
   ]
 
   return (
@@ -353,42 +287,41 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-border/30 overflow-x-auto">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          const count = tab.id === 'all' ? logs.length : 
-            tab.id === 'results' ? (workflow?.execution?.status === 'completed' ? 1 : 0) :
-            logs.filter(log => 
-              tab.id === 'orchestrator' ? log.type === 'orchestrator' :
-              tab.id === 'agents' ? log.type === 'agent_message' :
-              tab.id === 'memory' ? log.type === 'memory_operation' :
-              tab.id === 'rag' ? log.type === 'rag_operation' :
-              tab.id === 'tools' ? log.type === 'tool_call' : false
-            ).length
-          
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-all whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-accent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-              <Badge variant={activeTab === tab.id ? 'secondary' : 'outline'} className="ml-1">
-                {count}
-              </Badge>
-            </button>
-          )
-        })}
-      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-4 h-auto p-1 bg-muted/50">
+          {tabs.map((tab) => {
+            const Icon = tab.icon
+            const count = tab.id === 'all' ? logs.length : 
+              tab.id === 'results' ? (workflow?.execution?.status === 'completed' ? 1 : 0) :
+              logs.filter(log => 
+                tab.id === 'orchestrator' ? log.type === 'orchestrator' :
+                tab.id === 'agents' ? log.type === 'agent_message' :
+                tab.id === 'memory' ? log.type === 'memory_operation' :
+                tab.id === 'rag' ? log.type === 'rag_operation' :
+                tab.id === 'tools' ? log.type === 'tool_call' : false
+              ).length
+            
+            return (
+              <TabsTrigger 
+                key={tab.id} 
+                value={tab.id}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm data-[state=active]:bg-background data-[state=active]:text-foreground"
+              >
+                <Icon className="w-4 h-4" />
+                <span>{tab.label}</span>
+                <Badge variant="outline" className="ml-1 text-xs">
+                  {count}
+                </Badge>
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
+      </Tabs>
 
       {/* Tab Content */}
-      <ScrollArea className="flex-1">
-        <div className="p-3 space-y-2">
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="p-3 space-y-2">
           {/* Results Tab - Final Report */}
           {activeTab === 'results' && (
             <div className="space-y-4">
@@ -406,9 +339,15 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
                   )
                 }
                 
-                // Find the last subtask (usually the summary/report)
+                // Get the aggregated final report from backend (includes ALL subtask results)
+                const finalReport = execution?.output_data?.final_report || ''
                 const lastSubtask = subtasks[subtasks.length - 1]
-                const finalReport = lastSubtask?.execution_result?.llm_response || ''
+                
+                // Fallback to last subtask if aggregated report not available
+                if (!finalReport) {
+                  const fallbackReport = lastSubtask?.execution_result?.llm_response || ''
+                  console.warn('⚠️ No aggregated final_report found, falling back to last subtask')
+                }
                 
                 if (!finalReport) {
                   return (
@@ -495,377 +434,8 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
             </div>
           )}
 
-          {/* Memory Tab - Real Memory Data */}
-          {activeTab === 'memory' && (
-            <div className="p-4 space-y-3 h-full overflow-auto">
-              {loadingMemoryStats ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-400"></div>
-                </div>
-              ) : !memoryStats ? (
-                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <Brain className="w-12 h-12 mb-3 opacity-50" />
-                  <p className="text-sm">Memory Analytics Unavailable</p>
-                  <p className="text-xs mt-1">System is initializing memory tracking</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-12 gap-3 h-full">
-                  {/* Top Section: Health Score & Quick Metrics */}
-                  <div className="col-span-12 grid grid-cols-4 gap-3">
-                    {/* Memory System Health Score */}
-                    <div className="col-span-1 bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <Brain className="w-5 h-5 text-purple-400" />
-                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Healthy</Badge>
-                      </div>
-                      <div className="text-3xl font-bold text-white mb-1">
-                        {memoryStats?.system_stats?.system_performance?.health_score?.toFixed(0) || 87}%
-                      </div>
-                      <div className="text-xs text-muted-foreground">System Health</div>
-                    </div>
-
-                    {/* Hit Rate */}
-                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <TrendingUp className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs text-blue-400">↑ 12%</span>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.hit_rate * 100 || 92).toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-green-400">Cache Hit Rate</div>
-                    </div>
-
-                    {/* Cache Utilization */}
-                    <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <Activity className="w-4 h-4 text-orange-400" />
-                        <span className="text-xs text-orange-400">Active</span>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.cache_utilization * 100 || 67).toFixed(0)}%
-                      </div>
-                      <div className="text-xs text-green-400">Cache Usage</div>
-                    </div>
-
-                    {/* Avg Response Time */}
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <Clock className="w-4 h-4 text-green-400" />
-                        <span className="text-xs text-green-400">Fast</span>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {(memoryStats?.access_metrics?.avg_response_time * 1000 || 230).toFixed(0)}ms
-                      </div>
-                      <div className="text-xs text-green-400">Avg Response</div>
-                    </div>
-                  </div>
-
-                  {/* Middle Section: Charts Side by Side */}
-                  <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
-                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-purple-400" />
-                      Memory Hierarchy Distribution
-                    </h4>
-                    <ResponsiveContainer width="100%" height={180}>
-                      <PieChart>
-                        <Pie
-                          data={[
-                            { name: 'Immediate', value: memoryStats?.system_stats?.memory_levels?.immediate || 24, color: '#ef4444' },
-                            { name: 'Working', value: memoryStats?.system_stats?.memory_levels?.working || 156, color: '#f97316' },
-                            { name: 'Short-term', value: memoryStats?.system_stats?.memory_levels?.short_term || 432, color: '#eab308' },
-                            { name: 'Long-term', value: memoryStats?.system_stats?.memory_levels?.long_term || 2847, color: '#3b82f6' }
-                          ]}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={2}
-                          dataKey="value"
-                        >
-                          {[
-                            { color: '#ef4444' },
-                            { color: '#f97316' },
-                            { color: '#eab308' },
-                            { color: '#3b82f6' }
-                          ].map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)',
-                            borderRadius: '8px',
-                            padding: '12px',
-                            fontSize: '13px',
-                            fontWeight: '500',
-                            color: '#fff'
-                          }}
-                          labelStyle={{ color: '#fff', fontWeight: '600', marginBottom: '4px' }}
-                          itemStyle={{ color: '#fff', padding: '4px 0' }}
-                        />
-                        <Legend
-                          wrapperStyle={{ fontSize: '11px' }}
-                          iconType="circle"
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div className="col-span-6 bg-background/50 border border-border/30 rounded-lg p-3">
-                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-blue-400" />
-                      Access Patterns (24h)
-                      {accessPatternsData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
-                    </h4>
-                    <ResponsiveContainer width="100%" height={180}>
-                      <BarChart data={accessPatternsData.length > 0 ? accessPatternsData : [
-                        { time: '00:00', reads: 45, writes: 12 },
-                        { time: '04:00', reads: 23, writes: 8 },
-                        { time: '08:00', reads: 89, writes: 34 },
-                        { time: '12:00', reads: 156, writes: 67 },
-                        { time: '16:00', reads: 134, writes: 45 },
-                        { time: '20:00', reads: 98, writes: 28 }
-                      ]}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="time" stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)',
-                            borderRadius: '8px',
-                            padding: '12px',
-                            fontSize: '12px',
-                            fontWeight: '500',
-                            color: '#fff'
-                          }}
-                          labelStyle={{ color: '#fff', fontWeight: '600' }}
-                          itemStyle={{ color: '#fff' }}
-                        />
-                        <Bar dataKey="reads" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="writes" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Bottom Section: Consolidation Stats */}
-                  <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
-                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-green-400" />
-                      Consolidation & Performance Trends
-                      {consolidationData.length > 0 && <Badge variant="outline" className="ml-2 text-xs">Real Data</Badge>}
-                    </h4>
-                    <ResponsiveContainer width="100%" height={120}>
-                      <LineChart data={consolidationData.length > 0 ? consolidationData.map(d => ({
-                        time: d.time,
-                        consolidated: d.items_consolidated,
-                        compression: d.compression_ratio,
-                        storage: d.storage_saved_pct
-                      })) : [
-                        { time: '6h ago', consolidated: 45, compression: 2.3, storage: 89 },
-                        { time: '5h ago', consolidated: 67, compression: 2.5, storage: 76 },
-                        { time: '4h ago', consolidated: 89, compression: 2.8, storage: 65 },
-                        { time: '3h ago', consolidated: 103, compression: 3.1, storage: 54 },
-                        { time: '2h ago', consolidated: 124, compression: 3.4, storage: 45 },
-                        { time: '1h ago', consolidated: 145, compression: 3.6, storage: 38 },
-                        { time: 'Now', consolidated: 167, compression: 3.8, storage: 32 }
-                      ]}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis dataKey="time" stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                        <YAxis stroke="rgba(255,255,255,0.5)" style={{ fontSize: '10px' }} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                            border: '1px solid rgba(255, 255, 255, 0.3)',
-                            borderRadius: '8px',
-                            padding: '12px',
-                            fontSize: '12px',
-                            fontWeight: '500',
-                            color: '#fff'
-                          }}
-                          labelStyle={{ color: '#fff', fontWeight: '600' }}
-                          itemStyle={{ color: '#fff' }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: '10px' }} />
-                        <Line type="monotone" dataKey="consolidated" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} name="Items Consolidated" />
-                        <Line type="monotone" dataKey="compression" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} name="Compression Ratio" />
-                        <Line type="monotone" dataKey="storage" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Storage Saved %" />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Document RAG Tab */}
-          {activeTab === 'rag' && (
-            <div className="p-4 space-y-3 h-full overflow-auto">
-              {loadingRagData ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p className="text-muted-foreground text-sm">Loading RAG data...</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-12 gap-3">
-                  {/* Top Metrics - REAL DATA */}
-                  <div className="col-span-12 grid grid-cols-3 gap-3">
-                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <Database className="w-4 h-4 text-blue-400" />
-                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
-                          {ragStats?.systemStatus || 'Unknown'}
-                        </Badge>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {ragStats?.contextQueries?.toLocaleString() || '0'}
-                      </div>
-                      <div className="text-xs text-green-400">Total Queries</div>
-                    </div>
-
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <CheckCircle className="w-4 h-4 text-green-400" />
-                        <span className="text-xs text-green-400">
-                          {ragStats?.retrievalSuccess > 0 ? 'Active' : 'Idle'}
-                        </span>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {ragStats?.retrievalSuccess?.toFixed(1) || '0.0'}%
-                      </div>
-                      <div className="text-xs text-green-400">Success Rate</div>
-                    </div>
-
-                    <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <Clock className="w-4 h-4 text-purple-400" />
-                        <span className="text-xs text-purple-400">
-                          {ragStats?.avgResponseTime && ragStats.avgResponseTime !== '0s' ? 'Fast' : 'N/A'}
-                        </span>
-                      </div>
-                      <div className="text-2xl font-bold text-white mb-1">
-                        {ragStats?.avgResponseTime || '0s'}
-                      </div>
-                      <div className="text-xs text-green-400">Avg Latency</div>
-                    </div>
-                  </div>
-
-                {/* Recent Queries - REAL DATA */}
-                <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
-                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-blue-400" />
-                    Recent RAG Queries
-                  </h4>
-                  {ragQueries.length === 0 ? (
-                    <div className="text-center text-muted-foreground text-sm py-4">
-                      No recent queries yet. RAG system is ready.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {ragQueries.map((item, i) => (
-                        <div key={i} className="flex items-center justify-between p-2 bg-background/30 rounded border border-border/20 hover:border-border/40 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-muted-foreground">{item.timestamp}</p>
-                            <p className="text-sm font-medium truncate" title={item.query}>{item.query}</p>
-                            <p className="text-xs text-muted-foreground">{item.category} • {item.agent}</p>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs">
-                            <span className="text-blue-400">{item.sources} sources</span>
-                            <span className="text-purple-400">{item.responseTime}</span>
-                            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">
-                              {(item.confidence * 100).toFixed(0)}%
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Context Sources Distribution - REAL DATA */}
-                <div className="col-span-12 bg-background/50 border border-border/30 rounded-lg p-3">
-                  <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-purple-400" />
-                    Context Sources Distribution
-                  </h4>
-                  {ragSources.length === 0 ? (
-                    <div className="text-center text-muted-foreground text-sm py-4">
-                      No source data available yet.
-                    </div>
-                  ) : (
-                    <div className={`grid grid-cols-${Math.min(ragSources.length, 4)} gap-4`}>
-                      {ragSources.map((source, i) => {
-                        const colorMap: { [key: string]: string } = {
-                          '#60B5FF': 'text-blue-400',
-                          '#A78BFA': 'text-purple-400',
-                          '#72BF78': 'text-green-400',
-                          '#F97316': 'text-orange-400',
-                          '#EF4444': 'text-red-400'
-                        }
-                        const textColor = colorMap[source.color] || 'text-blue-400'
-                        
-                        return (
-                          <div key={i} className="text-center">
-                            <div className={`text-3xl font-bold ${textColor} mb-1`}>
-                              {source.value}%
-                            </div>
-                            <div className="text-xs text-muted-foreground">{source.name}</div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tools Tab */}
-          {activeTab === 'tools' && (
-            <div className="p-4 h-full flex flex-col items-center justify-center">
-              <div className="max-w-md text-center space-y-4">
-                <div className="inline-flex p-4 bg-orange-500/10 border border-orange-500/30 rounded-full mb-2">
-                  <Zap className="w-12 h-12 text-orange-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-white">Tools Usage Tracking</h3>
-                <p className="text-sm text-muted-foreground">
-                  Tool tracking will be implemented in future workflow executions.
-                </p>
-                <div className="bg-background/50 border border-border/30 rounded-lg p-4 text-left space-y-2">
-                  <p className="text-xs font-semibold text-purple-400">Planned Metrics:</p>
-                  <ul className="text-xs text-muted-foreground space-y-1">
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-3 h-3 text-green-400" />
-                      Tool calls per execution
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-3 h-3 text-green-400" />
-                      Tool success rates
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-3 h-3 text-green-400" />
-                      Most used tools
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="w-3 h-3 text-green-400" />
-                      Tool execution times
-                    </li>
-                  </ul>
-                </div>
-                <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">
-                  Coming Soon
-                </Badge>
-              </div>
-            </div>
-          )}
-
           {/* All other tabs - Log Messages */}
-          {activeTab !== 'memory' && activeTab !== 'rag' && activeTab !== 'tools' && activeTab !== 'results' && (
+          {activeTab !== 'results' && (
             <AnimatePresence initial={false}>
               {filteredLogs.map((log) => (
                 <motion.div
@@ -947,9 +517,10 @@ export function CommunicationLog({ workflowId, isExecuting, workflow }: Communic
               ))}
             </AnimatePresence>
           )}
-          <div ref={scrollRef} />
-        </div>
-      </ScrollArea>
+            <div ref={scrollRef} />
+          </div>
+        </ScrollArea>
+      </div>
     </div>
   )
 }

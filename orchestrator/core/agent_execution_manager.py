@@ -13,14 +13,18 @@ PHASE 2 ENHANCED: Now includes inter-agent communication
 
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
-from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timedelta
 from enum import Enum
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
-from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata
+import numpy as np
+
+from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata, get_action_executor
 from database.models import Agent
+from core.memory_prompt_injector import MemoryPromptInjector
 
 # PHASE 2: Import communication components
 try:
@@ -99,6 +103,7 @@ class AgentExecutionManager:
         self.max_parallel_executions = max_parallel_executions
         self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
+        self.memory_injector = MemoryPromptInjector()  # Memory injection support
         
         # Execution tracking
         self.active_executions: Dict[str, SubtaskExecution] = {}
@@ -125,7 +130,9 @@ class AgentExecutionManager:
         agent_assignments: Dict[str, Any],
         context_enhancements: Dict[str, Any],
         execution_id: int,
-        workflow_id: int
+        workflow_id: int,
+        memory_retrieval_results: Optional[Dict[str, Any]] = None,
+        execution_strategy: str = "parallel"  # Add strategy parameter
     ) -> Dict[str, SubtaskExecution]:
         """
         Execute all workflow subtasks with assigned agents.
@@ -173,17 +180,24 @@ class AgentExecutionManager:
             except Exception as e:
                 self.logger.warning(f"Failed to create shared context: {e}")
         
-        # 1. Create execution plan
-        execution_plan = self._create_execution_plan(subtasks)
+        # 1. Create execution plan based on strategy
+        execution_plan = self._create_execution_plan(subtasks, execution_strategy)
         
-        # 2. Execute subtasks in parallel groups
+        # 2. Execute subtasks based on strategy
         all_results = {}
         self.shared_context = shared_context  # Store for use in subtask execution
         
+        # Store results for memory sharing between sequential tasks
+        if execution_strategy == "sequential":
+            self.execution_memory = {}  # Store outputs for next task
+        
         for group_idx, parallel_group in enumerate(execution_plan.parallel_groups):
-            self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
+            if execution_strategy == "sequential":
+                self.logger.info(f"📦 Executing task {group_idx + 1}/{len(execution_plan.parallel_groups)} sequentially")
+            else:
+                self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
             
-            # Execute this group in parallel
+            # Execute this group (1 task if sequential, multiple if parallel)
             group_tasks = []
             for subtask_id in parallel_group:
                 subtask_idx = int(subtask_id.split("_")[1])
@@ -204,7 +218,8 @@ class AgentExecutionManager:
                     agent_match=agent_match,
                     context_enh=context_enh,
                     execution_id=execution_id,
-                    workflow_id=workflow_id
+                    workflow_id=workflow_id,
+                    memory_retrieval_results=memory_retrieval_results
                 )
                 group_tasks.append(task)
             
@@ -226,27 +241,39 @@ class AgentExecutionManager:
         
         return all_results
     
-    def _create_execution_plan(self, subtasks: List[Dict[str, Any]]) -> ExecutionPlan:
+    def _create_execution_plan(self, subtasks: List[Dict[str, Any]], execution_strategy: str = "parallel") -> ExecutionPlan:
         """
-        Create execution plan with parallelization strategy.
+        Create execution plan based on execution strategy.
         
-        For now: simple sequential plan (can be enhanced with dependency analysis)
+        Args:
+            subtasks: List of subtasks to execute
+            execution_strategy: "sequential" or "parallel"
         """
         
-        # Simple strategy: execute in order, max N in parallel
         parallel_groups = []
-        current_group = []
         
-        for idx in range(len(subtasks)):
-            subtask_id = f"subtask_{idx}"
-            current_group.append(subtask_id)
+        if execution_strategy == "sequential":
+            # Sequential: each task in its own group
+            for idx in range(len(subtasks)):
+                subtask_id = f"subtask_{idx}"
+                parallel_groups.append([subtask_id])
+                if idx < len(subtasks):
+                    task_desc = subtasks[idx].get('description', '')[:50] if idx < len(subtasks) else ''
+                    self.logger.info(f"📝 Task {idx + 1} will execute sequentially: {task_desc}")
+        else:
+            # Parallel: group tasks up to max_parallel_executions
+            current_group = []
             
-            if len(current_group) >= self.max_parallel_executions:
+            for idx in range(len(subtasks)):
+                subtask_id = f"subtask_{idx}"
+                current_group.append(subtask_id)
+                
+                if len(current_group) >= self.max_parallel_executions:
+                    parallel_groups.append(current_group)
+                    current_group = []
+            
+            if current_group:
                 parallel_groups.append(current_group)
-                current_group = []
-        
-        if current_group:
-            parallel_groups.append(current_group)
         
         # Estimate duration
         total_duration = sum(
@@ -268,37 +295,185 @@ class AgentExecutionManager:
         agent_match: Dict[str, Any],
         context_enh: Dict[str, Any],
         execution_id: int,
-        workflow_id: int
+        workflow_id: int,
+        memory_retrieval_results: Optional[Dict[str, Any]] = None
     ) -> SubtaskExecution:
         """Execute a single subtask with assigned agent"""
         
         description = subtask.get("description", subtask.get("name", "Unknown"))
+        
+        # Enhanced Debug Logging for Agent Extraction
+        self.logger.info(f"🔍 DEBUG: Extracting agent from agent_match (type: {type(agent_match)})")
+        
         # Handle different agent_match types
         if hasattr(agent_match, 'agent_id'):  # AgentMatch object
             agent_id = agent_match.agent_id
             agent_name = agent_match.agent_name
+            self.logger.info(f"🔍 DEBUG: Extracted from AgentMatch object: agent_id={agent_id}, agent_name='{agent_name}'")
         elif isinstance(agent_match, dict):
             agent_id = agent_match.get("agent_id")
             agent_name = agent_match.get("agent_name", "Unknown")
+            self.logger.info(f"🔍 DEBUG: Extracted from dict: agent_id={agent_id}, agent_name='{agent_name}'")
+            self.logger.info(f"🔍 DEBUG: agent_match keys: {list(agent_match.keys())}")
         else:
             agent_id = None
             agent_name = "No Agent"
+            self.logger.error(f"❌ ERROR: Unrecognized agent_match type: {type(agent_match)}")
         
-        self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name}")
+        if not agent_id:
+            self.logger.error(
+                f"❌ CRITICAL: No agent_id extracted for subtask! "
+                f"agent_match type: {type(agent_match)}, "
+                f"agent_name: '{agent_name}'"
+            )
+        
+        self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name} (ID: {agent_id})")
         
         # Create execution tracking
         # Handle context_enh as dataclass or dict
+        self.logger.info(f"🔍 DEBUG: Processing context enhancement (provided: {context_enh is not None})")
+        
         if context_enh:
             if hasattr(context_enh, 'context_quality_score'):  # ContextEnhancement object
                 context_quality = context_enh.context_quality_score
                 prompt_used = context_enh.enhanced_prompt
+                self.logger.info(
+                    f"🔍 DEBUG: Context from ContextEnhancement object: "
+                    f"quality={context_quality:.2%}, "
+                    f"prompt_length={len(prompt_used)}"
+                )
             else:  # dict
                 context_quality = context_enh.get("context_quality", 0.0)
                 prompt_used = context_enh.get("enhanced_prompt", description)
+                self.logger.info(
+                    f"🔍 DEBUG: Context from dict: "
+                    f"quality={context_quality:.2%}, "
+                    f"prompt_length={len(prompt_used)}, "
+                    f"keys={list(context_enh.keys())}"
+                )
         else:
             context_quality = 0.0
             prompt_used = description
+            self.logger.warning(
+                f"⚠️  WARNING: No context enhancement provided! "
+                f"context_quality will be 0%, using raw description as prompt"
+            )
+        
+        # Inject memory into the prompt if available
+        self.logger.info(
+            f"🔍 DEBUG: Memory injection check: "
+            f"memory_retrieval_results={'provided' if memory_retrieval_results else 'none'}, "
+            f"agent_id={agent_id}"
+        )
+        
+        if memory_retrieval_results and agent_id:
+            # Try both int and str keys (memory system uses int keys)
+            agent_memories_dict = memory_retrieval_results.get('results', {}).get('agent_memories', {})
+            memories = agent_memories_dict.get(agent_id) or agent_memories_dict.get(str(agent_id))
             
+            if memories:
+                self.logger.info(
+                    f"✅ Injecting {memories.get('count', 0)} memories for agent {agent_id}"
+                )
+            else:
+                self.logger.warning(
+                    f"⚠️  Memory retrieval results exist but no memories found for agent_id={agent_id}"
+                )
+                self.logger.debug(f"   Available agent IDs in memories: {list(agent_memories_dict.keys())}")
+            
+            prompt_used = self.memory_injector.inject_memory_into_prompt(
+                original_prompt=prompt_used,
+                agent_id=agent_id,
+                memory_retrieval_results=memory_retrieval_results,
+                subtask_id=subtask_id
+            )
+        elif not memory_retrieval_results:
+            self.logger.warning("⚠️  No memory retrieval results available")
+        elif not agent_id:
+            self.logger.warning("⚠️  Cannot inject memories: agent_id is missing")
+        
+        # Inject previous subtask results from shared context (for sequential dependencies)
+        if self.context_manager and hasattr(self, 'shared_context') and self.shared_context:
+            try:
+                # CRITICAL FIX: Refresh context from database to get latest results from previous groups
+                fresh_context = await self.context_manager.get_shared_context(self.shared_context.id)
+                if fresh_context:
+                    context_data = fresh_context.context_data or {}
+                    self.logger.info(f"🔄 Refreshed shared context from database: {len(context_data)} keys")
+                else:
+                    # Fallback to cached context if refresh fails
+                    context_data = self.shared_context.context_data or {}
+                    self.logger.warning("⚠️  Failed to refresh context, using cached version")
+                
+                previous_results = []
+                
+                # DEBUG: Log all keys to see what's actually stored
+                self.logger.info(f"🔍 DEBUG: Shared context keys: {list(context_data.keys())}")
+                
+                # Look for results from previous subtasks
+                for key, value in context_data.items():
+                    self.logger.info(f"🔍 DEBUG: Checking key '{key}' - type: {type(value)}")
+                    if key.startswith("subtask_") and key.endswith("_result"):
+                        # Handle both dict and string responses
+                        if isinstance(value, dict):
+                            # Don't truncate - provide full context for synthesis
+                            result_content = value.get('response', 'No response')
+                            result_length = len(result_content)
+                        else:
+                            result_content = str(value)
+                            result_length = len(result_content)
+                        
+                        previous_results.append({
+                            'key': key,
+                            'content': result_content,
+                            'length': result_length
+                        })
+                        self.logger.info(f"  📦 Found result: {key} ({result_length} chars)")
+                
+                if previous_results:
+                    self.logger.info(f"📨 Injecting {len(previous_results)} previous task results into prompt")
+                    context_section = "\n\n" + "="*80 + "\n"
+                    context_section += "🔥 RESEARCH FINDINGS FROM YOUR TEAM - BASE YOUR WORK ON THIS!\n"
+                    context_section += "="*80 + "\n\n"
+                    context_section += "Your teammates have already completed research tasks. Their findings are below.\n"
+                    context_section += "⚠️  CRITICAL INSTRUCTIONS:\n"
+                    context_section += "- Use the ACTUAL findings below (not generic knowledge)\n"
+                    context_section += "- Quote specific facts, code examples, and sources from the research\n"
+                    context_section += "- Cite which subtask each piece of information came from\n"
+                    context_section += "- Do NOT make up information or use general knowledge when specific research exists\n"
+                    context_section += "- If research is incomplete, use tools to fill gaps (search_knowledge, etc.)\n\n"
+                    context_section += "="*80 + "\n\n"
+                    
+                    # Format each previous result clearly
+                    for idx, result in enumerate(previous_results, 1):
+                        subtask_num = result['key'].replace('subtask_', '').replace('_result', '')
+                        context_section += f"📋 FINDING #{idx} (from subtask_{subtask_num}):\n"
+                        context_section += "─" * 80 + "\n"
+                        context_section += result['content'] + "\n"
+                        context_section += "─" * 80 + "\n\n"
+                    
+                    context_section += "="*80 + "\n"
+                    context_section += "END OF TEAM RESEARCH - Now complete your task using the findings above.\n"
+                    context_section += "="*80 + "\n\n"
+                    
+                    prompt_used = prompt_used + context_section
+                else:
+                    self.logger.info(f"ℹ️  No previous results found in shared context (checked {len(context_data)} keys)")
+            except Exception as e:
+                self.logger.warning(f"Failed to inject previous results: {e}")
+            
+        # Enhanced Debug Logging for Agent ID
+        self.logger.info(
+            f"🔍 DEBUG: Creating SubtaskExecution for {subtask_id}: "
+            f"agent_id={agent_id} (type: {type(agent_id)}), "
+            f"agent_name='{agent_name}'"
+        )
+        if not agent_id or agent_id == 0:
+            self.logger.warning(
+                f"⚠️  WARNING: agent_id is {agent_id} for {subtask_id}! "
+                f"This will prevent memory consolidation."
+            )
+        
         execution = SubtaskExecution(
             subtask_id=subtask_id,
             subtask_description=description,
@@ -308,6 +483,11 @@ class AgentExecutionManager:
             start_time=datetime.now(),
             context_quality=context_quality,
             prompt_used=prompt_used
+        )
+        
+        self.logger.info(
+            f"✅ SubtaskExecution created: agent_id={execution.agent_id}, "
+            f"agent_name='{execution.agent_name}'"
         )
         
         self.active_executions[subtask_id] = execution
@@ -401,13 +581,15 @@ class AgentExecutionManager:
                     execution.retry_count = attempt
                     self.logger.info(f"🔄 Retry {attempt}/{self.max_retries} for {execution.subtask_description[:30]}...")
                 
-                # Execute with agent factory
+                # Execute with agent factory - include action_executor for tool calls
+                action_executor = get_action_executor()
                 result = await self.agent_factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,
                     system_prompt="You are a helpful AI assistant. Complete the task accurately and concisely.",
                     use_memory=True,
-                    max_retries=0  # We handle retries here
+                    max_retries=0,  # We handle retries here
+                    action_executor=action_executor  # Enable platform tools
                 )
                 
                 if result.get("status") == "error":
@@ -660,8 +842,9 @@ class AgentExecutionManager:
         
         try:
             # Broadcast task start to all team members
-            await self.communication.broadcast(
-                from_agent=execution.agent_id,
+            from services.inter_agent_communication import Message
+            message = Message(
+                from_agent_id=execution.agent_id,
                 message_type=MessageType.COORDINATION,
                 content={
                     "event": "task_started",
@@ -671,6 +854,11 @@ class AgentExecutionManager:
                     "estimated_duration": "30-60 seconds"
                 },
                 priority=5
+            )
+            await self.communication.broadcast(
+                from_agent=execution.agent_id,
+                team=self.shared_context.team_agents if self.shared_context else [],
+                message=message
             )
             
             self.logger.debug(f"📢 Notified team: {execution.agent_name} starting {subtask_id}")
@@ -691,8 +879,9 @@ class AgentExecutionManager:
         
         try:
             # 1. Broadcast result to team
-            await self.communication.broadcast(
-                from_agent=execution.agent_id,
+            from services.inter_agent_communication import Message
+            message = Message(
+                from_agent_id=execution.agent_id,
                 message_type=MessageType.RESULT_SHARE,
                 content={
                     "subtask_id": subtask_id,
@@ -705,19 +894,29 @@ class AgentExecutionManager:
                 },
                 priority=7
             )
+            await self.communication.broadcast(
+                from_agent=execution.agent_id,
+                team=self.shared_context.team_agents if self.shared_context else [],
+                message=message
+            )
             
             # 2. Update shared context with result
             if self.context_manager and hasattr(self, 'shared_context') and self.shared_context:
-                await self.context_manager.update_context(
-                    context_id=self.shared_context.context_id,
+                # subtask_id is already "subtask_0", so use f"{subtask_id}_result" not f"subtask_{subtask_id}_result"
+                result_key = f"{subtask_id}_result"
+                await self.context_manager.update_shared_context(
+                    context_id=self.shared_context.id,  # SharedContext uses 'id' not 'context_id'
+                    agent=execution.agent_id,  # Required parameter!
                     updates={
-                        f"subtask_{subtask_id}_result": {
-                            "response": execution.llm_response[:1000],
+                        result_key: {
+                            "response": execution.llm_response[:5000],  # Increased from 1000 to 5000 chars
                             "status": execution.status.value,
                             "completed_at": datetime.now().isoformat()
                         }
-                    }
+                    },
+                    merge_strategy="override"  # CRITICAL FIX: Use override to actually store results!
                 )
+                self.logger.info(f"📝 Updated shared context with key: {result_key}")
             
             self.logger.info(f"✅ Shared result with team: {subtask_id}")
             
@@ -738,8 +937,9 @@ class AgentExecutionManager:
             return
         
         try:
-            await self.communication.broadcast(
-                from_agent=execution.agent_id,
+            from services.inter_agent_communication import Message
+            message = Message(
+                from_agent_id=execution.agent_id,
                 message_type=MessageType.TASK_REQUEST,
                 content={
                     "event": "help_requested",
@@ -749,7 +949,13 @@ class AgentExecutionManager:
                     "agent_name": execution.agent_name,
                     "retry_count": execution.retry_count
                 },
-                priority=8  # High priority for failures
+                priority=8,  # High priority for failures
+                requires_ack=True
+            )
+            await self.communication.broadcast(
+                from_agent=execution.agent_id,
+                team=self.shared_context.team_agents if self.shared_context else [],
+                message=message
             )
             
             self.logger.info(f"🆘 Requested help from team for {subtask_id}")
@@ -770,8 +976,9 @@ class AgentExecutionManager:
             return
         
         try:
-            await self.communication.broadcast(
-                from_agent=agent_id,
+            from services.inter_agent_communication import Message
+            message = Message(
+                from_agent_id=agent_id,
                 message_type=MessageType.KNOWLEDGE_SHARE,
                 content={
                     "knowledge_type": knowledge_type,
@@ -779,6 +986,11 @@ class AgentExecutionManager:
                     "timestamp": datetime.now().isoformat()
                 },
                 priority=3  # Lower priority for general knowledge
+            )
+            await self.communication.broadcast(
+                from_agent=agent_id,
+                team=self.shared_context.team_agents if self.shared_context else [],
+                message=message
             )
             
             self.logger.debug(f"💡 Shared knowledge: {knowledge_type}")

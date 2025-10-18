@@ -13,24 +13,22 @@ from sqlalchemy import and_, or_, func
 import logging
 
 from database.database import get_db
-from database.models import Agent
-# Import directly from models.py file using importlib
+from database.models import Agent, MCPTool, AgentToolAssignment
+# Import from models.py file (not models/ directory)
 import sys
-import importlib.util
 from pathlib import Path
-models_path = Path(__file__).parent.parent / "models.py"
-spec = importlib.util.spec_from_file_location("models_file", models_path)
-models = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(models)
+models_file = Path(__file__).parent.parent / "models.py"
+sys.path.insert(0, str(models_file.parent))
+import importlib.util
+spec = importlib.util.spec_from_file_location("models_file", models_file)
+models_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(models_module)
 
-# Now import the classes
-MCPTool = models.MCPTool
-AgentToolAssignment = models.AgentToolAssignment
-MCPToolCreate = models.MCPToolCreate
-MCPToolUpdate = models.MCPToolUpdate
-MCPToolResponse = models.MCPToolResponse
-AgentToolAssignmentCreate = models.AgentToolAssignmentCreate
-AgentToolAssignmentResponse = models.AgentToolAssignmentResponse
+MCPToolCreate = models_module.MCPToolCreate
+MCPToolUpdate = models_module.MCPToolUpdate
+MCPToolResponse = models_module.MCPToolResponse
+AgentToolAssignmentCreate = models_module.AgentToolAssignmentCreate
+AgentToolAssignmentResponse = models_module.AgentToolAssignmentResponse
 
 logger = logging.getLogger(__name__)
 

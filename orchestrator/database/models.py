@@ -32,6 +32,47 @@ workflow_agents = Table('workflow_agents', Base.metadata,
     Column('agent_id', Integer, ForeignKey('agents.id'))
 )
 
+# PRD-15: LLM Model Registry
+class LLMModel(Base):
+    """
+    Registry of available LLM models from different providers.
+    Stores model metadata, capabilities, costs, and recommended use cases.
+    """
+    __tablename__ = 'llm_models'
+    
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(50), nullable=False, index=True)  # 'openai', 'anthropic', 'huggingface'
+    model_id = Column(String(255), nullable=False, unique=True, index=True)  # 'gpt-4', 'claude-3-opus-20240229', etc.
+    display_name = Column(String(255), nullable=False)  # Human-readable name
+    model_family = Column(String(100), index=True)  # 'gpt-4', 'claude-3', 'llama-2', etc.
+    
+    # Capabilities
+    capabilities = Column(JSON, default=dict)  # {"reasoning": "high", "coding": "excellent", ...}
+    context_window = Column(Integer, nullable=False)  # Max context tokens
+    max_output_tokens = Column(Integer, nullable=False)  # Max output tokens
+    supports_functions = Column(Boolean, default=False)
+    supports_vision = Column(Boolean, default=False)
+    supports_streaming = Column(Boolean, default=True)
+    
+    # Cost information (in USD)
+    input_cost_per_1k_tokens = Column(Float)  # Cost per 1K input tokens
+    output_cost_per_1k_tokens = Column(Float)  # Cost per 1K output tokens
+    
+    # Metadata
+    description = Column(Text)
+    release_date = Column(DateTime)
+    deprecation_date = Column(DateTime)
+    status = Column(String(50), default='active', index=True)  # 'active', 'deprecated', 'beta'
+    recommended_for = Column(JSON, default=list)  # ['code_analysis', 'creative_writing', ...]
+    
+    # Settings
+    default_temperature = Column(Float, default=0.7)
+    min_temperature = Column(Float, default=0.0)
+    max_temperature = Column(Float, default=2.0)
+    
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
 # Database Models
 class Agent(Base):
     __tablename__ = 'agents'
@@ -52,6 +93,26 @@ class Agent(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    
+    # PRD-15: Multi-Model Configuration
+    model_config = Column(JSON, default=lambda: {
+        "provider": "openai",
+        "model_id": "gpt-4",
+        "temperature": 0.7,
+        "max_tokens": 2000,
+        "top_p": 1.0,
+        "frequency_penalty": 0.0,
+        "presence_penalty": 0.0,
+        "fallback_model_id": None
+    })  # Model configuration for this agent
+    
+    model_usage_stats = Column(JSON, default=lambda: {
+        "total_tokens": 0,
+        "total_cost": 0.0,
+        "total_requests": 0,
+        "avg_tokens_per_request": 0,
+        "last_used_at": None
+    })  # Model usage tracking
     
     # Relationships
     skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
@@ -146,12 +207,14 @@ class Workflow(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     goal = Column(Text)  # High-level objective (overrides description if provided)
-    context = Column(JSON)  # Additional context for execution (codegraph_project, pr_number, etc.)
+    context = Column(Text)  # Additional context for execution (codegraph_project, pr_number, etc.)
+    tags = Column(JSON, default=list)  # Tags for categorization and filtering
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    last_execution = Column(JSON, default=None)  # Quick access to latest execution summary
     
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
@@ -170,6 +233,8 @@ class WorkflowExecution(Base):
     started_at = Column(DateTime, default=func.now())
     completed_at = Column(DateTime)
     error_message = Column(Text)
+    execution_metadata = Column(JSON, default={})  # Analytics and tracking data (renamed from metadata - reserved word)
+    models_used = Column(JSON, default=list)  # Model usage tracking
     
     # Relationships
     workflow = relationship("Workflow", back_populates="executions")
@@ -255,6 +320,12 @@ class SkillCategory(str, Enum):
     SECURITY = "security"
     INFRASTRUCTURE = "infrastructure"
     ANALYTICS = "analytics"
+    DATA = "data"
+    PERFORMANCE = "performance"
+    AI = "ai"
+    DOCUMENTATION = "documentation"
+    SYSTEM = "system"
+    MONITORING = "monitoring"
 
 class WorkflowStatus(str, Enum):
     DRAFT = "draft"
@@ -271,7 +342,7 @@ class ExecutionStatus(str, Enum):
 class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
-    agent_type: AgentType
+    agent_type: str  # Flexible agent type - no enum restriction
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Support for tool assignment during creation
@@ -305,6 +376,7 @@ class AgentResponse(BaseModel):
     created_by: Optional[str]
     skills: List[Dict[str, Any]] = []
     tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools
+    agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -387,6 +459,7 @@ class WorkflowResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str]
     agents: List[Dict[str, Any]] = []
+    last_execution: Optional[Dict[str, Any]] = None
 
 class WorkflowExecutionCreate(BaseModel):
     workflow_id: int

@@ -24,6 +24,10 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 def _build_agent_response(agent: Agent) -> AgentResponse:
     """Build agent response with skills and tools"""
+    # PRD-15: Debug logging for model_config
+    model_cfg = getattr(agent, 'model_config', None)
+    logger.info(f"Agent {agent.id} model_config: {model_cfg}")
+    
     # Build tools list from tool_assignments relationship
     tools = []
     if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
@@ -66,6 +70,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
         updated_at=agent.updated_at or agent.created_at,
         performance_metrics=agent.performance_metrics or {},
         created_by=agent.created_by,
+        agent_model_config=getattr(agent, 'model_config', None),  # PRD-15: Include model config (field renamed to agent_model_config)
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
@@ -142,9 +147,9 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
             agent = Agent(
                 name=agent_data.name,
                 description=agent_data.description,
-                agent_type=agent_data.agent_type.value,
+                agent_type=agent_data.agent_type,  # Already a string, no .value needed
                 configuration=agent_data.configuration or {},
-                priority_level=agent_data.priority_level.value if agent_data.priority_level else "medium",
+                priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
                 max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
                 auto_start=agent_data.auto_start or False,
                 created_by="api"
@@ -201,9 +206,9 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         agent = Agent(
             name=agent_data.name,
             description=agent_data.description,
-            agent_type=agent_data.agent_type.value,
+            agent_type=agent_data.agent_type,  # Now accepts any string
             configuration=agent_data.configuration or {},
-            priority_level=agent_data.priority_level.value if agent_data.priority_level else "medium",
+            priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
             max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
             auto_start=agent_data.auto_start or False,
             created_by="api"

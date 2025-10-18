@@ -84,7 +84,7 @@ class IntelligentAgentSelector:
         max_agents_per_task: int = 3
     ) -> Dict[str, List[AgentMatch]]:
         """
-        Select best agents for each subtask.
+        Select best agents for each subtask with DIVERSITY preference.
         
         Args:
             subtasks: List of subtask dicts from RealTaskDecomposer
@@ -93,10 +93,15 @@ class IntelligentAgentSelector:
         Returns:
             Dict mapping subtask index to ranked list of agent matches
         """
+        self.logger.info(f"🔍 STAGE 3: Selecting agents for {len(subtasks)} subtasks")
+        
         results = {}
+        assigned_agents = {}  # Track agent assignments {agent_id: count}
         
         for idx, subtask in enumerate(subtasks):
             subtask_id = f"subtask_{idx}"
+            self.logger.info(f"\n{'='*60}")
+            self.logger.info(f"🔍 STAGE 3: Processing {subtask_id}")
             
             # Extract requirements from subtask
             requirements = self._extract_subtask_requirements(subtask, subtask_id)
@@ -104,16 +109,38 @@ class IntelligentAgentSelector:
             # Find matching agents
             agent_matches = await self._find_matching_agents(requirements)
             
+            # Apply diversity bonus/penalty to encourage using different agents
+            for match in agent_matches:
+                assignment_count = assigned_agents.get(match.agent_id, 0)
+                
+                # Reduce score for already-assigned agents (20% penalty per assignment)
+                if assignment_count > 0:
+                    diversity_penalty = assignment_count * 0.2
+                    match.match_score = max(0.1, match.match_score - diversity_penalty)
+                    match.reasoning += f" (Score reduced by {diversity_penalty:.1f} for diversity - already assigned {assignment_count} times)"
+            
             # Rank and filter
             ranked_matches = self._rank_agent_matches(agent_matches)
             top_matches = ranked_matches[:max_agents_per_task]
             
-            results[subtask_id] = top_matches
+            # Track assignment of best agent
+            if top_matches:
+                best_agent = top_matches[0]
+                assigned_agents[best_agent.agent_id] = assigned_agents.get(best_agent.agent_id, 0) + 1
+                
+                self.logger.info(
+                    f"✅ Subtask {idx}: '{subtask.get('description', 'Unknown')[:50]}' - "
+                    f"Assigned to {best_agent.agent_name} (ID: {best_agent.agent_id})"
+                )
+            else:
+                self.logger.warning(f"⚠️ Subtask {idx}: No suitable agents found")
             
-            self.logger.info(
-                f"✅ Subtask {idx}: '{subtask.get('description', 'Unknown')[:50]}' - "
-                f"Found {len(top_matches)} suitable agents"
-            )
+            results[subtask_id] = top_matches
+        
+        # Log diversity statistics
+        unique_agents = len(assigned_agents)
+        total_tasks = len(subtasks)
+        self.logger.info(f"📊 Agent Diversity: {unique_agents} unique agents used for {total_tasks} tasks")
         
         return results
     
@@ -143,8 +170,19 @@ class IntelligentAgentSelector:
         except:
             duration = 30.0
         
-        # Infer required skills from description and agent_type
-        required_skills = self._infer_required_skills(description, agent_type)
+        # CRITICAL FIX: Use skills from Stage 1 if provided, otherwise infer
+        if "skills_required" in subtask and subtask["skills_required"]:
+            required_skills = subtask["skills_required"]
+            if isinstance(required_skills, str):
+                required_skills = [required_skills]
+            self.logger.info(f"  ✅ Using Stage 1 skills: {required_skills}")
+        elif "primary_skill" in subtask and subtask["primary_skill"]:
+            required_skills = [subtask["primary_skill"]]
+            self.logger.info(f"  ✅ Using Stage 1 primary_skill: {required_skills}")
+        else:
+            # Fallback: Infer from description and agent_type
+            self.logger.warning(f"  ⚠️  No skills from Stage 1, inferring...")
+            required_skills = self._infer_required_skills(description, agent_type)
         
         return SubtaskAgentRequirement(
             subtask_id=subtask_id,
@@ -157,6 +195,8 @@ class IntelligentAgentSelector:
     
     def _infer_required_skills(self, description: str, agent_type: str) -> List[str]:
         """Infer required skills from task description and agent type"""
+        
+        self.logger.info(f"🔍 STAGE 3: Inferring skills for agent_type='{agent_type}'")
         
         skills = []
         desc_lower = description.lower()
@@ -175,7 +215,11 @@ class IntelligentAgentSelector:
         
         # Add agent type skills
         if agent_type.lower() in agent_type_skills:
-            skills.extend(agent_type_skills[agent_type.lower()])
+            type_skills = agent_type_skills[agent_type.lower()]
+            skills.extend(type_skills)
+            self.logger.info(f"  📝 From agent_type '{agent_type}': {type_skills}")
+        else:
+            self.logger.warning(f"  ⚠️  Unknown agent_type '{agent_type}' - no type skills added")
         
         # Keyword-based skill detection
         skill_keywords = {
@@ -191,14 +235,22 @@ class IntelligentAgentSelector:
             "security": ["security", "auth", "permission", "vulnerability"]
         }
         
+        keyword_skills = []
         for skill, keywords in skill_keywords.items():
             if any(keyword in desc_lower for keyword in keywords):
                 if skill not in skills:
                     skills.append(skill)
+                    keyword_skills.append(skill)
+        
+        if keyword_skills:
+            self.logger.info(f"  🔍 From keywords in description: {keyword_skills}")
         
         # Always include general skill
         if not skills:
             skills.append("general")
+            self.logger.warning(f"  ⚠️  No skills inferred, using 'general'")
+        
+        self.logger.info(f"  ✅ Final required_skills: {skills}")
         
         return skills
     
@@ -233,23 +285,48 @@ class IntelligentAgentSelector:
     ) -> Optional[AgentMatch]:
         """Calculate comprehensive match score for agent-subtask pair"""
         
+        self.logger.info(f"  🤖 Scoring agent: {agent.name} (ID: {agent.id}, type: {agent.agent_type})")
+        
         # 1. Skill Coverage Score
         agent_skills_list = [skill.name.lower() for skill in agent.skills]
         required_skills_lower = [s.lower() for s in requirements.required_skills]
         
-        matched_skills = [
-            skill for skill in requirements.required_skills
-            if skill.lower() in agent_skills_list
-        ]
-        missing_skills = [
-            skill for skill in requirements.required_skills
-            if skill.lower() not in agent_skills_list
-        ]
+        self.logger.info(f"    Required skills: {requirements.required_skills}")
+        self.logger.info(f"    Agent skills: {[skill.name for skill in agent.skills]}")
+        
+        # Enhanced fuzzy matching for skills (handles 'research' matching 'Researcher', etc.)
+        matched_skills = []
+        missing_skills = []
+        
+        for required_skill in requirements.required_skills:
+            required_lower = required_skill.lower()
+            
+            # Try multiple matching strategies
+            matched = False
+            for agent_skill in agent_skills_list:
+                # Strategy 1: Exact match
+                if required_lower == agent_skill:
+                    matched_skills.append(required_skill)
+                    matched = True
+                    break
+                # Strategy 2: Substring match (research in researcher, or researcher in research)
+                elif required_lower in agent_skill or agent_skill in required_lower:
+                    matched_skills.append(required_skill)
+                    matched = True
+                    self.logger.debug(f"      🔍 Fuzzy matched: '{required_skill}' ~ '{[s for s in agent.skills if s.name.lower() == agent_skill][0].name}'")
+                    break
+            
+            if not matched:
+                missing_skills.append(required_skill)
         
         if not requirements.required_skills:
             skill_coverage = 1.0
         else:
             skill_coverage = len(matched_skills) / len(requirements.required_skills)
+        
+        self.logger.info(f"    ✅ Matched: {matched_skills}")
+        self.logger.info(f"    ❌ Missing: {missing_skills}")
+        self.logger.info(f"    📊 Skill coverage: {skill_coverage:.1%}")
         
         # 2. Skill Proficiency Score (from agent configuration)
         proficiency_score = 0.0
@@ -309,6 +386,14 @@ class IntelligentAgentSelector:
             self.weights["performance"] * performance_score +
             semantic_boost
         )
+        
+        self.logger.info(f"    📊 Final Score Calculation:")
+        self.logger.info(f"       Skill coverage: {skill_coverage:.3f} × {self.weights['skill_coverage']} = {self.weights['skill_coverage'] * skill_coverage:.3f}")
+        self.logger.info(f"       Proficiency: {proficiency_score:.3f} × {self.weights['skill_proficiency']} = {self.weights['skill_proficiency'] * proficiency_score:.3f}")
+        self.logger.info(f"       Availability: {availability_score:.3f} × {self.weights['availability']} = {self.weights['availability'] * availability_score:.3f}")
+        self.logger.info(f"       Performance: {performance_score:.3f} × {self.weights['performance']} = {self.weights['performance'] * performance_score:.3f}")
+        self.logger.info(f"       Semantic boost: {semantic_boost:.3f}")
+        self.logger.info(f"    🎯 Final match_score: {final_score:.3f}")
         
         # Generate reasoning
         reasoning = f"Coverage: {skill_coverage:.0%}, Proficiency: {proficiency_score:.0%}, " \

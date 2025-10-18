@@ -92,8 +92,14 @@ class WorkflowMemoryIntegrator:
                         top_k=5
                     )
                     
+                    # Convert datetime objects to ISO strings for JSON serialization
+                    serialized_memories = []
+                    for m in memories:
+                        serialized = {k: (v.isoformat() if hasattr(v, 'isoformat') else v) for k, v in m.items()}
+                        serialized_memories.append(serialized)
+                    
                     agent_memories[agent_id] = {
-                        "memories": memories,
+                        "memories": serialized_memories,
                         "count": len(memories),
                         "types": list(set(m.get("type") for m in memories if m.get("type")))
                     }
@@ -188,20 +194,39 @@ Retries: {execution.retry_count}
                         aggregated_results.quality_scores.overall
                     )
                     
-                    # Store as EXPERIENCE memory
-                    await self.memory_system.store_experience(
-                        agent_id=execution.agent_id,
-                        experience={
-                            "content": experience_content,
-                            "task_id": f"workflow_{workflow_id}_subtask_{subtask_id}",
-                            "success": execution.status == SubtaskStatus.COMPLETED,
-                            "tokens_used": execution.tokens_used,
-                            "execution_time_ms": execution.execution_time_ms,
-                            "quality_score": aggregated_results.quality_scores.overall,
-                            "context_quality": execution.context_quality,
-                            "timestamp": datetime.now().isoformat()
-                        }
-                    )
+                    # Store as EXPERIENCE memory with enhanced error handling
+                    try:
+                        await self.memory_system.store_experience(
+                            agent_id=execution.agent_id,
+                            experience={
+                                "content": experience_content,
+                                "task_id": f"workflow_{workflow_id}_subtask_{subtask_id}",
+                                "success": execution.status == SubtaskStatus.COMPLETED,
+                                "tokens_used": execution.tokens_used,
+                                "execution_time_ms": execution.execution_time_ms,
+                                "quality_score": aggregated_results.quality_scores.overall,
+                                "context_quality": execution.context_quality,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                        )
+                    except Exception as store_error:
+                        # Log detailed error but continue with other experiences
+                        self.logger.error(f"Memory store error for agent {execution.agent_name}: {store_error}")
+                        # Try to store a simplified version as fallback
+                        try:
+                            await self.memory_system.store_experience(
+                                agent_id=execution.agent_id,
+                                experience={
+                                    "content": f"Subtask: {execution.subtask_description[:100]}",
+                                    "task_id": f"workflow_{workflow_id}_subtask_{subtask_id}",
+                                    "success": execution.status == SubtaskStatus.COMPLETED,
+                                    "timestamp": datetime.now().isoformat()
+                                }
+                            )
+                            self.logger.info(f"Fallback memory store succeeded for {execution.agent_name}")
+                        except Exception as fallback_error:
+                            self.logger.error(f"Fallback memory store also failed: {fallback_error}")
+                            # Continue execution - don't let memory failures break workflow
                     
                     # Track stored memories
                     agent_name = execution.agent_name
@@ -240,7 +265,8 @@ Retries: {execution.retry_count}
         workflow_id: int,
         execution_id: int,
         aggregated_results: AggregatedResults,
-        decomposition_metadata: Dict[str, Any]
+        decomposition_metadata: Dict[str, Any],
+        subtask_executions: Optional[Dict[str, SubtaskExecution]] = None
     ) -> Dict[str, Any]:
         """
         Consolidate workflow learnings into long-term memory and knowledge graph.
@@ -250,6 +276,7 @@ Retries: {execution.retry_count}
             execution_id: Execution ID
             aggregated_results: Quality scores and metrics
             decomposition_metadata: Task decomposition info
+            subtask_executions: Optional subtask execution data for agent ID mapping
             
         Returns:
             Summary of consolidation results
@@ -265,18 +292,58 @@ Retries: {execution.retry_count}
         
         try:
             # 1. Consolidate agent memories (short-term → long-term)
-            agent_ids = list(aggregated_results.agent_performance.keys())
+            agent_id_map = {}  # Store agent_name -> agent_id mapping
+            
+            self.logger.info(f"🔍 DEBUG: Starting agent ID mapping extraction")
+            self.logger.info(f"🔍 DEBUG: subtask_executions provided: {subtask_executions is not None}")
+            
+            # First, build a complete mapping of agent names to IDs
+            if subtask_executions:
+                self.logger.info(f"🔍 DEBUG: Processing {len(subtask_executions)} subtask executions")
+                for subtask_id, execution in subtask_executions.items():
+                    self.logger.info(
+                        f"🔍 DEBUG: Subtask {subtask_id}: "
+                        f"agent_id={execution.agent_id}, "
+                        f"agent_name='{execution.agent_name}', "
+                        f"status={execution.status}"
+                    )
+                    
+                    if execution.agent_id and execution.agent_id != 0 and execution.agent_name:
+                        agent_id_map[execution.agent_name] = execution.agent_id
+                        self.logger.info(f"✅ Added to map: {execution.agent_name} → {execution.agent_id}")
+                    else:
+                        self.logger.warning(
+                            f"⚠️  Skipping {execution.agent_name}: "
+                            f"agent_id={execution.agent_id} (valid: {execution.agent_id and execution.agent_id != 0})"
+                        )
+            else:
+                self.logger.warning("⚠️  No subtask_executions provided for agent ID mapping!")
+                        
+            self.logger.info(f"📋 Final Agent ID mapping: {agent_id_map}")
+            
             for agent_name, performance in aggregated_results.agent_performance.items():
                 try:
-                    # Find agent ID (we have name, need ID for memory system)
-                    # This is a simplified approach - in production, maintain agent_id mapping
-                    agent_id = hash(agent_name) % 10000  # Temporary mapping
+                    # Get agent ID from our mapping
+                    agent_id = agent_id_map.get(agent_name)
+                    
+                    if agent_id is None:
+                        self.logger.warning(f"Could not find agent_id for {agent_name}, skipping consolidation")
+                        continue
                     
                     # Consolidate if quality was high
                     if aggregated_results.quality_scores.overall >= 0.7:
-                        # In real implementation, this would call memory_system.consolidate_memories()
-                        # For now, we track that consolidation should happen
-                        consolidation["agents_consolidated"].append(agent_name)
+                        try:
+                            # Actually consolidate memories
+                            consolidation_result = await self.memory_system.consolidate_memories(agent_id)
+                            consolidation["agents_consolidated"].append(agent_name)
+                            
+                            # Track actual patterns extracted
+                            if hasattr(consolidation_result, 'patterns_extracted'):
+                                consolidation["patterns_extracted"] += consolidation_result.patterns_extracted
+                            
+                            self.logger.info(f"✅ Consolidated memories for agent {agent_name} (ID: {agent_id})")
+                        except Exception as consolidate_error:
+                            self.logger.error(f"Failed to consolidate memories for {agent_name}: {consolidate_error}")
                         
                 except Exception as e:
                     self.logger.warning(f"Failed to consolidate for agent {agent_name}: {e}")
@@ -414,4 +481,3 @@ Retries: {execution.retry_count}
             "agents_with_memory": len(retrieval_results.get("agent_memories", {})),
             "timestamp": datetime.now().isoformat()
         }
-

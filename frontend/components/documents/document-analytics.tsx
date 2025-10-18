@@ -98,10 +98,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Documents</p>
                 <p className="text-2xl font-bold">{analytics.totalDocuments}</p>
-                <p className="text-xs text-green-600 mt-1">↑ 12% this week</p>
+                <p className="text-xs text-green-400 mt-1">↑ 12% this week</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
-                <FileText className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-blue-400" />
               </div>
             </div>
           </CardContent>
@@ -113,10 +113,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Storage</p>
                 <p className="text-2xl font-bold">{formatFileSize(analytics.totalSize)}</p>
-                <p className="text-xs text-blue-600 mt-1">68% of quota used</p>
+                <p className="text-xs text-blue-400 mt-1">68% of quota used</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
-                <HardDrive className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <HardDrive className="w-5 h-5 text-green-400" />
               </div>
             </div>
           </CardContent>
@@ -128,10 +128,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Processing Rate</p>
                 <p className="text-2xl font-bold">94.2%</p>
-                <p className="text-xs text-green-600 mt-1">↑ 2.1% improvement</p>
+                <p className="text-xs text-green-400 mt-1">↑ 2.1% improvement</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
-                <Zap className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-purple-400" />
               </div>
             </div>
           </CardContent>
@@ -143,10 +143,10 @@ export function DocumentAnalytics({ documents, documentStats }: DocumentAnalytic
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Avg Process Time</p>
                 <p className="text-2xl font-bold">2.4s</p>
-                <p className="text-xs text-green-600 mt-1">↓ 0.3s faster</p>
+                <p className="text-xs text-green-400 mt-1">↓ 0.3s faster</p>
               </div>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
-                <Clock className="w-6 h-6 text-white" />
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-orange-400" />
               </div>
             </div>
           </CardContent>

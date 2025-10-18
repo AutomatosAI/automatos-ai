@@ -59,6 +59,10 @@ interface AgentWithPerformance {
   specializations?: string[]
   lastActive?: string
   avatar?: string
+  agent_model_config?: {
+    model_id?: string
+    provider?: string
+  }
 }
 
 const statusStyles: Record<string, string> = {
@@ -73,6 +77,32 @@ const statusIcons: Record<string, any> = {
   maintenance: AlertCircle
 }
 
+// PRD-15: Model display helper
+const getModelDisplayName = (modelId?: string): string => {
+  if (!modelId) return 'GPT-4'
+  
+  const modelNames: Record<string, string> = {
+    'gpt-4': 'GPT-4',
+    'gpt-4-turbo': 'GPT-4 Turbo',
+    'gpt-4-turbo-preview': 'GPT-4 Turbo',
+    'gpt-3.5-turbo': 'GPT-3.5',
+    'claude-3-opus-20240229': 'Claude 3 Opus',
+    'claude-3-sonnet-20240229': 'Claude 3 Sonnet',
+    'claude-3-haiku-20240307': 'Claude 3 Haiku',
+  }
+  
+  return modelNames[modelId] || modelId.split('-')[0].toUpperCase()
+}
+
+const getProviderColor = (provider?: string): string => {
+  const colors: Record<string, string> = {
+    openai: 'bg-green-500/10 text-green-400 border-green-500/20',
+    anthropic: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    huggingface: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+  }
+  return colors[provider?.toLowerCase() || 'openai'] || 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+}
+
 interface AgentRosterProps {
   agents: any[]
   loading: boolean
@@ -82,6 +112,7 @@ interface AgentRosterProps {
   onViewDetails: (agentId: string | null) => void
   selectedAgentId: string | null
   onRefresh: () => void
+  setSearchTerm?: ((term: string) => void) | undefined
 }
 
 export function AgentRoster({ 
@@ -92,7 +123,8 @@ export function AgentRoster({
   onAgentSelect, 
   onViewDetails,
   selectedAgentId, 
-  onRefresh 
+  onRefresh,
+  setSearchTerm
 }: AgentRosterProps) {
   // Modal states
   const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
@@ -125,9 +157,9 @@ export function AgentRoster({
   const handleStatusChange = async (agentId: number, newStatus: string) => {
     try {
       if (newStatus === 'inactive') {
-        await stopAgentMutation.mutateAsync(agentId.toString())
+        await (stopAgentMutation.mutateAsync as any)(agentId.toString())
       } else if (newStatus === 'active') {
-        await startAgentMutation.mutateAsync(agentId.toString())
+        await (startAgentMutation.mutateAsync as any)(agentId.toString())
       }
       
       // Refresh the agents list
@@ -168,7 +200,7 @@ export function AgentRoster({
           <Input
             placeholder="Search agents by name, type, or skills..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm?.(e.target.value)}
             className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
           />
         </div>
@@ -195,7 +227,7 @@ export function AgentRoster({
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-lg">
+                  <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center text-lg">
                     {agentIcon}
                   </div>
                   <div>
@@ -255,18 +287,25 @@ export function AgentRoster({
                 </DropdownMenu>
               </div>
 
-              {/* Status */}
+              {/* Status & Model */}
               <div className="flex items-center justify-between mb-4">
-                <Badge className={statusStyles[agent.status || 'active'] || statusStyles.active}>
-                  <StatusIcon className="w-3 h-3 mr-1" />
-                  {agent.status || 'active'}
-                </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {agent.performance_metrics?.success_rate != null ? 
-                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
-                      'N/A'
-                    }
-                  </span>
+                <div className="flex flex-col gap-2">
+                  <Badge className={statusStyles[agent.status || 'active'] || statusStyles.active}>
+                    <StatusIcon className="w-3 h-3 mr-1" />
+                    {agent.status || 'active'}
+                  </Badge>
+                  {/* PRD-15: Model Badge */}
+                  <Badge className={getProviderColor(agent.agent_model_config?.provider)}>
+                    <Bot className="w-3 h-3 mr-1" />
+                    {getModelDisplayName(agent.agent_model_config?.model_id)}
+                  </Badge>
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  {agent.performance_metrics?.success_rate != null ? 
+                    `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
+                    'N/A'
+                  }
+                </span>
               </div>
 
               {/* Performance Bar */}

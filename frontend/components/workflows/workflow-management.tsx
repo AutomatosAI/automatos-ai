@@ -48,6 +48,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { workflowService, type WorkflowWithMetrics, type WorkflowStats } from '@/lib/workflow-service'
 import { apiClient } from '@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
+import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
 import { MonitoringTab } from './monitoring-tab'
 import { TemplatesTab } from './templates-tab'
@@ -162,29 +163,8 @@ const availableAgents = [
   }
 ]
 
-const workflowTemplates = [
-  {
-    id: 'code-review',
-    name: 'Code Review Pipeline',
-    description: 'Comprehensive code review with security and quality checks',
-    agents: ['code-architect', 'security-guard', 'test-master'],
-    steps: ['Code Analysis', 'Security Scan', 'Quality Check', 'Documentation Review']
-  },
-  {
-    id: 'bug-investigation',
-    name: 'Bug Investigation',
-    description: 'Systematic bug analysis and resolution workflow',
-    agents: ['bug-hunter', 'performance-optimizer'],
-    steps: ['Issue Analysis', 'Root Cause Investigation', 'Solution Development', 'Testing', 'Documentation']
-  },
-  {
-    id: 'security-audit',
-    name: 'Security Audit',
-    description: 'Complete security assessment and compliance check',
-    agents: ['security-guard'],
-    steps: ['Vulnerability Scan', 'Code Security Review', 'Infrastructure Audit', 'Compliance Check', 'Report Generation']
-  }
-]
+// Removed hardcoded templates - all templates now come from database via workflow_templates table
+const workflowTemplates: any[] = []
 
 export function WorkflowManagement() {
   const queryClient = useQueryClient()
@@ -357,13 +337,24 @@ export function WorkflowManagement() {
       // Submit to backend API using the service
       const result = await workflowService.createWorkflow(workflowData)
       console.log('Workflow created successfully:', result)
+      
+      // Show success toast
+      toast({
+        title: "✅ Workflow Created",
+        description: `"${workflowForm.name}" has been created successfully and is now active.`,
+        variant: "default"
+      })
 
       // Reload workflow data to show the new workflow
       await loadWorkflowData()
       
-      // Invalidate React Query cache to refresh active workflows panel
-      queryClient.invalidateQueries({ queryKey: ['workflows', 'active'] })
-      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      // Invalidate all workflow-related queries to ensure UI refreshes
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workflows'] }),
+        queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] }),
+        queryClient.invalidateQueries({ queryKey: ['workflows', 'active'] }),
+        queryClient.invalidateQueries({ queryKey: ['workflowStats'] })
+      ])
 
       // Close modal and reset form
       setShowCreateModal(false)
@@ -385,11 +376,12 @@ export function WorkflowManagement() {
         }
       })
 
-      // Automatically open Execution Theater for the new workflow with auto-start
+      // Open Execution Theater for the new workflow WITHOUT auto-start
+      // User can choose when to run it
       if (result && result.id) {
         setTimeout(() => {
           setSelectedWorkflowId(result.id)
-          setAutoStartExecution(true)
+          setAutoStartExecution(false) // Don't auto-start, let user decide
           setShowExecutionTheater(true)
         }, 500) // Small delay to allow UI to update
       }
@@ -409,6 +401,13 @@ export function WorkflowManagement() {
       }
       
       setError(errorMessage)
+      
+      // Show error toast
+      toast({
+        title: "❌ Failed to Create Workflow",
+        description: errorMessage,
+        variant: "destructive"
+      })
     } finally {
       setIsCreating(false)
     }

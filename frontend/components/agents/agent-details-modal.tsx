@@ -30,7 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useAgent, useAgentStats, useAgentLogs } from '@/hooks/use-agent-api'
+import { useAgent, useAgentStats, useAgentLogs, useAgentPerformance, useAgentSkills } from '@/hooks/use-agent-api'
 
 interface AgentDetailsModalProps {
   agentId: number | null
@@ -115,8 +115,13 @@ export function AgentDetailsModal({
 
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
-  const { data: agentStats } = useAgentStats(agentId?.toString() || '')
+  const { data: agentPerformance } = useAgentPerformance(agentId?.toString() || '')
   const { data: agentLogs } = useAgentLogs(agentId?.toString() || '')
+  // Note: Skills should be included in agent data, but fallback to separate API call if needed
+  const { data: agentSkills } = useAgentSkills(agentId?.toString() || '')
+  
+  // Use skills from agent data if available, otherwise use separate API call
+  const skills = agent?.skills || agentSkills || []
 
   const error = agentError?.message || null
 
@@ -336,8 +341,8 @@ export function AgentDetailsModal({
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-green-400">
-                            {agentStats?.success_rate != null ? 
-                              `${(agentStats.success_rate * 100).toFixed(1)}%` : 
+                            {agentPerformance?.success_rate != null ? 
+                              `${agentPerformance.success_rate}%` : 
                               'N/A'
                             }
                           </p>
@@ -345,14 +350,14 @@ export function AgentDetailsModal({
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-blue-400">
-                            {agentStats?.tasks_completed || 0}
+                            {agentPerformance?.completed_tasks || 0}
                           </p>
                           <p className="text-sm text-muted-foreground">Tasks Done</p>
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-purple-400">
-                            {agentStats?.avg_response_time != null ? 
-                              `${agentStats.avg_response_time}ms` : 
+                            {agentPerformance?.average_response_time != null ? 
+                              `${agentPerformance.average_response_time}s` : 
                               'N/A'
                             }
                           </p>
@@ -360,7 +365,7 @@ export function AgentDetailsModal({
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-orange-400">
-                            {agent?.skills?.length || 0}
+                            {skills?.length || 0}
                           </p>
                           <p className="text-sm text-muted-foreground">Skills</p>
                         </div>
@@ -379,26 +384,25 @@ export function AgentDetailsModal({
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
                             <span>Success Rate</span>
-                            <span>{agentStats?.success_rate != null ? 
-                              `${(agentStats.success_rate * 100).toFixed(1)}%` : 'N/A'}
+                            <span>{agentPerformance?.success_rate != null ? 
+                              `${agentPerformance.success_rate}%` : 'N/A'}
                             </span>
                           </div>
                           <Progress 
-                            value={agentStats?.success_rate != null ? 
-                              agentStats.success_rate * 100 : 0} 
+                            value={agentPerformance?.success_rate || 0} 
                             className="h-2"
                           />
                         </div>
                         <div className="pt-4 grid grid-cols-2 gap-4 text-center">
                           <div>
                             <p className="text-lg font-semibold text-green-400">
-                              {agentStats?.tasks_completed || 0}
+                              {agentPerformance?.completed_tasks || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Completed</p>
                           </div>
                           <div>
                             <p className="text-lg font-semibold text-red-400">
-                              {agentStats?.tasks_failed || 0}
+                              {agentPerformance?.failed_tasks || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Failed</p>
                           </div>
@@ -413,18 +417,41 @@ export function AgentDetailsModal({
                       <CardContent className="space-y-4">
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
-                            <span>CPU Usage</span>
-                            <span>{agent?.resource_usage?.cpu_percent || 0}%</span>
+                            <span>Total Tokens Used</span>
+                            <span>{agentPerformance?.total_tokens_used?.toLocaleString() || 0}</span>
                           </div>
-                          <Progress value={agent?.resource_usage?.cpu_percent || 0} className="h-2" />
+                          <Progress 
+                            value={Math.min((agentPerformance?.total_tokens_used || 0) / 100000 * 100, 100)} 
+                            className="h-2" 
+                          />
                         </div>
                         <div className="space-y-2">
                           <div className="flex justify-between text-sm">
-                            <span>Memory Usage</span>
-                            <span>{agent?.resource_usage?.memory_mb || 0} MB</span>
+                            <span>Total Cost</span>
+                            <span>${agentPerformance?.total_cost?.toFixed(2) || '0.00'}</span>
                           </div>
                           <Progress 
-                            value={Math.min((agent?.resource_usage?.memory_mb || 0) / 80, 100)} 
+                            value={Math.min((agentPerformance?.total_cost || 0) / 10 * 100, 100)} 
+                            className="h-2" 
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Avg Tokens per Task</span>
+                            <span>{agentPerformance?.average_tokens_per_task || 0}</span>
+                          </div>
+                          <Progress 
+                            value={Math.min((agentPerformance?.average_tokens_per_task || 0) / 5000 * 100, 100)} 
+                            className="h-2" 
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span>Total Requests</span>
+                            <span>{agentPerformance?.total_requests || 0}</span>
+                          </div>
+                          <Progress 
+                            value={Math.min((agentPerformance?.total_requests || 0) / 1000 * 100, 100)} 
                             className="h-2" 
                           />
                         </div>
@@ -442,25 +469,66 @@ export function AgentDetailsModal({
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Users className="w-8 h-8 text-blue-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agent?.current_workload?.active_workflows || 0}</p>
-                          <p className="text-sm text-muted-foreground">Active Workflows</p>
+                          <p className="text-2xl font-bold">{agentPerformance?.total_tasks || 0}</p>
+                          <p className="text-sm text-muted-foreground">Total Tasks</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Clock className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agent?.current_workload?.queued_tasks || 0}</p>
-                          <p className="text-sm text-muted-foreground">Queued Tasks</p>
+                          <p className="text-2xl font-bold">{agentPerformance?.total_requests || 0}</p>
+                          <p className="text-sm text-muted-foreground">Total Requests</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <Database className="w-8 h-8 text-green-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agent?.current_workload?.processing_capacity || 0}</p>
-                          <p className="text-sm text-muted-foreground">Capacity</p>
+                          <p className="text-2xl font-bold">{agentPerformance?.completed_tasks || 0}</p>
+                          <p className="text-sm text-muted-foreground">Completed</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
                           <TrendingUp className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-                          <p className="text-2xl font-bold">{agent?.current_workload?.current_utilization || 0}%</p>
-                          <p className="text-sm text-muted-foreground">Utilization</p>
+                          <p className="text-2xl font-bold">{agentPerformance?.uptime_percentage || 0}%</p>
+                          <p className="text-sm text-muted-foreground">Uptime</p>
                         </div>
                       </div>
+                    </CardContent>
+                  </Card>
+                  
+                  {/* Activity Timeline */}
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base">Recent Activity</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {agentLogs && agentLogs.length > 0 ? (
+                        <div className="space-y-3">
+                          {agentLogs.slice(0, 5).map((log: any, index: number) => (
+                            <div key={index} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
+                              <div className={`w-2 h-2 rounded-full ${
+                                log.status === 'completed' ? 'bg-green-400' :
+                                log.status === 'failed' ? 'bg-red-400' :
+                                'bg-yellow-400'
+                              }`} />
+                              <div className="flex-1">
+                                <p className="text-sm font-medium">{log.message}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Recent'}
+                                  {log.tokens_used && ` • ${log.tokens_used} tokens`}
+                                  {log.execution_time_ms && ` • ${log.execution_time_ms}ms`}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className="text-xs">
+                                {log.status || 'unknown'}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <Activity className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Recent Activity</h3>
+                          <p className="text-muted-foreground">
+                            This agent hasn't executed any tasks recently.
+                          </p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -471,12 +539,12 @@ export function AgentDetailsModal({
                       <CardTitle className="text-base">Assigned Skills</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {agent?.skills && agent.skills.length > 0 ? (
+                      {skills && skills.length > 0 ? (
                         <div className="space-y-4">
-                          {agent.skills.map((skill) => (
+                          {skills.map((skill: any) => (
                             <div key={skill.id} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
                               <div className="flex items-center space-x-3">
-                                <div className={`w-3 h-3 rounded-full ${skill.is_active ? 'bg-green-400' : 'bg-gray-400'}`} />
+                                <div className="w-3 h-3 rounded-full bg-green-400" />
                                 <div>
                                   <h4 className="font-medium">{skill.name}</h4>
                                   <p className="text-sm text-muted-foreground">
@@ -486,11 +554,11 @@ export function AgentDetailsModal({
                               </div>
                               <div className="flex items-center space-x-2">
                                 <Badge variant="outline" className="text-xs">
-                                  {skill.skill_type?.replace('_', ' ') || 'Unknown'}
+                                  {skill.category || skill.skill_type || 'General'}
                                 </Badge>
-                                {skill.category && (
+                                {skill.difficulty && (
                                   <Badge variant="secondary" className="text-xs">
-                                    {skill.category}
+                                    {skill.difficulty}
                                   </Badge>
                                 )}
                               </div>
