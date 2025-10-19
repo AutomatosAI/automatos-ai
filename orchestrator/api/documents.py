@@ -25,16 +25,21 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-# Initialize document manager
+# Initialize document manager with credentials from credential resolver
+from services.credential_resolver import get_credential_resolver
+resolver = get_credential_resolver()
+
+postgres_creds = resolver.get_dict("development_db")
+openai_key = resolver.get_credential_field("development_openai", "api_key")
+
 db_config = {
-    "database": os.getenv("POSTGRES_DB", "orchestrator_db"),
-    "user": os.getenv("POSTGRES_USER", "postgres"),
-    "password": os.getenv("POSTGRES_PASSWORD", "secure_password_123"),
-    "host": os.getenv("POSTGRES_HOST", "localhost"),
-    "port": os.getenv("POSTGRES_PORT", "5432")
+    "database": postgres_creds.get('database', 'orchestrator_db'),
+    "user": postgres_creds.get('user', 'postgres'),
+    "password": postgres_creds.get('password', ''),
+    "host": postgres_creds.get('host', 'localhost'),
+    "port": postgres_creds.get('port', 5432)
 }
-openai_api_key = os.getenv("OPENAI_API_KEY", "demo_key")
-doc_manager = DocumentManager(db_config, openai_api_key)
+doc_manager = DocumentManager(db_config, openai_key)
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(

@@ -26,7 +26,7 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/credentials", tags=["Credentials Management"])
+router = APIRouter(prefix="/legacy/credentials", tags=["Legacy Credentials Management"])
 
 # ====================================
 # Encryption Setup

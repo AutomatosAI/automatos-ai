@@ -139,7 +139,13 @@ class RAGService:
     """
     
     def __init__(self, openai_api_key: Optional[str] = None):
-        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        # Get API key from credential resolver if not provided
+        if not openai_api_key:
+            from services.credential_resolver import get_credential_resolver
+            resolver = get_credential_resolver()
+            openai_api_key = resolver.get_credential_field("development_openai", "api_key")
+        
+        self.api_key = openai_api_key
         
         # Initialize OpenAI client with new API (>= 1.0.0)
         if self.api_key:

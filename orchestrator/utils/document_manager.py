@@ -141,6 +141,11 @@ class DocumentProcessor:
                 for page in pdf.pages:
                     page_text = page.extract_text()
                     if page_text:
+                        # Remove null characters and other problematic characters
+                        page_text = page_text.replace('\x00', '').replace('\x01', '').replace('\x02', '')
+                        # Fix double characters (common PDF extraction issue)
+                        import re
+                        page_text = re.sub(r'(.)\1+', r'\1', page_text)  # Remove duplicate characters
                         text += page_text + "\n"
             return text.strip()
         except Exception as e:
@@ -164,18 +169,24 @@ class DocumentProcessor:
         file_type = self.detect_file_type(file_path)
         
         if file_type == DocumentType.PDF:
-            return self.extract_text_from_pdf(file_path)
+            text = self.extract_text_from_pdf(file_path)
         elif file_type == DocumentType.DOCX:
-            return self.extract_text_from_docx(file_path)
+            text = self.extract_text_from_docx(file_path)
         else:
             # For text-based files (MD, TXT, PY, JSON)
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    return f.read()
+                    text = f.read()
             except UnicodeDecodeError:
                 # Try with different encoding
                 with open(file_path, 'r', encoding='latin-1') as f:
-                    return f.read()
+                    text = f.read()
+        
+        # Clean any remaining null characters from all text sources
+        if text:
+            text = text.replace('\x00', '').replace('\x01', '').replace('\x02', '')
+        
+        return text
     
     def chunk_document(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
         """Split document into chunks based on file type"""
@@ -356,11 +367,152 @@ class DocumentManager:
     async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType):
         """Process document: extract text, chunk, and generate embeddings"""
         try:
+            logger.info(f"Starting document processing for document {document_id}, type: {file_type}")
+            
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
             # Extract text
             text = self.processor.extract_text_from_file(file_path)
+            logger.info(f"Extracted {len(text)} characters from document {document_id}")
+            
+            # Multimodal processing (tables, formulas, images)
+            try:
+                from services.multimodal_processors import TableProcessor, FormulaProcessor, ImageProcessor
+                
+                logger.info(f"Starting multimodal processing for document {document_id}")
+                
+                # Create knowledge_items entry for this document (if not exists)
+                cursor.execute("""
+                    INSERT INTO knowledge_items (id, kb_type_id, title, content, metadata, quality_score)
+                    SELECT %s, 
+                           (SELECT id FROM kb_types WHERE type_name = 'document' LIMIT 1),
+                           %s,
+                           %s,
+                           %s,
+                           0.8
+                    WHERE NOT EXISTS (SELECT 1 FROM knowledge_items WHERE id = %s)
+                """, (
+                    document_id,
+                    os.path.basename(file_path),
+                    text[:1000] if text else '',  # First 1000 chars as preview
+                    json.dumps({'source': 'document_upload', 'file_type': str(file_type)}),
+                    document_id
+                ))
+                conn.commit()
+                logger.info(f"Created knowledge_items entry for document {document_id}")
+                
+                # Extract tables based on file type
+                tables = []
+                try:
+                    if file_type == DocumentType.PDF or file_type == DocumentType.DOCX:
+                        # Use camelot for PDFs
+                        table_processor = TableProcessor()
+                        tables = table_processor.extract_tables_from_pdf(file_path)
+                    elif file_type == DocumentType.MARKDOWN or file_type == DocumentType.TEXT:
+                        # Extract Markdown tables using regex
+                        import re
+                        
+                        # Find Markdown table patterns
+                        table_pattern = r'\|(.+)\|[\r\n]+\|[\s:-]+\|[\r\n]+((?:\|.+\|[\r\n]+)+)'
+                        matches = re.finditer(table_pattern, text, re.MULTILINE)
+                        
+                        for match in matches:
+                            table_text = match.group(0)
+                            # Convert to simple format
+                            tables.append({
+                                'markdown': table_text,
+                                'data': [],  # Could parse if needed
+                                'csv': table_text.replace('|', ',')  # Simple CSV conversion
+                            })
+                        
+                        logger.info(f"Found {len(tables)} markdown tables in document {document_id}")
+                    
+                    # Insert all extracted tables (from PDF or Markdown)
+                    if tables:
+                        for idx, table_data in enumerate(tables):
+                            # Handle both dict and dataclass formats
+                            if isinstance(table_data, dict):
+                                markdown_content = table_data.get('markdown')
+                                json_content = json.dumps(table_data.get('data', []))
+                                csv_content = table_data.get('csv')
+                            else:
+                                # TableExtraction dataclass
+                                markdown_content = table_data.markdown
+                                json_content = json.dumps(table_data.json)
+                                csv_content = table_data.csv
+                            
+                            # Extract table details
+                            if hasattr(table_data, 'headers'):
+                                headers = json.dumps(table_data.headers)
+                                row_count = table_data.row_count
+                                column_count = table_data.column_count
+                            else:
+                                headers = json.dumps([])
+                                row_count = len(markdown_content.split('\n')) if markdown_content else 0
+                                column_count = len(markdown_content.split('|')) if markdown_content else 0
+                            
+                            cursor.execute("""
+                                INSERT INTO kb_tables (
+                                    knowledge_item_id, headers, row_count, column_count, 
+                                    markdown_representation, csv_data, json_data
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """, (
+                                document_id,
+                                headers,
+                                row_count,
+                                column_count,
+                                markdown_content,
+                                csv_content,
+                                json_content
+                            ))
+                        
+                        conn.commit()
+                        logger.info(f"Inserted {len(tables)} tables into knowledge base for document {document_id}")
+                    
+                except Exception as e:
+                    logger.warning(f"Table extraction failed for document {document_id}: {e}")
+                
+                # Process formulas (for ALL file types)
+                try:
+                    formula_processor = FormulaProcessor()
+                    formulas = formula_processor.extract_formulas_from_text(text)
+                    
+                    if formulas:
+                        for idx, formula_data in enumerate(formulas):
+                            # Handle both dict and dataclass formats
+                            if isinstance(formula_data, dict):
+                                latex_content = formula_data.get('latex')
+                                mathml_content = formula_data.get('mathml')
+                                rendered_url = formula_data.get('rendered_url')
+                            else:
+                                # FormulaExtraction dataclass
+                                latex_content = formula_data.latex
+                                mathml_content = None  # Not provided by FormulaExtraction
+                                rendered_url = None    # Not provided by FormulaExtraction
+                            
+                            cursor.execute("""
+                                INSERT INTO kb_formulas (
+                                    knowledge_item_id, latex, mathml, ascii_math
+                                ) VALUES (%s, %s, %s, %s)
+                            """, (
+                                document_id,
+                                latex_content,
+                                mathml_content or '',
+                                formula_data.ascii_math if hasattr(formula_data, 'ascii_math') else ''
+                            ))
+                        
+                        conn.commit()
+                        logger.info(f"Inserted {len(formulas)} formulas into knowledge base for document {document_id}")
+                
+                except Exception as e:
+                    logger.warning(f"Formula extraction failed for document {document_id}: {e}")
+                
+                conn.commit()
+                
+            except Exception as e:
+                logger.warning(f"Multimodal processing encountered errors for document {document_id}: {e}")
+                # Continue processing even if multimodal extraction fails
             
             # Create chunks
             chunks = self.processor.chunk_document(text, file_type, {

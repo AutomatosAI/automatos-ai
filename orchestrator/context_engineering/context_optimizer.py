@@ -144,11 +144,15 @@ class ContextOptimizer:
             openai_api_key: OpenAI API key for embeddings (uses env var if not provided)
         """
         # Initialize OpenAI client for embeddings
-        api_key = openai_api_key or os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            raise ValueError("OpenAI API key required for embeddings. Set OPENAI_API_KEY env var.")
+        if not openai_api_key:
+            from services.credential_resolver import get_credential_resolver
+            resolver = get_credential_resolver()
+            openai_api_key = resolver.get_credential_field("development_openai", "api_key")
         
-        self.openai_client = AsyncOpenAI(api_key=api_key)
+        if not openai_api_key:
+            raise ValueError("OpenAI API key required for embeddings. Configure 'development_openai' credential.")
+        
+        self.openai_client = AsyncOpenAI(api_key=openai_api_key)
         
         # Initialize embedding generator with OpenAI
         self.embedding_config = EmbeddingConfig(

@@ -295,7 +295,7 @@ class LLMManager:
         self.provider = self._create_provider()
     
     def _load_config_from_env(self) -> LLMConfig:
-        """Load LLM configuration from environment variables"""
+        """Load LLM configuration from environment variables or credential system"""
         provider_str = os.getenv("LLM_PROVIDER", "openai").lower()
         
         try:
@@ -314,12 +314,23 @@ class LLMManager:
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
         max_tokens = int(os.getenv("LLM_MAX_TOKENS", "2000"))
         
-        # Get API key based on provider
+        # PRD-18: Get API key from credential system with fallback to .env
         api_key = None
-        if provider == LLMProvider.OPENAI:
-            api_key = os.getenv("OPENAI_API_KEY")
-        elif provider == LLMProvider.ANTHROPIC:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
+        try:
+            from services.credential_resolver import get_credential_resolver
+            resolver = get_credential_resolver()
+            
+            if provider == LLMProvider.OPENAI:
+                api_key = resolver.get_openai_key()
+            elif provider == LLMProvider.ANTHROPIC:
+                api_key = resolver.get_anthropic_key()
+        except Exception as e:
+            # Fallback to environment variables (transition period)
+            logger.warning(f"Failed to resolve API key from credential system: {e}")
+            if provider == LLMProvider.OPENAI:
+                api_key = os.getenv("OPENAI_API_KEY")
+            elif provider == LLMProvider.ANTHROPIC:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
         
         return LLMConfig(
             provider=provider,

@@ -15,7 +15,11 @@ import {
   RefreshCw,
   BarChart3,
   Brain,
-  Settings
+  Settings,
+  Table,
+  Image,
+  Calculator,
+  FileSpreadsheet
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -106,7 +110,7 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
       </div>
 
       {/* Processing Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <Card className="glass-card">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -158,6 +162,20 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
               </div>
               <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
                 <BarChart3 className="w-5 h-5 text-orange-400" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="glass-card">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Multimodal Items</p>
+                <p className="text-2xl font-bold">{queueStatus?.multimodal_items_extracted || 0}</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                <Brain className="w-5 h-5 text-purple-400" />
               </div>
             </div>
           </CardContent>
@@ -265,9 +283,33 @@ export function DocumentProcessing({ documents, onDocumentSelect }: DocumentProc
 
                     {/* Processing Steps Visualization */}
                     <ProcessingSteps 
-                      steps={['Upload', 'Extract', 'Chunk', 'Embed', 'Store']}
+                      steps={['Upload', 'Extract', 'Multimodal', 'Chunk', 'Embed', 'Store', 'Complete']}
                       currentStep={doc.current_step || 'text_extraction'}
                     />
+
+                    {/* Multimodal Extraction Status */}
+                    {(doc.current_step === 'multimodal_extraction' || doc.multimodal_status) && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Brain className="w-4 h-4 text-purple-400" />
+                          <span className="text-sm font-medium">Multimodal Extraction</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
+                            <Table className="w-4 h-4 text-blue-400" />
+                            <span className="text-xs">Tables: {doc.extracted_tables || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
+                            <Calculator className="w-4 h-4 text-green-400" />
+                            <span className="text-xs">Formulas: {doc.extracted_formulas || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2 p-2 rounded-lg bg-secondary/30">
+                            <Image className="w-4 h-4 text-orange-400" />
+                            <span className="text-xs">Images: {doc.extracted_images || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

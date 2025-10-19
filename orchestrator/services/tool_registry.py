@@ -466,6 +466,133 @@ class ToolRegistry:
         ))
         
         # ==========================================
+        # MULTIMODAL RESEARCH TOOLS (PRD-19)
+        # ==========================================
+        
+        self.register_tool(ToolSpec(
+            name="search_tables",
+            category=ToolCategory.RESEARCH,
+            description="Search for tables and structured data extracted from documents. Returns tables with preserved structure in Markdown, CSV, and JSON formats",
+            executor_class="MultimodalKnowledgeTools",
+            executor_method="search_tables",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="What kind of table or data to find (e.g., 'performance metrics', 'financial data')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="number",
+                    description="Maximum number of tables to return (default: 5)",
+                    required=False,
+                    default=5
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "search_tables", "params": {"query": "API response times", "limit": 3}}
+            ],
+            metadata={"kb_type": "table", "added_in": "PRD-19"}
+        ))
+        
+        self.register_tool(ToolSpec(
+            name="search_images",
+            category=ToolCategory.RESEARCH,
+            description="Search for images, diagrams, and charts with AI-generated descriptions and OCR text. Useful for finding architecture diagrams, flowcharts, screenshots",
+            executor_class="MultimodalKnowledgeTools",
+            executor_method="search_images",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="What kind of image or diagram to find (e.g., 'system architecture', 'workflow diagram')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="number",
+                    description="Maximum number of images to return (default: 5)",
+                    required=False,
+                    default=5
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "search_images", "params": {"query": "database schema diagram", "limit": 3}}
+            ],
+            metadata={"kb_type": "image", "added_in": "PRD-19"}
+        ))
+        
+        self.register_tool(ToolSpec(
+            name="search_formulas",
+            category=ToolCategory.RESEARCH,
+            description="Search for mathematical formulas and equations. Returns LaTeX format with variable and operator extraction",
+            executor_class="MultimodalKnowledgeTools",
+            executor_method="search_formulas",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Mathematical concept or formula type (e.g., 'entropy formula', 'optimization algorithm')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="number",
+                    description="Maximum number of formulas to return (default: 5)",
+                    required=False,
+                    default=5
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "search_formulas", "params": {"query": "Shannon entropy", "limit": 3}}
+            ],
+            metadata={"kb_type": "formula", "added_in": "PRD-19"}
+        ))
+        
+        self.register_tool(ToolSpec(
+            name="search_multimodal",
+            category=ToolCategory.RESEARCH,
+            description="Unified search across ALL knowledge types: documents, code, tables, images, formulas. Use this for comprehensive research when you need multiple content types",
+            executor_class="MultimodalKnowledgeTools",
+            executor_method="search_multimodal",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Research query that may span multiple content types",
+                    required=True
+                ),
+                ToolParameter(
+                    name="kb_types",
+                    type="array",
+                    description="Knowledge types to search (default: all types)",
+                    required=False,
+                    default=["document", "table", "image", "formula", "codegraph"]
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="number",
+                    description="Maximum total results across all types (default: 10)",
+                    required=False,
+                    default=10
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["document", "codegraph", "image"], "limit": 10}}
+            ],
+            metadata={"kb_types": ["document", "table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
+        ))
+        
+        # ==========================================
         # FILE OPERATIONS (from ActionExecutor)
         # ==========================================
         

@@ -48,8 +48,12 @@ async def get_context_manager():
     global context_manager
     if not context_manager:
         context_manager = EnhancedContextManager()
-        # Check if we have OpenAI key
-        if not os.getenv("OPENAI_API_KEY"):
+        # Check if we have OpenAI key from credential resolver
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        openai_key = resolver.get_credential_field("development_openai", "api_key")
+        
+        if not openai_key:
             raise HTTPException(
                 status_code=501,
                 detail="OpenAI API key not configured. Cannot process documents without embeddings."

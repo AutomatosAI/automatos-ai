@@ -1277,12 +1277,23 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             memory_retrieval_results = {}
             try:
                 # Initialize memory system (ALWAYS create, even if retrieval fails)
+                # Get credentials from credential resolver
+                from services.credential_resolver import get_credential_resolver
+                resolver = get_credential_resolver()
+                
+                redis_creds = resolver.get_dict("development_redis")
+                postgres_creds = resolver.get_dict("development_db")
+                openai_key = resolver.get_credential_field("development_openai", "api_key")
+                
+                # Build database URL from postgres credentials
+                postgres_url = f"postgresql://{postgres_creds['user']}:{postgres_creds['password']}@{postgres_creds['host']}:{postgres_creds['port']}/{postgres_creds['database']}"
+                
                 memory_system = HierarchicalMemorySystem(
-                    redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
-                    redis_port=int(os.getenv("REDIS_PORT", 6379)),
-                    redis_password=os.getenv("REDIS_PASSWORD"),
-                    postgres_url=os.getenv("DATABASE_URL"),
-                    openai_api_key=os.getenv("OPENAI_API_KEY")
+                    redis_host=redis_creds.get('host', '127.0.0.1'),
+                    redis_port=redis_creds.get('port', 6379),
+                    redis_password=redis_creds.get('password'),
+                    postgres_url=postgres_url,
+                    openai_api_key=openai_key
                 )
                 
                 memory_integrator = WorkflowMemoryIntegrator(memory_system)

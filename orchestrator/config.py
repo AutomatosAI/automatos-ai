@@ -36,33 +36,76 @@ class Config:
             # Production/staging uses HTTPS
             return f"https://{self.API_HOST}"
     
-    # Database Configuration
+    # PRD-18: Database Configuration - Try credential system first
+    @property
+    def DATABASE_URL(self) -> str:
+        """Get database URL from credential system or environment variables"""
+        try:
+            from services.credential_resolver import resolve_postgres_params
+            params = resolve_postgres_params()
+            return (
+                f"postgresql://{params['user']}:{params['password']}@"
+                f"{params['host']}:{params['port']}/{params['database']}"
+            )
+        except:
+            # Fallback to environment variables
+            return os.getenv(
+                "DATABASE_URL", 
+                f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', '')}@{os.getenv('POSTGRES_HOST', 'localhost')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
+            )
+    
+    # Keep individual properties for backward compatibility
     POSTGRES_DB: str = os.getenv("POSTGRES_DB", "orchestrator_db")
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
     POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
     POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
     
+    # PRD-18: Redis Configuration - Try credential system first
     @property
-    def DATABASE_URL(self) -> str:
-        """Get the full database URL"""
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+    def REDIS_URL(self) -> str:
+        """Get Redis URL from credential system or environment variables"""
+        try:
+            from services.credential_resolver import resolve_redis_params
+            params = resolve_redis_params()
+            
+            if params.get('password'):
+                return f"redis://:{params['password']}@{params['host']}:{params['port']}"
+            return f"redis://{params['host']}:{params['port']}"
+        except:
+            # Fallback to environment variables
+            redis_password = os.getenv("REDIS_PASSWORD", "")
+            redis_host = os.getenv("REDIS_HOST", "localhost")
+            redis_port = os.getenv("REDIS_PORT", "6379")
+            
+            if redis_password:
+                return f"redis://:{redis_password}@{redis_host}:{redis_port}"
+            return f"redis://{redis_host}:{redis_port}"
     
-    # Redis Configuration
+    # Keep individual properties for backward compatibility
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     
+    # PRD-18: LLM Configuration - Use credential system only (no .env fallback)
     @property
-    def REDIS_URL(self) -> str:
-        """Get the full Redis URL"""
-        if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}"
-        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
+    def OPENAI_API_KEY(self) -> str:
+        """Get OpenAI API key from credential system"""
+        from services.credential_resolver import resolve_openai_key
+        key = resolve_openai_key()
+        if not key:
+            raise ValueError("OpenAI API key not found. Configure 'development_openai' credential.")
+        return key
     
-    # LLM Configuration
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    @property
+    def ANTHROPIC_API_KEY(self) -> str:
+        """Get Anthropic API key from credential system"""
+        from services.credential_resolver import resolve_anthropic_key
+        key = resolve_anthropic_key()
+        if not key:
+            raise ValueError("Anthropic API key not found. Configure 'development_anthropic' credential.")
+        return key
+    
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4")
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))

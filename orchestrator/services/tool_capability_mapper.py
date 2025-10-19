@@ -173,32 +173,32 @@ class ToolCapabilityMapper:
             "rationale": "CI/CD setup requires configuration files and shell commands"
         },
         
-        # Documentation tasks
+        # Documentation tasks (PRD-19: Enhanced with multimodal tools)
         "documentation": {
             "required": ["research", "file_ops"],
             "optional": [],
-            "specific": ["search_knowledge", "search_codebase"],
-            "rationale": "Documentation requires research and file writing"
+            "specific": ["search_knowledge", "search_codebase", "search_images"],
+            "rationale": "Documentation requires research, code examples, and finding diagrams/screenshots"
         },
         "technical_writing": {
             "required": ["research", "file_ops"],
             "optional": [],
-            "specific": ["search_knowledge"],
-            "rationale": "Technical writing requires research and document creation"
+            "specific": ["search_knowledge", "search_images", "search_tables"],
+            "rationale": "Technical writing requires research, finding diagrams, and referencing data tables"
         },
         
-        # Data tasks
+        # Data tasks (PRD-19: Enhanced with multimodal tools)
         "data_analysis": {
             "required": ["research", "file_ops"],
             "optional": ["database", "shell"],
-            "specific": [],
-            "rationale": "Data analysis requires research, file operations, and potentially database queries"
+            "specific": ["search_tables", "search_multimodal"],
+            "rationale": "Data analysis requires finding structured tables and potentially formulas for calculations"
         },
         "data_processing": {
             "required": ["file_ops", "shell"],
             "optional": ["database", "research"],
-            "specific": [],
-            "rationale": "Data processing requires file operations and command execution"
+            "specific": ["search_tables"],
+            "rationale": "Data processing benefits from finding existing data tables and patterns"
         },
         "etl_pipeline": {
             "required": ["database", "file_ops", "shell"],
@@ -211,14 +211,38 @@ class ToolCapabilityMapper:
         "research": {
             "required": ["research"],
             "optional": [],
-            "specific": ["search_knowledge", "semantic_search"],
-            "rationale": "Research tasks only need knowledge search capabilities"
+            "specific": ["search_knowledge", "semantic_search", "search_multimodal"],
+            "rationale": "Research tasks benefit from comprehensive multimodal search capabilities"
         },
         "competitive_analysis": {
             "required": ["research"],
             "optional": ["api"],
-            "specific": ["search_knowledge", "semantic_search"],
-            "rationale": "Competitive analysis requires extensive research capabilities"
+            "specific": ["search_knowledge", "semantic_search", "search_tables"],
+            "rationale": "Competitive analysis requires research and finding comparison tables"
+        },
+        "research_paper_review": {
+            "required": ["research"],
+            "optional": ["file_ops"],
+            "specific": ["search_formulas", "search_images", "search_tables", "search_multimodal"],
+            "rationale": "Research papers contain formulas, diagrams, data tables - multimodal tools essential"
+        },
+        "scientific_research": {
+            "required": ["research"],
+            "optional": ["file_ops"],
+            "specific": ["search_formulas", "search_tables", "search_images"],
+            "rationale": "Scientific research requires accessing equations, data, and visual content"
+        },
+        "financial_analysis": {
+            "required": ["research"],
+            "optional": ["database", "file_ops"],
+            "specific": ["search_tables", "search_multimodal"],
+            "rationale": "Financial analysis requires structured financial data tables and reports"
+        },
+        "diagram_analysis": {
+            "required": ["research"],
+            "optional": [],
+            "specific": ["search_images", "search_multimodal"],
+            "rationale": "Analyzing diagrams requires finding and understanding visual content"
         },
         
         # General/Fallback
@@ -350,10 +374,14 @@ class ToolCapabilityMapper:
             "deployment": ["deploy", "release", "publish", "deploy to", "deploy the"],
             "database_update": ["database", "sql", "update db", "migrate", "schema", "update the user database"],
             "create_pr": ["create pr", "pull request", "github pr"],
-            "documentation": ["document", "write docs", "readme"],
-            "data_analysis": ["analyze data", "data analysis", "statistics"],
+            "documentation": ["document", "write docs", "readme", "technical documentation"],
+            "data_analysis": ["analyze data", "data analysis", "statistics", "data insights", "analyze table"],
             "testing": ["test", "unit test", "integration test", "qa"],
             "research": ["research", "best practices", "find information", "learn about"],
+            "research_paper_review": ["research paper", "scientific paper", "academic paper", "paper review", "literature review"],
+            "scientific_research": ["scientific", "science", "research study", "experiment", "hypothesis"],
+            "financial_analysis": ["financial", "finance", "budget", "revenue", "profit", "financial data"],
+            "diagram_analysis": ["diagram", "chart", "graph", "flowchart", "architecture diagram", "visual"],
         }
         
         # Score each task type based on keyword matches

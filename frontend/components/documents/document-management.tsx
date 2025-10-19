@@ -10,7 +10,7 @@ import {
   Filter, 
   FileText, 
   File, 
-  Image, 
+  Image,
   Database,
   Trash2,
   Download,
@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
+import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
 // Document modals
 import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
@@ -342,10 +343,14 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span className="hidden sm:inline">Library</span>
+            </TabsTrigger>
+            <TabsTrigger value="multimodal" className="flex items-center space-x-2">
+              <Image className="w-4 h-4" />
+              <span className="hidden sm:inline">Multimodal</span>
             </TabsTrigger>
             <TabsTrigger value="search" className="flex items-center space-x-2">
               <Search className="w-4 h-4" />
@@ -528,14 +533,18 @@ export function DocumentManagement() {
             </div>
           </TabsContent>
 
+          <TabsContent value="multimodal" className="space-y-6">
+            <MultimodalKnowledgePanel />
+          </TabsContent>
+
           <TabsContent value="search" className="space-y-6">
             <SemanticSearch
               context="documents"
               onResultSelect={(result) => {
                 // Find and select the document
-                const doc = documents.find(d => d.id === result.document_id)
+                const doc = typedDocuments.find(d => d.id === result.document_id)
                 if (doc) {
-                  setSelectedDocument(doc)
+                  setSelectedDocumentId(doc.id)
                   setShowDetailsModal(true)
                 }
               }}
@@ -605,9 +614,9 @@ export function DocumentManagement() {
             <DocumentProcessing 
               documents={documents}
               onDocumentSelect={(docId) => {
-                const doc = documents.find(d => d.id === parseInt(docId))
+                const doc = typedDocuments.find(d => d.id === parseInt(docId))
                 if (doc) {
-                  setSelectedDocument(doc)
+                  setSelectedDocumentId(doc.id)
                   setShowDetailsModal(true)
                 }
               }}

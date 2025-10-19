@@ -10,11 +10,13 @@ interface ProcessingStepsProps {
 
 export function ProcessingSteps({ steps, currentStep }: ProcessingStepsProps) {
   const stepMap: Record<string, number> = {
-    'text_extraction': 0,
-    'chunking': 1,
-    'embedding': 2,
-    'storage': 3,
-    'finalizing': 4,
+    'upload': 0,
+    'text_extraction': 1,
+    'multimodal_extraction': 2,
+    'chunking': 3,
+    'embedding': 4,
+    'storage': 5,
+    'finalizing': 6,
   }
 
   const currentStepIndex = stepMap[currentStep] ?? 0

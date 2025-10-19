@@ -1,0 +1,321 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { 
+  Database, Brain, Server, Mail, Code, Key, Cloud, CreditCard,
+  Briefcase, Activity, Search, ExternalLink
+} from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  listCredentialTypes,
+  getCredentialCategories,
+  type CredentialType
+} from '@/lib/api/credentials'
+
+const CATEGORY_ICONS: Record<string, any> = {
+  database: Database,
+  ai: Brain,
+  infrastructure: Server,
+  communication: Mail,
+  code: Code,
+  api: Key,
+  cloud: Cloud,
+  payment: CreditCard,
+  crm: Briefcase,
+  monitoring: Activity,
+  storage: Server
+}
+
+export function CredentialTypesTab() {
+  const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [selectedType, setSelectedType] = useState<CredentialType | null>(null)
+
+  useEffect(() => {
+    loadData()
+  }, [categoryFilter])
+
+  const loadData = async () => {
+    try {
+      setLoading(true)
+      const [types, cats] = await Promise.all([
+        listCredentialTypes({
+          category: categoryFilter === 'all' ? undefined : categoryFilter,
+          active_only: true
+        }),
+        getCredentialCategories()
+      ])
+      
+      setCredentialTypes(types)
+      setCategories(cats)
+    } catch (error) {
+      console.error('Failed to load credential types:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const filteredTypes = credentialTypes.filter(type =>
+    type.display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    type.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (type.description && type.description.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
+
+  const getCategoryIcon = (category: string | null) => {
+    if (!category) return Key
+    return CATEGORY_ICONS[category] || Key
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-2xl font-bold">Credential Types</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Browse {credentialTypes.length} available credential types for integrations
+        </p>
+      </div>
+
+      {/* Filters */}
+      <Card className="glass-card">
+        <CardContent className="pt-6">
+          <div className="flex gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search credential types..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {categories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Credential Types Grid */}
+      {loading ? (
+        <div className="text-center py-12">
+          <p className="text-muted-foreground">Loading credential types...</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredTypes.map((type) => {
+            const IconComponent = getCategoryIcon(type.category)
+            
+            return (
+              <Card
+                key={type.id}
+                className="glass-card hover:border-primary/50 transition-all cursor-pointer"
+                onClick={() => setSelectedType(type)}
+              >
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <IconComponent className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-lg">{type.display_name}</CardTitle>
+                        {type.category && (
+                          <Badge variant="outline" className="mt-1 text-xs">
+                            {type.category}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    {type.is_system && (
+                      <Badge className="bg-blue-500/20 text-blue-400 text-xs">
+                        System
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                
+                <CardContent>
+                  {type.description && (
+                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                      {type.description}
+                    </p>
+                  )}
+                  
+                  <div className="text-xs text-muted-foreground">
+                    {type.schema_definition.length} field{type.schema_definition.length !== 1 && 's'}
+                    {type.test_endpoint && ' • Test available'}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+
+      {filteredTypes.length === 0 && !loading && (
+        <Card className="glass-card">
+          <CardContent className="pt-12 pb-12 text-center">
+            <Key className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Credential Types Found</h3>
+            <p className="text-sm text-muted-foreground">
+              Try adjusting your search or filters
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Detail Dialog */}
+      {selectedType && (
+        <Dialog open={!!selectedType} onOpenChange={() => setSelectedType(null)}>
+          <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3">
+                {(() => {
+                  const IconComponent = getCategoryIcon(selectedType.category)
+                  return <IconComponent className="w-6 h-6 text-primary" />
+                })()}
+                {selectedType.display_name}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedType.description}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-6">
+              {/* Metadata */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">Internal Name</p>
+                  <p className="text-sm font-mono">{selectedType.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">Category</p>
+                  <p className="text-sm">{selectedType.category || 'None'}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">Fields</p>
+                  <p className="text-sm">{selectedType.schema_definition.length}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">Test Available</p>
+                  <p className="text-sm">{selectedType.test_endpoint ? 'Yes' : 'No'}</p>
+                </div>
+              </div>
+
+              {/* Documentation Link */}
+              {selectedType.documentation_url && (
+                <a
+                  href={selectedType.documentation_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  View Documentation
+                </a>
+              )}
+
+              {/* Schema Definition */}
+              <div>
+                <h4 className="font-semibold mb-3">Field Schema</h4>
+                <div className="space-y-3">
+                  {selectedType.schema_definition.map((field, idx) => (
+                    <div key={idx} className="p-3 bg-secondary/20 rounded-lg">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="font-semibold">
+                            {field.displayName}
+                            {field.required && <span className="text-red-500 ml-1">*</span>}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Field: <code className="text-xs">{field.name}</code>
+                          </p>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {field.type}
+                        </Badge>
+                      </div>
+                      
+                      {field.description && (
+                        <p className="text-sm text-muted-foreground mt-2">{field.description}</p>
+                      )}
+                      
+                      {field.default !== undefined && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Default: <code>{JSON.stringify(field.default)}</code>
+                        </p>
+                      )}
+
+                      {field.typeOptions?.options && (
+                        <div className="mt-2">
+                          <p className="text-xs font-semibold text-muted-foreground mb-1">Options:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {field.typeOptions.options.map((opt: any, i: number) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {opt.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Test Endpoint Info */}
+              {selectedType.test_endpoint && (
+                <div>
+                  <h4 className="font-semibold mb-2">Test Configuration</h4>
+                  <div className="p-3 bg-secondary/20 rounded-lg">
+                    <p className="text-sm">
+                      <span className="font-semibold">Method:</span> {selectedType.test_endpoint.method}
+                    </p>
+                    {selectedType.test_endpoint.description && (
+                      <p className="text-sm mt-1 text-muted-foreground">
+                        {selectedType.test_endpoint.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  )
+}
+
