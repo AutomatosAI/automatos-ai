@@ -379,6 +379,7 @@ class DocumentManager:
             # Multimodal processing (tables, formulas, images)
             try:
                 from services.multimodal_processors import TableProcessor, FormulaProcessor, ImageProcessor
+                from services.entity_extractor import EntityExtractor, create_or_get_entity, create_entity_mention, create_entity_relationship
                 
                 logger.info(f"Starting multimodal processing for document {document_id}")
                 
@@ -507,6 +508,64 @@ class DocumentManager:
                 
                 except Exception as e:
                     logger.warning(f"Formula extraction failed for document {document_id}: {e}")
+                
+                # NEW: Entity extraction for knowledge graph
+                try:
+                    logger.info(f"Starting entity extraction for document {document_id}")
+                    entity_extractor = EntityExtractor()
+                    
+                    # Extract entities from text
+                    entities = await entity_extractor.extract_entities(text, use_llm=True, max_entities=30)
+                    logger.info(f"Extracted {len(entities)} entities from document {document_id}")
+                    
+                    # Store entities and create mentions
+                    entity_ids = []
+                    for entity in entities:
+                        entity_id = await create_or_get_entity(
+                            cursor,
+                            entity.entity_name,
+                            entity.entity_type,
+                            entity.canonical_name,
+                            entity.description
+                        )
+                        entity_ids.append(entity_id)
+                        
+                        await create_entity_mention(
+                            cursor,
+                            document_id,
+                            entity_id,
+                            entity.mention_context,
+                            entity.confidence,
+                            entity.position,
+                            "llm"
+                        )
+                    
+                    conn.commit()
+                    logger.info(f"Stored {len(entities)} entities for document {document_id}")
+                    
+                    # Extract relationships between entities
+                    if len(entities) >= 2:
+                        relationships = await entity_extractor.extract_relationships(text, entities, max_relationships=20)
+                        logger.info(f"Extracted {len(relationships)} relationships from document {document_id}")
+                        
+                        for rel in relationships:
+                            await create_entity_relationship(
+                                cursor,
+                                rel.from_entity,
+                                rel.to_entity,
+                                rel.relationship_type,
+                                rel.strength,
+                                document_id,
+                                rel.evidence
+                            )
+                        
+                        conn.commit()
+                        logger.info(f"Stored {len(relationships)} relationships for document {document_id}")
+                    
+                except Exception as e:
+                    logger.warning(f"Entity extraction failed for document {document_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
                 conn.commit()
                 

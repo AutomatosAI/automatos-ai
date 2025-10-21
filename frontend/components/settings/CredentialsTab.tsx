@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { DynamicCredentialForm } from './DynamicCredentialForm'
+import { EnhancedPagination } from '@/components/ui/pagination'
 import {
   listCredentials,
   deleteCredential,
@@ -60,19 +61,55 @@ export function CredentialsTab() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedCredential, setSelectedCredential] = useState<Credential | null>(null)
   const [testingCredential, setTestingCredential] = useState<number | null>(null)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [paginationData, setPaginationData] = useState<any>(null)
 
   useEffect(() => {
     loadCredentials()
-  }, [environmentFilter])
+  }, [environmentFilter, currentPage])
+
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (currentPage !== 1) {
+        setCurrentPage(1) // Reset to first page when searching
+      } else {
+        loadCredentials()
+      }
+    }, 500)
+
+    return () => clearTimeout(timeoutId)
+  }, [searchTerm])
 
   const loadCredentials = async () => {
     try {
       setLoading(true)
       const data = await listCredentials({
         environment: environmentFilter === 'all' ? undefined : environmentFilter,
-        active_only: true
+        active_only: true,
+        skip: (currentPage - 1) * pageSize,
+        limit: pageSize,
+        search: searchTerm || undefined
       })
-      setCredentials(data)
+      
+      // Handle paginated response
+      if (data.items) {
+        setCredentials(data.items)
+        setPaginationData({
+          total: data.total,
+          skip: data.skip,
+          limit: data.limit,
+          pages: data.pages,
+          current_page: data.current_page
+        })
+      } else {
+        // Fallback for non-paginated response
+        setCredentials(data)
+        setPaginationData(null)
+      }
     } catch (error) {
       console.error('Failed to load credentials:', error)
     } finally {
@@ -114,11 +151,8 @@ export function CredentialsTab() {
     }
   }
 
-  const filteredCredentials = credentials.filter(cred =>
-    cred.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cred.credential_type_display_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (cred.description && cred.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  )
+  // Since we're now using server-side search, we don't need client-side filtering
+  const filteredCredentials = credentials
 
   return (
     <div className="space-y-6">
@@ -306,6 +340,15 @@ export function CredentialsTab() {
             )
           })}
         </div>
+      )}
+
+      {/* Pagination */}
+      {paginationData && (
+        <EnhancedPagination
+          data={paginationData}
+          onPageChange={(page) => setCurrentPage(page)}
+          className="mt-6"
+        />
       )}
 
       {/* Edit Dialog */}

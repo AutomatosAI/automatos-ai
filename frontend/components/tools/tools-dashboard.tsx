@@ -41,7 +41,10 @@ import {
   MoreVertical,
   Edit,
   Power,
-  PowerOff
+  PowerOff,
+  BookOpen,
+  ExternalLink,
+  Eye
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,8 +62,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
 import { ToolConfigModal } from './tool-config-modal'
+import { ToolDetailsModal } from './tool-details-modal'
 import { AgentToolAssignment } from './agent-tool-assignment'
 import { CreateToolModal } from './create-tool-modal'
+import { EnhancedPagination } from '@/components/ui/pagination'
 import { useMCPTools, useMCPToolsStats, useMCPToolCategories, useMCPToolAssignments, useUpdateMCPTool } from '@/hooks/use-mcp-tools-api'
 
 // Tool Categories
@@ -156,8 +161,15 @@ interface Tool {
 }
 
 export function ToolsDashboard() {
-  // Fetch real data from API with error handling
-  const { data: mcpTools = [], isLoading: toolsLoading, error: toolsError } = useMCPTools({ limit: 100 })
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(20)
+  
+  // Fetch real data from API with error handling and pagination
+  const { data: mcpToolsData, isLoading: toolsLoading, error: toolsError } = useMCPTools({ 
+    skip: (currentPage - 1) * pageSize,
+    limit: pageSize
+  })
   const { data: statsData, error: statsError } = useMCPToolsStats()
   const { data: categoriesData, error: categoriesError } = useMCPToolCategories()
   // Temporarily disable assignments API until backend endpoint is ready
@@ -165,10 +177,14 @@ export function ToolsDashboard() {
   const toolAssignments: any[] = [] // Mock empty assignments for now
   const updateToolMutation = useUpdateMCPTool()
 
+  // Extract tools and pagination data
+  const mcpTools = mcpToolsData?.data || []
+  const paginationData = mcpToolsData?.pagination || { total: 0, pages: 0, current_page: 1 }
+
   // Log any API errors (but don't spam the console)
-  if (toolsError && !toolsError.message?.includes('422')) console.error('Tools API Error:', toolsError)
-  if (statsError && !statsError.message?.includes('422')) console.error('Stats API Error:', statsError)
-  if (categoriesError && !categoriesError.message?.includes('422')) console.error('Categories API Error:', categoriesError)
+  if (toolsError && !(toolsError as any).message?.includes('422')) console.error('Tools API Error:', toolsError)
+  if (statsError && !(statsError as any).message?.includes('422')) console.error('Stats API Error:', statsError)
+  if (categoriesError && !(categoriesError as any).message?.includes('422')) console.error('Categories API Error:', categoriesError)
 
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -179,6 +195,7 @@ export function ToolsDashboard() {
   
   // Modal states
   const [configModalOpen, setConfigModalOpen] = useState(false)
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false)
   const [selectedTool, setSelectedTool] = useState<any | null>(null)
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
   const [createToolModalOpen, setCreateToolModalOpen] = useState(false) // Phase 3
@@ -194,7 +211,7 @@ export function ToolsDashboard() {
         
         const baseTool = {
           ...tool,
-          isInstalled: isAssigned, // Use real assignment status
+          isInstalled: tool.status === 'active', // Use actual tool status
           isConfigured: isAssigned, // Assume configured if assigned
           rating: 0, // TODO: Add ratings system
           usageCount: 0, // TODO: Track from usage logs
@@ -274,7 +291,7 @@ export function ToolsDashboard() {
   }
 
   const getCategoryCount = (categoryId: string) => {
-    if (categoryId === 'all') return tools?.length || 0
+    if (categoryId === 'all') return paginationData.total || 0
     
     // Use real category counts from API if available
     if (categoriesData && Array.isArray(categoriesData) && categoryId !== 'all') {
@@ -350,8 +367,7 @@ export function ToolsDashboard() {
         [tool.id]: { isInstalled: enabled, isConfigured: enabled }
       }))
       
-      // For now, just update the tool status in the database
-      // TODO: Later we should manage agent-tool assignments instead
+      // Update the tool status in the database
       await updateToolMutation.mutateAsync({
         id: tool.id,
         data: { 
@@ -364,6 +380,8 @@ export function ToolsDashboard() {
           }
         }
       })
+      
+      console.log(`✅ Successfully ${enabled ? 'enabled' : 'disabled'} tool: ${tool.name}`)
       
     } catch (error) {
       console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
@@ -381,6 +399,11 @@ export function ToolsDashboard() {
   const handleToolConfigure = (tool: Tool) => {
     setSelectedTool(tool)
     setConfigModalOpen(true)
+  }
+
+  const handleToolDetails = (tool: Tool) => {
+    setSelectedTool(tool)
+    setDetailsModalOpen(true)
   }
 
   const handleToolDelete = async (tool: Tool) => {
@@ -405,7 +428,7 @@ export function ToolsDashboard() {
   }
 
   const stats = {
-    total_tools: (mcpTools as any[]).length,
+    total_tools: paginationData.total || 0, // Use total from pagination
     active_tools: (mcpTools as any[]).filter((tool: any) => tool.status === 'active').length,
     assigned_tools: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
     total_agents: (toolAssignments as any[]).reduce((acc: any, assignment: any) => {
@@ -416,8 +439,8 @@ export function ToolsDashboard() {
     }, []).length,
     installed: tools.filter(tool => tool?.isInstalled)?.length || 0, // Use actual enabled tools count
     configured: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
-    available: (mcpTools as any[]).filter((tool: any) => tool.status === 'available').length,
-    total: (mcpTools as any[]).length
+    available: paginationData.total || 0, // Use total from pagination for available
+    total: paginationData.total || 0 // Use total from pagination
   }
 
   return (
@@ -441,7 +464,7 @@ export function ToolsDashboard() {
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
-            {toolsLoading ? 'Loading...' : `${(mcpTools as any[])?.length || 0} Tools`}
+            {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
           
           <Button
@@ -691,9 +714,13 @@ export function ToolsDashboard() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleToolDetails(tool)}>
+                          <Eye className="w-4 h-4 mr-2" />
+                          View Details
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToolConfigure(tool)}>
                           <Edit className="w-4 h-4 mr-2" />
-                          Edit
+                          Configure
                         </DropdownMenuItem>
                         <DropdownMenuItem 
                           onClick={() => handleToolDelete(tool)}
@@ -748,32 +775,44 @@ export function ToolsDashboard() {
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="flex items-center justify-between">
-                    {/* Custom Toggle Button */}
-                    <button
-                      onClick={() => {
-                        console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
-                        handleToolToggle(tool, !tool?.isInstalled)
-                      }}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
-                        tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
-                      }`}
-                    >
-                      <span className="sr-only">Toggle tool</span>
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                  <div className="space-y-3">
+                    {/* Toggle Section */}
+                    <div className="flex items-center justify-between">
+                      {/* Custom Toggle Button */}
+                      <button
+                        onClick={() => {
+                          console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                          handleToolToggle(tool, !tool?.isInstalled)
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
+                          tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
                         }`}
-                      />
-                    </button>
-                    <span className="text-sm text-muted-foreground">
-                      {tool?.isInstalled ? 'Enabled' : 'Disabled'}
-                    </span>
+                      >
+                        <span className="sr-only">Toggle tool</span>
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                      <span className="text-sm text-muted-foreground">
+                        {tool?.isInstalled ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </div>
                   </div>
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
+
+          {/* Pagination */}
+          {paginationData.total > pageSize && (
+            <EnhancedPagination
+              data={paginationData}
+              onPageChange={(page) => setCurrentPage(page)}
+              className="mt-6"
+            />
+          )}
 
           {/* Empty State */}
           {filteredTools?.length === 0 && (
@@ -910,6 +949,29 @@ export function ToolsDashboard() {
       </motion.div>
 
       {/* Modals */}
+      <ToolDetailsModal
+        open={detailsModalOpen}
+        onClose={() => setDetailsModalOpen(false)}
+        tool={selectedTool}
+        onInstall={() => {
+          if (selectedTool) {
+            handleToolToggle(selectedTool, true)
+            setDetailsModalOpen(false)
+          }
+        }}
+        onConfigure={() => {
+          setDetailsModalOpen(false)
+          setConfigModalOpen(true)
+        }}
+        onUninstall={() => {
+          if (selectedTool) {
+            handleToolToggle(selectedTool, false)
+            setDetailsModalOpen(false)
+          }
+        }}
+        loading={loading}
+      />
+
       <ToolConfigModal
         open={configModalOpen}
         onClose={() => setConfigModalOpen(false)}
@@ -1077,39 +1139,42 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
 
           <Separator />
 
-          <div className="flex space-x-2">
-            {tool?.isInstalled ? (
-              <>
+          {/* Documentation Link */}
+          <div className="space-y-2">
+            <div className="flex space-x-2">
+              {tool?.isInstalled ? (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1 hover:border-blue-500/50"
+                    onClick={onConfigure}
+                  >
+                    <Settings className="w-4 h-4 mr-1" />
+                    Config
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={onUninstall}
+                    className="hover:border-red-500/50 text-red-400"
+                    disabled={loading}
+                  >
+                    Remove
+                  </Button>
+                </>
+              ) : (
                 <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="flex-1 hover:border-blue-500/50"
-                  onClick={onConfigure}
-                >
-                  <Settings className="w-4 h-4 mr-1" />
-                  Config
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={onUninstall}
-                  className="hover:border-red-500/50 text-red-400"
+                  onClick={onInstall}
                   disabled={loading}
+                  className="w-full bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+                  size="sm"
                 >
-                  Remove
+                  <Download className="w-4 h-4 mr-2" />
+                  Install
                 </Button>
-              </>
-            ) : (
-              <Button 
-                onClick={onInstall}
-                disabled={loading}
-                className="w-full bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                size="sm"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Install
-              </Button>
-            )}
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

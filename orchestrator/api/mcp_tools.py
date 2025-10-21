@@ -44,11 +44,11 @@ async def list_mcp_tools(
     category: Optional[str] = Query(None, description="Filter by category"),
     provider: Optional[str] = Query(None, description="Filter by provider"),
     search: Optional[str] = Query(None, description="Search in name, description"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0, description="Number of items to skip (for pagination)"),
+    limit: int = Query(20, ge=1, le=10000, description="Number of items per page (max 10000)"),
     db: Session = Depends(get_db)
 ):
-    """List all MCP tools with optional filters"""
+    """List all MCP tools with pagination and optional filters"""
     try:
         query = db.query(MCPTool)
         
@@ -69,10 +69,17 @@ async def list_mcp_tools(
                 )
             )
         
-        tools = query.offset(skip).limit(limit).all()
+        # Get total count before pagination
+        total = query.count()
+        
+        # Apply pagination
+        tools = query.order_by(MCPTool.name).offset(skip).limit(limit).all()
+        
+        # Calculate pagination metadata
+        pages = (total + limit - 1) // limit  # Ceiling division
         
         # Manually convert to dict to handle metadata field
-        return [
+        items = [
             {
                 "id": t.id,
                 "name": t.name,
@@ -93,6 +100,18 @@ async def list_mcp_tools(
             }
             for t in tools
         ]
+        
+        # Return paginated response (frontend expects 'data' and 'pagination')
+        return {
+            "data": items,
+            "pagination": {
+                "total": total,
+                "skip": skip,
+                "limit": limit,
+                "pages": pages,
+                "current_page": (skip // limit) + 1 if limit > 0 else 1
+            }
+        }
         
     except Exception as e:
         logger.error(f"Error listing MCP tools: {e}")
@@ -180,21 +199,27 @@ async def update_mcp_tool(
             raise HTTPException(status_code=404, detail="Tool not found")
         
         # Update fields
-        update_data = tool_data.model_dump(exclude_unset=True)
+        update_data = tool_data.model_dump(exclude_unset=True, by_alias=False)
+        logger.info(f"Updating tool {tool_id} with data: {update_data}")
+        
         for field, value in update_data.items():
-            setattr(tool, field, value)
+            # Handle the metadata field properly
+            if field == 'metadata' or field == 'tool_metadata':
+                setattr(tool, 'tool_metadata', value)
+            else:
+                setattr(tool, field, value)
         
         db.commit()
         db.refresh(tool)
         
-        logger.info(f"Updated MCP tool: {tool.name} (ID: {tool.id})")
+        logger.info(f"✅ Updated MCP tool: {tool.name} (ID: {tool.id}, Status: {tool.status})")
         return tool
         
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating MCP tool: {e}")
+        logger.error(f"Error updating MCP tool {tool_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/{tool_id}")

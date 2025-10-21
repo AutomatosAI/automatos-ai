@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { EnhancedPagination } from '@/components/ui/pagination'
 import { 
   Database, Brain, Server, Mail, Code, Key, Cloud, CreditCard,
   Briefcase, Activity, Search, ExternalLink
@@ -50,6 +51,11 @@ export function CredentialTypesTab() {
   const [searchTerm, setSearchTerm] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [selectedType, setSelectedType] = useState<CredentialType | null>(null)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [totalCount, setTotalCount] = useState(0)
 
   useEffect(() => {
     loadData()
@@ -80,6 +86,25 @@ export function CredentialTypesTab() {
     type.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (type.description && type.description.toLowerCase().includes(searchTerm.toLowerCase()))
   )
+  
+  // Client-side pagination
+  const startIndex = (currentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+  const paginatedTypes = filteredTypes.slice(startIndex, endIndex)
+  const totalPages = Math.ceil(filteredTypes.length / pageSize)
+  
+  const paginationData = {
+    total: filteredTypes.length,
+    skip: startIndex,
+    limit: pageSize,
+    pages: totalPages,
+    current_page: currentPage
+  }
+  
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, categoryFilter])
 
   const getCategoryIcon = (category: string | null) => {
     if (!category) return Key
@@ -92,7 +117,7 @@ export function CredentialTypesTab() {
       <div>
         <h2 className="text-2xl font-bold">Credential Types</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Browse {credentialTypes.length} available credential types for integrations
+          Browse {filteredTypes.length} of {credentialTypes.length} available credential types for integrations
         </p>
       </div>
 
@@ -133,8 +158,9 @@ export function CredentialTypesTab() {
           <p className="text-muted-foreground">Loading credential types...</p>
         </div>
       ) : (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredTypes.map((type) => {
+          {paginatedTypes.map((type) => {
             const IconComponent = getCategoryIcon(type.category)
             
             return (
@@ -182,6 +208,16 @@ export function CredentialTypesTab() {
             )
           })}
         </div>
+        
+        {/* Pagination */}
+        {filteredTypes.length > pageSize && (
+          <EnhancedPagination
+            data={paginationData}
+            onPageChange={(page) => setCurrentPage(page)}
+            className="mt-6"
+          />
+        )}
+        </>
       )}
 
       {filteredTypes.length === 0 && !loading && (

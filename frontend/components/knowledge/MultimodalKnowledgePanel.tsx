@@ -40,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
+import KnowledgeGraphVisualizer from './KnowledgeGraphVisualizer'
 
 // Knowledge type icons
 const knowledgeTypeIcons = {
@@ -263,10 +264,10 @@ export function MultimodalKnowledgePanel() {
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Total Items</p>
                   <p className="text-2xl font-bold">{stats.total_items}</p>
-                  <p className="text-xs text-blue-400 mt-1">Across all types</p>
+                  <p className="text-xs text-gray-400 mt-1">Across all types</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Database className="w-5 h-5 text-blue-400" />
+                  <Database className="w-5 h-5 text-gray-400" />
                 </div>
               </div>
             </CardContent>
@@ -278,10 +279,10 @@ export function MultimodalKnowledgePanel() {
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Tables</p>
                   <p className="text-2xl font-bold">{stats.by_type?.table || 0}</p>
-                  <p className="text-xs text-green-400 mt-1">Structured data</p>
+                  <p className="text-xs text-gray-400 mt-1">Structured data</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Table2 className="w-5 h-5 text-green-400" />
+                  <Table2 className="w-5 h-5 text-gray-400" />
                 </div>
               </div>
             </CardContent>
@@ -293,10 +294,10 @@ export function MultimodalKnowledgePanel() {
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Images</p>
                   <p className="text-2xl font-bold">{stats.by_type?.image || 0}</p>
-                  <p className="text-xs text-orange-400 mt-1">Visual content</p>
+                  <p className="text-xs text-gray-400 mt-1">Visual content</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <ImageIcon className="w-5 h-5 text-orange-400" />
+                  <ImageIcon className="w-5 h-5 text-gray-400" />
                 </div>
               </div>
             </CardContent>
@@ -308,10 +309,10 @@ export function MultimodalKnowledgePanel() {
                 <div>
                   <p className="text-sm font-medium text-muted-foreground">Formulas</p>
                   <p className="text-2xl font-bold">{stats.by_type?.formula || 0}</p>
-                  <p className="text-xs text-pink-400 mt-1">Mathematical</p>
+                  <p className="text-xs text-gray-400 mt-1">Mathematical</p>
                 </div>
                 <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Calculator className="w-5 h-5 text-pink-400" />
+                  <Calculator className="w-5 h-5 text-gray-400" />
                 </div>
               </div>
             </CardContent>
@@ -355,7 +356,7 @@ export function MultimodalKnowledgePanel() {
 
       {/* Knowledge Type Tabs */}
       <Tabs value={activeType} onValueChange={setActiveType} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
           <TabsTrigger value="all" className="flex items-center space-x-2">
             <Sparkles className="w-4 h-4" />
             <span className="hidden sm:inline">All</span>
@@ -376,6 +377,10 @@ export function MultimodalKnowledgePanel() {
             <Network className="w-4 h-4" />
             <span className="hidden sm:inline">Diagrams</span>
           </TabsTrigger>
+          <TabsTrigger value="graph" className="flex items-center space-x-2">
+            <Brain className="w-4 h-4" />
+            <span className="hidden sm:inline">Graph</span>
+          </TabsTrigger>
         </TabsList>
 
         {/* Content Grid */}
@@ -387,7 +392,7 @@ export function MultimodalKnowledgePanel() {
                 <p className="text-muted-foreground">Loading knowledge items...</p>
               </div>
             </div>
-          ) : knowledgeItems.length === 0 ? (
+          ) : knowledgeItems.length === 0 && activeType !== 'graph' ? (
             <Card className="glass-card">
               <CardContent className="p-12 text-center">
                 <Database className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
@@ -402,6 +407,10 @@ export function MultimodalKnowledgePanel() {
                 </p>
               </CardContent>
             </Card>
+          ) : activeType === 'graph' ? (
+            <div className="h-[800px]">
+              <KnowledgeGraphVisualizer />
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {knowledgeItems.map((item, index) => {
@@ -468,9 +477,41 @@ export function MultimodalKnowledgePanel() {
                         {/* Content Preview based on type */}
                         {item.knowledge_type === 'table' && item.metadata?.preview && (
                           <div className="bg-secondary/30 rounded p-2 mb-3 overflow-x-auto">
-                            <div className="text-xs font-mono whitespace-pre">
-                              {item.metadata.preview.substring(0, 100)}...
-                            </div>
+                            {(() => {
+                              const preview = item.metadata.preview
+                              const lines = preview.split('\n').filter(line => line.trim())
+                              if (lines.length < 2) {
+                                return <div className="text-xs font-mono whitespace-pre">{preview.substring(0, 100)}...</div>
+                              }
+                              
+                              const headers = lines[0].split('|').map(h => h.trim()).filter(h => h)
+                              const rows = lines.slice(1, 3).map(line => 
+                                line.split('|').map(cell => cell.trim()).filter(cell => cell)
+                              )
+                              
+                              return (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-xs border-collapse min-w-full">
+                                    <thead>
+                                      <tr className="border-b border-gray-600">
+                                        {headers.map((header, i) => (
+                                          <th key={i} className="text-left p-1 font-medium bg-gray-800/50 text-gray-200">{header}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {rows.map((row, i) => (
+                                        <tr key={i} className="border-b border-gray-700">
+                                          {row.map((cell, j) => (
+                                            <td key={j} className="p-1 text-gray-300">{cell}</td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )
+                            })()}
                           </div>
                         )}
 
@@ -558,38 +599,72 @@ export function MultimodalKnowledgePanel() {
                       <h3 className="text-sm font-medium text-muted-foreground mb-2">
                         Table ({selectedItem.row_count} rows × {selectedItem.column_count} columns)
                       </h3>
-                      <div className="bg-secondary/30 p-4 rounded-lg overflow-auto">
+                      <div className="bg-secondary/30 p-4 rounded-lg overflow-auto max-h-96">
                         {(() => {
-                          // Convert markdown table to HTML for better formatting
                           const markdown = selectedItem.markdown
                           const lines = markdown.split('\n').filter(line => line.trim())
-                          if (lines.length < 2) return <pre className="text-sm whitespace-pre-wrap">{markdown}</pre>
                           
-                          const headers = lines[0].split('|').map(h => h.trim()).filter(h => h)
-                          const separator = lines[1]
-                          const rows = lines.slice(2).map(line => 
-                            line.split('|').map(cell => cell.trim()).filter(cell => cell)
-                          )
-                          
-                          return (
-                            <table className="w-full text-sm border-collapse">
-                              <thead>
-                                <tr className="border-b">
-                                  {headers.map((header, i) => (
-                                    <th key={i} className="text-left p-2 font-medium">{header}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {rows.map((row, i) => (
-                                  <tr key={i} className="border-b border-gray-600">
-                                    {row.map((cell, j) => (
-                                      <td key={j} className="p-2">{cell}</td>
+                          // Parse markdown table format
+                          if (lines.length >= 2 && lines[0].includes('|')) {
+                            // Extract headers (first line)
+                            const headerLine = lines[0]
+                            const headers = headerLine.split('|')
+                              .map(h => h.trim())
+                              .filter(h => h && h !== '')
+                            
+                            // Skip separator line (second line with |---|---|)
+                            // Extract data rows (lines after separator)
+                            const dataLines = lines.slice(2)
+                            const rows = dataLines
+                              .filter(line => line.includes('|'))
+                              .map(line => 
+                                line.split('|')
+                                  .map(cell => cell.trim())
+                                  .filter(cell => cell !== '')
+                              )
+                            
+                            return (
+                              <div className="overflow-y-auto max-h-80">
+                                <table className="w-full text-sm border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-gray-600">
+                                      {headers.map((header, i) => (
+                                        <th key={i} className="text-left p-3 font-medium bg-gray-800/50 text-gray-200">{header}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {rows.map((row, i) => (
+                                      <tr key={i} className="border-b border-gray-700 hover:bg-gray-800/30">
+                                        {row.map((cell, j) => (
+                                          <td key={j} className="p-3 text-gray-300">{cell}</td>
+                                        ))}
+                                      </tr>
                                     ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )
+                          }
+                          
+                          // Fallback: treat as single column data
+                          return (
+                            <div className="overflow-y-auto max-h-80">
+                              <table className="w-full text-sm border-collapse">
+                                <thead>
+                                  <tr className="border-b border-gray-600">
+                                    <th className="text-left p-3 font-medium bg-gray-800/50 text-gray-200">Data</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {lines.map((line, i) => (
+                                    <tr key={i} className="border-b border-gray-700 hover:bg-gray-800/30">
+                                      <td className="p-3 text-gray-300">{line}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           )
                         })()}
                       </div>

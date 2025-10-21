@@ -9,8 +9,8 @@ Inspired by n8n's credential architecture.
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
 from enum import Enum
 
@@ -27,6 +27,7 @@ class CredentialType(Base):
     Defines the schema for a type of credential (e.g., PostgreSQL, OpenAI, SSH).
     """
     __tablename__ = 'credential_types'
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), unique=True, nullable=False, index=True)  # 'postgres_credentials', 'openai_api'
@@ -189,13 +190,48 @@ class CredentialTypeResponse(BaseModel):
     category: Optional[str]
     icon: Optional[str]
     description: Optional[str]
-    schema_definition: List[Dict[str, Any]]
+    schema_definition: Any = Field(..., description="Field definitions")
     test_endpoint: Optional[Dict[str, Any]]
     documentation_url: Optional[str]
     is_system: bool
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    
+    @field_validator('schema_definition', mode='before')
+    @classmethod
+    def convert_schema_definition(cls, v):
+        """Convert JSON to list if needed"""
+        if isinstance(v, str):
+            import json
+            v = json.loads(v)
+        
+        if isinstance(v, dict):
+            # If it's a JSON Schema object with 'properties', extract the properties as a list
+            if 'properties' in v:
+                properties = v['properties']
+                required_fields = v.get('required', [])
+                result = []
+                for k, prop in properties.items():
+                    field_def = {
+                        'name': k,
+                        'displayName': prop.get('title', k),
+                        'type': prop.get('type', 'string'),
+                        'required': k in required_fields,
+                        'description': prop.get('description', '')
+                    }
+                    # Add any additional properties
+                    for key, value in prop.items():
+                        if key not in ['title', 'type', 'description']:
+                            field_def[key] = value
+                    result.append(field_def)
+                return result
+            else:
+                return [v]  # Convert single dict to list
+        elif isinstance(v, list):
+            return v  # Already a list
+        
+        return v
     
     class Config:
         from_attributes = True

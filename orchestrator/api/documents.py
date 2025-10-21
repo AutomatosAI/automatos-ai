@@ -27,10 +27,28 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Initialize document manager with credentials from credential resolver
 from services.credential_resolver import get_credential_resolver
+import os
+
 resolver = get_credential_resolver()
 
-postgres_creds = resolver.get_dict("development_db")
-openai_key = resolver.get_credential_field("development_openai", "api_key")
+# Try to get credentials, fallback to environment variables
+try:
+    postgres_creds = resolver.get_dict("development_db")
+except Exception:
+    # Fallback to environment variables
+    postgres_creds = {
+        'database': os.getenv('POSTGRES_DB', 'automatos'),
+        'user': os.getenv('POSTGRES_USER', 'postgres'),
+        'password': os.getenv('POSTGRES_PASSWORD', ''),
+        'host': os.getenv('POSTGRES_HOST', 'localhost'),
+        'port': os.getenv('POSTGRES_PORT', '5432')
+    }
+
+try:
+    openai_key = resolver.get_credential_field("development_openai", "api_key")
+except Exception:
+    # Fallback to environment variable
+    openai_key = os.getenv('OPENAI_API_KEY')
 
 db_config = {
     "database": postgres_creds.get('database', 'orchestrator_db'),
@@ -547,7 +565,7 @@ async def semantic_search(
         
         # Generate query embedding using OpenAI (v1.0+ API)
         from openai import OpenAI
-        client = OpenAI(api_key=openai_api_key)
+        client = OpenAI(api_key=openai_key)
         
         logger.info(f"Generating embedding for query: {query[:50]}...")
         
@@ -844,7 +862,7 @@ async def rag_retrieve(
         
         # Generate query embedding (v1.0+ API)
         from openai import OpenAI
-        client = OpenAI(api_key=openai_api_key)
+        client = OpenAI(api_key=openai_key)
         
         query_response = client.embeddings.create(
             model="text-embedding-ada-002",

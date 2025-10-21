@@ -458,3 +458,4 @@ def get_multimodal_knowledge_tools(db_session: Optional[Session] = None) -> Mult
         _instance = MultimodalKnowledgeTools(db_session)
     return _instance
 
+
