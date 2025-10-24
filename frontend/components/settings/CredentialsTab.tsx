@@ -95,8 +95,12 @@ export function CredentialsTab() {
         search: searchTerm || undefined
       })
       
-      // Handle paginated response
-      if (data.items) {
+      // Ensure data is an array
+      if (Array.isArray(data)) {
+        setCredentials(data)
+        setPaginationData(null)
+      } else if (data.items && Array.isArray(data.items)) {
+        // Handle paginated response
         setCredentials(data.items)
         setPaginationData({
           total: data.total,
@@ -106,12 +110,14 @@ export function CredentialsTab() {
           current_page: data.current_page
         })
       } else {
-        // Fallback for non-paginated response
-        setCredentials(data)
+        // Fallback to empty array
+        console.warn('Unexpected credentials response format:', data)
+        setCredentials([])
         setPaginationData(null)
       }
     } catch (error) {
       console.error('Failed to load credentials:', error)
+      setCredentials([]) // Set to empty array on error
     } finally {
       setLoading(false)
     }

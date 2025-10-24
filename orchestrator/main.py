@@ -50,7 +50,7 @@ from api.github_webhooks import router as github_webhooks_router  # GitHub PR au
 from api.api_playbooks import router as playbooks_router
 from api.patterns import router as patterns_router
 from api.context import router as context_router
-from api.credentials_v2 import router as credentials_router  # PRD-18: Enhanced credentials
+from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools - Fixed import
