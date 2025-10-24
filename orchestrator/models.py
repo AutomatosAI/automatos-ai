@@ -447,7 +447,7 @@ class MCPToolUpdate(BaseModel):
     version: Optional[str] = None
     icon: Optional[str] = None
     category: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[List[str]] = None  # Fixed: should be List[str] not str
     tool_metadata: Optional[Dict[str, Any]] = Field(default=None, alias='metadata')
 
 class MCPToolResponse(BaseModel):

@@ -51,7 +51,11 @@ class EmbeddingGenerator:
                 logger.info(f"Initialized SentenceTransformer: {self.config.model_name}")
                 
             elif self.config.model_type == "openai":
-                self.openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+                # Get API key from credential resolver
+                from services.credential_resolver import get_credential_resolver
+                resolver = get_credential_resolver()
+                openai_key = resolver.get_credential_field("development_openai", "api_key")
+                self.openai_client = AsyncOpenAI(api_key=openai_key)
                 # OpenAI text-embedding-ada-002 has 1536 dimensions
                 self.config.dimension = 1536
                 logger.info("Initialized OpenAI embeddings")

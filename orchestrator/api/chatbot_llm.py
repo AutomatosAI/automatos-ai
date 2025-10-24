@@ -28,8 +28,11 @@ from anthropic import Anthropic
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
-# Initialize Anthropic client
-anthropic_client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+# Initialize Anthropic client with credentials from credential resolver
+from services.credential_resolver import get_credential_resolver
+resolver = get_credential_resolver()
+anthropic_key = resolver.get_credential_field("development_anthropic", "api_key")
+anthropic_client = Anthropic(api_key=anthropic_key)
 
 # Models
 class ChatContext(BaseModel):

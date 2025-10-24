@@ -1,590 +1,736 @@
-
-
 """
-Credentials Management API Routes
+Enhanced Credentials Management API
+===================================
 
-Secure credential storage and management for tools with encryption,
-environment separation, and audit logging.
+Comprehensive credential management endpoints inspired by n8n.
+Supports credential types, CRUD operations, testing, and audit logging.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import or_
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 import logging
-from pydantic import BaseModel, Field
-from cryptography.fernet import Fernet
-import base64
-import os
+import uuid
 
 from database.database import get_db
-from database.models import ToolCredentials, Tool, CredentialAuditLog
-from models import ToolCredentials, Tool, CredentialAuditLog
+from models.credentials import (
+    CredentialType,
+    Credential,
+    CredentialAuditLog,
+    CredentialTypeCreate,
+    CredentialTypeResponse,
+    CredentialCreate,
+    CredentialUpdate,
+    CredentialResponse,
+    CredentialTestRequest,
+    CredentialTestResponse,
+    CredentialAuditLogResponse,
+    CredentialResolveRequest,
+    CredentialResolveResponse
+)
+from services.credential_service import (
+    CredentialStore,
+    CredentialNotFoundError,
+    CredentialValidationError
+)
+from services.encryption_service import EncryptionKeyError
 from utils.logging_adapter import set_request_id
-import uuid
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/credentials", tags=["Credentials Management"])
+router = APIRouter(prefix="/api/credentials", tags=["🔐 Credential Management"])
 
-# ====================================
-# Encryption Setup
-# ====================================
 
-# In production, use proper key management (AWS KMS, Azure Key Vault, etc.)
-ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key())
-cipher_suite = Fernet(ENCRYPTION_KEY if isinstance(ENCRYPTION_KEY, bytes) else ENCRYPTION_KEY.encode())
+# ============================================================================
+# Dependency Injection
+# ============================================================================
 
-# ====================================
-# Pydantic Models
-# ====================================
+def get_credential_store(db: Session = Depends(get_db)) -> CredentialStore:
+    """Get credential store instance"""
+    return CredentialStore(db)
 
-class CredentialBase(BaseModel):
-    credential_key: str = Field(..., description="Credential key/name")
-    credential_value: str = Field(..., description="Credential value (will be encrypted)")
-    environment: str = Field(..., description="Target environment")
-    description: Optional[str] = Field(None, description="Credential description")
-    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp")
 
-class CredentialCreate(CredentialBase):
-    tool_id: int = Field(..., description="Associated tool ID")
+def get_client_ip(request: Request) -> str:
+    """Extract client IP from request"""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
-class CredentialUpdate(BaseModel):
-    credential_value: Optional[str] = None
-    description: Optional[str] = None
-    expires_at: Optional[datetime] = None
-    is_active: Optional[bool] = None
 
-class CredentialResponse(BaseModel):
-    id: int
-    tool_id: int
-    tool_name: str
-    credential_key: str
-    environment: str
-    description: Optional[str]
-    expires_at: Optional[datetime]
-    is_active: bool
-    created_at: datetime
-    updated_at: Optional[datetime]
-    # Note: credential_value is never returned for security
+# ============================================================================
+# Credential Type Endpoints
+# ============================================================================
 
-    class Config:
-        from_attributes = True
-
-class CredentialTestRequest(BaseModel):
-    tool_id: int
-    environment: str
-    credentials: Dict[str, str]
-
-class CredentialAuditEntry(BaseModel):
-    id: int
-    tool_id: int
-    tool_name: str
-    credential_key: str
-    action: str
-    environment: str
-    user_id: Optional[str]
-    timestamp: datetime
-    details: Optional[Dict[str, Any]]
-
-# ====================================
-# Helper Functions
-# ====================================
-
-def encrypt_credential(value: str) -> str:
-    """Encrypt a credential value"""
-    try:
-        encrypted_bytes = cipher_suite.encrypt(value.encode())
-        return base64.b64encode(encrypted_bytes).decode()
-    except Exception as e:
-        logger.error(f"Failed to encrypt credential: {e}")
-        raise HTTPException(status_code=500, detail="Encryption failed")
-
-def decrypt_credential(encrypted_value: str) -> str:
-    """Decrypt a credential value"""
-    try:
-        encrypted_bytes = base64.b64decode(encrypted_value.encode())
-        decrypted_bytes = cipher_suite.decrypt(encrypted_bytes)
-        return decrypted_bytes.decode()
-    except Exception as e:
-        logger.error(f"Failed to decrypt credential: {e}")
-        raise HTTPException(status_code=500, detail="Decryption failed")
-
-def create_audit_log(
-    db: Session, 
-    tool_id: int, 
-    credential_key: str, 
-    action: str, 
-    environment: str,
-    user_id: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None
+@router.get("/types", response_model=List[CredentialTypeResponse])
+async def list_credential_types(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    active_only: bool = Query(True, description="Only active types"),
+    store: CredentialStore = Depends(get_credential_store)
 ):
-    """Create an audit log entry"""
-    audit_entry = CredentialAuditLog(
-        tool_id=tool_id,
-        credential_key=credential_key,
-        action=action,
-        environment=environment,
-        user_id=user_id,
-        details=details or {},
-        timestamp=datetime.utcnow()
-    )
-    db.add(audit_entry)
-    return audit_entry
+    """
+    List all available credential types.
+    Returns all 400+ credential type definitions for dynamic form generation.
+    """
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        types = store.list_credential_types(category=category, active_only=active_only)
+        return [CredentialTypeResponse.from_orm(t) for t in types]
+    
+    except Exception as e:
+        logger.error(f"Failed to list credential types: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ====================================
-# API Endpoints
-# ====================================
+
+@router.get("/types/categories", response_model=List[str])
+async def list_credential_categories(
+    store: CredentialStore = Depends(get_credential_store)
+):
+    """Get list of all credential categories"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        from credential_types.all_credential_types import get_all_categories
+        return get_all_categories()
+    
+    except Exception as e:
+        logger.error(f"Failed to list categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/types/{type_id}", response_model=CredentialTypeResponse)
+async def get_credential_type(
+    type_id: int,
+    store: CredentialStore = Depends(get_credential_store)
+):
+    """Get a specific credential type with full schema definition"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        cred_type = store.get_credential_type(type_id)
+        if not cred_type:
+            raise HTTPException(status_code=404, detail="Credential type not found")
+        
+        return CredentialTypeResponse.from_orm(cred_type)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get credential type {type_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/types/by-name/{type_name}", response_model=CredentialTypeResponse)
+async def get_credential_type_by_name(
+    type_name: str,
+    store: CredentialStore = Depends(get_credential_store)
+):
+    """Get credential type by name (e.g., 'openai_api', 'postgres_credentials')"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        cred_type = store.get_credential_type_by_name(type_name)
+        if not cred_type:
+            raise HTTPException(status_code=404, detail=f"Credential type '{type_name}' not found")
+        
+        return CredentialTypeResponse.from_orm(cred_type)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get credential type '{type_name}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Credential CRUD Endpoints
+# ============================================================================
 
 @router.post("/", response_model=CredentialResponse)
 async def create_credential(
     credential: CredentialCreate,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
+    request: Request,
+    user_id: Optional[str] = Query(None, description="User ID"),
+    store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
 ):
     """
-    Create and store an encrypted credential for a tool.
-    All credential values are encrypted at rest and only accessible by authorized agents.
+    Create a new credential with encryption.
+    Credential values are immediately encrypted and never stored in plaintext.
+    
+    PRD-20: Auto-activates matching MCP servers when credential is created!
     """
     set_request_id(str(uuid.uuid4()))
     
     try:
-        # Verify tool exists
-        tool = db.query(Tool).filter(Tool.id == credential.tool_id).first()
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
+        ip_address = get_client_ip(request)
         
-        # Check if credential already exists
-        existing = db.query(ToolCredentials).filter(
-            and_(
-                ToolCredentials.tool_id == credential.tool_id,
-                ToolCredentials.credential_key == credential.credential_key,
-                ToolCredentials.environment == credential.environment
-            )
-        ).first()
-        
-        if existing:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Credential {credential.credential_key} already exists for this tool and environment"
-            )
-        
-        # Encrypt the credential value
-        encrypted_value = encrypt_credential(credential.credential_value)
-        
-        # Create credential record
-        new_credential = ToolCredentials(
-            tool_id=credential.tool_id,
-            credential_key=credential.credential_key,
-            credential_value=encrypted_value,
-            environment=credential.environment,
-            description=credential.description,
-            expires_at=credential.expires_at,
-            is_active=True,
-            created_at=datetime.utcnow()
+        created_cred = store.create_credential(
+            credential_data=credential,
+            user_id=user_id,
+            ip_address=ip_address
         )
         
-        db.add(new_credential)
+        # Build response (without decrypted values)
+        cred_type = store.get_credential_type(created_cred.credential_type_id)
         
-        # Create audit log
-        create_audit_log(
-            db, credential.tool_id, credential.credential_key, "create", 
-            credential.environment, user_id,
-            {"description": credential.description, "has_expiration": bool(credential.expires_at)}
-        )
+        # Extract field names from encrypted data
+        decrypted = store.encryption_service.decrypt_dict(created_cred.encrypted_data)
+        field_names = list(decrypted.keys())
         
-        db.commit()
-        db.refresh(new_credential)
-        
-        # Prepare response (without credential value)
         response = CredentialResponse(
-            id=new_credential.id,
-            tool_id=new_credential.tool_id,
-            tool_name=tool.name,
-            credential_key=new_credential.credential_key,
-            environment=new_credential.environment,
-            description=new_credential.description,
-            expires_at=new_credential.expires_at,
-            is_active=new_credential.is_active,
-            created_at=new_credential.created_at,
-            updated_at=new_credential.updated_at
+            id=created_cred.id,
+            name=created_cred.name,
+            credential_type_id=created_cred.credential_type_id,
+            credential_type_name=cred_type.name,
+            credential_type_display_name=cred_type.display_name,
+            environment=created_cred.environment,
+            description=created_cred.description,
+            tags=created_cred.tags or [],
+            is_active=created_cred.is_active,
+            expires_at=created_cred.expires_at,
+            last_tested=created_cred.last_tested,
+            test_status=created_cred.test_status,
+            test_message=created_cred.test_message,
+            created_by=created_cred.created_by,
+            created_at=created_cred.created_at,
+            updated_at=created_cred.updated_at,
+            has_credentials=True,
+            field_names=field_names
         )
         
-        logger.info(f"Created credential {credential.credential_key} for tool {tool.name}")
-        return response
+        # PRD-20: AUTO-ACTIVATE matching MCP servers! 🚀
+        try:
+            from services.mcp_auto_activation import MCPAutoActivationService
+            
+            activation_service = MCPAutoActivationService(db)
+            activation_result = await activation_service.activate_mcp_servers_for_credential(
+                credential_id=created_cred.id,
+                credential_type_name=cred_type.name
+            )
+            
+            logger.info(f"🎉 Auto-activated {activation_result['activated_count']} MCP servers for credential '{created_cred.name}'")
+            
+        except Exception as e:
+            # Don't fail credential creation if auto-activation fails
+            logger.warning(f"⚠️  Auto-activation failed (credential still created): {e}")
         
-    except HTTPException:
-        raise
+        return response
+    
+    except CredentialValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except EncryptionKeyError as e:
+        raise HTTPException(status_code=500, detail=f"Encryption error: {e}")
     except Exception as e:
-        logger.error(f"Error creating credential: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create credential: {str(e)}")
+        logger.error(f"Failed to create credential: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/", response_model=List[CredentialResponse])
+
+@router.get("/")
 async def list_credentials(
-    tool_id: Optional[int] = Query(None, description="Filter by tool ID"),
+    credential_type_id: Optional[int] = Query(None, description="Filter by type"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
-    active_only: bool = Query(True, description="Only show active credentials"),
+    active_only: bool = Query(True, description="Only active credentials"),
+    tags: Optional[str] = Query(None, description="Filter by tags (comma-separated)"),
+    search: Optional[str] = Query(None, description="Search in name or description"),
+    skip: int = Query(0, ge=0, description="Number of items to skip (for pagination)"),
+    limit: int = Query(20, ge=1, le=100, description="Number of items per page"),
+    store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
 ):
-    """List all credentials with optional filtering (values are never returned)"""
+    """
+    List all credentials with pagination (values are NEVER returned for security).
+    Returns metadata only - use resolve endpoint to get actual values.
+    
+    PRD-20: Now with pagination support for 400+ credentials!
+    """
     set_request_id(str(uuid.uuid4()))
     
     try:
-        query = db.query(ToolCredentials, Tool.name.label("tool_name")).join(
-            Tool, ToolCredentials.tool_id == Tool.id
-        )
+        # Build query
+        query = db.query(Credential)
         
-        if tool_id:
-            query = query.filter(ToolCredentials.tool_id == tool_id)
-        
+        # Apply filters
+        if credential_type_id:
+            query = query.filter(Credential.credential_type_id == credential_type_id)
         if environment:
-            query = query.filter(ToolCredentials.environment == environment)
-        
+            query = query.filter(Credential.environment == environment)
         if active_only:
-            query = query.filter(ToolCredentials.is_active == True)
+            query = query.filter(Credential.is_active == True)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Credential.name.ilike(search_pattern),
+                    Credential.description.ilike(search_pattern)
+                )
+            )
+        if tags:
+            tag_list = tags.split(',')
+            for tag in tag_list:
+                query = query.filter(Credential.tags.contains([tag]))
         
-        results = query.all()
+        # Get total count before pagination
+        total = query.count()
         
-        credentials = []
-        for credential, tool_name in results:
-            credentials.append(CredentialResponse(
-                id=credential.id,
-                tool_id=credential.tool_id,
-                tool_name=tool_name,
-                credential_key=credential.credential_key,
-                environment=credential.environment,
-                description=credential.description,
-                expires_at=credential.expires_at,
-                is_active=credential.is_active,
-                created_at=credential.created_at,
-                updated_at=credential.updated_at
+        # Apply pagination
+        credentials = query.order_by(Credential.name).offset(skip).limit(limit).all()
+        
+        # Calculate pagination metadata
+        pages = (total + limit - 1) // limit
+        
+        # Build responses
+        responses = []
+        for cred in credentials:
+            cred_type = store.get_credential_type(cred.credential_type_id)
+            
+            # Get field names from credential type schema
+            try:
+                schema_fields = cred_type.schema_definition
+                field_names = [field.get('name', '') for field in schema_fields if field.get('name')]
+            except:
+                field_names = []
+            
+            responses.append(CredentialResponse(
+                id=cred.id,
+                name=cred.name,
+                credential_type_id=cred.credential_type_id,
+                credential_type_name=cred_type.name,
+                credential_type_display_name=cred_type.display_name,
+                environment=cred.environment,
+                description=cred.description,
+                tags=cred.tags or [],
+                is_active=cred.is_active,
+                expires_at=cred.expires_at,
+                last_tested=cred.last_tested,
+                test_status=cred.test_status,
+                test_message=cred.test_message,
+                created_by=cred.created_by,
+                created_at=cred.created_at,
+                updated_at=cred.updated_at,
+                has_credentials=True,
+                field_names=field_names
             ))
         
-        logger.info(f"Retrieved {len(credentials)} credentials")
-        return credentials
-        
+        # Return paginated response
+        return {
+            "items": responses,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "pages": pages,
+            "current_page": (skip // limit) + 1 if limit > 0 else 1
+        }
+    
     except Exception as e:
-        logger.error(f"Error listing credentials: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list credentials: {str(e)}")
+        logger.error(f"Failed to list credentials: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{tool_id}", response_model=Dict[str, str])
-async def get_tool_credentials(
-    tool_id: int,
-    environment: str = Query(..., description="Target environment"),
-    agent_type: Optional[str] = Query(None, description="Agent type for permission check"),
-    db: Session = Depends(get_db)
+
+@router.get("/{credential_id}", response_model=CredentialResponse)
+async def get_credential(
+    credential_id: int,
+    store: CredentialStore = Depends(get_credential_store)
 ):
-    """
-    Get decrypted credentials for a tool in a specific environment.
-    This endpoint is used by agents to access tool credentials.
-    Access is logged for security auditing.
-    """
+    """Get credential with decrypted values for editing"""
     set_request_id(str(uuid.uuid4()))
     
     try:
-        # Verify tool exists
-        tool = db.query(Tool).filter(Tool.id == tool_id).first()
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
+        cred = store.get_credential(credential_id)
+        if not cred:
+            raise HTTPException(status_code=404, detail="Credential not found")
         
-        # Check agent permissions (simplified for demo)
-        if agent_type and agent_type not in (tool.permissions or []):
-            create_audit_log(
-                db, tool_id, "ALL", "access_denied", environment, agent_type,
-                {"reason": "insufficient_permissions"}
-            )
-            db.commit()
-            raise HTTPException(status_code=403, detail="Agent type not authorized for this tool")
+        cred_type = store.get_credential_type(cred.credential_type_id)
         
-        # Get credentials for the environment
-        credentials = db.query(ToolCredentials).filter(
-            and_(
-                ToolCredentials.tool_id == tool_id,
-                ToolCredentials.environment == environment,
-                ToolCredentials.is_active == True
-            )
-        ).all()
+        try:
+            decrypted = store.encryption_service.decrypt_dict(cred.encrypted_data)
+            field_names = list(decrypted.keys())
+        except:
+            field_names = []
+            decrypted = {}
         
-        if not credentials:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No credentials found for tool {tool.name} in {environment} environment"
-            )
-        
-        # Decrypt credentials
-        decrypted_creds = {}
-        for cred in credentials:
-            # Check expiration
-            if cred.expires_at and cred.expires_at < datetime.utcnow():
-                logger.warning(f"Credential {cred.credential_key} has expired")
-                continue
-                
-            try:
-                decrypted_value = decrypt_credential(cred.credential_value)
-                decrypted_creds[cred.credential_key] = decrypted_value
-            except Exception as e:
-                logger.error(f"Failed to decrypt credential {cred.credential_key}: {e}")
-                continue
-        
-        # Create audit log for access
-        create_audit_log(
-            db, tool_id, "ALL", "access_granted", environment, agent_type,
-            {"credentials_accessed": list(decrypted_creds.keys())}
+        return CredentialResponse(
+            id=cred.id,
+            name=cred.name,
+            credential_type_id=cred.credential_type_id,
+            credential_type_name=cred_type.name,
+            credential_type_display_name=cred_type.display_name,
+            environment=cred.environment,
+            description=cred.description,
+            tags=cred.tags or [],
+            is_active=cred.is_active,
+            expires_at=cred.expires_at,
+            last_tested=cred.last_tested,
+            test_status=cred.test_status,
+            test_message=cred.test_message,
+            created_by=cred.created_by,
+            created_at=cred.created_at,
+            updated_at=cred.updated_at,
+            has_credentials=True,
+            field_names=field_names,
+            credential_data=decrypted  # Add the decrypted data
         )
-        
-        db.commit()
-        
-        logger.info(f"Retrieved {len(decrypted_creds)} credentials for tool {tool.name}")
-        return decrypted_creds
-        
+    
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving credentials for tool {tool_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve credentials: {str(e)}")
+        logger.error(f"Failed to get credential {credential_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.put("/{credential_id}", response_model=CredentialResponse)
 async def update_credential(
     credential_id: int,
     update_data: CredentialUpdate,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
-    db: Session = Depends(get_db)
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    store: CredentialStore = Depends(get_credential_store)
 ):
     """Update an existing credential"""
     set_request_id(str(uuid.uuid4()))
     
     try:
-        credential = db.query(ToolCredentials).filter(
-            ToolCredentials.id == credential_id
-        ).first()
+        ip_address = get_client_ip(request)
         
-        if not credential:
-            raise HTTPException(status_code=404, detail="Credential not found")
-        
-        tool = db.query(Tool).filter(Tool.id == credential.tool_id).first()
-        
-        # Track changes for audit
-        changes = {}
-        
-        # Update fields
-        if update_data.credential_value is not None:
-            credential.credential_value = encrypt_credential(update_data.credential_value)
-            changes["credential_value"] = "updated"
-        
-        if update_data.description is not None:
-            changes["description"] = {"old": credential.description, "new": update_data.description}
-            credential.description = update_data.description
-        
-        if update_data.expires_at is not None:
-            changes["expires_at"] = {"old": credential.expires_at, "new": update_data.expires_at}
-            credential.expires_at = update_data.expires_at
-        
-        if update_data.is_active is not None:
-            changes["is_active"] = {"old": credential.is_active, "new": update_data.is_active}
-            credential.is_active = update_data.is_active
-        
-        credential.updated_at = datetime.utcnow()
-        
-        # Create audit log
-        create_audit_log(
-            db, credential.tool_id, credential.credential_key, "update",
-            credential.environment, user_id, {"changes": changes}
+        updated_cred = store.update_credential(
+            credential_id=credential_id,
+            update_data=update_data,
+            user_id=user_id,
+            ip_address=ip_address
         )
         
-        db.commit()
-        db.refresh(credential)
+        cred_type = store.get_credential_type(updated_cred.credential_type_id)
         
-        response = CredentialResponse(
-            id=credential.id,
-            tool_id=credential.tool_id,
-            tool_name=tool.name,
-            credential_key=credential.credential_key,
-            environment=credential.environment,
-            description=credential.description,
-            expires_at=credential.expires_at,
-            is_active=credential.is_active,
-            created_at=credential.created_at,
-            updated_at=credential.updated_at
+        try:
+            decrypted = store.encryption_service.decrypt_dict(updated_cred.encrypted_data)
+            field_names = list(decrypted.keys())
+        except:
+            field_names = []
+        
+        return CredentialResponse(
+            id=updated_cred.id,
+            name=updated_cred.name,
+            credential_type_id=updated_cred.credential_type_id,
+            credential_type_name=cred_type.name,
+            credential_type_display_name=cred_type.display_name,
+            environment=updated_cred.environment,
+            description=updated_cred.description,
+            tags=updated_cred.tags or [],
+            is_active=updated_cred.is_active,
+            expires_at=updated_cred.expires_at,
+            last_tested=updated_cred.last_tested,
+            test_status=updated_cred.test_status,
+            test_message=updated_cred.test_message,
+            created_by=updated_cred.created_by,
+            created_at=updated_cred.created_at,
+            updated_at=updated_cred.updated_at,
+            has_credentials=True,
+            field_names=field_names
         )
-        
-        logger.info(f"Updated credential {credential.credential_key} for tool {tool.name}")
-        return response
-        
-    except HTTPException:
-        raise
+    
+    except CredentialNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except CredentialValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error updating credential {credential_id}: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update credential: {str(e)}")
+        logger.error(f"Failed to update credential {credential_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.delete("/{credential_id}")
 async def delete_credential(
     credential_id: int,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
 ):
-    """Delete a credential (secure deletion)"""
+    """
+    Securely delete a credential
+    
+    PRD-20: Auto-deactivates linked MCP servers when credential is deleted!
+    """
     set_request_id(str(uuid.uuid4()))
     
     try:
-        credential = db.query(ToolCredentials).filter(
-            ToolCredentials.id == credential_id
-        ).first()
+        ip_address = get_client_ip(request)
         
-        if not credential:
-            raise HTTPException(status_code=404, detail="Credential not found")
-        
-        tool = db.query(Tool).filter(Tool.id == credential.tool_id).first()
-        
-        # Create audit log before deletion
-        create_audit_log(
-            db, credential.tool_id, credential.credential_key, "delete",
-            credential.environment, user_id,
-            {"credential_id": credential_id, "tool_name": tool.name if tool else "unknown"}
-        )
-        
-        # Secure deletion - overwrite credential value before deletion
-        credential.credential_value = encrypt_credential("DELETED")
-        db.flush()
+        # PRD-20: DEACTIVATE linked MCP servers before deleting credential
+        try:
+            from services.mcp_auto_activation import MCPAutoActivationService
+            
+            activation_service = MCPAutoActivationService(db)
+            deactivation_result = await activation_service.deactivate_mcp_servers_for_credential(
+                credential_id=credential_id
+            )
+            
+            if deactivation_result['deactivated_count'] > 0:
+                logger.info(f"🔌 Auto-deactivated {deactivation_result['deactivated_count']} MCP servers")
+            
+        except Exception as e:
+            # Don't fail deletion if deactivation fails
+            logger.warning(f"⚠️  Auto-deactivation failed (continuing with deletion): {e}")
         
         # Delete the credential
-        db.delete(credential)
-        db.commit()
+        store.delete_credential(
+            credential_id=credential_id,
+            user_id=user_id,
+            ip_address=ip_address
+        )
         
-        logger.info(f"Deleted credential {credential.credential_key} for tool {tool.name if tool else 'unknown'}")
-        return {"message": "Credential deleted successfully"}
-        
-    except HTTPException:
-        raise
+        return {"message": "Credential deleted successfully", "credential_id": credential_id}
+    
+    except CredentialNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error deleting credential {credential_id}: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete credential: {str(e)}")
+        logger.error(f"Failed to delete credential {credential_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/test-connection")
-async def test_connection(
-    test_request: CredentialTestRequest,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
-    db: Session = Depends(get_db)
+
+# ============================================================================
+# Credential Testing
+# ============================================================================
+
+@router.post("/{credential_id}/test", response_model=CredentialTestResponse)
+async def test_credential(
+    credential_id: int,
+    user_id: Optional[str] = Query(None),
+    store: CredentialStore = Depends(get_credential_store)
 ):
-    """Test tool connection with provided credentials"""
+    """
+    Test a credential to verify it works.
+    Tests database connections, API calls, etc. based on credential type.
+    """
     set_request_id(str(uuid.uuid4()))
     
     try:
-        tool = db.query(Tool).filter(Tool.id == test_request.tool_id).first()
-        if not tool:
-            raise HTTPException(status_code=404, detail="Tool not found")
-        
-        # Create audit log for connection test
-        create_audit_log(
-            db, test_request.tool_id, "connection_test", "test", 
-            test_request.environment, user_id,
-            {"credentials_tested": list(test_request.credentials.keys())}
-        )
-        
-        # Mock connection test - in real implementation, make actual API calls
-        import asyncio
-        await asyncio.sleep(1)  # Simulate connection test time
-        
-        # Mock test results based on credential completeness
-        required_creds = tool.required_credentials or []
-        provided_creds = list(test_request.credentials.keys())
-        missing_creds = [cred for cred in required_creds if cred not in provided_creds]
-        
-        if missing_creds:
-            result = {
-                "success": False,
-                "message": f"Missing required credentials: {', '.join(missing_creds)}",
-                "details": {
-                    "required": required_creds,
-                    "provided": provided_creds,
-                    "missing": missing_creds
-                }
-            }
-        else:
-            result = {
-                "success": True,
-                "message": "Connection successful! All credentials are valid.",
-                "details": {
-                    "response_time_ms": 234,
-                    "server_version": "1.0.0",
-                    "authenticated": True
-                }
-            }
-        
-        db.commit()
-        
-        logger.info(f"Connection test for tool {tool.name}: {'success' if result['success'] else 'failed'}")
+        result = await store.test_credential(credential_id=credential_id, user_id=user_id)
         return result
-        
-    except HTTPException:
-        raise
+    
+    except CredentialNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error(f"Error testing connection for tool {test_request.tool_id}: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to test connection: {str(e)}")
+        logger.error(f"Failed to test credential {credential_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/audit/logs", response_model=List[CredentialAuditEntry])
-async def get_audit_logs(
-    tool_id: Optional[int] = Query(None, description="Filter by tool ID"),
-    environment: Optional[str] = Query(None, description="Filter by environment"),
-    action: Optional[str] = Query(None, description="Filter by action"),
-    limit: int = Query(100, description="Maximum number of logs to return"),
-    db: Session = Depends(get_db)
+
+# ============================================================================
+# Credential Resolution (Internal Use)
+# ============================================================================
+
+@router.post("/resolve", response_model=CredentialResolveResponse)
+async def resolve_credential(
+    resolve_request: CredentialResolveRequest,
+    request: Request,
+    store: CredentialStore = Depends(get_credential_store)
 ):
-    """Get credential audit logs with optional filtering"""
+    """
+    Resolve and decrypt a credential for service use.
+    
+    ⚠️ SECURITY WARNING: Returns decrypted credential values!
+    This endpoint should only be used by internal services.
+    All access is audited.
+    """
     set_request_id(str(uuid.uuid4()))
     
     try:
-        query = db.query(CredentialAuditLog, Tool.name.label("tool_name")).join(
-            Tool, CredentialAuditLog.tool_id == Tool.id
+        ip_address = get_client_ip(request)
+        
+        # Get credential by ID or name
+        if resolve_request.credential_id:
+            credential = store.get_credential(resolve_request.credential_id)
+            if not credential:
+                raise HTTPException(status_code=404, detail="Credential not found")
+        
+        elif resolve_request.credential_name:
+            credential = store.get_credential_by_name(
+                resolve_request.credential_name,
+                resolve_request.environment
+            )
+            if not credential:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Credential '{resolve_request.credential_name}' not found"
+                )
+        else:
+            raise HTTPException(status_code=400, detail="Must provide credential_id or credential_name")
+        
+        # Decrypt credential data
+        decrypted_data = store.get_decrypted_credential(
+            credential_id=credential.id,
+            user_id=resolve_request.service_name,
+            ip_address=ip_address,
+            service_name=resolve_request.service_name
         )
         
-        if tool_id:
-            query = query.filter(CredentialAuditLog.tool_id == tool_id)
+        cred_type = store.get_credential_type(credential.credential_type_id)
         
-        if environment:
-            query = query.filter(CredentialAuditLog.environment == environment)
+        return CredentialResolveResponse(
+            credential_id=credential.id,
+            credential_name=credential.name,
+            credential_type=cred_type.name,
+            data=decrypted_data,
+            environment=credential.environment,
+            resolved_at=datetime.utcnow()
+        )
+    
+    except HTTPException:
+        raise
+    except CredentialValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except EncryptionKeyError as e:
+        raise HTTPException(status_code=500, detail=f"Decryption failed: {e}")
+    except Exception as e:
+        logger.error(f"Failed to resolve credential: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Audit Logs
+# ============================================================================
+
+@router.get("/audit/logs", response_model=List[CredentialAuditLogResponse])
+async def get_audit_logs(
+    credential_id: Optional[int] = Query(None),
+    action: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+    store: CredentialStore = Depends(get_credential_store)
+):
+    """Get credential audit logs with filtering"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        logs = store.get_audit_logs(
+            credential_id=credential_id,
+            action=action,
+            user_id=user_id,
+            limit=limit
+        )
         
-        if action:
-            query = query.filter(CredentialAuditLog.action == action)
-        
-        results = query.order_by(CredentialAuditLog.timestamp.desc()).limit(limit).all()
-        
-        audit_entries = []
-        for log, tool_name in results:
-            audit_entries.append(CredentialAuditEntry(
+        responses = []
+        for log in logs:
+            credential = store.get_credential(log.credential_id)
+            
+            responses.append(CredentialAuditLogResponse(
                 id=log.id,
+                credential_id=str(log.credential_id),
                 tool_id=log.tool_id,
-                tool_name=tool_name,
-                credential_key=log.credential_key,
                 action=log.action,
-                environment=log.environment,
                 user_id=log.user_id,
-                timestamp=log.timestamp,
-                details=log.details
+                ip_address=log.ip_address,
+                success=log.success,
+                error_message=log.error_message,
+                details=log.details,
+                created_at=log.timestamp
             ))
         
-        logger.info(f"Retrieved {len(audit_entries)} audit log entries")
-        return audit_entries
-        
+        return responses
+    
     except Exception as e:
-        logger.error(f"Error retrieving audit logs: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve audit logs: {str(e)}")
+        logger.error(f"Failed to get audit logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# ====================================
-# Health Check
-# ====================================
+
+# ============================================================================
+# Utility Endpoints
+# ============================================================================
 
 @router.get("/health")
-async def credentials_health_check():
-    """Health check endpoint for credentials management system"""
-    return {
-        "status": "healthy",
-        "service": "credentials-management",
-        "timestamp": datetime.utcnow().isoformat(),
-        "encryption": "active",
-        "version": "1.0.0"
-    }
+async def credentials_health():
+    """Health check for credentials service"""
+    from services.encryption_service import get_encryption_service
+    
+    try:
+        encryption_service = get_encryption_service()
+        key_info = encryption_service.get_key_info()
+        
+        return {
+            "status": "healthy",
+            "service": "credentials",
+            "encryption": {
+                "status": "active",
+                "algorithm": key_info["algorithm"],
+                "key_source": key_info["source"]
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
+@router.post("/cache/clear")
+async def clear_credential_cache(
+    credential_name: Optional[str] = Query(None, description="Specific credential to clear")
+):
+    """Clear credential cache (useful after updates)"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        resolver.clear_cache(credential_name)
+        
+        return {
+            "message": f"Cache cleared for {credential_name if credential_name else 'all credentials'}",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats")
+async def get_credential_stats(
+    db: Session = Depends(get_db)
+):
+    """Get credential system statistics"""
+    set_request_id(str(uuid.uuid4()))
+    
+    try:
+        from sqlalchemy import func
+        
+        total_types = db.query(func.count(CredentialType.id)).scalar()
+        active_types = db.query(func.count(CredentialType.id)).filter(
+            CredentialType.is_active == True
+        ).scalar()
+        
+        total_creds = db.query(func.count(Credential.id)).scalar()
+        active_creds = db.query(func.count(Credential.id)).filter(
+            Credential.is_active == True
+        ).scalar()
+        
+        by_env = db.query(
+            Credential.environment,
+            func.count(Credential.id)
+        ).group_by(Credential.environment).all()
+        
+        by_type = db.query(
+            CredentialType.display_name,
+            func.count(Credential.id)
+        ).join(Credential).group_by(CredentialType.display_name).all()
+        
+        return {
+            "credential_types": {
+                "total": total_types,
+                "active": active_types
+            },
+            "credentials": {
+                "total": total_creds,
+                "active": active_creds,
+                "by_environment": {env: count for env, count in by_env},
+                "by_type": {type_name: count for type_name, count in by_type}
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to get credential stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

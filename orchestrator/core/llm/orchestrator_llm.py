@@ -113,13 +113,15 @@ class OrchestratorLLM:
         if not provider_enum:
             raise ValueError(f"Unsupported provider: {self.provider}")
         
-        # Get API key
-        import os
+        # Get API key from credential resolver
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        
         api_key = None
         if provider_enum == LLMProviderEnum.OPENAI:
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = resolver.get_credential_field("development_openai", "api_key")
         elif provider_enum == LLMProviderEnum.ANTHROPIC:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
+            api_key = resolver.get_credential_field("development_anthropic", "api_key")
         
         if not api_key:
             raise ValueError(f"API key not found for provider: {self.provider}")

@@ -18,8 +18,10 @@ from services.codegraph_service import CodeGraphService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
 
-# Get OpenAI API key
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Get OpenAI API key from credential resolver
+from services.credential_resolver import get_credential_resolver
+resolver = get_credential_resolver()
+OPENAI_API_KEY = resolver.get_credential_field("development_openai", "api_key")
 
 
 # Request/Response Models

@@ -104,10 +104,13 @@ const agentTypeColors = {
 function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps) {
   // Use real API data instead of mock data
   const { data: agentsData = [], isLoading: agentsLoading } = useAgents()
-  const { data: mcpTools = [], isLoading: toolsLoading } = useMCPTools({ limit: 100 })
+  const { data: mcpToolsResponse, isLoading: toolsLoading } = useMCPTools({ limit: 1000 }) // Get all tools for assignment
   // Temporarily disable assignments API until backend endpoint is ready
   // const { data: toolAssignments = [] } = useMCPToolAssignments()
   const toolAssignments: any[] = [] // Mock empty assignments for now
+  
+  // Extract tools from paginated response
+  const mcpTools = mcpToolsResponse?.data || []
   
   // Convert API data to match expected format
   const agents = (agentsData as any[]).map((agent: any) => ({

@@ -29,11 +29,16 @@ def get_llm_manager():
     """Get or initialize LLM service"""
     global llm_service
     if not llm_service:
-        # Check for API keys
-        if not os.getenv("OPENAI_API_KEY") and not os.getenv("ANTHROPIC_API_KEY"):
+        # Check for API keys from credential resolver
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        openai_key = resolver.get_credential_field("development_openai", "api_key")
+        anthropic_key = resolver.get_credential_field("development_anthropic", "api_key")
+        
+        if not openai_key and not anthropic_key:
             raise HTTPException(
                 status_code=501,
-                detail="No LLM API keys configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
+                detail="No LLM API keys configured. Configure 'development_openai' or 'development_anthropic' credentials."
             )
         llm_service = LLMManager.create_default()
     return llm_service

@@ -33,7 +33,7 @@ from models import Base
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
-from api.documents_v2 import router as documents_router
+from api.documents import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
@@ -50,7 +50,8 @@ from api.github_webhooks import router as github_webhooks_router  # GitHub PR au
 from api.api_playbooks import router as playbooks_router
 from api.patterns import router as patterns_router
 from api.context import router as context_router
-from api.credentials import router as credentials_router
+from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
+from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools - Fixed import
 from api.statistics import router as statistics_router
@@ -386,7 +387,8 @@ app.include_router(github_webhooks_router)  # GitHub PR automation
 app.include_router(playbooks_router)
 app.include_router(patterns_router)
 app.include_router(context_router)
-app.include_router(credentials_router)
+app.include_router(credentials_router)  # PRD-18: Enhanced credentials with n8n-style management
+app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
 app.include_router(statistics_router)

@@ -21,6 +21,13 @@ from uuid import uuid4
 # Keeping this file as a shim to avoid breaking external imports during transition.
 Base = declarative_base()
 
+# PRD-18: Import credential models
+# These will be defined in models/credentials.py but imported here for backward compatibility
+# Forward declarations - actual models defined later in this file
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from models.credentials import CredentialType, Credential, CredentialAuditLog
+
 # Association tables for many-to-many relationships
 agent_skills = Table('agent_skills', Base.metadata,
     Column('agent_id', Integer, ForeignKey('agents.id')),
@@ -123,12 +130,16 @@ class Agent(Base):
 
 # Phase 3: MCP Tools Models
 class AgentToolAssignment(Base):
-    """Agent-Tool Assignment with permissions"""
+    """Agent-Tool Assignment with permissions and credential linking"""
     __tablename__ = 'agent_tool_assignments'
     
     id = Column(Integer, primary_key=True)
     agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'), nullable=False)
     tool_id = Column(Integer, ForeignKey('mcp_tools.id', ondelete='CASCADE'), nullable=False)
+    
+    # PRD-18: Link to credential for n8n-style credential injection
+    credential_id = Column(Integer, ForeignKey('credentials.id', ondelete='SET NULL'), nullable=True)
+    
     enabled = Column(Boolean, default=True)
     permissions = Column(JSON, default={})
     configuration = Column(JSON, default={})
@@ -138,6 +149,7 @@ class AgentToolAssignment(Base):
     # Relationships
     agent = relationship("Agent", back_populates="tool_assignments")
     tool = relationship("MCPTool", back_populates="tool_assignments")
+    credential = relationship("Credential", back_populates="tool_assignments")
 
 class MCPTool(Base):
     """MCP Tool Model"""

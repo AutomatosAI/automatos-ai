@@ -10,6 +10,40 @@ description: The complete guide to mastering the world's most advanced open sour
 
 ---
 
+> **📚 New!** We've created comprehensive deep-dive guides for each major platform component. For detailed information, see the specialized guides below.
+
+## 🎓 Comprehensive Deep-Dive Guides
+
+Our documentation has been restructured into detailed, comprehensive guides covering every aspect of the platform:
+
+### **Core Platform Guides**
+
+| Guide | Topics Covered | Length |
+|-------|---------------|--------|
+| **[Agent System Guide](AGENT_SYSTEM_GUIDE.md)** | Agent Factory, Multi-Model Support, LLM-Driven Orchestration, Dynamic Tool Assignment | ~1,500 lines |
+| **[Workflow Orchestration Guide](WORKFLOW_SYSTEM_GUIDE.md)** | 9-Stage Pipeline, Task Decomposition, Agent Selection, Result Aggregation, Learning | ~2,000 lines |
+| **[Context Engineering Guide](CONTEXT_ENGINEERING_GUIDE.md)** | Mathematical Foundations, RAG Integration, Token Optimization, Progressive Complexity | ~1,800 lines |
+| **[Tools & Integration Guide](TOOLS_INTEGRATION_GUIDE.md)** | Centralized Tool Registry, 400+ MCP Integrations, Credential Management | ~2,200 lines |
+| **[Memory & Knowledge Guide](MEMORY_KNOWLEDGE_GUIDE.md)** | 4-Tier Hierarchical Memory, Knowledge Graphs, Multimodal KB, Learning & Consolidation | ~1,700 lines |
+
+### **Advanced Feature Guides**
+
+| Guide | Topics Covered | Length |
+|-------|---------------|--------|
+| **[Playbooks Guide](PLAYBOOKS_GUIDE.md)** | FP-Growth Algorithm, Pattern Discovery, Automated Learning, Workflow Templates | ~1,300 lines |
+| **[CodeGraph Guide](CODEGRAPH_GUIDE.md)** | Code Indexing, Semantic Search, Symbol Tracking, Multi-Project Management | ~1,900 lines |
+| **[Credential System Guide](CREDENTIAL_SYSTEM_GUIDE.md)** | n8n-Style Credentials, Auto-Activation, Security, Encryption | ~500 lines |
+| **[Agent Communication Guide](AGENT_COMMUNICATION_MONITORING_GUIDE.md)** | Inter-Agent Messaging, Shared Context, Collaboration Patterns | Coming Soon |
+
+### **Deployment & Operations**
+
+| Guide | Topics Covered | Length |
+|-------|---------------|--------|
+| **[Deployment Guide](DEPLOYMENT_GUIDE.md)** | Production Setup, Docker Deployment, Security Hardening, Monitoring, Scaling | ~1,100 lines |
+| **[Developer Guide](DEVELOPER_GUIDE.md)** | Local Development, API Integration, Testing, Contributing | ~800 lines |
+
+---
+
 ## 📖 Table of Contents
 
 ### **🚀 Getting Started**

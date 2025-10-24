@@ -19,11 +19,31 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-# Database configuration - PostgreSQL only from environment variables
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
-)
+# PRD-18: Database configuration - Try credential system first, fallback to environment variables
+def get_database_url() -> str:
+    """
+    Get database URL from credential system or environment variables.
+    Tries credential system first for secure credential management.
+    """
+    try:
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        params = resolver.get_postgres_connection_params()
+        
+        # Build connection string from credential
+        return (
+            f"postgresql://{params['user']}:{params['password']}@"
+            f"{params['host']}:{params['port']}/{params['database']}"
+        )
+    except Exception as e:
+        # Fallback to environment variables (transition period)
+        logger.warning(f"Using environment variables for database (credential system not available): {e}")
+        return os.getenv(
+            "DATABASE_URL", 
+            f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
+        )
+
+DATABASE_URL = get_database_url()
 
 # Create PostgreSQL engine with connection pooling
 engine = create_engine(

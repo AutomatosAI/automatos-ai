@@ -27,11 +27,12 @@ class AgentPlatformTools:
     """
     
     def __init__(self, db_session: Session):
-        import os
         self.db = db_session
         self.rag_service = RAGService()
-        # CodeGraphService needs openai_api_key
-        openai_key = os.getenv("OPENAI_API_KEY")
+        # CodeGraphService needs openai_api_key - get from credential resolver
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        openai_key = resolver.get_credential_field("development_openai", "api_key")
         self.code_graph = CodeGraphService(db_session, openai_key) if openai_key else None
         self.logger = logger
     

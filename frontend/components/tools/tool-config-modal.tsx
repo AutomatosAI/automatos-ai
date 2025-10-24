@@ -177,13 +177,16 @@ export function ToolConfigModal({ open, onClose, tool, onSave, onUpdate }: ToolC
         data: updateData
       })
 
+      console.log(`✅ Successfully updated tool: ${tool.name}`)
+
       if (onUpdate) {
         onUpdate(tool.id, updateData)
       }
 
       handleClose()
     } catch (error: any) {
-      console.error('Failed to update tool:', error)
+      console.error('❌ Failed to update tool:', error)
+      alert(`❌ Failed to update ${tool.name}: ${error.message || 'Unknown error'}`)
     }
   }
 

@@ -66,9 +66,9 @@
     'orchestrator': false,     // ✅ Use real APIs - task submission working
     
     // Settings/Admin Pages
-    'settings': true,          // 🔄 Use mocks until backend endpoints ready
+    'settings': false,         // ✅ Use real APIs - credentials system ready
     'tools': false,            // ✅ Use real APIs - MCP tools endpoints working
-    'credentials': true,       // 🔄 Use mocks until backend endpoints ready
+    'credentials': false,      // ✅ Use real APIs - credentials system ready
     
     // Testing/Development
     'test': true,              // 🧪 Always use mocks for testing
