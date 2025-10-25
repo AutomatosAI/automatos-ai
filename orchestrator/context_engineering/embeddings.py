@@ -51,14 +51,23 @@ class EmbeddingGenerator:
                 logger.info(f"Initialized SentenceTransformer: {self.config.model_name}")
                 
             elif self.config.model_type == "openai":
-                # Get API key from credential resolver
-                from services.credential_resolver import get_credential_resolver
-                resolver = get_credential_resolver()
-                openai_key = resolver.get_credential_field("development_openai", "api_key")
-                self.openai_client = AsyncOpenAI(api_key=openai_key)
-                # OpenAI text-embedding-ada-002 has 1536 dimensions
-                self.config.dimension = 1536
-                logger.info("Initialized OpenAI embeddings")
+                # Get API key from environment or credential resolver
+                openai_key = os.getenv("OPENAI_API_KEY")
+                if not openai_key:
+                    try:
+                        from services.credential_resolver import get_credential_resolver
+                        resolver = get_credential_resolver()
+                        openai_key = resolver.get_credential_field("development_openai", "api_key")
+                    except Exception as e:
+                        logger.warning(f"Could not get OpenAI key from credential resolver: {e}")
+                
+                if openai_key:
+                    self.openai_client = AsyncOpenAI(api_key=openai_key)
+                    # OpenAI text-embedding-ada-002 has 1536 dimensions
+                    self.config.dimension = 1536
+                    logger.info("Initialized OpenAI embeddings")
+                else:
+                    raise ValueError("OPENAI_API_KEY not found in environment or credential resolver")
                 
         except Exception as e:
             logger.error(f"Failed to initialize embedding model: {str(e)}")

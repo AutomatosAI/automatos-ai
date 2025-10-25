@@ -133,9 +133,12 @@ class PgVectorStore:
         
         async with self.pool.acquire() as conn:
             # Vector similarity index (HNSW for fast approximate search)
+            # m=16: max connections per layer (higher = better recall, more memory)
+            # ef_construction=200: build-time accuracy (higher = better index quality, slower build)
             await conn.execute(f"""
                 CREATE INDEX IF NOT EXISTS {self.table_name}_embedding_idx 
-                ON {self.table_name} USING hnsw (embedding vector_cosine_ops);
+                ON {self.table_name} USING hnsw (embedding vector_cosine_ops)
+                WITH (m = 16, ef_construction = 200);
             """)
             
             # Metadata indexes
@@ -222,7 +225,8 @@ class PgVectorStore:
                               query_embedding: List[float],
                               limit: int = 10,
                               similarity_threshold: float = 0.0,
-                              filters: Dict[str, Any] = None) -> List[VectorSearchResult]:
+                              filters: Dict[str, Any] = None,
+                              ef_search: int = 100) -> List[VectorSearchResult]:
         """
         Perform similarity search
         
@@ -231,12 +235,15 @@ class PgVectorStore:
             limit: Maximum number of results
             similarity_threshold: Minimum similarity score
             filters: Additional filters (content_type, source_file, etc.)
+            ef_search: HNSW search quality parameter (64-200, higher = better recall but slower)
             
         Returns:
             List of search results
         """
         try:
             async with self.pool.acquire() as conn:
+                # Set HNSW ef_search for this query (controls recall vs speed tradeoff)
+                await conn.execute(f"SET LOCAL hnsw.ef_search = {ef_search};")
                 # Build query with optional filters
                 where_conditions = ["1 - (embedding <=> $1) >= $3"]
                 params = [query_embedding, limit, similarity_threshold]
@@ -299,7 +306,8 @@ class PgVectorStore:
                           query_text: str,
                           limit: int = 10,
                           vector_weight: float = 0.7,
-                          text_weight: float = 0.3) -> List[VectorSearchResult]:
+                          text_weight: float = 0.3,
+                          ef_search: int = 100) -> List[VectorSearchResult]:
         """
         Hybrid search combining vector similarity and text search
         
@@ -315,6 +323,9 @@ class PgVectorStore:
         """
         try:
             async with self.pool.acquire() as conn:
+                # Set HNSW ef_search for this query
+                await conn.execute(f"SET LOCAL hnsw.ef_search = {ef_search};")
+                
                 query = f"""
                     SELECT 
                         id, content, metadata, source_file, chunk_index, content_type,

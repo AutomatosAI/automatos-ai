@@ -34,32 +34,45 @@ Automatos AI is a powerful, enterprise-grade platform for creating, managing, an
 
 ## 🛠️ Quick Start
 
+Get Automatos AI running in 3 simple steps:
+
 ### Prerequisites
-- Docker & Docker Compose
-- Git
-- Node.js 18+ (for frontend development)
-- Python 3.11+ (for backend development)
+- **Docker** & **Docker Compose** (latest versions)
+- **Git**
+- Optional: OpenAI API key ([get one here](https://platform.openai.com/api-keys))
 
-### 1. Clone and Setup
+### 1️⃣ Clone & Configure
 ```bash
-git clone git@github.com:AutomatosAI/automatos-ai.git
-cd automatos-ai/orchestrator
-cp .env.example .env  # Configure your environment
+git clone https://github.com/AutomatosAI/automatos-ai.git
+cd automatos-ai
+cp .env.example .env
+# Optional: Edit .env and add your OPENAI_API_KEY
 ```
 
-### 2. Start Services
+### 2️⃣ Start Everything
 ```bash
-# Start all services
-docker compose up -d
+docker-compose up
+```
+⏳ First startup takes 2-3 minutes (building images, loading seed data)
 
-# Backend only (for API development)
-docker compose up -d postgres redis backend_api
+### 3️⃣ Access the Platform
+- **🌐 Frontend**: http://localhost:3000
+- **📚 API Docs**: http://localhost:8000/docs
+- **❤️ Health Check**: http://localhost:8000/health
+
+**That's it!** 🎉 The platform is ready to use.
+
+### Optional: Monitoring & Admin Tools
+```bash
+# Add monitoring (Prometheus + Grafana)
+docker-compose --profile monitoring up
+
+# Add everything (includes Adminer for database management)
+docker-compose --profile all up
 ```
 
-### 3. Access the Platform
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Frontend**: http://localhost:3000 (when built)
+### Troubleshooting
+See [Quick Start Guide](docs/QUICKSTART.md) for detailed setup instructions and troubleshooting.
 
 ## 📁 Project Structure
 

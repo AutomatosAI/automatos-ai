@@ -1,0 +1,98 @@
+# =============================================================================
+# Automatos AI - Backend Dockerfile (Multi-stage)
+# =============================================================================
+# Stages:
+#   - base: Common dependencies
+#   - development: Hot-reload, debugging tools
+#   - production: Optimized, minimal image
+# =============================================================================
+
+# =============================================================================
+# Base Stage - Common Dependencies
+# =============================================================================
+FROM python:3.11-slim as base
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    postgresql-client \
+    libmagic1 \
+    tesseract-ocr \
+    ghostscript \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY orchestrator/requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# =============================================================================
+# Development Stage - Hot Reload & Debugging
+# =============================================================================
+FROM base as development
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Copy application code
+COPY orchestrator/ .
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/vector_stores /app/projects
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Default command - can be overridden in docker-compose
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# =============================================================================
+# Production Stage - Optimized & Minimal
+# =============================================================================
+FROM base as production
+
+# Copy application code only (no dev tools)
+COPY orchestrator/ .
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/vector_stores /app/projects
+
+# Remove dev dependencies
+RUN pip uninstall -y pytest pytest-asyncio black isort
+
+# Create non-root user for security
+RUN useradd -m -u 1000 automatos && \
+    chown -R automatos:automatos /app
+
+USER automatos
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Production command - multiple workers, no reload
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+

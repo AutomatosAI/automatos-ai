@@ -65,6 +65,8 @@ from api.analytics_api import router as analytics_api_router
 from api.analytics_real import router as analytics_real_router
 from api.insights import router as insights_router
 from api.knowledge import router as knowledge_router
+from api.knowledge_multimodal import router as knowledge_multimodal_router
+from api.knowledge_graph import router as knowledge_graph_router
 from api.learning import router as learning_router
 from api.problems import router as problems_router
 from api.query import router as query_router
@@ -73,7 +75,6 @@ from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 from api.websocket_api import router as websocket_api_router
 from api.chatbot_llm import router as chatbot_router
-# from api.chatbot_suggestions import router as chatbot_suggestions_router  # TODO: File missing
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
@@ -402,6 +403,8 @@ app.include_router(analytics_api_router)
 app.include_router(analytics_real_router)
 app.include_router(insights_router)
 app.include_router(knowledge_router)
+app.include_router(knowledge_multimodal_router)
+app.include_router(knowledge_graph_router)
 app.include_router(learning_router)
 app.include_router(problems_router)
 app.include_router(query_router)
@@ -411,7 +414,6 @@ app.include_router(synthesis_router)
 app.include_router(websocket_api_router)
 app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
 app.include_router(chatbot_router)
-# app.include_router(chatbot_suggestions_router)  # TODO: File missing
 app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
 
