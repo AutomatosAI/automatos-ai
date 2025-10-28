@@ -17,7 +17,8 @@ import {
   Eye,
   MoreVertical,
   FolderOpen,
-  Plus
+  Plus,
+  History
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +33,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CodeGraphPanel } from '@/components/knowledge/CodeGraphPanel'
 import { MultimodalKnowledgePanel } from '@/components/knowledge/MultimodalKnowledgePanel'
+import { DatabaseQueryExplorer } from '@/components/knowledge/DatabaseQueryExplorer'
+import { QueryTemplatesGrid } from '@/components/knowledge/QueryTemplatesGrid'
+import { SemanticLayerBuilder } from '@/components/knowledge/SemanticLayerBuilder'
+import { AddDatabaseModal } from '@/components/knowledge/AddDatabaseModal'
 // Document modals
 import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
@@ -40,6 +45,7 @@ import { DocumentProcessing } from './document-processing'
 import { DocumentAnalytics } from './document-analytics'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
+import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -86,12 +92,24 @@ export function DocumentManagement() {
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
+  const [showAddDatabaseModal, setShowAddDatabaseModal] = useState(false)
   
   // API hooks
   const { data: documents = [], isLoading, error } = useDocuments()
   const { data: documentStats } = useDocumentStats()
   const uploadDocumentMutation = useUploadDocument()
   const deleteDocumentMutation = useDeleteDocument()
+  
+  // Database Knowledge hooks
+  const { 
+    sources: databaseSources, 
+    templates,
+    loading: dbLoading,
+    createSource,
+    executeQuery,
+    syncSchema,
+    getCacheStats 
+  } = useDatabaseKnowledge()
   
   // Type the documents array properly
   const typedDocuments = documents as BackendDocument[]
@@ -343,7 +361,7 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span className="hidden sm:inline">Library</span>
@@ -351,6 +369,10 @@ export function DocumentManagement() {
             <TabsTrigger value="multimodal" className="flex items-center space-x-2">
               <Image className="w-4 h-4" />
               <span className="hidden sm:inline">Multimodal</span>
+            </TabsTrigger>
+            <TabsTrigger value="database" className="flex items-center space-x-2">
+              <Database className="w-4 h-4" />
+              <span className="hidden sm:inline">Database</span>
             </TabsTrigger>
             <TabsTrigger value="search" className="flex items-center space-x-2">
               <Search className="w-4 h-4" />
@@ -537,6 +559,243 @@ export function DocumentManagement() {
             <MultimodalKnowledgePanel />
           </TabsContent>
 
+          <TabsContent value="database" className="space-y-6">
+            {/* Database Knowledge Header */}
+            <Card className="glass-card">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-5 h-5 text-blue-400" />
+                    Database Knowledge Sources
+                  </div>
+                  <Button 
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAddDatabaseModal(true)}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Database
+                  </Button>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {dbLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Loading database sources...
+                  </div>
+                ) : (!databaseSources || databaseSources.length === 0) ? (
+                  <div className="text-center py-12">
+                    <Database className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No database sources yet</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Connect your databases to query them with natural language
+                    </p>
+                    <Button 
+                      onClick={() => setShowAddDatabaseModal(true)}
+                    >
+                      <Database className="w-4 h-4 mr-2" />
+                      Add Your First Database
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {databaseSources.map((source: any) => (
+                      <div key={source.id} className="p-4 border rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Database className="w-5 h-5 text-green-500" />
+                            <span className="font-medium">{source.name}</span>
+                          </div>
+                          <Badge variant="outline">{source.dialect}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-2">
+                          {source.tables_count} tables • Last synced {source.last_synced}
+                        </p>
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => syncSchema(source.id)}
+                          >
+                            Sync Schema
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Sub-tabs for Database Features */}
+            <Tabs defaultValue="explorer" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/30">
+                <TabsTrigger value="explorer">SQL Explorer</TabsTrigger>
+                <TabsTrigger value="semantic">Semantic Layer</TabsTrigger>
+                <TabsTrigger value="templates">Query Templates</TabsTrigger>
+                <TabsTrigger value="schema">Schema Browser</TabsTrigger>
+                <TabsTrigger value="audit">Audit History</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="explorer" className="space-y-6">
+                <DatabaseQueryExplorer 
+                  selectedSource={databaseSources?.[0]}
+                  sources={databaseSources || []}
+                />
+              </TabsContent>
+              
+              <TabsContent value="semantic" className="space-y-6">
+                <SemanticLayerBuilder 
+                  selectedSource={databaseSources?.[0]}
+                  sources={databaseSources || []}
+                />
+              </TabsContent>
+              
+              <TabsContent value="templates" className="space-y-6">
+                <QueryTemplatesGrid 
+                  templates={templates || []}
+                  selectedSource={databaseSources?.[0]}
+                />
+              </TabsContent>
+
+              <TabsContent value="schema" className="space-y-6">
+                {/* Schema Browser */}
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      Database Schema Browser
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {!databaseSources || databaseSources.length === 0 ? (
+                      <p className="text-muted-foreground text-center py-8">
+                        No database sources connected. Add a database to browse its schema.
+                      </p>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-3">Tables & Columns</h4>
+                          <div className="space-y-3">
+                            {/* Example schema structure - would be populated from API */}
+                            <div className="border-l-2 border-blue-500 pl-4">
+                              <div className="font-medium flex items-center gap-2">
+                                <Database className="h-4 w-4" />
+                                customers
+                              </div>
+                              <div className="ml-4 mt-2 space-y-1 text-sm text-muted-foreground">
+                                <div>• id (INTEGER, PK)</div>
+                                <div>• name (VARCHAR)</div>
+                                <div>• email (VARCHAR)</div>
+                                <div>• created_at (TIMESTAMP)</div>
+                              </div>
+                            </div>
+                            <div className="border-l-2 border-green-500 pl-4">
+                              <div className="font-medium flex items-center gap-2">
+                                <Database className="h-4 w-4" />
+                                orders
+                              </div>
+                              <div className="ml-4 mt-2 space-y-1 text-sm text-muted-foreground">
+                                <div>• id (INTEGER, PK)</div>
+                                <div>• customer_id (INTEGER, FK→customers.id)</div>
+                                <div>• total_amount (DECIMAL)</div>
+                                <div>• order_date (TIMESTAMP)</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-3">Relationships</h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline">Many-to-One</Badge>
+                              <span>orders.customer_id → customers.id</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="audit" className="space-y-6">
+                {/* Audit History */}
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <History className="h-5 w-5" />
+                        Query Audit History
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        // TODO: Export audit log
+                        console.log('Export audit log')
+                      }}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Export CSV
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Audit entries would come from API */}
+                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-medium">Show top 10 customers by revenue</p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              SELECT customer_name, SUM(order_total) as revenue...
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            247ms
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span>User: admin@automatos.ai</span>
+                          <span>Rows: 10</span>
+                          <span>2 minutes ago</span>
+                          <Badge className="text-xs" variant="secondary">
+                            Success
+                          </Badge>
+                        </div>
+                      </div>
+                      
+                      <div className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-medium">Calculate monthly revenue trend</p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              SELECT DATE_TRUNC('month', order_date) as month...
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            523ms
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                          <span>User: analyst@automatos.ai</span>
+                          <span>Rows: 12</span>
+                          <span>15 minutes ago</span>
+                          <Badge className="text-xs" variant="secondary">
+                            Success
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="text-center py-4">
+                        <Button variant="outline" size="sm">
+                          Load More
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+
           <TabsContent value="search" className="space-y-6">
             <SemanticSearch
               context="documents"
@@ -663,6 +922,16 @@ export function DocumentManagement() {
           setDocumentToDelete(null)
         }}
         onConfirm={confirmDelete}
+      />
+
+      {/* Add Database Modal */}
+      <AddDatabaseModal
+        isOpen={showAddDatabaseModal}
+        onClose={() => setShowAddDatabaseModal(false)}
+        onSuccess={() => {
+          // Refresh database sources after adding
+          window.location.reload()
+        }}
       />
     </div>
   )

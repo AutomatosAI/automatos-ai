@@ -376,39 +376,70 @@ SUBTASK RESULTS ({len(subtask_results)} subtasks):
 {results_text}
 
 YOUR TASK:
-Synthesize these subtask results into a coherent final result.
+Synthesize subtask results into a COMPREHENSIVE, AUTHORITATIVE final deliverable.
+
+🎯 CRITICAL MINDSET: 
+- This is the FINAL DELIVERABLE that will be presented to stakeholders
+- NO meta-commentary, NO "to be continued", NO "please let me know"
+- NO mentions of "writing to file" or "creating document"
+- COMPLETE the full output in your response - this is not a draft
+- The user will receive EXACTLY what you write in synthesized_result
 
 PROCESS:
 1. REVIEW RESULTS:
    - Call get_result_summary(subtask_id) for each key result
-   - Identify main findings from each subtask
-   - Note quality scores and confidence levels
+   - Extract ALL concrete findings, data, code snippets, evidence
+   - Note quality scores - use high-quality results prominently
 
 2. DETECT CONFLICTS:
    - Call detect_conflicts(results) to find inconsistencies
-   - Are any results contradictory?
-   - Do results from different agents disagree?
+   - Identify contradictory information between subtasks
+   - Note where different sources provide conflicting data
 
 3. RESOLVE CONFLICTS:
    - For each conflict, call resolve_conflict(conflict, context)
-   - Use reasoning to determine which result is more reliable
-   - Consider: agent performance, evidence quality, logical consistency
-   - Don't just "vote" - reason about which makes more sense
+   - Use evidence-based reasoning to determine truth
+   - Prefer: higher quality scores, code evidence, multiple confirmations
+   - Document your resolution reasoning
 
 4. VALIDATE COMPLETENESS:
    - Call validate_completeness(results, goal)
-   - Does synthesis address all aspects of the goal?
-   - Are there gaps in coverage?
+   - Ensure ALL aspects of the original goal are addressed
+   - Identify any gaps BUT work with what you have
 
-5. SYNTHESIZE:
-   - Combine results into coherent narrative
-   - Preserve key insights from each subtask
-   - Explain how results relate to each other
-   - Address any limitations or uncertainties
+5. SYNTHESIZE WITH AUTHORITY:
+   - Write with CONFIDENCE based on the evidence you have
+   - Use CODE SNIPPETS as concrete proof (include file paths, line numbers)
+   - Create DETAILED TECHNICAL SECTIONS with specifics
+   - Build a COHERENT NARRATIVE that flows logically
+   - CITE SOURCES: Reference specific findings, files, functions
+   - Focus on WHAT YOU FOUND, not what you didn't find
+   - BE ASSERTIVE: "The platform implements X..." not "It appears that X might..."
 
 6. CALCULATE CONFIDENCE:
    - Call calculate_confidence(synthesis)
    - Consider conflicts, quality scores, completeness
+
+WRITING RULES:
+✅ DO:
+- State findings with confidence: "The platform uses FastAPI..." 
+- Include code evidence: "As shown in orchestrator/main.py:123..."
+- Create detailed sections with headers
+- Use technical specifics: version numbers, function names, file paths
+- Build comprehensive narratives from available evidence
+
+❌ ABSOLUTELY FORBIDDEN:
+- "Unfortunately, without access to..."
+- "To be continued..." or "(To be continued...)"
+- "I have started the report..." or "I will write..."
+- "Please let me know if you need..." or "Feel free to..."
+- "You could use X function..." or instructions to the user
+- Apologizing for lack of information
+- Weak language: "appears", "seems", "might be", "possibly"
+- Meta-commentary about the synthesis process
+- References to files being created or written
+- Incomplete sections or placeholder text
+- Any instructions or suggestions to the user
 
 FUNCTIONS AVAILABLE:
 - get_result_summary(subtask_id) → Get detailed result summary
@@ -418,20 +449,83 @@ FUNCTIONS AVAILABLE:
 - calculate_confidence(synthesis) → Assess overall confidence
 
 QUALITY CRITERIA:
-- Coherence: Does synthesis tell a logical story?
-- Completeness: All aspects of goal addressed?
-- Accuracy: Results properly integrated?
-- Transparency: Conflicts and resolutions explained?
+- Confidence: Assertive writing backed by evidence
+- Technical Depth: Specific implementations, not generalities
+- Code Integration: Include relevant code snippets with paths
+- Coherence: Logical flow with clear sections
+- Completeness: Maximize value from available findings
 
-Provide:
+🚫 EXAMPLE OF BAD OUTPUT (DO NOT DO THIS):
+"Based on the provided code snippets, we can infer... To be continued...
+I have started the report and written it to a file. Please let me know if you need assistance!"
+
+✅ EXAMPLE OF GOOD OUTPUT (DO THIS):
+"# Technical Analysis of AgentFactory
+
+The AgentFactory class implements a singleton pattern for managing AI agents across the platform. Located in `services/agent_factory.py:470`, it provides the following core capabilities:
+
+**Key Features:**
+1. Dynamic agent creation from user-defined metadata
+2. Lifecycle management (IDLE → ACTIVE → BUSY → COMPLETED)
+3. Multi-type agent support (researchers, analysts, writers, etc.)
+
+**Implementation Details:**
+The factory maintains active agents in memory using a dictionary:
+```python
+self.active_agents: Dict[int, AgentRuntime] = {{}}
+```
+
+The create_agent method (line 523) supports both AgentMetadata objects and dictionaries..."
+
+OUTPUT FORMAT GUIDELINES (adapt to task type):
+
+FOR RESEARCH/DOCUMENTATION TASKS:
+- Write COMPLETE technical reports with all sections finished
+- Include headers, code examples, architecture diagrams
+- Cite specific files, functions, line numbers
+- Use markdown formatting
+- Minimum 2000 words for comprehensive topics
+
+FOR DEPLOYMENT/OPERATIONS TASKS:
+- Provide COMPLETE execution summary with all steps
+- Include command outputs, timestamps, final status
+- List errors encountered and their resolutions
+- End with verification confirmation
+
+FOR ANALYSIS TASKS:
+- Present COMPLETE findings with all evidence
+- Include metrics, benchmarks, performance data
+- Provide specific, actionable recommendations
+- Cite all sources
+
+FOR CODE TASKS:
+- Include COMPLETE, working code implementations
+- Add comprehensive inline comments
+- Provide usage examples and test cases
+- List all dependencies
+
+🎯 FINAL OUTPUT STRUCTURE:
+
+Return JSON with these fields:
+
 {{
-    "synthesized_result": "Main synthesized output",
-    "key_insights": ["Insight 1", "Insight 2", ...],
-    "conflicts_found": ["Description of conflicts"],
+    "synthesized_result": "<YOUR COMPLETE FINAL DELIVERABLE GOES HERE - This exact text will be shown to the user as the final result. Write the ENTIRE report/output/deliverable here. No placeholders, no 'to be continued', no meta-commentary. For a 5000 word report, write all 5000 words HERE.>",
+    
+    "key_insights": [
+        "Specific, actionable insight with evidence",
+        "Another concrete finding with file/line references",
+        "Technical detail that adds value"
+    ],
+    
+    "conflicts_found": ["Any conflicts detected and how they were resolved"],
+    
     "confidence_score": 0.0-1.0,
     "completeness_score": 0.0-1.0,
-    "reasoning": "Explain your synthesis process"
+    
+    "reasoning": "Brief (2-3 sentences) on synthesis approach"
 }}
+
+⚠️ REMEMBER: The 'synthesized_result' field IS the final output. Write it COMPLETE and READY TO USE.
 """
         return prompt
     

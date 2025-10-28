@@ -212,8 +212,11 @@ def init_database():
             "Documents": ['documents', 'document_chunks', 'document_usage'],
             "Memory": ['memory_items', 'knowledge_nodes', 'knowledge_edges'],
             "Tools": ['mcp_tools', 'agent_tool_assignments', 'tool_credentials'],
+            "Credentials": ['credential_types', 'credentials', 'credential_audit_logs'],
             "Context": ['context_policies', 'context_templates', 'context_examples'],
-            "Analytics": ['analytics_snapshots', 'system_metrics', 'dashboard_configs']
+            "Analytics": ['analytics_snapshots', 'system_metrics', 'dashboard_configs'],
+            "Database Knowledge": ['database_knowledge_sources', 'database_relationships', 'database_query_audit', 
+                                  'semantic_metrics', 'semantic_dimensions', 'database_query_templates']
         }
         
         print("\n🔍 Critical tables verification by category:")

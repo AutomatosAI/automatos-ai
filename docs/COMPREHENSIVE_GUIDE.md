@@ -32,7 +32,7 @@ Our documentation has been restructured into detailed, comprehensive guides cove
 |-------|---------------|--------|
 | **[Playbooks Guide](PLAYBOOKS_GUIDE.md)** | FP-Growth Algorithm, Pattern Discovery, Automated Learning, Workflow Templates | ~1,300 lines |
 | **[CodeGraph Guide](CODEGRAPH_GUIDE.md)** | Code Indexing, Semantic Search, Symbol Tracking, Multi-Project Management | ~1,900 lines |
-| **[Credential System Guide](CREDENTIAL_SYSTEM_GUIDE.md)** | n8n-Style Credentials, Auto-Activation, Security, Encryption | ~500 lines |
+| **[Credential System Guide](CREDENTIAL_SYSTEM_GUIDE.md)** | Style Credentials, Auto-Activation, Security, Encryption | ~500 lines |
 | **[Agent Communication Guide](AGENT_COMMUNICATION_MONITORING_GUIDE.md)** | Inter-Agent Messaging, Shared Context, Collaboration Patterns | Coming Soon |
 
 ### **Deployment & Operations**

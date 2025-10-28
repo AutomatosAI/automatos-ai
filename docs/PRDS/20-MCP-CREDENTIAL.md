@@ -1278,7 +1278,7 @@ if __name__ == "__main__":
 
 ## Part 3: Phase 2 Implementation (400+ Servers)
 
-### 3.1 n8n Credential Scraping Strategy
+### 3.1 Credential Scraping Strategy
 
 **Source**: https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/credentials
 

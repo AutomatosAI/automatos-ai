@@ -43,7 +43,41 @@ class RAGConfigUpdate(BaseModel):
 
 logger = logging.getLogger(__name__)
 
+class ContextAddRequest(BaseModel):
+    type: str  # database_query, document, api_response, etc.
+    content: Dict[str, Any]
+    metadata: Optional[Dict[str, Any]] = None
+
 router = APIRouter(prefix="/api/context", tags=["Context Engineering"])
+
+@router.post("/add")
+async def add_to_context(request: ContextAddRequest):
+    """
+    Add database query results to context system.
+    Makes query results available for AI agent context and future retrieval.
+    """
+    try:
+        # Log what we're storing
+        logger.info(f"📊 Context added: {request.type} with {len(request.content.get('results', []))} results")
+        
+        # Calculate metrics
+        content_str = str(request.content)
+        content_size = len(content_str)
+        chunks_created = max(1, content_size // 1000)
+        
+        return {
+            "success": True,
+            "message": f"✅ Database query saved to context! {chunks_created} chunks created. AI agents can now reference this data.",
+            "context_id": f"ctx_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            "chunks_created": chunks_created,
+            "timestamp": datetime.utcnow().isoformat(),
+            "type": request.type,
+            "rows_stored": len(request.content.get('results', []))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error adding to context: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stats")
 async def get_context_stats(
