@@ -72,7 +72,7 @@ Result: Can handle ANY task type
 | **Centralized Registry** | Single source of truth for all tools | 100% visibility |
 | **Dynamic Assignment** | Tools assigned based on task type | 87% better matches |
 | **400+ Integrations** | Pre-integrated MCP servers | Massive coverage |
-| **Credential Linking** | n8n-style credential-to-tool binding | Zero config |
+| **Credential Linking** | style credential-to-tool binding | Zero config |
 | **Auto-Activation** | Add credential → tools enabled | 1-click setup |
 | **Smart Recommendations** | AI suggests required tools | 92% accuracy |
 
@@ -458,9 +458,9 @@ POST /api/credentials
 
 ## Credential Management
 
-### n8n-Style Credential System
+### Style Credential System
 
-Automatos uses the **same credential architecture as n8n** - battle-tested by thousands of users.
+Automatos uses the **same credential architecture as ** - battle-tested by thousands of users.
 
 ### How It Works
 

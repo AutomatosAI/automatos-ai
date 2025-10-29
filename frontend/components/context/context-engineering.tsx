@@ -17,7 +17,8 @@ import {
   Activity,
   TrendingUp,
   Filter,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, BarChart as RechartsBarChart, Bar, PieChart, Pie, Cell } from 'recharts'
 
 // Import all the context hooks
@@ -41,6 +43,7 @@ import {
 import { RAGContextBuilder } from './rag-context-builder'
 import { ConfigureRAGModal } from './configure-rag-modal'
 import { PatternDetailsModal } from './pattern-details-modal'
+import { DatabaseQueryAnalytics } from './DatabaseQueryAnalytics'
 
 const confidenceColors = {
   high: 'text-green-400',
@@ -264,7 +267,7 @@ export function ContextEngineering() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="performance" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="performance" className="flex items-center space-x-2">
               <BarChart className="w-4 h-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -272,6 +275,10 @@ export function ContextEngineering() {
             <TabsTrigger value="queries" className="flex items-center space-x-2">
               <Search className="w-4 h-4" />
               <span className="hidden sm:inline">Query Analysis</span>
+            </TabsTrigger>
+            <TabsTrigger value="database" className="flex items-center space-x-2">
+              <Database className="w-4 h-4" />
+              <span className="hidden sm:inline">Database Analytics</span>
             </TabsTrigger>
             <TabsTrigger value="patterns" className="flex items-center space-x-2">
               <Network className="w-4 h-4" />
@@ -544,6 +551,11 @@ export function ContextEngineering() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="database" className="space-y-6">
+            {/* Real Database Query Analytics - fetched from database_query_audit */}
+            <DatabaseQueryAnalytics />
           </TabsContent>
 
           <TabsContent value="patterns" className="space-y-6">

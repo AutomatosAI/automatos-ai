@@ -544,6 +544,8 @@ class CredentialStore:
             f"Tested credential '{credential.name}': "
             f"{'✅ PASSED' if test_result.success else '❌ FAILED'}"
         )
+        if not test_result.success:
+            logger.error(f"Test failure details: {test_result.message}")
         
         return test_result
     
@@ -718,11 +720,35 @@ class CredentialStore:
         
         Args:
             data: Credential data to validate
-            schema: Schema definition
+            schema: Schema definition (can be JSON string or list)
             
         Raises:
             CredentialValidationError: If validation fails
         """
+        # Handle schema as string (from database JSON column)
+        import json
+        
+        if isinstance(schema, str):
+            schema = json.loads(schema)
+        
+        # Convert JSON Schema format to list format if needed
+        if isinstance(schema, dict) and 'properties' in schema:
+            # This is a JSON Schema object, convert to list format
+            properties = schema['properties']
+            required_fields = schema.get('required', [])
+            schema_list = []
+            for key, prop in properties.items():
+                field_def = {
+                    'name': key,
+                    'displayName': prop.get('title', key),
+                    'type': prop.get('type', 'string'),
+                    'required': key in required_fields,
+                    'description': prop.get('description', ''),
+                    'default': prop.get('default')
+                }
+                schema_list.append(field_def)
+            schema = schema_list
+        
         # Check required fields
         for field in schema:
             field_name = field.get('name')

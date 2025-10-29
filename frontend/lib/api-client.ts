@@ -899,27 +899,34 @@
       return [] // Return empty array instead of empty object to prevent .slice errors
     }
   
-    async request<T>(
-      endpoint: string,
-      options: RequestInit = {}
-    ): Promise<T> {
-      const url = `${this.baseUrl}${endpoint}`
-      
-      console.log('🔍 API Call:', { url, method: options.method || 'GET' })
-      
-      const config: RequestInit = {
-        ...options,
-        headers: {
-          ...this.defaultHeaders,
-          ...options.headers,
-        },
-      }
-  
-      try {
-        const response = await fetch(url, {
-          ...config,
-          redirect: 'follow' // Follow redirects automatically
-        })
+  async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`
+    
+    console.log('🔍 API Call:', { url, method: options.method || 'GET' })
+    
+    // Auto-stringify body if it's an object and not FormData
+    let body = options.body
+    if (body && typeof body === 'object' && !(body instanceof FormData)) {
+      body = JSON.stringify(body)
+    }
+    
+    const config: RequestInit = {
+      ...options,
+      body,
+      headers: {
+        ...this.defaultHeaders,
+        ...options.headers,
+      },
+    }
+
+    try {
+      const response = await fetch(url, {
+        ...config,
+        redirect: 'follow' // Follow redirects automatically
+      })
         
         if (!response.ok) {
           console.error('❌ API Error:', response.status, response.statusText)

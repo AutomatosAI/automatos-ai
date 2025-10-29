@@ -368,6 +368,30 @@ CREATE INDEX IF NOT EXISTS ix_credential_types_name ON credential_types(name);
 CREATE INDEX IF NOT EXISTS ix_credential_types_category ON credential_types(category);
 CREATE INDEX IF NOT EXISTS ix_credential_types_is_active ON credential_types(is_active);
 
+-- Credentials table (stores encrypted credentials)
+CREATE TABLE IF NOT EXISTS credentials (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    credential_type_id INTEGER REFERENCES credential_types(id) ON DELETE CASCADE NOT NULL,
+    encrypted_data TEXT NOT NULL,
+    environment VARCHAR(50) DEFAULT 'production',
+    description TEXT,
+    tags JSON DEFAULT '[]',
+    is_active BOOLEAN DEFAULT TRUE,
+    expires_at TIMESTAMP,
+    last_tested TIMESTAMP,
+    test_status VARCHAR(50),
+    test_message TEXT,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(name, environment)
+);
+
+CREATE INDEX idx_credentials_type ON credentials(credential_type_id);
+CREATE INDEX idx_credentials_env ON credentials(environment);
+CREATE INDEX idx_credentials_active ON credentials(is_active);
+
 -- Tool Credentials table
 CREATE TABLE IF NOT EXISTS tool_credentials (
     id SERIAL PRIMARY KEY,
@@ -1068,6 +1092,168 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 );
 
 -- ================================================================
+-- DATABASE KNOWLEDGE SOURCE TABLES (PRD-21)
+-- ================================================================
+
+-- Main database knowledge source table
+CREATE TABLE IF NOT EXISTS database_knowledge_sources (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    -- Uses existing credential system by name
+    credential_name VARCHAR(255),
+    credential_environment VARCHAR(50) DEFAULT 'production',
+    dialect VARCHAR(50) NOT NULL CHECK (dialect IN ('postgresql', 'mysql', 'sqlite', 'mssql', 'snowflake', 'bigquery', 'redshift')),
+    connection_pool_size INTEGER DEFAULT 5,
+    max_rows_limit INTEGER DEFAULT 10000,
+    query_timeout_seconds INTEGER DEFAULT 30,
+    schema_metadata JSONB,
+    schema_version INTEGER DEFAULT 1,
+    schema_hash VARCHAR(64),
+    last_introspected TIMESTAMP,
+    semantic_layer JSONB,
+    schema_cache_ttl INTEGER DEFAULT 3600,
+    query_cache_ttl INTEGER DEFAULT 300,
+    total_queries_executed INTEGER DEFAULT 0,
+    avg_query_time_ms FLOAT,
+    last_successful_query TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    status VARCHAR(50) DEFAULT 'active',
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_dks_tenant_name ON database_knowledge_sources(tenant_id, name);
+CREATE INDEX idx_dks_credential_lookup ON database_knowledge_sources(credential_name, credential_environment);
+CREATE INDEX idx_dks_status ON database_knowledge_sources(status, is_active);
+
+-- Table relationships for JOIN optimization
+CREATE TABLE IF NOT EXISTS database_relationships (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES database_knowledge_sources(id) ON DELETE CASCADE,
+    from_table VARCHAR(255) NOT NULL,
+    from_column VARCHAR(255) NOT NULL,
+    to_table VARCHAR(255) NOT NULL,
+    to_column VARCHAR(255) NOT NULL,
+    relationship_type VARCHAR(50),
+    is_inferred BOOLEAN DEFAULT FALSE,
+    confidence FLOAT DEFAULT 1.0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_dr_source ON database_relationships(source_id);
+CREATE INDEX idx_dr_tables ON database_relationships(from_table, to_table);
+
+-- Query audit trail
+CREATE TABLE IF NOT EXISTS database_query_audit (
+    id SERIAL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    source_id INTEGER REFERENCES database_knowledge_sources(id) ON DELETE CASCADE,
+    user_id INTEGER,
+    agent_id VARCHAR(255),
+    session_id VARCHAR(255),
+    natural_language_query TEXT NOT NULL,
+    generated_sql TEXT,
+    validated_sql TEXT,
+    execution_time_ms INTEGER,
+    row_count INTEGER,
+    bytes_processed INTEGER,
+    success BOOLEAN NOT NULL,
+    error_message TEXT,
+    validation_errors JSONB,
+    was_cached BOOLEAN DEFAULT FALSE,
+    cache_key VARCHAR(64),
+    visualization_type VARCHAR(50),
+    confidence_score FLOAT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_dqa_tenant_source ON database_query_audit(tenant_id, source_id);
+CREATE INDEX idx_dqa_user ON database_query_audit(user_id);
+CREATE INDEX idx_dqa_created ON database_query_audit(created_at DESC);
+
+-- Semantic metrics
+CREATE TABLE IF NOT EXISTS semantic_metrics (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES database_knowledge_sources(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    sql_expression TEXT NOT NULL,
+    aggregation VARCHAR(50),
+    format VARCHAR(50),
+    description TEXT,
+    business_definition TEXT,
+    tables_used JSONB,
+    drill_down_dimensions JSONB,
+    supports_time_grain BOOLEAN DEFAULT TRUE,
+    default_time_grain VARCHAR(50),
+    usage_count INTEGER DEFAULT 0,
+    last_used TIMESTAMP,
+    is_featured BOOLEAN DEFAULT FALSE,
+    is_certified BOOLEAN DEFAULT FALSE,
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(source_id, name)
+);
+
+CREATE INDEX idx_sm_source ON semantic_metrics(source_id);
+CREATE INDEX idx_sm_featured ON semantic_metrics(is_featured, is_certified);
+
+-- Semantic dimensions
+CREATE TABLE IF NOT EXISTS semantic_dimensions (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES database_knowledge_sources(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    category VARCHAR(100),
+    sql_expression TEXT NOT NULL,
+    type VARCHAR(50),
+    description TEXT,
+    hierarchy_levels JSONB,
+    parent_dimension_id INTEGER REFERENCES semantic_dimensions(id),
+    cached_values JSONB,
+    total_unique_values INTEGER,
+    is_featured BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(source_id, name)
+);
+
+CREATE INDEX idx_sd_source ON semantic_dimensions(source_id);
+CREATE INDEX idx_sd_parent ON semantic_dimensions(parent_dimension_id);
+
+-- Query templates
+CREATE TABLE IF NOT EXISTS database_query_templates (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER REFERENCES database_knowledge_sources(id) ON DELETE CASCADE,
+    dialect VARCHAR(50),
+    category VARCHAR(100),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    natural_language TEXT NOT NULL,
+    sql_template TEXT,
+    parameters JSONB,
+    visualization_type VARCHAR(50),
+    usage_count INTEGER DEFAULT 0,
+    avg_execution_time_ms FLOAT,
+    tags JSONB,
+    is_featured BOOLEAN DEFAULT FALSE,
+    is_certified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_dqt_source ON database_query_templates(source_id);
+CREATE INDEX idx_dqt_dialect ON database_query_templates(dialect, category);
+CREATE INDEX idx_dqt_featured ON database_query_templates(is_featured);
+
+-- ================================================================
 -- INSERT INITIAL DATA
 -- ================================================================
 
@@ -1098,6 +1284,43 @@ INSERT INTO llm_models (provider, model_id, display_name, model_family, context_
 ('anthropic', 'claude-3-opus-20240229', 'Claude 3 Opus', 'claude-3', 200000, 4096, 0.015, 0.075, 'active'),
 ('anthropic', 'claude-3-sonnet-20240229', 'Claude 3 Sonnet', 'claude-3', 200000, 4096, 0.003, 0.015, 'active')
 ON CONFLICT (model_id) DO NOTHING;
+
+-- Insert sample database query templates
+INSERT INTO database_query_templates (
+    dialect, category, name, description, natural_language, sql_template, 
+    parameters, visualization_type, tags, is_featured, is_certified
+) VALUES 
+(
+    'postgresql', 'analytics', 'Top N by Revenue',
+    'Show top customers by revenue with time filter',
+    'Show top {n} customers by revenue in the last {days} days',
+    'SELECT customer_id, customer_name, SUM(amount) as total_revenue FROM orders WHERE order_date >= CURRENT_DATE - INTERVAL ''{days} days'' GROUP BY customer_id, customer_name ORDER BY total_revenue DESC LIMIT {n}',
+    '[{"name": "n", "type": "integer", "default": 10}, {"name": "days", "type": "integer", "default": 30}]'::jsonb,
+    'bar',
+    '["revenue", "customers", "top-n"]'::jsonb,
+    true, true
+),
+(
+    'postgresql', 'analytics', 'Revenue Trend',
+    'Revenue trend over time',
+    'Show revenue trend over the last {months} months',
+    'SELECT DATE_TRUNC(''month'', order_date) as month, SUM(amount) as revenue FROM orders WHERE order_date >= CURRENT_DATE - INTERVAL ''{months} months'' GROUP BY month ORDER BY month',
+    '[{"name": "months", "type": "integer", "default": 12}]'::jsonb,
+    'line',
+    '["revenue", "trend", "time-series"]'::jsonb,
+    true, true
+),
+(
+    'postgresql', 'reporting', 'Daily Summary',
+    'Daily business metrics summary',
+    'Daily business summary for {date}',
+    'SELECT COUNT(DISTINCT order_id) as total_orders, COUNT(DISTINCT customer_id) as unique_customers, SUM(amount) as revenue, AVG(amount) as avg_order_value FROM orders WHERE DATE(order_date) = ''{date}''',
+    '[{"name": "date", "type": "date", "default": "CURRENT_DATE"}]'::jsonb,
+    'table',
+    '["daily", "summary", "kpi"]'::jsonb,
+    true, true
+)
+ON CONFLICT DO NOTHING;
 
 -- ================================================================
 -- COMMENTS FOR DOCUMENTATION

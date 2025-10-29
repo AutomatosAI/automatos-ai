@@ -1077,7 +1077,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         task_type=task_type,
                         complexity=complexity,
                         requirements=[],
-                        max_subtasks=7
+                        max_subtasks=None
                     )
                     
                     # Extract real subtasks from LLM response

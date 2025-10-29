@@ -2,7 +2,7 @@
 Enhanced Credentials Management API
 ===================================
 
-Comprehensive credential management endpoints inspired by n8n.
+Comprehensive credential management endpoints
 Supports credential types, CRUD operations, testing, and audit logging.
 """
 
@@ -165,6 +165,10 @@ async def create_credential(
     set_request_id(str(uuid.uuid4()))
     
     try:
+        # Debug logging
+        logger.info(f"Received credential: type={type(credential)}, credential_type_id={credential.credential_type_id}")
+        logger.info(f"credential_data type: {type(credential.credential_data)}, value: {credential.credential_data}")
+        
         ip_address = get_client_ip(request)
         
         created_cred = store.create_credential(
@@ -224,7 +228,9 @@ async def create_credential(
     except EncryptionKeyError as e:
         raise HTTPException(status_code=500, detail=f"Encryption error: {e}")
     except Exception as e:
+        import traceback
         logger.error(f"Failed to create credential: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

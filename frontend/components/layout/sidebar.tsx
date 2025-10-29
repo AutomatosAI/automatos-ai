@@ -61,7 +61,7 @@ const navigationItems = [
     href: '/documents',
     icon: Database,
     iconColor: 'text-green-400',
-    description: 'Documents, code-graph & databases'
+    description: 'Documents, databases & code-graph'
   },
   {
     name: 'Context Engineering',

@@ -153,6 +153,64 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
+    """Query connected databases using natural language"""
+    try:
+        logger.info(f"[Database] Query: {query}, Database: {database_name or 'auto-detect'}")
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # First, get available database sources
+            sources_response = await client.get("http://127.0.0.1:8000/api/knowledge/sources/database/")
+            
+            if sources_response.status_code != 200:
+                return {"success": False, "error": "No database sources available"}
+            
+            sources = sources_response.json()
+            if not sources:
+                return {"success": False, "error": "No database sources configured"}
+            
+            # Select database source
+            target_source = None
+            if database_name:
+                target_source = next((s for s in sources if database_name.lower() in s['name'].lower()), None)
+            
+            if not target_source:
+                target_source = sources[0]  # Use first available database
+            
+            logger.info(f"[Database] Using source: {target_source['name']}")
+            
+            # Execute query
+            query_response = await client.post(
+                f"http://127.0.0.1:8000/api/knowledge/sources/database/{target_source['id']}/query",
+                json={
+                    "query": query,
+                    "source_id": target_source['id']
+                }
+            )
+            
+            if query_response.status_code == 200:
+                data = query_response.json()
+                logger.info(f"[Database] Query successful: {data.get('row_count', 0)} rows")
+                
+                return {
+                    "success": data.get('success', True),
+                    "database": target_source['name'],
+                    "sql": data.get('sql', ''),
+                    "row_count": data.get('row_count', 0),
+                    "data": data.get('data', [])[:10],  # Limit to 10 rows for chat
+                    "columns": data.get('columns', []),
+                    "execution_time_ms": data.get('execution_time_ms', 0),
+                    "explanation": data.get('explanation', '')
+                }
+            else:
+                error_data = query_response.json()
+                return {"success": False, "error": error_data.get('detail', 'Query failed')}
+                
+    except Exception as e:
+        logger.error(f"[Database] Query error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # Define tools for Claude
 TOOLS = [
     {
@@ -178,6 +236,24 @@ TOOLS = [
                 "query": {
                     "type": "string",
                     "description": "The search query for documents (e.g., 'deployment guide', 'architecture documentation', 'how to setup')"
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "query_database",
+        "description": "Query connected databases using natural language. Converts questions like 'show me top customers' into SQL and returns actual data. Use this when users ask about data, analytics, statistics, customer information, orders, revenue, or any database queries. Works with PostgreSQL and MySQL databases.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language database query (e.g., 'show me top 10 customers by revenue', 'how many orders in the last month', 'what is the average order value')"
+                },
+                "database_name": {
+                    "type": "string",
+                    "description": "Optional: specific database name to query. If not provided, uses the first available database."
                 }
             },
             "required": ["query"]
@@ -217,6 +293,7 @@ Then provide a helpful, technical response based on the search results."""
         messages = [{"role": "user", "content": user_message}]
         code_results = []
         document_results = []
+        database_results = []
         tool_calls_made = []
         
         # Agentic loop - let Claude call tools iteratively
@@ -253,6 +330,13 @@ Then provide a helpful, technical response based on the search results."""
                             tool_result = await search_documents_tool(tool_input.get("query", ""))
                             if tool_result.get("success"):
                                 document_results.extend(tool_result.get("results", []))
+                        elif tool_name == "query_database":
+                            tool_result = await query_database_tool(
+                                tool_input.get("query", ""),
+                                tool_input.get("database_name")
+                            )
+                            if tool_result.get("success"):
+                                database_results.append(tool_result)
                         else:
                             tool_result = {"error": f"Unknown tool: {tool_name}"}
                         
@@ -283,7 +367,16 @@ Then provide a helpful, technical response based on the search results."""
                         final_content += content_block.text
                 
                 logger.info(f"[req={request_id}] Claude finished. Used tools: {tool_calls_made}")
-                logger.info(f"[req={request_id}] Code results: {len(code_results)}, Doc results: {len(document_results)}")
+                logger.info(f"[req={request_id}] Code results: {len(code_results)}, Doc results: {len(document_results)}, DB results: {len(database_results)}")
+                
+                # Determine primary source
+                primary_source = "llm"
+                if database_results:
+                    primary_source = "database"
+                elif code_results:
+                    primary_source = "codegraph"
+                elif document_results:
+                    primary_source = "rag"
                 
                 # Build response
                 return {
@@ -293,10 +386,14 @@ Then provide a helpful, technical response based on the search results."""
                         "timestamp": datetime.now().isoformat(),
                         "code_snippets": code_results,
                         "documents": document_results,
+                        "database_results": database_results,
                         "metadata": {
                             "tools_used": tool_calls_made,
-                            "source": "codegraph" if code_results else ("rag" if document_results else "llm"),
-                            "llm_model": "claude-3-5-sonnet-20241022"
+                            "source": primary_source,
+                            "llm_model": "claude-3-5-sonnet-20241022",
+                            "code_count": len(code_results),
+                            "document_count": len(document_results),
+                            "database_count": len(database_results)
                         }
                     },
                     "session_id": chat_query.session_id or str(uuid.uuid4())
@@ -310,6 +407,7 @@ Then provide a helpful, technical response based on the search results."""
                 "timestamp": datetime.now().isoformat(),
                 "code_snippets": code_results,
                 "documents": document_results,
+                "database_results": database_results,
                 "metadata": {
                     "tools_used": tool_calls_made,
                     "error": "Max tool iterations reached"

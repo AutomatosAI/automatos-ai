@@ -42,7 +42,10 @@ class CredentialTester:
             'openai_api': self._test_openai,
             'anthropic_api': self._test_anthropic,
             'postgres_credentials': self._test_postgres,
+            'postgres': self._test_postgres,  # Alias for n8n postgres type
+            'postgreSql': self._test_postgres,  # Another n8n alias
             'redis_credentials': self._test_redis,
+            'redis': self._test_redis,  # Alias for n8n redis type
             'github_api': self._test_github,
             'ssh_credentials': self._test_ssh,
             'generic_api': self._test_generic_api,
@@ -60,6 +63,7 @@ class CredentialTester:
             'elasticsearch_credentials': self._test_elasticsearch,
             'mongodb_credentials': self._test_mongodb,
             'mysql_credentials': self._test_mysql,
+            'mySql': self._test_mysql,  # Alias for n8n mysql type
             'docker_credentials': self._test_docker,
             'kubernetes_credentials': self._test_kubernetes,
             'sendgrid_api': self._test_sendgrid,
@@ -166,17 +170,36 @@ class CredentialTester:
         database = data.get('database')
         user = data.get('user')
         password = data.get('password')
+        ssl_mode = data.get('ssl', 'prefer')  # disable, allow, prefer, require, verify-ca, verify-full
+        allow_unauthorized = data.get('allowUnauthorizedCerts', False)
         
         if not all([host, database, user, password]):
             return {'success': False, 'message': 'Host, database, user, and password are required'}
         
         try:
+            # Handle SSL configuration based on mode
+            import ssl as ssl_module
+            ssl_param = None
+            
+            if ssl_mode == 'disable':
+                ssl_param = False  # Explicitly disable SSL
+            elif ssl_mode in ['require', 'verify-ca', 'verify-full']:
+                ssl_context = ssl_module.create_default_context()
+                if allow_unauthorized or ssl_mode == 'require':
+                    # Don't verify certificates
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl_module.CERT_NONE
+                ssl_param = ssl_context
+            # For 'allow' and 'prefer' modes, use None to let asyncpg decide
+            # (it will try SSL first and fall back to non-SSL)
+            
             conn = await asyncpg.connect(
                 host=host,
                 port=int(port),
                 database=database,
                 user=user,
-                password=password
+                password=password,
+                ssl=ssl_param
             )
             
             # Test query

@@ -42,7 +42,7 @@
   * Centralized Tool Registry
   * Dynamic Tool Assignment
   * 400+ MCP Integrations
-  * n8n-Style Credential System
+  * Style Credential System
   * Auto-Activation
 
 ### Memory & Knowledge
@@ -77,7 +77,7 @@
   * Secure Storage & Encryption
   * Auto-Activation
   * Audit Logging
-  * n8n Compatibility
+  * Compatibility
 
 * [Benchmarking System](BENCHMARKING_GUIDE.md)
   * Performance Metrics

@@ -6,7 +6,7 @@ import {
   Bot, User, Send, Code, FileText, Sparkles, 
   Copy, ThumbsUp, ThumbsDown, Download, 
   ChevronRight, Search, Terminal, BookOpen,
-  Eye, EyeOff, RotateCw, MessageCircle
+  Eye, EyeOff, RotateCw, MessageCircle, Database
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,15 @@ import 'prismjs/components/prism-typescript'
 import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-json'
 
+interface DatabaseResult {
+  database: string
+  sql: string
+  row_count: number
+  data: any[]
+  columns: string[]
+  execution_time_ms: number
+}
+
 interface ChatMessage {
   id: string
   type: 'user' | 'bot' | 'system'
@@ -28,11 +37,14 @@ interface ChatMessage {
   timestamp: string
   codeSnippets?: CodeSnippet[]
   documents?: DocumentReference[]
+  database_results?: DatabaseResult[]
   metadata?: {
-    intent: string
-    confidence: number
-    source: 'rag' | 'semantic' | 'codegraph' | 'llm'
-    processing_time: number
+    intent?: string
+    confidence?: number
+    source: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
+    processing_time?: number
+    tools_used?: string[]
+    database_count?: number
   }
 }
 
@@ -75,11 +87,15 @@ export function ChatbotInterface() {
 I can help you with:
 • 💻 **Code Questions** - Search your codebase, understand functions & classes
 • 📄 **Document Search** - Find and analyze your documents
+• 🗄️ **Database Queries** - Ask questions about your data in natural language
 • 🤖 **Agent Help** - Manage and optimize your AI agents
 • 🔄 **Workflow Assistance** - Debug and improve workflows
 • 📊 **System Insights** - Performance metrics and health monitoring
 
-Try asking: *"How does authentication work?"* or *"Find documents about deployment"*`,
+Try asking: 
+*"How does authentication work?"* (CodeGraph)
+*"Find documents about deployment"* (RAG)
+*"Show me the top 10 customers by revenue"* (Database)`,
       timestamp: new Date().toISOString(),
       metadata: {
         intent: 'welcome',
@@ -149,6 +165,7 @@ Try asking: *"How does authentication work?"* or *"Find documents about deployme
           timestamp: data.message.timestamp,
           codeSnippets: data.message.code_snippets,
           documents: data.message.documents,
+          database_results: data.message.database_results,
           metadata: data.message.metadata
         }
 
@@ -316,6 +333,7 @@ async def search_symbols(query: str, limit: int = 10):
                                       ${message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : ''}
                                       ${message.metadata.source === 'rag' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : ''}
                                       ${message.metadata.source === 'semantic' ? 'bg-green-500/10 border-green-500/20 text-green-400' : ''}
+                                      ${message.metadata.source === 'database' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : ''}
                                       ${message.metadata.source === 'llm' ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' : ''}
                                     `}>
                                       {message.metadata.source.toUpperCase()}
@@ -382,6 +400,66 @@ async def search_symbols(query: str, limit: int = 10):
                                     <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
                                   </div>
                                 </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Database Results */}
+                          {message.database_results && message.database_results.length > 0 && (
+                            <div className="space-y-3">
+                              {message.database_results.map((dbResult, idx) => (
+                                <div
+                                  key={idx}
+                                  className="p-4 rounded-lg bg-gradient-to-br from-green-900/20 to-emerald-900/20 border border-green-500/30"
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center space-x-2">
+                                      <Database className="w-4 h-4 text-green-400" />
+                                      <span className="text-sm font-medium text-green-300">{dbResult.database}</span>
+                                      <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
+                                        {dbResult.row_count} rows • {dbResult.execution_time_ms?.toFixed(0)}ms
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* SQL Query */}
+                                  <div className="mt-2 p-2 bg-gray-900/50 rounded text-xs font-mono text-gray-300 overflow-x-auto">
+                                    {dbResult.sql}
+                                  </div>
+                                  
+                                  {/* Data Preview */}
+                                  {dbResult.data && dbResult.data.length > 0 && (
+                                    <div className="mt-3 overflow-x-auto">
+                                      <table className="w-full text-xs">
+                                        <thead>
+                                          <tr className="border-b border-green-500/20">
+                                            {dbResult.columns?.map(col => (
+                                              <th key={col} className="text-left p-1.5 text-green-300 font-medium">
+                                                {col}
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {dbResult.data.slice(0, 3).map((row, rowIdx) => (
+                                            <tr key={rowIdx} className="border-b border-gray-700/30">
+                                              {dbResult.columns?.map(col => (
+                                                <td key={col} className="p-1.5 text-gray-300">
+                                                  {String(row[col]).substring(0, 30)}
+                                                </td>
+                                              ))}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                      {dbResult.row_count > 3 && (
+                                        <p className="text-xs text-gray-500 mt-2 text-center">
+                                          +{dbResult.row_count - 3} more rows
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
                               ))}
                             </div>
                           )}

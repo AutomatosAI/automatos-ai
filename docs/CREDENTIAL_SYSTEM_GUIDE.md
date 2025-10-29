@@ -1,6 +1,6 @@
 # 🔐 Credential Management System - Complete Guide
 
-**PRD-18 Implementation** | **n8n-Style Credential Management**
+**PRD-18 Implementation** | **Style Credential Management**
 
 ---
 
@@ -13,7 +13,7 @@ cd automatos-ai/orchestrator
 # 2. Run database migration
 psql -U postgres -d orchestrator_db -f migrations/add_credential_system.sql
 
-# 3. Load credential types (400+ types from n8n)
+# 3. Load credential types (400+ types)
 python scripts/load_credential_types.py
 
 # 4. Migrate your .env credentials to database
@@ -134,7 +134,7 @@ Returns decrypted value
 Cached for 5 minutes
 ```
 
-### 3. Tool-Credential Linking (n8n-style)
+### 3. Tool-Credential Linking
 
 ```
 User assigns Slack tool to agent
@@ -481,5 +481,5 @@ No more plaintext secrets in `.env` files. All credentials encrypted, audited, a
 
 ---
 
-*Built with ❤️ following n8n's battle-tested credential architecture*
+*Built with ❤️ following battle-tested credential architecture*
 

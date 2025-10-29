@@ -1,4 +1,4 @@
-# PRD-18: n8n-Style Credential Management System
+# PRD-18: Style Credential Management System
 
 **Status**: ✅ IMPLEMENTED  
 **Date**: October 18, 2025  
@@ -6,7 +6,7 @@
 
 ## Overview
 
-Complete credential management system inspired by n8n's architecture. Eliminates hardcoded credentials from `.env` files with encrypted database storage, dynamic form generation, and seamless integration across all platform services.
+Complete credential management system inspired by architecture. Eliminates hardcoded credentials from `.env` files with encrypted database storage, dynamic form generation, and seamless integration across all platform services.
 
 ## Implementation Summary
 
@@ -31,7 +31,7 @@ Complete credential management system inspired by n8n's architecture. Eliminates
   - Seeded: 8 system credential types
 
 - ✅ **Credential Type Definitions** (`credential_types/all_credential_types.py`)
-  - Cloned from n8n: 15+ credential types (expandable to 400+)
+  - 15+ credential types (expandable to 400+)
   - Categories: AI, Database, Cloud, Communication, Code, Infrastructure
   - Includes: PostgreSQL, Redis, OpenAI, Anthropic, GitHub, SSH, AWS, Azure, Slack, and more
 
@@ -186,7 +186,7 @@ postgres_params = resolver.get_postgres_connection_params()
 # Returns: {host, port, database, user, password, ssl_mode}
 ```
 
-### 4. Linking Credentials to Tools (n8n-style)
+### 4. Linking Credentials to Tools
 
 When assigning tools to agents, link credentials:
 

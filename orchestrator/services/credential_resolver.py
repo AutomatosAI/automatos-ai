@@ -281,38 +281,82 @@ class CredentialResolver:
     def get_openai_key(
         self,
         credential_name: str = "development_openai",
-        environment: str = None
-    ) -> str:
-        """Get OpenAI API key"""
-        return self.get_credential_field(
-            credential_name=credential_name,
-            field_name="api_key",
-            environment=environment,
-            fallback_env="OPENAI_API_KEY",
-            service_name="llm_provider"
-        )
+        environment: str = None,
+        required: bool = False
+    ) -> Optional[str]:
+        """
+        Get OpenAI API key.
+        
+        Args:
+            required: If True, raises error if key not found. If False, returns None.
+        
+        BOOTSTRAP STRATEGY:
+        - LLM keys are OPTIONAL at startup
+        - Only required when actually making LLM calls
+        - Allows platform to start and user to configure credentials via UI
+        """
+        try:
+            return self.get_credential_field(
+                credential_name=credential_name,
+                field_name="api_key",
+                environment=environment,
+                fallback_env="OPENAI_API_KEY",
+                service_name="llm_provider"
+            )
+        except (CredentialNotFoundError, Exception) as e:
+            if required:
+                raise ValueError(f"OpenAI API key required but not found. Please configure '{credential_name}' credential.") from e
+            logger.info("OpenAI API key not configured (will fail if LLM features are used)")
+            return None
     
     def get_anthropic_key(
         self,
         credential_name: str = "development_anthropic",
-        environment: str = None
-    ) -> str:
-        """Get Anthropic API key"""
-        return self.get_credential_field(
-            credential_name=credential_name,
-            field_name="api_key",
-            environment=environment,
-            fallback_env="ANTHROPIC_API_KEY",
-            service_name="llm_provider"
-        )
+        environment: str = None,
+        required: bool = False
+    ) -> Optional[str]:
+        """
+        Get Anthropic API key.
+        
+        Args:
+            required: If True, raises error if key not found. If False, returns None.
+        
+        BOOTSTRAP STRATEGY: Same as OpenAI - optional at startup
+        """
+        try:
+            return self.get_credential_field(
+                credential_name=credential_name,
+                field_name="api_key",
+                environment=environment,
+                fallback_env="ANTHROPIC_API_KEY",
+                service_name="llm_provider"
+            )
+        except (CredentialNotFoundError, Exception) as e:
+            if required:
+                raise ValueError(f"Anthropic API key required but not found. Please configure '{credential_name}' credential.") from e
+            logger.info("Anthropic API key not configured (will fail if LLM features are used)")
+            return None
     
     def get_postgres_connection_params(
         self,
         credential_name: str = "development_db",
         environment: str = None
     ) -> Dict[str, Any]:
-        """Get PostgreSQL connection parameters"""
+        """
+        Get PostgreSQL connection parameters.
+        
+        BOOTSTRAP STRATEGY:
+        - ALWAYS tries .env file first (for initial setup)
+        - Then checks database credentials (after user sets them up)
+        - This solves chicken-and-egg: DB needs credentials to store credentials!
+        
+        Workflow:
+        1. Start platform with .env file
+        2. User configures credentials in UI
+        3. User can optionally delete .env file (credentials in DB take precedence)
+        """
         try:
+            # Try database credentials first (after bootstrap)
             return self.get_dict(
                 credential_name=credential_name,
                 environment=environment,
@@ -320,14 +364,38 @@ class CredentialResolver:
                 service_name="database"
             )
         except CredentialNotFoundError:
-            # Fallback to environment variables
-            logger.warning(f"Using environment variables for PostgreSQL (credential '{credential_name}' not found)")
+            # ALWAYS fallback to environment variables for infrastructure
+            # This is NOT a warning - it's the expected bootstrap flow
+            logger.info(f"Using .env file for PostgreSQL (credential '{credential_name}' not in database yet)")
+            
+            # Get from .env - NO HARDCODED DEFAULTS
+            # If .env missing → FAIL (don't guess!)
+            host = os.getenv("POSTGRES_HOST")
+            port = os.getenv("POSTGRES_PORT")
+            database = os.getenv("POSTGRES_DB")
+            user = os.getenv("POSTGRES_USER")
+            password = os.getenv("POSTGRES_PASSWORD")
+            
+            # Validate ALL required fields present
+            missing = []
+            if not host: missing.append("POSTGRES_HOST")
+            if not port: missing.append("POSTGRES_PORT")
+            if not database: missing.append("POSTGRES_DB")
+            if not user: missing.append("POSTGRES_USER")
+            if not password: missing.append("POSTGRES_PASSWORD")
+            
+            if missing:
+                raise CredentialNotFoundError(
+                    f"PostgreSQL credentials not found in database AND missing from .env file: {', '.join(missing)}. "
+                    f"Add to .env file or configure '{credential_name}' credential in UI."
+                )
+            
             return {
-                "host": os.getenv("POSTGRES_HOST", "localhost"),
-                "port": int(os.getenv("POSTGRES_PORT", "5432")),
-                "database": os.getenv("POSTGRES_DB", "orchestrator_db"),
-                "user": os.getenv("POSTGRES_USER", "postgres"),
-                "password": os.getenv("POSTGRES_PASSWORD", "")
+                "host": host,
+                "port": int(port),
+                "database": database,
+                "user": user,
+                "password": password
             }
     
     def get_redis_connection_params(
@@ -335,8 +403,13 @@ class CredentialResolver:
         credential_name: str = "development_redis",
         environment: str = None
     ) -> Dict[str, Any]:
-        """Get Redis connection parameters"""
+        """
+        Get Redis connection parameters.
+        
+        BOOTSTRAP STRATEGY: Same as Postgres - .env first, then database credentials
+        """
         try:
+            # Try database credentials first (after bootstrap)
             return self.get_dict(
                 credential_name=credential_name,
                 environment=environment,
@@ -344,12 +417,33 @@ class CredentialResolver:
                 service_name="redis"
             )
         except CredentialNotFoundError:
-            logger.warning(f"Using environment variables for Redis (credential '{credential_name}' not found)")
+            # ALWAYS fallback to environment variables for infrastructure
+            logger.info(f"Using .env file for Redis (credential '{credential_name}' not in database yet)")
+            
+            # Get from .env - NO HARDCODED DEFAULTS
+            # If .env missing → FAIL (don't guess!)
+            host = os.getenv("REDIS_HOST")
+            port = os.getenv("REDIS_PORT")
+            password = os.getenv("REDIS_PASSWORD")
+            db = os.getenv("REDIS_DB", "0")  # DB 0 is reasonable default
+            
+            # Validate required fields present
+            missing = []
+            if not host: missing.append("REDIS_HOST")
+            if not port: missing.append("REDIS_PORT")
+            # Password is optional for local dev
+            
+            if missing:
+                raise CredentialNotFoundError(
+                    f"Redis credentials not found in database AND missing from .env file: {', '.join(missing)}. "
+                    f"Add to .env file or configure '{credential_name}' credential in UI."
+                )
+            
             return {
-                "host": os.getenv("REDIS_HOST", "localhost"),
-                "port": int(os.getenv("REDIS_PORT", "6379")),
-                "password": os.getenv("REDIS_PASSWORD", ""),
-                "database": int(os.getenv("REDIS_DB", "0"))
+                "host": host,
+                "port": int(port),
+                "password": password if password else None,
+                "database": int(db)
             }
     
     def get_github_token(
@@ -416,14 +510,24 @@ def resolve_credential(
     )
 
 
-def resolve_openai_key() -> str:
-    """Quick helper to get OpenAI API key"""
-    return get_credential_resolver().get_openai_key()
+def resolve_openai_key(required: bool = False) -> Optional[str]:
+    """
+    Quick helper to get OpenAI API key.
+    
+    Args:
+        required: If True, raises error if not found. If False, returns None.
+    """
+    return get_credential_resolver().get_openai_key(required=required)
 
 
-def resolve_anthropic_key() -> str:
-    """Quick helper to get Anthropic API key"""
-    return get_credential_resolver().get_anthropic_key()
+def resolve_anthropic_key(required: bool = False) -> Optional[str]:
+    """
+    Quick helper to get Anthropic API key.
+    
+    Args:
+        required: If True, raises error if not found. If False, returns None.
+    """
+    return get_credential_resolver().get_anthropic_key(required=required)
 
 
 def resolve_postgres_params() -> Dict[str, Any]:

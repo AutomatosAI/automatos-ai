@@ -80,6 +80,8 @@ from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.execution_history import router as execution_history_router  # Enhanced execution history
+from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
+from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
@@ -388,7 +390,7 @@ app.include_router(github_webhooks_router)  # GitHub PR automation
 app.include_router(playbooks_router)
 app.include_router(patterns_router)
 app.include_router(context_router)
-app.include_router(credentials_router)  # PRD-18: Enhanced credentials with n8n-style management
+app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
@@ -416,6 +418,8 @@ app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-ti
 app.include_router(chatbot_router)
 app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
+app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
+app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

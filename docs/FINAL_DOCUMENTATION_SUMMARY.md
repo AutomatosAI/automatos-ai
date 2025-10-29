@@ -43,7 +43,7 @@
    - PRD: 11
 
 9. **CREDENTIAL_SYSTEM_GUIDE.md** (~486 lines)
-   - n8n-Style Credentials, Auto-Activation
+   - Style Credentials, Auto-Activation
    - PRD: 18
 
 10. **AGENT_FLOW_GUIDE.md** (~1,235 lines)
