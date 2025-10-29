@@ -53,7 +53,6 @@ export default function ApiDebugPage() {
         <h2>Backend URLs to Test Directly:</h2>
         <ul>
           <li>Health check: {apiUrl}/health</li>
-          <li>Chatbot suggestions: {apiUrl}/api/chatbot/suggestions?page=dashboard&user_role=user</li>
           <li>System health: {apiUrl}/api/system/health</li>
         </ul>
       </div>

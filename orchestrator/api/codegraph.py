@@ -18,12 +18,6 @@ from services.codegraph_service import CodeGraphService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
 
-# Get OpenAI API key from credential resolver
-from services.credential_resolver import get_credential_resolver
-resolver = get_credential_resolver()
-OPENAI_API_KEY = resolver.get_credential_field("development_openai", "api_key")
-
-
 # Request/Response Models
 class IndexGitHubRequest(BaseModel):
     """Request to index a GitHub repository"""
@@ -72,15 +66,26 @@ class ProjectResponse(BaseModel):
     created_at: Optional[str]
 
 
-# Helper to get service instance
+# Helper functions
+def get_openai_key() -> str:
+    """Lazy load OpenAI API key from credentials or environment"""
+    try:
+        from services.credential_resolver import get_credential_resolver
+        resolver = get_credential_resolver()
+        return resolver.get_credential_field("development_openai", "api_key")
+    except Exception:
+        return os.getenv("OPENAI_API_KEY", "")
+
+
 def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
     """Get CodeGraph service instance"""
-    if not OPENAI_API_KEY:
+    api_key = get_openai_key()
+    if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY not configured"
+            detail="OPENAI_API_KEY not configured. Add it to Settings > Credentials or set OPENAI_API_KEY environment variable."
         )
-    return CodeGraphService(db, OPENAI_API_KEY)
+    return CodeGraphService(db, api_key)
 
 
 # Endpoints
@@ -331,7 +336,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "codegraph",
-        "openai_configured": bool(OPENAI_API_KEY)
+        "openai_configured": bool(get_openai_key())
     }
 
 
@@ -350,7 +355,7 @@ async def get_call_graph_api(
     Example: /api/code-graph/call-graph?project=Automatos-ai&symbol=AgentFactory&depth=2
     """
     try:
-        codegraph_service = CodeGraphService(db, OPENAI_API_KEY)
+        codegraph_service = CodeGraphService(db, get_openai_key())
         call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction)
         return call_graph
     except ValueError as e:

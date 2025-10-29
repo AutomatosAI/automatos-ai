@@ -1651,11 +1651,7 @@
       })
     }
   
-    async getChatbotSuggestions() {
-      return this.request('/api/chatbot/suggestions')
-    }
-  
-    async executeChatbotAction(data: any) {
+  async executeChatbotAction(data: any) {
       return this.request('/api/chatbot/execute', {
         method: 'POST',
         body: JSON.stringify(data)

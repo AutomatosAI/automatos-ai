@@ -28,11 +28,27 @@ from anthropic import Anthropic
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
-# Initialize Anthropic client with credentials from credential resolver
-from services.credential_resolver import get_credential_resolver
-resolver = get_credential_resolver()
-anthropic_key = resolver.get_credential_field("development_anthropic", "api_key")
-anthropic_client = Anthropic(api_key=anthropic_key)
+# Lazy initialization of Anthropic client
+_anthropic_client = None
+
+def get_anthropic_client() -> Anthropic:
+    """Lazy load Anthropic client with credentials"""
+    global _anthropic_client
+    if _anthropic_client is None:
+        try:
+            from services.credential_resolver import get_credential_resolver
+            resolver = get_credential_resolver()
+            anthropic_key = resolver.get_credential_field("development_anthropic", "api_key")
+        except Exception:
+            anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        
+        if not anthropic_key:
+            raise HTTPException(
+                status_code=500,
+                detail="ANTHROPIC_API_KEY not configured. Add it to Settings > Credentials or set ANTHROPIC_API_KEY environment variable."
+            )
+        _anthropic_client = Anthropic(api_key=anthropic_key)
+    return _anthropic_client
 
 # Models
 class ChatContext(BaseModel):
@@ -205,7 +221,7 @@ Then provide a helpful, technical response based on the search results."""
         
         # Agentic loop - let Claude call tools iteratively
         for iteration in range(3):  # Max 3 tool call iterations
-            response = anthropic_client.messages.create(
+            response = get_anthropic_client().messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=2000,
                 tools=TOOLS,

@@ -56,26 +56,10 @@ export function ChatWidget({
   
   // Load contextual suggestions based on current page
   useEffect(() => {
-    const loadSuggestions = async () => {
-      try {
-        const response = await fetch(`/api/chatbot/suggestions?page=${context.currentPage}&user_role=${context.userRole}`)
-        if (response.ok) {
-          const data = await response.json()
-          setSuggestions(data.slice(0, 3)) // Show top 3 suggestions
-        } else {
-          // Fallback suggestions based on current page
-          const fallbackSuggestions = getFallbackSuggestions(context.currentPage)
-          setSuggestions(fallbackSuggestions)
-        }
-      } catch (error) {
-        console.error('Error loading suggestions:', error)
-        const fallbackSuggestions = getFallbackSuggestions(context.currentPage)
-        setSuggestions(fallbackSuggestions)
-      }
-    }
-    
-    loadSuggestions()
-  }, [context.currentPage, context.userRole])
+    // Use fallback suggestions (chatbot/suggestions endpoint removed)
+    const fallbackSuggestions = getFallbackSuggestions(context.currentPage)
+    setSuggestions(fallbackSuggestions)
+  }, [context.currentPage])
 
   const getFallbackSuggestions = (page: string): ChatSuggestion[] => {
     const suggestionMap: Record<string, ChatSuggestion[]> = {

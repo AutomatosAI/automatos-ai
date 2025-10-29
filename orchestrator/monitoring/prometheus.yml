@@ -1,0 +1,33 @@
+# =============================================================================
+# Prometheus Configuration for Automatos AI
+# =============================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'automatos-ai'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Backend API metrics
+  - job_name: 'backend'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: '/metrics'
+
+  # PostgreSQL metrics (if exporter is added)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # Redis metrics (if exporter is added)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']

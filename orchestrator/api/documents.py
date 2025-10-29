@@ -546,7 +546,7 @@ async def get_document_content(document_id: int, db: Session = Depends(get_db)):
 async def semantic_search(
     query: str = Query(..., description="Search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
-    min_similarity: float = Query(0.7, ge=0.0, le=1.0, description="Minimum similarity score"),
+    min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
     db: Session = Depends(get_db)
 ):
@@ -563,7 +563,7 @@ async def semantic_search(
         
         start_time = time.time()
         
-        # Generate query embedding using OpenAI (v1.0+ API)
+        # Generate query embedding using OpenAI (matches DB - 1536-dim)
         from openai import OpenAI
         client = OpenAI(api_key=openai_key)
         
@@ -860,7 +860,7 @@ async def rag_retrieve(
         # Step 1: Get more candidates than needed for diversity selection
         candidate_limit = max_chunks * 3
         
-        # Generate query embedding (v1.0+ API)
+        # Generate query embedding using OpenAI (matches DB - 1536-dim)
         from openai import OpenAI
         client = OpenAI(api_key=openai_key)
         

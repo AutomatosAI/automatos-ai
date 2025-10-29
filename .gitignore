@@ -82,3 +82,8 @@ __pycache__/
 # Logs
 *.log
 /tmp/
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
