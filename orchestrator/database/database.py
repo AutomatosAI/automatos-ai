@@ -38,10 +38,33 @@ def get_database_url() -> str:
     except Exception as e:
         # Fallback to environment variables (transition period)
         logger.warning(f"Using environment variables for database (credential system not available): {e}")
-        return os.getenv(
-            "DATABASE_URL", 
-            f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', 'postgres')}@{os.getenv('POSTGRES_HOST', '127.0.0.1')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
-        )
+        
+        # Try DATABASE_URL first (Heroku, Railway, etc.)
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            return database_url
+        
+        # Build from individual env vars - NO HARDCODED DEFAULTS!
+        user = os.getenv('POSTGRES_USER')
+        password = os.getenv('POSTGRES_PASSWORD')
+        host = os.getenv('POSTGRES_HOST')
+        port = os.getenv('POSTGRES_PORT')
+        database = os.getenv('POSTGRES_DB')
+        
+        if not all([user, password, host, port, database]):
+            missing = []
+            if not user: missing.append("POSTGRES_USER")
+            if not password: missing.append("POSTGRES_PASSWORD")
+            if not host: missing.append("POSTGRES_HOST")
+            if not port: missing.append("POSTGRES_PORT")
+            if not database: missing.append("POSTGRES_DB")
+            
+            raise ValueError(
+                f"Database credentials not configured. Missing from .env: {', '.join(missing)}. "
+                f"Either set these environment variables or configure 'development_db' credential in database."
+            )
+        
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 DATABASE_URL = get_database_url()
 

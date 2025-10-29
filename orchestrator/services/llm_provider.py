@@ -87,15 +87,30 @@ class OpenAIProvider(BaseLLMProvider):
         if OpenAI is None:
             raise ImportError("OpenAI package not installed. Run: pip install openai")
         
+        # Try multiple sources for API key
         api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OpenAI API key not provided")
         
-        self.client = OpenAI(api_key=api_key)
-        logger.info(f"Initialized OpenAI client with model: {self.config.model}")
+        # BOOTSTRAP STRATEGY: Don't require key at initialization
+        # Only fail when actually making API calls
+        if not api_key:
+            logger.warning(
+                "OpenAI API key not configured. "
+                "LLM features will fail until key is added. "
+                "Configure 'development_openai' credential or set OPENAI_API_KEY env var."
+            )
+            self.client = None  # Will fail gracefully on first use
+        else:
+            self.client = OpenAI(api_key=api_key)
+            logger.info(f"Initialized OpenAI client with model: {self.config.model}")
     
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using OpenAI API without blocking the event loop"""
+        if self.client is None:
+            raise ValueError(
+                "OpenAI API key not configured. Cannot generate response. "
+                "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
+            )
+        
         import asyncio
         loop = asyncio.get_running_loop()
         try:
@@ -149,6 +164,12 @@ class OpenAIProvider(BaseLLMProvider):
     
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using OpenAI API (synchronous)"""
+        if self.client is None:
+            raise ValueError(
+                "OpenAI API key not configured. Cannot generate response. "
+                "Please configure 'development_openai' credential or set OPENAI_API_KEY env var."
+            )
+        
         try:
             response = self.client.chat.completions.create(
                 model=self.config.model,
@@ -178,12 +199,21 @@ class AnthropicProvider(BaseLLMProvider):
         if anthropic is None:
             raise ImportError("Anthropic package not installed. Run: pip install anthropic")
         
+        # Try multiple sources for API key
         api_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("Anthropic API key not provided")
         
-        self.client = anthropic.Anthropic(api_key=api_key)
-        logger.info(f"Initialized Anthropic client with model: {self.config.model}")
+        # BOOTSTRAP STRATEGY: Don't require key at initialization
+        # Only fail when actually making API calls
+        if not api_key:
+            logger.warning(
+                "Anthropic API key not configured. "
+                "LLM features will fail until key is added. "
+                "Configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
+            )
+            self.client = None  # Will fail gracefully on first use
+        else:
+            self.client = anthropic.Anthropic(api_key=api_key)
+            logger.info(f"Initialized Anthropic client with model: {self.config.model}")
     
     def _convert_messages_to_anthropic_format(self, messages: List[Dict[str, str]]) -> tuple:
         """Convert OpenAI-style messages to Anthropic format"""
@@ -202,6 +232,12 @@ class AnthropicProvider(BaseLLMProvider):
     
     async def generate_response(self, messages: List[Dict[str, str]], tools: List[Dict] = None) -> LLMResponse:
         """Generate response using Anthropic API without blocking the event loop"""
+        if self.client is None:
+            raise ValueError(
+                "Anthropic API key not configured. Cannot generate response. "
+                "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
+            )
+        
         import asyncio
         loop = asyncio.get_running_loop()
         try:
@@ -259,6 +295,12 @@ class AnthropicProvider(BaseLLMProvider):
     
     def generate_response_sync(self, messages: List[Dict[str, str]]) -> LLMResponse:
         """Generate response using Anthropic API (synchronous)"""
+        if self.client is None:
+            raise ValueError(
+                "Anthropic API key not configured. Cannot generate response. "
+                "Please configure 'development_anthropic' credential or set ANTHROPIC_API_KEY env var."
+            )
+        
         try:
             system_message, user_messages = self._convert_messages_to_anthropic_format(messages)
             

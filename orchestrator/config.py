@@ -7,9 +7,12 @@ NO HARDCODED VALUES - Everything from environment.
 """
 
 import os
+import logging
 from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -48,18 +51,32 @@ class Config:
                 f"{params['host']}:{params['port']}/{params['database']}"
             )
         except:
-            # Fallback to environment variables
-            return os.getenv(
-                "DATABASE_URL", 
-                f"postgresql://{os.getenv('POSTGRES_USER', 'postgres')}:{os.getenv('POSTGRES_PASSWORD', '')}@{os.getenv('POSTGRES_HOST', 'localhost')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'orchestrator_db')}"
-            )
+            # Fallback to environment variables - NO HARDCODED DEFAULTS!
+            database_url = os.getenv("DATABASE_URL")
+            if database_url:
+                return database_url
+            
+            # Build from env vars - will fail if missing (good!)
+            user = os.getenv('POSTGRES_USER')
+            password = os.getenv('POSTGRES_PASSWORD')
+            host = os.getenv('POSTGRES_HOST')
+            port = os.getenv('POSTGRES_PORT')
+            database = os.getenv('POSTGRES_DB')
+            
+            if not all([user, host, port, database]):
+                raise ValueError(
+                    "Database credentials not configured in .env file. "
+                    "Set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB"
+                )
+            
+            return f"postgresql://{user}:{password or ''}@{host}:{port}/{database}"
     
-    # Keep individual properties for backward compatibility
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "orchestrator_db")
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
+    # Keep individual properties for backward compatibility - NO DEFAULTS!
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "")
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
-    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
-    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "")
+    POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "")
     
     # PRD-18: Redis Configuration - Try credential system first
     @property
@@ -73,38 +90,57 @@ class Config:
                 return f"redis://:{params['password']}@{params['host']}:{params['port']}"
             return f"redis://{params['host']}:{params['port']}"
         except:
-            # Fallback to environment variables
-            redis_password = os.getenv("REDIS_PASSWORD", "")
-            redis_host = os.getenv("REDIS_HOST", "localhost")
-            redis_port = os.getenv("REDIS_PORT", "6379")
+            # Fallback to environment variables - NO HARDCODED DEFAULTS!
+            redis_host = os.getenv("REDIS_HOST")
+            redis_port = os.getenv("REDIS_PORT")
+            redis_password = os.getenv("REDIS_PASSWORD")
+            
+            if not redis_host or not redis_port:
+                raise ValueError(
+                    "Redis credentials not configured in .env file. "
+                    "Set REDIS_HOST and REDIS_PORT"
+                )
             
             if redis_password:
                 return f"redis://:{redis_password}@{redis_host}:{redis_port}"
             return f"redis://{redis_host}:{redis_port}"
     
-    # Keep individual properties for backward compatibility
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    # Keep individual properties for backward compatibility - NO DEFAULTS!
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "")
+    REDIS_PORT: str = os.getenv("REDIS_PORT", "")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     
-    # PRD-18: LLM Configuration - Use credential system only (no .env fallback)
+    # PRD-18: LLM Configuration - Optional at startup, required when used
     @property
-    def OPENAI_API_KEY(self) -> str:
-        """Get OpenAI API key from credential system"""
-        from services.credential_resolver import resolve_openai_key
-        key = resolve_openai_key()
-        if not key:
-            raise ValueError("OpenAI API key not found. Configure 'development_openai' credential.")
-        return key
+    def OPENAI_API_KEY(self) -> Optional[str]:
+        """
+        Get OpenAI API key from credential system or .env.
+        
+        BOOTSTRAP STRATEGY:
+        - Returns None if not configured (won't block startup)
+        - LLM features will fail gracefully if key missing
+        - User can configure via UI after platform starts
+        """
+        try:
+            from services.credential_resolver import resolve_openai_key
+            return resolve_openai_key(required=False)
+        except Exception as e:
+            logger.warning(f"Could not resolve OpenAI API key: {e}")
+            return os.getenv("OPENAI_API_KEY")  # Final fallback to .env
     
     @property
-    def ANTHROPIC_API_KEY(self) -> str:
-        """Get Anthropic API key from credential system"""
-        from services.credential_resolver import resolve_anthropic_key
-        key = resolve_anthropic_key()
-        if not key:
-            raise ValueError("Anthropic API key not found. Configure 'development_anthropic' credential.")
-        return key
+    def ANTHROPIC_API_KEY(self) -> Optional[str]:
+        """
+        Get Anthropic API key from credential system or .env.
+        
+        BOOTSTRAP STRATEGY: Same as OpenAI - optional at startup
+        """
+        try:
+            from services.credential_resolver import resolve_anthropic_key
+            return resolve_anthropic_key(required=False)
+        except Exception as e:
+            logger.warning(f"Could not resolve Anthropic API key: {e}")
+            return os.getenv("ANTHROPIC_API_KEY")  # Final fallback to .env
     
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4")
@@ -195,9 +231,12 @@ class Config:
 # Singleton instance
 config = Config()
 
+# Backward compatibility alias
+orchestrator_config = config
+
 # Validate on import
 if not config.validate():
     print("⚠️  WARNING: Configuration validation failed")
 
 # Export for easy import
-__all__ = ['config', 'Config']
+__all__ = ['config', 'Config', 'orchestrator_config']
