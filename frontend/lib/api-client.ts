@@ -1445,7 +1445,7 @@
   
     // ===== SKILLS ENDPOINTS =====
     async getSkills() {
-      const skills = await this.request('/api/skills/') as any[]
+      const skills = await this.request('/api/v1/skills') as any[]
       // Add default difficulty field if missing
       return skills.map((skill: any) => ({
         ...skill,

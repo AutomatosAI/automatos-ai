@@ -1,0 +1,180 @@
+version: '3.8'
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: Automatos_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orchestrator_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+    ports:
+    - ${POSTGRES_PORT:-5432}:5432
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    - ./init_pgvector.sql:/docker-entrypoint-initdb.d/02-init_pgvector.sql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-postgres}
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+    - orchestrator_network
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    container_name: Automatos_redis
+    ports:
+    - ${REDIS_PORT:-6379}:6379
+    volumes:
+    - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password_123}
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - --no-auth-warning
+      - -a
+      - ${REDIS_PASSWORD:-redis_password_123}
+      - ping
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+    - orchestrator_network
+    restart: unless-stopped
+  backend_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backend_api_server
+    env_file:
+    - ./.env
+    ports:
+    - ${API_PORT:-8000}:8000
+    environment:
+    - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password_123}
+    - API_KEY=${API_KEY:-your_secure_api_key_here}
+    - OPENAI_API_KEY=${OPENAI_API_KEY}
+    - DEPLOY_HOST=${DEPLOY_HOST:-mcp.xplaincrypto.ai}
+    - DEPLOY_PORT=${DEPLOY_PORT:-22}
+    - DEPLOY_USER=${DEPLOY_USER:-root}
+    - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+    - DEPLOY=${DEPLOY:-false}
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./logs:/app/logs
+    - ./vector_stores:/app/vector_stores
+    - ./keys:/app/keys:ro
+    - ./projects:/app/projects
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8000/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+    - orchestrator_network
+    restart: unless-stopped
+    command:
+    - python
+    - main.py
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: Automatos
+    env_file:
+    - ./.env
+    environment:
+    - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/${POSTGRES_DB:-orchestrator_db}
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - REDIS_PASSWORD=${REDIS_PASSWORD:-redis_password_123}
+    - MCP_URL=http://backend_api:8000
+    - OPENAI_API_KEY=${OPENAI_API_KEY}
+    - CHROMA_PERSIST_DIRECTORY=/app/vector_stores
+    - DEPLOY_HOST=${DEPLOY_HOST:-mcp.xplaincrypto.ai}
+    - DEPLOY_PORT=${DEPLOY_PORT:-22}
+    - DEPLOY_USER=${DEPLOY_USER:-root}
+    - DEPLOY_KEY_PATH=${DEPLOY_KEY_PATH:-/app/keys/deploy_key}
+    - DEPLOY=${DEPLOY:-false}
+    volumes:
+    - ./logs:/app/logs
+    - ./vector_stores:/app/vector_stores
+    - ./projects:/app/projects
+    - ./keys:/app/keys:ro
+    depends_on:
+      backend_api:
+        condition: service_healthy
+    networks:
+    - orchestrator_network
+    restart: 'no'
+    profiles:
+    - cli
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: Automatos_prometheus
+    ports:
+    - ${PROMETHEUS_PORT:-9090}:9090
+    volumes:
+    - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    - prometheus_data:/prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --web.console.libraries=/etc/prometheus/console_libraries
+    - --web.console.templates=/etc/prometheus/consoles
+    - --storage.tsdb.retention.time=200h
+    - --web.enable-lifecycle
+    networks:
+    - orchestrator_network
+    restart: unless-stopped
+    profiles:
+    - monitoring
+  grafana:
+    image: grafana/grafana:latest
+    container_name: Automatos_grafana
+    ports:
+    - ${GRAFANA_PORT:-3002}:3000
+    environment:
+    - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    volumes:
+    - grafana_data:/var/lib/grafana
+    - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+    - prometheus
+    networks:
+    - orchestrator_network
+    restart: unless-stopped
+    profiles:
+    - monitoring
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+networks:
+  orchestrator_network:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: 172.20.0.0/16

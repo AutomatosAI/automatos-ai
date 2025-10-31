@@ -1,541 +1,919 @@
-from datetime import datetime
 
 """
-Skills Management API
-====================
+Skills Management API - PRD-22 Implementation
+=============================================
 
-API endpoints for managing skills, skill categories, and agent-skill associations.
+Complete API endpoints for skill source management, skill CRUD,
+agent-skill assignment, and skill execution.
+
+INTEGRATION NOTE:
+- This extends your existing orchestrator/api/skills.py
+- Add these routes to your FastAPI router
+- Update imports to match your project structure
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
+from datetime import datetime
+import logging
+import tempfile
+import shutil
+from pathlib import Path
+import zipfile
+
+# Adjust imports to match your project structure
 from database.database import get_db
 from database.models import (
-    Skill, Agent, SkillCreate, SkillUpdate, SkillResponse, 
-    SkillsByCategory, SkillCategory, agent_skills
+    Skill, Agent, SkillSource, SkillFile, SkillVersion, SkillAuditLog,
+    agent_skills
 )
-import logging
+from sqlalchemy import text, or_
+from pydantic import BaseModel, Field
+from enum import Enum
+from services.skill_loader import get_skill_loader
+# PRD-22: Keep recommendations local to skills API to avoid coupling to agent factory
+
+# Minimal PRD-22 request/response types (inlined to avoid external dependency)
+class SkillLoadLevel(int, Enum):
+    METADATA = 1
+    CORE = 2
+    RESOURCE = 3
+
+class GitSkillSourceCreate(BaseModel):
+    git_url: str = Field(..., description="Git repository URL")
+    source_name: Optional[str] = Field(None, description="Friendly name for this source")
+    branch: str = Field("main", description="Git branch to clone")
+    auto_update: bool = Field(False, description="Enable automatic updates")
+    update_frequency_hours: int = Field(24, description="Update frequency in hours")
+
+class SkillSourceResponse(BaseModel):
+    id: int
+    source_name: str
+    source_type: str
+    git_url: Optional[str]
+    git_branch: Optional[str]
+    git_commit_sha: Optional[str]
+    local_cache_path: str
+    auto_update: bool
+    skills_discovered: int
+    status: str
+    last_sync_at: Optional[datetime]
+    last_sync_status: Optional[str]
+    last_sync_error: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    class Config:
+        from_attributes = True
+
+class SkillFileInfo(BaseModel):
+    file_path: str
+    file_type: str
+    content_summary: Optional[str]
+    file_size_bytes: Optional[int]
+    estimated_tokens: Optional[int]
+    load_level: int
+
+class SkillContentResponse(BaseModel):
+    skill_id: int
+    skill_name: str
+    load_level: int
+    content: str
+    estimated_tokens: int
+    files_available: List[str]
+
+class EnhancedSkillResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    skill_type: str
+    category: str
+    skill_version: Optional[str]
+    skill_source: Optional[str]
+    git_repo_url: Optional[str]
+    git_commit_sha: Optional[str]
+    filesystem_path: Optional[str]
+    tags: List[str] = []
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    last_sync_at: Optional[datetime]
+    files: List[SkillFileInfo] = []
+    class Config:
+        from_attributes = True
+
+class SkillRecommendationRequest(BaseModel):
+    task_description: str
+    task_type: Optional[str] = None
+    limit: int = Field(5, ge=1, le=20)
+
+class SkillRecommendation(BaseModel):
+    skill_id: int
+    skill_name: str
+    confidence: float
+    reasoning: str
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/skills", tags=["skills"])
+router = APIRouter(prefix="/api/v1/skills", tags=["skills-prd22"])
 
-@router.get("/categories", response_model=List[SkillsByCategory])
-async def get_skills_by_categories(
-    category: Optional[SkillCategory] = None,
+
+# ----------------------------------------------------------------------------
+# PRD-22: Local skill recommendation helper
+# ----------------------------------------------------------------------------
+def recommend_skills_for_task(
+    task_description: str,
+    task_type: Optional[str] = None,
+    limit: int = 5,
+    db: Session = None
+) -> List[Dict[str, Any]]:
+    """
+    Recommend relevant skills for a task using a simple lexical scoring approach.
+    Keeps PRD-22 self-contained without depending on agent_factory.
+    """
+    if not db:
+        return []
+
+    text = (task_description or "").lower()
+
+    # Fetch active skills, optionally filter by category/task_type
+    query = db.query(Skill).filter(Skill.is_active == True)
+    if task_type:
+        query = query.filter(Skill.category == task_type)
+    skills = query.all()
+
+    results: List[Dict[str, Any]] = []
+    for s in skills:
+        name = (s.name or "").lower()
+        desc = (s.description or "").lower()
+        tags = [t.lower() for t in (s.tags or []) if isinstance(t, str)]
+
+        score = 0.0
+        # Simple keyword presence boosts
+        if name and any(tok in text for tok in name.split()):
+            score += 0.5
+        if desc and any(tok in text for tok in desc.split()):
+            score += 0.35
+        if tags and any(tag in text for tag in tags):
+            score += 0.25
+
+        # Small bonus if task_type matches category
+        if task_type and s.category and s.category.lower() == task_type.lower():
+            score += 0.2
+
+        if score > 0:
+            results.append({
+                "skill_id": s.id,
+                "skill_name": s.name,
+                "confidence": min(0.99, round(score, 2)),
+                "reasoning": "Matched by name/description/tags{}".format(
+                    " and category" if task_type else ""
+                )
+            })
+
+    # Sort and trim
+    results.sort(key=lambda r: r["confidence"], reverse=True)
+    return results[: max(1, limit)]
+
+# ============================================================================
+# Skill Source Management Endpoints
+# ============================================================================
+
+@router.post("/sources/git", response_model=Dict[str, Any])
+async def import_git_repository(
+    source_data: GitSkillSourceCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Get skills organized by categories"""
+    """
+    Import skills from a Git repository.
+    
+    This clones the repository, indexes all SKILL.md files, and creates
+    skill records in the database.
+    
+    Example:
+        POST /api/v1/skills/sources/git
+        {
+            "git_url": "https://github.com/anthropics/skills.git",
+            "source_name": "anthropic-official",
+            "branch": "main",
+            "auto_update": true
+        }
+    """
     try:
-        if category:
-            # Get skills for specific category
-            skills = db.query(Skill).filter(
-                Skill.category == category.value,
-                Skill.is_active == True
-            ).all()
-            
-            skills_data = [
-                SkillResponse(
-                    id=skill.id,
-                    name=skill.name,
-                    description=skill.description,
-                    skill_type=skill.skill_type,
-                    category=skill.category,
-                    implementation=skill.implementation,
-                    parameters=skill.parameters,
-                    performance_data=skill.performance_data,
-                    is_active=skill.is_active,
-                    created_at=skill.created_at,
-                    updated_at=skill.updated_at,
-                    created_by=skill.created_by
-                ) for skill in skills
-            ]
-            
-            return [SkillsByCategory(category=category.value, skills=skills_data)]
+        skill_loader = get_skill_loader(db)
         
-        else:
-            # Get all skills organized by categories
-            categories_data = []
-            for cat in SkillCategory:
-                skills = db.query(Skill).filter(
-                    Skill.category == cat.value,
-                    Skill.is_active == True
-                ).all()
-                
-                skills_data = [
-                    SkillResponse(
-                        id=skill.id,
-                        name=skill.name,
-                        description=skill.description,
-                        skill_type=skill.skill_type,
-                        category=skill.category,
-                        implementation=skill.implementation or "",
-                        parameters=skill.parameters or {},
-                        performance_data=skill.performance_data or {},
-                        is_active=skill.is_active if skill.is_active is not None else True,
-                        created_at=skill.created_at,
-                        updated_at=skill.updated_at,
-                        created_by=skill.created_by or ""
-                    ) for skill in skills
-                ]
-                
-                if skills_data:  # Only include categories that have skills
-                    categories_data.append(SkillsByCategory(category=cat.value, skills=skills_data))
-            
-            return categories_data
-            
+        # Import repository (this may take a while for large repos)
+        result = skill_loader.add_git_repository(
+            git_url=source_data.git_url,
+            source_name=source_data.source_name,
+            branch=source_data.branch,
+            auto_update=source_data.auto_update,
+            db=db
+        )
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": f"Successfully imported {result['skills_discovered']} skills from Git repository",
+            "source_id": result["source_id"],
+            "source_name": result["source_name"],
+            "skills_discovered": result["skills_discovered"],
+            "skills": result["skills"],
+            "commit_sha": result.get("commit_sha")
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting skills by categories: {e}")
+        logger.error(f"Error importing Git repository: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/agents/{agent_id}/", response_model=List[SkillResponse])
-async def get_agent_skills(
-    agent_id: int,
+
+@router.get("/sources", response_model=List[SkillSourceResponse])
+async def list_skill_sources(
+    source_type: Optional[str] = Query(None, description="Filter by source type"),
+    status: Optional[str] = Query(None, description="Filter by status"),
     db: Session = Depends(get_db)
 ):
-    """Get skills associated with a specific agent"""
+    """
+    List all skill sources.
+    
+    Example:
+        GET /api/v1/skills/sources
+        GET /api/v1/skills/sources?source_type=git&status=active
+    """
     try:
-        # Check if agent exists
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
+        query = db.query(SkillSource)
         
-        # Get agent's skills
-        skills = db.query(Skill).join(agent_skills).filter(
-            agent_skills.c.agent_id == agent_id,
-            Skill.is_active == True
-        ).all()
+        if source_type:
+            query = query.filter(SkillSource.source_type == source_type)
         
-        return [
-            SkillResponse(
+        if status:
+            query = query.filter(SkillSource.status == status)
+        
+        sources = query.order_by(SkillSource.created_at.desc()).all()
+        
+        return sources
+        
+    except Exception as e:
+        logger.error(f"Error listing skill sources: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sources/{source_id}", response_model=SkillSourceResponse)
+async def get_skill_source(
+    source_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get details of a specific skill source.
+    
+    Example:
+        GET /api/v1/skills/sources/1
+    """
+    try:
+        source = db.query(SkillSource).filter(SkillSource.id == source_id).first()
+        
+        if not source:
+            raise HTTPException(status_code=404, detail="Skill source not found")
+        
+        return source
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting skill source: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sources/{source_id}/update", response_model=Dict[str, Any])
+async def update_git_repository(
+    source_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a Git repository (git pull) and re-index skills.
+    
+    Example:
+        POST /api/v1/skills/sources/1/update
+    """
+    try:
+        # Get source
+        source = db.query(SkillSource).filter(SkillSource.id == source_id).first()
+        
+        if not source:
+            raise HTTPException(status_code=404, detail="Skill source not found")
+        
+        if source.source_type != "git":
+            raise HTTPException(status_code=400, detail="Source is not a Git repository")
+        
+        # Update repository
+        skill_loader = get_skill_loader(db)
+        result = skill_loader.update_git_repository(source.source_name, db=db)
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Repository updated successfully",
+            "changes": result["changes"],
+            "old_commit": result["old_commit"],
+            "new_commit": result["new_commit"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating Git repository: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sources/{source_id}/rollback", response_model=Dict[str, Any])
+async def rollback_git_repository(
+    source_id: int,
+    commit_sha: str = Query(..., description="Commit SHA to rollback to"),
+    db: Session = Depends(get_db)
+):
+    """
+    Rollback a Git repository to a specific commit.
+    
+    Example:
+        POST /api/v1/skills/sources/1/rollback?commit_sha=abc123
+    """
+    try:
+        # Get source
+        source = db.query(SkillSource).filter(SkillSource.id == source_id).first()
+        
+        if not source:
+            raise HTTPException(status_code=404, detail="Skill source not found")
+        
+        if source.source_type != "git":
+            raise HTTPException(status_code=400, detail="Source is not a Git repository")
+        
+        # Rollback
+        skill_loader = get_skill_loader(db)
+        result = skill_loader.rollback_git_repository(source.source_name, commit_sha, db=db)
+        
+        if result["status"] == "error":
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": f"Repository rolled back to {commit_sha}",
+            "commit_sha": commit_sha
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rolling back Git repository: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sources/{source_id}")
+async def deactivate_skill_source(
+    source_id: int,
+    deactivate_skills: bool = Query(False, description="Also deactivate associated skills"),
+    db: Session = Depends(get_db)
+):
+    """
+    Deactivate a skill source (soft delete).
+    
+    Example:
+        DELETE /api/v1/skills/sources/1?deactivate_skills=true
+    """
+    try:
+        source = db.query(SkillSource).filter(SkillSource.id == source_id).first()
+        
+        if not source:
+            raise HTTPException(status_code=404, detail="Skill source not found")
+        
+        # Deactivate source
+        source.status = "inactive"
+        
+        # Optionally deactivate skills
+        if deactivate_skills:
+            db.query(Skill).filter(
+                Skill.skill_source == str(source_id)
+            ).update({"is_active": False})
+        
+        db.commit()
+        
+        return {"message": "Skill source deactivated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deactivating skill source: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Skill Management Endpoints
+# ============================================================================
+
+@router.get("", response_model=List[EnhancedSkillResponse])
+async def list_skills(
+    category: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None, description="Comma-separated tags"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """
+    List skills with filtering and pagination.
+    
+    Example:
+        GET /api/v1/skills?category=development&limit=20
+        GET /api/v1/skills?search=security&tags=authentication,authorization
+    """
+    try:
+        query = db.query(Skill).filter(Skill.is_active == True)
+        
+        # Apply filters
+        if category:
+            query = query.filter(Skill.category == category)
+        
+        if source:
+            query = query.filter(Skill.skill_source == source)
+        
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                (Skill.name.ilike(search_pattern)) |
+                (Skill.description.ilike(search_pattern))
+            )
+        
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",")]
+            # PostgreSQL JSON contains check
+            for tag in tag_list:
+                query = query.filter(Skill.tags.contains([tag]))
+        
+        # Get total count before pagination
+        total = query.count()
+        
+        # Apply pagination
+        skills = query.order_by(Skill.created_at.desc()).offset(offset).limit(limit).all()
+        
+        # Build enhanced responses with file info
+        result = []
+        for skill in skills:
+            skill_dict = EnhancedSkillResponse(
                 id=skill.id,
                 name=skill.name,
                 description=skill.description,
                 skill_type=skill.skill_type,
                 category=skill.category,
-                implementation=skill.implementation,
-                parameters=skill.parameters,
-                performance_data=skill.performance_data,
+                skill_version=skill.skill_version,
+                skill_source=skill.skill_source,
+                git_repo_url=skill.git_repo_url,
+                git_commit_sha=skill.git_commit_sha,
+                filesystem_path=skill.filesystem_path,
+                tags=skill.tags or [],
                 is_active=skill.is_active,
                 created_at=skill.created_at,
                 updated_at=skill.updated_at,
-                created_by=skill.created_by
-            ) for skill in skills
+                last_sync_at=skill.last_sync_at,
+                files=[
+                    SkillFileInfo(
+                        file_path=f.file_path,
+                        file_type=f.file_type,
+                        content_summary=f.content_summary,
+                        file_size_bytes=f.file_size_bytes,
+                        estimated_tokens=f.estimated_tokens,
+                        load_level=f.load_level
+                    )
+                    for f in skill.files
+                ] if hasattr(skill, 'files') else []
+            )
+            result.append(skill_dict)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error listing skills: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{skill_id}", response_model=EnhancedSkillResponse)
+async def get_skill_details(
+    skill_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed information about a specific skill.
+    
+    Example:
+        GET /api/v1/skills/123
+    """
+    try:
+        skill = db.query(Skill).filter(Skill.id == skill_id).first()
+        
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        
+        return EnhancedSkillResponse(
+            id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            skill_type=skill.skill_type,
+            category=skill.category,
+            skill_version=skill.skill_version,
+            skill_source=skill.skill_source,
+            git_repo_url=skill.git_repo_url,
+            git_commit_sha=skill.git_commit_sha,
+            filesystem_path=skill.filesystem_path,
+            tags=skill.tags or [],
+            is_active=skill.is_active,
+            created_at=skill.created_at,
+            updated_at=skill.updated_at,
+            last_sync_at=skill.last_sync_at,
+            files=[
+                SkillFileInfo(
+                    file_path=f.file_path,
+                    file_type=f.file_type,
+                    content_summary=f.content_summary,
+                    file_size_bytes=f.file_size_bytes,
+                    estimated_tokens=f.estimated_tokens,
+                    load_level=f.load_level
+                )
+                for f in skill.files
+            ] if hasattr(skill, 'files') else []
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting skill details: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{skill_id}/content", response_model=SkillContentResponse)
+async def get_skill_content(
+    skill_id: int,
+    level: int = Query(2, ge=1, le=3, description="Load level: 1=metadata, 2=core, 3=resource"),
+    resource_path: Optional[str] = Query(None, description="Resource path for level 3"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get skill content at different load levels (progressive disclosure).
+    
+    Examples:
+        GET /api/v1/skills/123/content?level=1  # Metadata only
+        GET /api/v1/skills/123/content?level=2  # Core content
+        GET /api/v1/skills/123/content?level=3&resource_path=advanced.md  # Specific resource
+    """
+    try:
+        skill = db.query(Skill).filter(Skill.id == skill_id).first()
+        
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        
+        skill_loader = get_skill_loader(db)
+        content = ""
+        estimated_tokens = 0
+        
+        if level == 1:
+            # Level 1: Metadata
+            metadata = skill_loader.load_skill_metadata(skill.name, db=db)
+            if metadata:
+                content = str(metadata)
+                estimated_tokens = 50  # Rough estimate for metadata
+        
+        elif level == 2:
+            # Level 2: Core content
+            core_content = skill_loader.load_skill_core(skill.name, db=db)
+            if core_content:
+                content = core_content
+                from services.skill_loader import estimate_tokens
+                estimated_tokens = estimate_tokens(content)
+        
+        elif level == 3:
+            # Level 3: Resource
+            if not resource_path:
+                raise HTTPException(status_code=400, detail="resource_path required for level 3")
+            
+            resource_content = skill_loader.load_skill_resource(skill.name, resource_path, db=db)
+            if resource_content:
+                content = resource_content
+                from services.skill_loader import estimate_tokens
+                estimated_tokens = estimate_tokens(content)
+            else:
+                raise HTTPException(status_code=404, detail=f"Resource not found: {resource_path}")
+        
+        # Get available files
+        files_available = []
+        if hasattr(skill, 'files'):
+            files_available = [f.file_path for f in skill.files]
+        
+        return SkillContentResponse(
+            skill_id=skill.id,
+            skill_name=skill.name,
+            load_level=level,
+            content=content,
+            estimated_tokens=estimated_tokens,
+            files_available=files_available
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting skill content: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/cleanup-old-mappings")  # Admin endpoint to avoid route conflicts
+async def cleanup_old_skill_mappings(
+    db: Session = Depends(get_db)
+):
+    """
+    Remove all skill-agent mappings for skills with source='Unknown' (legacy skills).
+    This helps clean up old mappings before migrating to PRD-22 skills.
+    """
+    try:
+        # Find all skills with source='Unknown'
+        old_skills = db.query(Skill).filter(
+            or_(
+                Skill.skill_source == 'Unknown',
+                Skill.skill_source.is_(None)
+            )
+        ).all()
+        
+        if not old_skills:
+            return {
+                "message": "No old skill mappings found",
+                "removed_count": 0
+            }
+        
+        old_skill_ids = [s.id for s in old_skills]
+        
+        # Delete agent_skills mappings for these old skills (use IN clause for compatibility)
+        if old_skill_ids:
+            placeholders = ','.join([f':id{i}' for i in range(len(old_skill_ids))])
+            params = {f'id{i}': skill_id for i, skill_id in enumerate(old_skill_ids)}
+            deleted_count = db.execute(
+                text(f"DELETE FROM agent_skills WHERE skill_id IN ({placeholders})"),
+                params
+            ).rowcount
+        else:
+            deleted_count = 0
+        
+        db.commit()
+        
+        return {
+            "message": f"Removed {deleted_count} old skill-agent mappings",
+            "removed_count": deleted_count,
+            "old_skill_ids": old_skill_ids
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error cleaning up old skill mappings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{skill_id}")
+async def deactivate_skill(
+    skill_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Deactivate a skill (soft delete).
+    
+    Example:
+        DELETE /api/v1/skills/123
+    """
+    try:
+        skill = db.query(Skill).filter(Skill.id == skill_id).first()
+        
+        if not skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        
+        skill.is_active = False
+        
+        # Remove from all agent assignments
+        db.query(agent_skills).filter(agent_skills.c.skill_id == skill_id).delete()
+        
+        db.commit()
+        
+        return {"message": "Skill deactivated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deactivating skill: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Agent-Skill Assignment Endpoints
+# ============================================================================
+
+@router.get("/agents/{agent_id}/skills", response_model=List[EnhancedSkillResponse])
+async def get_agent_skills(
+    agent_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get skills assigned to a specific agent.
+    
+    Example:
+        GET /api/v1/skills/agents/456/skills
+    """
+    try:
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        return [
+            EnhancedSkillResponse(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                skill_type=skill.skill_type,
+                category=skill.category,
+                skill_version=skill.skill_version,
+                skill_source=skill.skill_source,
+                git_repo_url=skill.git_repo_url,
+                git_commit_sha=skill.git_commit_sha,
+                filesystem_path=skill.filesystem_path,
+                tags=skill.tags or [],
+                is_active=skill.is_active,
+                created_at=skill.created_at,
+                updated_at=skill.updated_at,
+                last_sync_at=skill.last_sync_at,
+                files=[]
+            )
+            for skill in agent.skills
         ]
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting agent skills: {e}")
+        logger.error(f"Error getting agent skills: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/agents/{agent_id}/")
-async def add_skills_to_agent(
+
+@router.post("/agents/{agent_id}/skills")
+async def assign_skills_to_agent(
     agent_id: int,
     skill_ids: List[int],
+    replace: bool = Query(False, description="Replace existing skills instead of adding"),
     db: Session = Depends(get_db)
 ):
-    """Add skills to an agent"""
+    """
+    Assign skills to an agent.
+    
+    Example:
+        POST /api/v1/skills/agents/456/skills
+        {
+            "skill_ids": [1, 2, 3]
+        }
+    """
     try:
-        # Check if agent exists
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Verify all skills exist
+        # Verify skills exist
         skills = db.query(Skill).filter(
             Skill.id.in_(skill_ids),
             Skill.is_active == True
         ).all()
         
         if len(skills) != len(skill_ids):
-            found_ids = [skill.id for skill in skills]
-            missing_ids = [sid for sid in skill_ids if sid not in found_ids]
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Skills not found: {missing_ids}"
-            )
+            raise HTTPException(status_code=400, detail="One or more skills not found or inactive")
         
-        # Add skills to agent (avoid duplicates)
-        current_skill_ids = [skill.id for skill in agent.skills]
-        new_skills = [skill for skill in skills if skill.id not in current_skill_ids]
+        # Assign skills
+        if replace:
+            agent.skills = skills
+        else:
+            # Add only new skills (avoid duplicates)
+            existing_skill_ids = {s.id for s in agent.skills}
+            new_skills = [s for s in skills if s.id not in existing_skill_ids]
+            agent.skills.extend(new_skills)
         
-        agent.skills.extend(new_skills)
         db.commit()
         
         return {
-            "message": f"Added {len(new_skills)} skills to agent",
+            "message": f"Successfully assigned {len(skills)} skills to agent",
             "agent_id": agent_id,
-            "added_skill_ids": [skill.id for skill in new_skills],
-            "total_skills": len(agent.skills)
+            "skill_ids": skill_ids
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error adding skills to agent: {e}")
+        logger.error(f"Error assigning skills to agent: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/agents/{agent_id}/{skill_id}")
-async def remove_skill_from_agent(
+
+@router.delete("/agents/{agent_id}/skills")
+async def remove_skills_from_agent(
     agent_id: int,
-    skill_id: int,
+    skill_ids: List[int] = Query(..., description="Skill IDs to remove"),
     db: Session = Depends(get_db)
 ):
-    """Remove a skill from an agent"""
+    """
+    Remove skills from an agent.
+    
+    Example:
+        DELETE /api/v1/skills/agents/456/skills?skill_ids=1&skill_ids=2
+    """
     try:
-        # Check if agent exists
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Check if skill exists and is associated with agent
-        skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        if not skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
+        # Remove skills
+        agent.skills = [s for s in agent.skills if s.id not in skill_ids]
         
-        if skill not in agent.skills:
-            raise HTTPException(
-                status_code=404, 
-                detail="Skill not associated with this agent"
-            )
-        
-        # Remove skill from agent
-        agent.skills.remove(skill)
         db.commit()
         
         return {
-            "message": "Skill removed from agent",
-            "agent_id": agent_id,
-            "removed_skill_id": skill_id,
-            "remaining_skills": len(agent.skills)
+            "message": f"Successfully removed {len(skill_ids)} skills from agent",
+            "agent_id": agent_id
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error removing skill from agent: {e}")
+        logger.error(f"Error removing skills from agent: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/", response_model=List[SkillResponse])
-async def get_all_skills(
-    category: Optional[SkillCategory] = None,
-    skill_type: Optional[str] = None,
-    is_active: Optional[bool] = True,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+
+# ============================================================================
+# Skill Recommendation Endpoint
+# ============================================================================
+
+@router.post("/recommend", response_model=List[SkillRecommendation])
+async def recommend_skills(
+    request: SkillRecommendationRequest,
     db: Session = Depends(get_db)
 ):
-    """Get all skills with optional filtering"""
+    """
+    Get AI-recommended skills for a task.
+    
+    Example:
+        POST /api/v1/skills/recommend
+        {
+            "task_description": "I need to analyze and refactor legacy Python code",
+            "task_type": "development",
+            "limit": 5
+        }
+    """
     try:
-        query = db.query(Skill)
-        
-        if category:
-            query = query.filter(Skill.category == category.value)
-        
-        if skill_type:
-            query = query.filter(Skill.skill_type == skill_type)
-        
-        if is_active is not None:
-            query = query.filter(Skill.is_active == is_active)
-        
-        skills = query.offset(skip).limit(limit).all()
+        recommendations = recommend_skills_for_task(
+            task_description=request.task_description,
+            task_type=request.task_type,
+            limit=request.limit,
+            db=db
+        )
         
         return [
-            SkillResponse(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                skill_type=skill.skill_type,
-                category=skill.category,
-                implementation=skill.implementation,
-                parameters=skill.parameters,
-                performance_data=skill.performance_data,
-                is_active=skill.is_active,
-                created_at=skill.created_at,
-                updated_at=skill.updated_at,
-                created_by=skill.created_by
-            ) for skill in skills
+            SkillRecommendation(
+                skill_id=r["skill_id"],
+                skill_name=r["skill_name"],
+                confidence=r["confidence"],
+                reasoning=r["reasoning"]
+            )
+            for r in recommendations
         ]
         
     except Exception as e:
-        logger.error(f"Error getting all skills: {e}")
+        logger.error(f"Error recommending skills: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# This route was duplicated - using single route instead
-@router.post("/bulk", response_model=List[SkillResponse])
-async def create_skills_bulk(
-    skills: List[SkillCreate],
-    db: Session = Depends(get_db)
-):
-    """Create multiple skills at once"""
-    try:
-        created_skills = []
-        for skill_data in skills:
-            # Check if skill name already exists
-            existing = db.query(Skill).filter(Skill.name == skill_data.name).first()
-            if existing:
-                continue  # Skip existing skills
-            
-            skill = Skill(
-                name=skill_data.name,
-                description=skill_data.description,
-                skill_type=skill_data.skill_type,
-                category=skill_data.category,
-                implementation=skill_data.implementation,
-                parameters=skill_data.parameters,
-                created_by="api"
-            )
-            db.add(skill)
-            db.flush()
-            created_skills.append(skill)
-        
-        db.commit()
-        return created_skills
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error creating skills bulk: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/single", response_model=SkillResponse)
-async def create_skill(
-    skill: SkillCreate,
-    db: Session = Depends(get_db)
-):
-    """Create a new skill"""
-    try:
-        # Check if skill name already exists
-        existing = db.query(Skill).filter(Skill.name == skill.name).first()
-        if existing:
-            raise HTTPException(
-                status_code=400, 
-                detail="Skill with this name already exists"
-            )
-        
-        db_skill = Skill(
-            name=skill.name,
-            description=skill.description,
-            skill_type=skill.skill_type.value,
-            category=skill.category.value,
-            implementation=skill.implementation,
-            parameters=skill.parameters,
-            created_by="api"
-        )
-        
-        db.add(db_skill)
-        db.commit()
-        db.refresh(db_skill)
-        
-        return SkillResponse(
-            id=db_skill.id,
-            name=db_skill.name,
-            description=db_skill.description,
-            skill_type=db_skill.skill_type,
-            category=db_skill.category,
-            implementation=db_skill.implementation,
-            parameters=db_skill.parameters,
-            performance_data=db_skill.performance_data,
-            is_active=db_skill.is_active,
-            created_at=db_skill.created_at,
-            updated_at=db_skill.updated_at,
-            created_by=db_skill.created_by
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating skill: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+# ============================================================================
+# Integration Notes
+# ============================================================================
 
-@router.put("/{skill_id}", response_model=SkillResponse)
-async def update_skill(
-    skill_id: int,
-    skill_update: SkillUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update an existing skill"""
-    try:
-        db_skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        if not db_skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        
-        # Update fields if provided
-        update_data = skill_update.dict(exclude_unset=True)
-        for field, value in update_data.items():
-            if field == "category" and value:
-                setattr(db_skill, field, value.value)
-            else:
-                setattr(db_skill, field, value)
-        
-        db.commit()
-        db.refresh(db_skill)
-        
-        return SkillResponse(
-            id=db_skill.id,
-            name=db_skill.name,
-            description=db_skill.description,
-            skill_type=db_skill.skill_type,
-            category=db_skill.category,
-            implementation=db_skill.implementation,
-            parameters=db_skill.parameters,
-            performance_data=db_skill.performance_data,
-            is_active=db_skill.is_active,
-            created_at=db_skill.created_at,
-            updated_at=db_skill.updated_at,
-            created_by=db_skill.created_by
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating skill: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+"""
+INTEGRATION STEPS:
 
-@router.delete("/{skill_id}")
-async def delete_skill(
-    skill_id: int,
-    db: Session = Depends(get_db)
-):
-    """Delete a skill (soft delete by setting is_active=False)"""
-    try:
-        db_skill = db.query(Skill).filter(Skill.id == skill_id).first()
-        if not db_skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        
-        # Soft delete
-        db_skill.is_active = False
-        db.commit()
-        
-        return {"message": "Skill deleted successfully", "skill_id": skill_id}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting skill: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+1. Add this router to your main FastAPI app:
+   
+   from api.skills_prd22 import router as skills_prd22_router
+   app.include_router(skills_prd22_router)
 
-# Bulk Skills Creation
-# Keeping only one bulk creation endpoint
-@router.post("/bulk", response_model=List[SkillResponse])
-async def create_skills_bulk(
-    skills: List[SkillCreate],
-    db: Session = Depends(get_db)
-):
-    """Create multiple skills at once"""
-    try:
-        created_skills = []
-        
-        for skill_data in skills:
-            # Check if skill with this name already exists
-            existing = db.query(Skill).filter(Skill.name == skill_data.name).first()
-            if existing:
-                continue  # Skip existing skills
-                
-            skill = Skill(
-                name=skill_data.name,
-                description=skill_data.description,
-                skill_type=skill_data.skill_type,
-                category=skill_data.category,
-                implementation=skill_data.implementation,
-                parameters=skill_data.parameters,
-                created_by="api"
-            )
-            
-            db.add(skill)
-            db.flush()
-            created_skills.append(skill)
-            
-        db.commit()
-        return created_skills
-        
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error creating skills bulk: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+2. Make sure all model imports match your project structure
 
-# Using only one bulk endpoint and the /single endpoint for single skill creation
-# This route is deprecated and should be removed in future versions
+3. Test endpoints:
+   - Import Git repo: POST /api/v1/skills/sources/git
+   - List skills: GET /api/v1/skills
+   - Assign to agent: POST /api/v1/skills/agents/{id}/skills
+   
+4. Add authentication/authorization middleware as needed
 
-@router.get("/", response_model=List[SkillResponse])
-async def get_all_skills(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
-    """Get all skills"""
-    try:
-        skills = db.query(Skill).offset(skip).limit(limit).all()
-        
-        return [
-            SkillResponse(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                skill_type=skill.skill_type,
-                category=skill.category,
-                implementation=skill.implementation,
-                parameters=skill.parameters,
-                performance_data=skill.performance_data,
-                is_active=skill.is_active,
-                created_at=skill.created_at,
-                updated_at=skill.updated_at,
-                created_by=skill.created_by
-            ) for skill in skills
-        ]
-        
-    except Exception as e:
-        logger.error(f"Error getting skills: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/single", response_model=SkillResponse)
-async def create_single_skill(
-    skill_data: SkillCreate,
-    db: Session = Depends(get_db)
-):
-    """Create a single skill"""
-    try:
-        # Check if skill exists
-        existing = db.query(Skill).filter(Skill.name == skill_data.name).first()
-        if existing:
-            raise HTTPException(status_code=400, detail=f"Skill '{skill_data.name}' already exists")
-            
-        skill = Skill(
-            name=skill_data.name,
-            description=skill_data.description,
-            skill_type=skill_data.skill_type,
-            category=skill_data.category,
-            implementation=skill_data.implementation,
-            parameters=skill_data.parameters,
-            is_active=True
-        )
-        db.add(skill)
-        db.commit()
-        db.refresh(skill)
-        
-        return SkillResponse(
-            id=skill.id,
-            name=skill.name,
-            description=skill.description or "",
-            skill_type=skill.skill_type,
-            category=skill.category,
-            implementation=skill.implementation or "",
-            parameters=skill.parameters or {},
-            performance_data=skill.performance_data or {},
-            is_active=skill.is_active,
-            created_at=skill.created_at or datetime.now(),
-            updated_at=skill.updated_at or datetime.now(),
-            created_by=skill.created_by or ""
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error creating skill: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+5. Monitor performance and add caching if needed
+"""

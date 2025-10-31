@@ -84,7 +84,15 @@ class CredentialResolver:
             return cached_value
         
         # Try to resolve from database
+        # CRITICAL: Only try database AFTER import phase completes
+        # During module initialization (database.py loading), SessionLocal doesn't exist yet
         try:
+            # Lazy import to avoid circular dependency during startup
+            import sys
+            if 'database.database' not in sys.modules or not hasattr(sys.modules.get('database.database'), 'SessionLocal'):
+                # Database module not fully loaded yet - skip database lookup during bootstrap
+                raise CredentialNotFoundError(f"Database not initialized yet (bootstrap phase)")
+            
             from database.database import SessionLocal
             from services.credential_service import CredentialStore
             
@@ -115,7 +123,7 @@ class CredentialResolver:
                 db.close()
         
         except Exception as e:
-            logger.warning(f"Failed to resolve credential '{credential_name}' from database: {e}")
+            logger.debug(f"Database credential lookup skipped (using .env): {e}")
         
         # Fallback to environment variable
         if fallback_env:
@@ -167,6 +175,12 @@ class CredentialResolver:
             return json.loads(cached_value)
         
         try:
+            # Lazy import to avoid circular dependency during startup
+            import sys
+            if 'database.database' not in sys.modules or not hasattr(sys.modules.get('database.database'), 'SessionLocal'):
+                # Database module not fully loaded yet - skip database lookup during bootstrap
+                raise CredentialNotFoundError(f"Database not initialized yet (bootstrap phase)")
+            
             from database.database import SessionLocal
             from services.credential_service import CredentialStore
             
@@ -190,7 +204,7 @@ class CredentialResolver:
                 db.close()
         
         except Exception as e:
-            logger.warning(f"Failed to resolve credential dict '{credential_name}': {e}")
+            logger.debug(f"Database credential lookup skipped (using .env): {e}")
         
         # Fallback to environment variables if prefix provided
         if fallback_env_prefix:

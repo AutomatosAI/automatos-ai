@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import Prism from 'prismjs'
 import 'prismjs/themes/prism-tomorrow.css'
 import 'prismjs/components/prism-python'
@@ -73,11 +74,35 @@ export function ChatbotInterface() {
   const [selectedDocument, setSelectedDocument] = useState<DocumentReference | null>(null)
   const [isViewerVisible, setIsViewerVisible] = useState(true)
   const [activeTab, setActiveTab] = useState<'code' | 'docs'>('code')
+  const [selectedProvider, setSelectedProvider] = useState<string>('')
+  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [availableModels, setAvailableModels] = useState<Record<string, any[]>>({})
+  const [defaultProvider, setDefaultProvider] = useState<string>('openai')
+  const [defaultModel, setDefaultModel] = useState<string>('gpt-4')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setSessionId(`session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
+    
+    // Load available models
+    const loadModels = async () => {
+      try {
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
+        const response = await fetch(`${API_BASE_URL}/api/chatbot/models`)
+        if (response.ok) {
+          const data = await response.json()
+          setAvailableModels(data.providers || {})
+          setDefaultProvider(data.default_provider || 'openai')
+          setDefaultModel(data.default_model || 'gpt-4')
+          setSelectedProvider(data.default_provider || 'openai')
+          setSelectedModel(data.default_model || 'gpt-4')
+        }
+      } catch (error) {
+        console.error('Failed to load models:', error)
+      }
+    }
+    loadModels()
     
     const welcomeMessage: ChatMessage = {
       id: 'welcome',
@@ -148,7 +173,9 @@ Try asking:
             userRole: 'user',
             recentActions: []
           },
-          session_id: sessionId
+          session_id: sessionId,
+          provider: selectedProvider || undefined,
+          model: selectedModel || undefined
         })
       })
 
@@ -267,6 +294,51 @@ async def search_symbols(query: str, limit: int = 10):
           <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
             Session: {sessionId.slice(-8)}
           </Badge>
+          
+          {/* Model Selector */}
+          <div className="flex items-center space-x-2">
+            <Select
+              value={selectedProvider}
+              onValueChange={(value) => {
+                setSelectedProvider(value)
+                // Reset model when provider changes
+                const providerModels = availableModels[value] || []
+                if (providerModels.length > 0) {
+                  setSelectedModel(providerModels[0].model_id)
+                } else {
+                  setSelectedModel('')
+                }
+              }}
+            >
+              <SelectTrigger className="w-32 bg-gray-800/50 border-gray-700 text-white">
+                <SelectValue placeholder="Provider" />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-900 border-gray-700">
+                {Object.keys(availableModels).map(provider => (
+                  <SelectItem key={provider} value={provider} className="text-white">
+                    {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            <Select
+              value={selectedModel}
+              onValueChange={setSelectedModel}
+            >
+              <SelectTrigger className="w-48 bg-gray-800/50 border-gray-700 text-white">
+                <SelectValue placeholder="Model" />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-900 border-gray-700">
+                {(availableModels[selectedProvider] || []).map((model: any) => (
+                  <SelectItem key={model.model_id} value={model.model_id} className="text-white">
+                    {model.display_name || model.model_id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
           <Button
             variant="outline"
             size="sm"

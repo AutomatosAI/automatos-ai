@@ -77,12 +77,12 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
         throw new Error(`Category ${category} not found`)
       }
       
-      // Create bulk update request
+      // Create bulk update request - save ALL settings in category
+      // Use formData value if provided, otherwise preserve existing value
       const bulkUpdates = categoryData.settings
-        .filter(setting => updates[setting.key] !== undefined)
         .map(setting => ({
           id: setting.id,
-          value: updates[setting.key]
+          value: updates[setting.key] !== undefined ? updates[setting.key] : (setting.value || setting.default_value || '')
         }))
       
       if (bulkUpdates.length > 0) {
@@ -91,6 +91,9 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
         
         // Reload settings to get updated values
         await loadSettings()
+      } else {
+        console.warn(`No settings found for category: ${category}`)
+        toast.warning(`No settings found in ${category}`)
       }
     } catch (err) {
       console.error(`Failed to save ${category} settings:`, err)

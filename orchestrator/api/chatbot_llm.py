@@ -1,54 +1,62 @@
 """
-Chatbot API with LLM Function Calling
-======================================
+Chatbot LLM API
+===============
 
-Intelligent chatbot using Claude function calling to decide:
-- When to search code (CodeGraph)
-- When to search documents (RAG)
-- How to synthesize results
-
-Uses Anthropic's native tool use, not custom text parsing.
+FastAPI endpoints for chatbot functionality with tool calling.
+PRD-25: Migrated to use LLM service with per-request model selection.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-import logging
 import os
 import json
+import logging
 import uuid
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from database.database import get_db
 import httpx
 
-# Use Anthropic directly for native tool use
-from anthropic import Anthropic
+from database.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
-# Lazy initialization of Anthropic client
-_anthropic_client = None
+# Lazy initialization of LLM Manager
+_llm_manager = None
 
-def get_anthropic_client() -> Anthropic:
-    """Lazy load Anthropic client with credentials"""
-    global _anthropic_client
-    if _anthropic_client is None:
+def get_llm_manager():
+    """
+    Lazy load LLM manager with orchestrator settings.
+    
+    PRD-25: Uses new LLM service with per-service configuration.
+    Chatbot defaults to orchestrator LLM settings (can be overridden per-request).
+    """
+    global _llm_manager
+    if _llm_manager is None:
         try:
-            from services.credential_resolver import get_credential_resolver
-            resolver = get_credential_resolver()
-            anthropic_key = resolver.get_credential_field("development_anthropic", "api_key")
-        except Exception:
-            anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
-        
-        if not anthropic_key:
+            from services.llm_provider import create_llm_manager
+            # Use orchestrator settings (default for chatbot)
+            _llm_manager = create_llm_manager(service_name="orchestrator")
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM manager: {e}")
             raise HTTPException(
                 status_code=500,
-                detail="ANTHROPIC_API_KEY not configured. Add it to Settings > Credentials or set ANTHROPIC_API_KEY environment variable."
+                detail=f"LLM service not configured: {str(e)}. Check Settings > Orchestrator LLM."
             )
-        _anthropic_client = Anthropic(api_key=anthropic_key)
-    return _anthropic_client
+    return _llm_manager
+
+# Legacy function for backward compatibility (if needed)
+def get_anthropic_client():
+    """
+    Legacy function - now uses LLM service instead.
+    Kept for backward compatibility only.
+    """
+    from services.llm_provider import create_llm_manager
+    llm = create_llm_manager(service_name="orchestrator", provider="anthropic")
+    # Return a mock Anthropic client interface (not used, but maintains compatibility)
+    # Actual API calls should use llm.generate_response() instead
+    return None
 
 # Models
 class ChatContext(BaseModel):
@@ -61,6 +69,8 @@ class ChatQuery(BaseModel):
     query: str
     context: Optional[ChatContext] = None
     session_id: Optional[str] = None
+    provider: Optional[str] = None  # Override provider (openai, anthropic, etc.)
+    model: Optional[str] = None  # Override model (gpt-4, claude-3-5-sonnet-20241022, etc.)
 
 
 # Tool implementations
@@ -129,15 +139,12 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 
                 # Format results
                 results = []
-                for result in data.get('results', [])[:8]:
-                    content = result.get('content', '')
+                for doc in data.get('results', [])[:8]:
                     results.append({
-                        "id": result.get('chunk_id', result.get('id', 0)),
-                        "filename": result.get('source', {}).get('filename', 'Unknown'),
-                        "excerpt": content,  # Frontend expects 'excerpt'
-                        "content": content,   # Keep for backwards compatibility
-                        "similarity": result.get('similarity', 0.0),
-                        "file_type": result.get('source', {}).get('file_type', 'unknown')
+                        "id": doc.get('id'),
+                        "filename": doc.get('filename'),
+                        "excerpt": doc.get('excerpt', ''),
+                        "similarity": doc.get('similarity', 0.0)
                     })
                 
                 return {
@@ -154,112 +161,165 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
 
 
 async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
-    """Query connected databases using natural language"""
+    """Query database using natural language"""
     try:
-        logger.info(f"[Database] Query: {query}, Database: {database_name or 'auto-detect'}")
+        logger.info(f"[Database] Querying: {query}, DB: {database_name}")
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # First, get available database sources
-            sources_response = await client.get("http://127.0.0.1:8000/api/knowledge/sources/database/")
-            
-            if sources_response.status_code != 200:
-                return {"success": False, "error": "No database sources available"}
-            
-            sources = sources_response.json()
-            if not sources:
-                return {"success": False, "error": "No database sources configured"}
-            
-            # Select database source
-            target_source = None
-            if database_name:
-                target_source = next((s for s in sources if database_name.lower() in s['name'].lower()), None)
-            
-            if not target_source:
-                target_source = sources[0]  # Use first available database
-            
-            logger.info(f"[Database] Using source: {target_source['name']}")
-            
-            # Execute query
-            query_response = await client.post(
-                f"http://127.0.0.1:8000/api/knowledge/sources/database/{target_source['id']}/query",
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "http://127.0.0.1:8000/api/database-knowledge/nl-query",
                 json={
                     "query": query,
-                    "source_id": target_source['id']
+                    "database_name": database_name
                 }
             )
             
-            if query_response.status_code == 200:
-                data = query_response.json()
-                logger.info(f"[Database] Query successful: {data.get('row_count', 0)} rows")
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"[Database] Query successful")
                 
                 return {
-                    "success": data.get('success', True),
-                    "database": target_source['name'],
+                    "success": True,
+                    "database": data.get('database', ''),
                     "sql": data.get('sql', ''),
                     "row_count": data.get('row_count', 0),
-                    "data": data.get('data', [])[:10],  # Limit to 10 rows for chat
+                    "data": data.get('data', []),
                     "columns": data.get('columns', []),
-                    "execution_time_ms": data.get('execution_time_ms', 0),
-                    "explanation": data.get('explanation', '')
+                    "execution_time_ms": data.get('execution_time_ms', 0)
                 }
             else:
-                error_data = query_response.json()
-                return {"success": False, "error": error_data.get('detail', 'Query failed')}
+                return {"success": False, "error": f"API returned {response.status_code}"}
                 
     except Exception as e:
         logger.error(f"[Database] Query error: {e}")
         return {"success": False, "error": str(e)}
 
 
-# Define tools for Claude
+# Tool definitions for LLM
 TOOLS = [
     {
-        "name": "search_code",
-        "description": "Search the codebase for functions, classes, methods, and code implementations using CodeGraph semantic search. Use this when the user asks about code, how something works, implementation details, or specific code symbols like AgentFactory, functions, classes, etc.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query for code (e.g., 'AgentFactory', 'authentication flow', 'how agents are created')"
-                }
-            },
-            "required": ["query"]
-        }
-    },
-    {
-        "name": "search_documents",
-        "description": "Search documentation, guides, PDFs, and uploaded documents using RAG semantic search. Use this when the user asks about documentation, guides, architecture, deployment, setup, specifications, or general information about the platform.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query for documents (e.g., 'deployment guide', 'architecture documentation', 'how to setup')"
-                }
-            },
-            "required": ["query"]
-        }
-    },
-    {
-        "name": "query_database",
-        "description": "Query connected databases using natural language. Converts questions like 'show me top customers' into SQL and returns actual data. Use this when users ask about data, analytics, statistics, customer information, orders, revenue, or any database queries. Works with PostgreSQL and MySQL databases.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural language database query (e.g., 'show me top 10 customers by revenue', 'how many orders in the last month', 'what is the average order value')"
+        "type": "function",
+        "function": {
+            "name": "search_code",
+            "description": "Search the codebase for functions, classes, or code patterns. Use this when the user asks about code implementation, functions, classes, or wants to find specific code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query describing what code to find (e.g., 'authentication function', 'user model class', 'API endpoint handler')"
+                    }
                 },
-                "database_name": {
-                    "type": "string",
-                    "description": "Optional: specific database name to query. If not provided, uses the first available database."
-                }
-            },
-            "required": ["query"]
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": "Search documents and knowledge base for information. Use this when the user asks about documentation, guides, architecture, or general knowledge.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query describing what information to find (e.g., 'deployment guide', 'architecture overview', 'API documentation')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_database",
+            "description": "Query databases using natural language. Convert user questions into SQL queries and return results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language database query (e.g., 'show me top 10 customers by revenue', 'how many orders in the last month', 'what is the average order value')"
+                    },
+                    "database_name": {
+                        "type": "string",
+                        "description": "Optional: specific database name to query. If not provided, uses the first available database."
+                    }
+                },
+                "required": ["query"]
+            }
         }
     }
 ]
+
+
+@router.get("/models")
+async def list_available_models(
+    provider: Optional[str] = None,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    List available LLM models for chatbot selection.
+    
+    Returns models organized by provider for easy selection in UI.
+    """
+    try:
+        from services.model_registry import ModelRegistry
+        
+        registry = ModelRegistry(db)
+        
+        if provider:
+            models = registry.get_all_models(provider=provider, status='active')
+        else:
+            models = registry.get_all_models(status='active')
+        
+        # Group by provider
+        by_provider = {}
+        for model in models:
+            if model.provider not in by_provider:
+                by_provider[model.provider] = []
+            by_provider[model.provider].append({
+                "model_id": model.model_id,
+                "display_name": model.display_name,
+                "description": model.description,
+                "context_window": model.context_window,
+                "max_output_tokens": model.max_output_tokens,
+                "input_cost_per_1k_tokens": model.input_cost_per_1k_tokens,
+                "output_cost_per_1k_tokens": model.output_cost_per_1k_tokens,
+                "supports_functions": model.supports_functions,
+                "recommended_for": model.recommended_for
+            })
+        
+        # Get default model from settings
+        from services.llm_provider.manager import get_provider_and_model_from_settings
+        default_provider, default_model = get_provider_and_model_from_settings("orchestrator")
+        
+        return {
+            "providers": by_provider,
+            "default_provider": default_provider,
+            "default_model": default_model
+        }
+    except Exception as e:
+        logger.error(f"Error listing models: {e}")
+        # Return fallback with common models
+        return {
+            "providers": {
+                "openai": [
+                    {"model_id": "gpt-4", "display_name": "GPT-4", "supports_functions": True},
+                    {"model_id": "gpt-4-turbo", "display_name": "GPT-4 Turbo", "supports_functions": True},
+                    {"model_id": "gpt-3.5-turbo", "display_name": "GPT-3.5 Turbo", "supports_functions": True}
+                ],
+                "anthropic": [
+                    {"model_id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "supports_functions": True},
+                    {"model_id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "supports_functions": False},
+                    {"model_id": "claude-3-haiku-20240307", "display_name": "Claude 3 Haiku", "supports_functions": False}
+                ]
+            },
+            "default_provider": "openai",
+            "default_model": "gpt-4"
+        }
 
 
 @router.post("/query")
@@ -268,12 +328,17 @@ async def process_chatbot_query(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
-    Process chatbot query using Claude with function calling.
-    Claude decides whether to search code or documents.
+    Process chatbot query using LLM service with function calling.
+    LLM decides whether to search code or documents.
+    Uses orchestrator LLM settings by default, but can be overridden per-request.
+    
+    Query parameters:
+    - provider: Optional override (openai, anthropic, google, azure, huggingface)
+    - model: Optional override (model ID like gpt-4, claude-3-5-sonnet-20241022)
     """
     try:
         request_id = str(uuid.uuid4())[:12]
-        logger.info(f"[req={request_id}] Chatbot query: '{chat_query.query}'")
+        logger.info(f"[req={request_id}] Chatbot query: '{chat_query.query}' (provider={chat_query.provider}, model={chat_query.model})")
         
         # Build initial prompt
         user_message = f"""User query: {chat_query.query}
@@ -283,12 +348,13 @@ Context: {chat_query.context.dict() if chat_query.context else 'None'}
 You are the Automatos AI Assistant. Analyze the user's query and decide:
 1. If they're asking about CODE (functions, classes, implementation), use the search_code tool
 2. If they're asking about DOCUMENTS (guides, architecture, docs), use the search_documents tool
-3. You can use BOTH tools if the query would benefit from both code and documentation
+3. If they're asking about DATA (database queries, statistics), use the query_database tool
+4. You can use MULTIPLE tools if the query would benefit from multiple sources
 
 Then provide a helpful, technical response based on the search results."""
 
-        # Call Claude with tool use
-        logger.info(f"[req={request_id}] Calling Claude with tools...")
+        # Call LLM with tool use
+        logger.info(f"[req={request_id}] Calling LLM service with tools...")
         
         messages = [{"role": "user", "content": user_message}]
         code_results = []
@@ -296,29 +362,81 @@ Then provide a helpful, technical response based on the search results."""
         database_results = []
         tool_calls_made = []
         
-        # Agentic loop - let Claude call tools iteratively
+        # Agentic loop - let LLM call tools iteratively
         for iteration in range(3):  # Max 3 tool call iterations
-            response = get_anthropic_client().messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=2000,
-                tools=TOOLS,
-                messages=messages
+            # Use LLM service - allow per-request provider/model override
+            from services.llm_provider import create_llm_manager
+            
+            # Use override if provided, otherwise use default orchestrator settings
+            if chat_query.provider or chat_query.model:
+                llm_manager = create_llm_manager(
+                    service_name="orchestrator",
+                    provider=chat_query.provider,
+                    model=chat_query.model
+                )
+                logger.info(f"[req={request_id}] Using LLM override: provider={chat_query.provider}, model={chat_query.model}")
+            else:
+                llm_manager = get_llm_manager()
+            
+            # Convert messages to LLM service format
+            llm_messages = []
+            for msg in messages:
+                # Handle both string content and dict content (tool results)
+                if isinstance(msg.get("content"), str):
+                    llm_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+                elif isinstance(msg.get("content"), list):
+                    # Handle Anthropic-style tool results format
+                    content_str = ""
+                    for block in msg["content"]:
+                        if isinstance(block, dict):
+                            if block.get("type") == "tool_result":
+                                content_str += f"Tool Result: {block.get('content', '')}\n"
+                        else:
+                            content_str += str(block) + "\n"
+                    llm_messages.append({
+                        "role": msg["role"],
+                        "content": content_str.strip() or json.dumps(msg.get("content"))
+                    })
+                else:
+                    llm_messages.append({
+                        "role": msg["role"],
+                        "content": json.dumps(msg.get("content", ""))
+                    })
+            
+            # Generate response using LLM service
+            response = await llm_manager.generate_response(
+                messages=llm_messages,
+                tools=TOOLS
             )
             
-            logger.info(f"[req={request_id}] Claude response stop_reason: {response.stop_reason}")
+            logger.info(f"[req={request_id}] LLM response finish_reason: {response.finish_reason}")
             
-            # Check if Claude wants to use tools
-            if response.stop_reason == "tool_use":
+            # Check if LLM wants to use tools
+            if response.finish_reason == "tool_use" or (response.tool_calls and len(response.tool_calls) > 0):
                 # Collect all tool results first
                 tool_results = []
                 
-                for content_block in response.content:
-                    if content_block.type == "tool_use":
-                        tool_name = content_block.name
-                        tool_input = content_block.input
-                        tool_id = content_block.id
+                # Handle tool calls from LLMResponse
+                if response.tool_calls:
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call.get("function", {}).get("name", "")
+                        tool_input_str = tool_call.get("function", {}).get("arguments", "{}")
                         
-                        logger.info(f"[req={request_id}] Claude called tool: {tool_name} with query: {tool_input.get('query')}")
+                        # Parse tool arguments (handle both string and dict)
+                        try:
+                            if isinstance(tool_input_str, str):
+                                tool_input = json.loads(tool_input_str)
+                            else:
+                                tool_input = tool_input_str
+                        except:
+                            tool_input = {"query": str(tool_input_str)}
+                        
+                        tool_id = tool_call.get("id", "")
+                        
+                        logger.info(f"[req={request_id}] LLM called tool: {tool_name} with query: {tool_input.get('query')}")
                         tool_calls_made.append(tool_name)
                         
                         # Execute the tool
@@ -340,33 +458,42 @@ Then provide a helpful, technical response based on the search results."""
                         else:
                             tool_result = {"error": f"Unknown tool: {tool_name}"}
                         
-                        # Collect tool result
+                        # Collect tool result (format depends on provider)
+                        # OpenAI format: {type: "function", function: {name, arguments}}
+                        # Anthropic format: {type: "tool_result", tool_use_id, content}
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_id,
-                            "content": json.dumps(tool_result)
+                            "content": json.dumps(tool_result) if isinstance(tool_result, dict) else str(tool_result)
                         })
                 
-                # Add assistant message with ALL tool_use blocks
-                messages.append({"role": "assistant", "content": response.content})
-                
-                # Add ONE user message with ALL tool_result blocks
+                # Add assistant message with tool calls
                 messages.append({
-                    "role": "user",
-                    "content": tool_results
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": response.tool_calls
                 })
                 
-                # Continue the loop to let Claude process tool results
+                # Add user message with tool results
+                # For Anthropic: content must be an array of content blocks
+                # For OpenAI: content can be JSON string (will be converted by provider)
+                messages.append({
+                    "role": "user",
+                    "content": tool_results if tool_results else ""  # Send as array directly for Anthropic
+                })
+                
+                # Continue the loop to let LLM process tool results
                 continue
                 
             else:
-                # Claude provided final response
-                final_content = ""
-                for content_block in response.content:
-                    if hasattr(content_block, "text"):
-                        final_content += content_block.text
+                # LLM provided final response
+                final_content = response.content or ""
                 
-                logger.info(f"[req={request_id}] Claude finished. Used tools: {tool_calls_made}")
+                # Get model info from LLM manager
+                llm_info = llm_manager.get_provider_info()
+                model_name = llm_info.get("model", "unknown")
+                
+                logger.info(f"[req={request_id}] LLM finished. Used tools: {tool_calls_made}")
                 logger.info(f"[req={request_id}] Code results: {len(code_results)}, Doc results: {len(document_results)}, DB results: {len(database_results)}")
                 
                 # Determine primary source
@@ -390,7 +517,8 @@ Then provide a helpful, technical response based on the search results."""
                         "metadata": {
                             "tools_used": tool_calls_made,
                             "source": primary_source,
-                            "llm_model": "claude-3-5-sonnet-20241022",
+                            "llm_provider": llm_info.get("provider", "unknown"),
+                            "llm_model": model_name,
                             "code_count": len(code_results),
                             "document_count": len(document_results),
                             "database_count": len(database_results)
@@ -419,4 +547,3 @@ Then provide a helpful, technical response based on the search results."""
     except Exception as e:
         logger.error(f"Chatbot query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
