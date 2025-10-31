@@ -648,6 +648,17 @@ class AgentExecutionManager:
 
 REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                 
+                # PRD-22: Enhance system prompt with skills if agent has them
+                agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
+                if agent and agent.skills:
+                    skill_enhanced_prompt = self.agent_factory._build_agent_system_prompt_with_skills(
+                        agent=agent,
+                        task_context=prompt[:500],  # First 500 chars as context
+                        db=self.db_session
+                    )
+                    # Merge professional prompt with skill-enhanced prompt
+                    professional_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
+                
                 result = await self.agent_factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,

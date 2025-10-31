@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, text
 import time
 import logging
 
@@ -494,18 +494,44 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
 
 @router.delete("/{agent_id}", )
 async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
-    """Delete an agent"""
+    """Delete an agent and all related records"""
     try:
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
+        # Delete related records first (tables without CASCADE) - use savepoints to handle errors
+        # Order matters: delete in correct order to avoid FK violations
+        
+        deletions = [
+            ("agent_skills", "DELETE FROM agent_skills WHERE agent_id = :agent_id", True),
+            ("workflow_agents", "DELETE FROM workflow_agents WHERE agent_id = :agent_id", True),
+            ("memory_items", "DELETE FROM memory_items WHERE agent_id = :agent_id", True),
+            ("tasks", "DELETE FROM tasks WHERE agent_id = :agent_id", False),
+            ("workflow_executions", "DELETE FROM workflow_executions WHERE agent_id = :agent_id", False),
+        ]
+        
+        for table_name, sql_stmt, required in deletions:
+            savepoint = db.begin_nested()  # Create savepoint for this deletion
+            try:
+                db.execute(text(sql_stmt), {"agent_id": agent_id})
+                savepoint.commit()  # Commit savepoint
+            except Exception as e:
+                savepoint.rollback()  # Rollback savepoint, but keep main transaction
+                if required:
+                    logger.error(f"Error deleting {table_name} for agent {agent_id}: {e}")
+                    raise HTTPException(status_code=500, detail=f"Error deleting {table_name}: {str(e)}")
+                else:
+                    logger.warning(f"Error deleting {table_name} for agent {agent_id}: {e}")
+                    # Continue for optional tables
+        
+        # Now delete the agent (other relationships have CASCADE)
         db.delete(agent)
         db.commit()
         
         return {"message": f"Agent {agent_id} deleted successfully"}
-    except HTTPException:        raise
-        
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting agent: {e}")

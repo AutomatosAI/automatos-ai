@@ -29,6 +29,7 @@ from database.models import (
     Agent, Skill, PriorityLevel, Base,
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
+from services.skill_loader import get_skill_loader
 
 # Import new services (lazy import to avoid circular deps)
 def get_action_executor():
@@ -1197,6 +1198,69 @@ To use actions, respond with JSON blocks like:
             )
         
         return agent
+
+    # ======================================================================
+    # PRD-22: Build agent system prompt with progressive skill injection
+    # ======================================================================
+    def _build_agent_system_prompt(
+        self,
+        agent: Agent,
+        task_context: Optional[str] = None,
+        db: Optional[Session] = None,
+        required_tools: Optional[List[str]] = None
+    ) -> str:
+        """
+        Build the agent system prompt, injecting PRD-22 skill content (Level 2).
+
+        - Loads core content for each assigned skill via SkillLoader (progressive disclosure)
+        - Falls back to skill.description for legacy/seed skills without filesystem content
+        - Keeps tool schemas separate; optionally appends a tools section if provided
+        """
+        sections: List[str] = []
+
+        # Identity
+        sections.append(f"# Agent: {agent.name}")
+        if agent.description:
+            sections.append(agent.description)
+
+        # Task context (optional)
+        if task_context:
+            sections.append("\n## Task Context\n" + str(task_context))
+
+        # Skills (progressive disclosure)
+        if getattr(agent, 'skills', None):
+            sections.append("\n## Your Specialized Skills\n")
+            loader = get_skill_loader(db) if db is not None else None
+
+            for skill in agent.skills:
+                sections.append(f"### {skill.name}")
+
+                core_content = None
+                if loader is not None:
+                    try:
+                        # Level 2: core content from SKILL.md body or prompt_template
+                        core_content = loader.load_skill_core(skill.name, db=db)
+                    except Exception:
+                        core_content = None
+
+                if core_content and isinstance(core_content, str) and core_content.strip():
+                    sections.append(core_content)
+                else:
+                    # Fallback for legacy/seed skills
+                    fallback = skill.prompt_template or skill.description or ""
+                    if fallback:
+                        sections.append(str(fallback))
+
+        # Optional tools section (kept minimal; main tool wiring remains elsewhere)
+        if required_tools:
+            try:
+                tool_schemas = _build_tool_schemas(required_tools)
+                sections.append("\n## Available Tools\n")
+                sections.append(json.dumps(tool_schemas))
+            except Exception:
+                pass
+
+        return "\n\n".join([s for s in sections if s is not None])
     
     async def get_agent_status(self, agent_id: int) -> Dict[str, Any]:
         """

@@ -36,7 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useSkills } from '@/hooks/use-agent-api'
+import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
+import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 
@@ -116,16 +117,39 @@ export function AgentConfigurationModal({
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
-  const { data: availableSkills } = useSkills() // Get ALL available skills
+  // PRD-22: Load available skills from Skills API
+  const { listSkills } = useSkillsApi()
+  const [availableSkills, setAvailableSkills] = useState<any[]>([])
   const { data: agentSkills } = useAgentSkills(agentId?.toString() || '') // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
   
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(agentId)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
+  const addSkillMutation = useAddSkillToAgent()
+  const removeSkillMutation = useRemoveSkillFromAgent()
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
+
+  // PRD-22: Fetch skills once when modal opens
+  useEffect(() => {
+    if (!open) return
+    let mounted = true
+    ;(async () => {
+      try {
+        const data = await listSkills({ limit: 200 })
+        const items = Array.isArray(data) ? data : (data?.items || data?.skills || [])
+        if (!mounted) return
+        setAvailableSkills(items)
+      } catch (_) {
+        if (!mounted) return
+        setAvailableSkills([])
+      }
+    })()
+    return () => { mounted = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]) // Re-fetch when modal opens
 
   useEffect(() => {
     if (agentConfig && agent && typeof agent === 'object') {
@@ -183,13 +207,49 @@ export function AgentConfigurationModal({
     setHasChanges(true)
   }
 
-  const toggleSkillAssignment = (skillId: number) => {
+  const toggleSkillAssignment = async (skillId: number) => {
     const currentSkills = formData.assigned_skills || []
-    const newSkills = currentSkills.includes(skillId)
+    const hasSkill = currentSkills.includes(skillId)
+    const newSkills = hasSkill
       ? currentSkills.filter((id: number) => id !== skillId)
       : [...currentSkills, skillId]
-    
+
+    // Optimistic UI update
     updateFormData('assigned_skills', newSkills)
+
+    // Persist using the working backend endpoints
+    try {
+      if (hasSkill) {
+        // DELETE: Use /api/v1/skills/agents/{agent_id}/skills with query params
+        const deleteUrl = `/api/v1/skills/agents/${String(agentId)}/skills?skill_ids=${skillId}`
+        const res = await fetch(deleteUrl, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        console.info('Removed skill from agent', { agentId, skillId, ok: res.ok, status: res.status })
+        if (!res.ok) {
+          const errorText = await res.text()
+          throw new Error(`Remove failed: ${res.status} - ${errorText}`)
+        }
+      } else {
+        // POST: Use /api/agents/{agent_id}/skills - body must be raw array [1, 2, 3]
+        const postUrl = `/api/agents/${String(agentId)}/skills`
+        const res = await fetch(postUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([skillId])
+        })
+        console.info('Added skill to agent', { agentId, skillId, ok: res.ok, status: res.status })
+        if (!res.ok) {
+          const errorText = await res.text()
+          throw new Error(`Add failed: ${res.status} - ${errorText}`)
+        }
+      }
+    } catch (e) {
+      // Revert on error
+      updateFormData('assigned_skills', currentSkills)
+      console.error('Failed to update skill assignment', e)
+    }
   }
 
   const handleSave = async () => {

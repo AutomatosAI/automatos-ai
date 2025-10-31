@@ -7,7 +7,7 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table
-from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -15,7 +15,12 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
-from database.models import PriorityLevel
+# Define PriorityLevel locally to avoid circular imports
+class PriorityLevel(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 Base = declarative_base()
 
@@ -142,8 +147,134 @@ class Skill(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
     
+    # PRD-22: New fields for Git-backed skills
+    prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)
+    skill_version = Column(String(20), nullable=True)  # Version string
+    skill_source = Column(String(50), nullable=True)  # Source identifier (builtin-seeds, anthropic-official, etc.)
+    git_repo_url = Column(Text, nullable=True)  # Git repository URL
+    git_commit_sha = Column(String(40), nullable=True)  # Git commit SHA
+    git_branch = Column(String(100), nullable=True)  # Git branch
+    filesystem_path = Column(Text, nullable=True)  # Path to skill directory
+    tags = Column(JSONB, nullable=True)  # Tags array for categorization
+    skill_metadata = Column(JSONB, nullable=True)  # Flexible metadata JSON
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)  # Last Git sync timestamp
+    
     # Relationships
     agents = relationship("Agent", secondary=agent_skills, back_populates="skills")
+    # PRD-22: New relationships
+    files = relationship("SkillFile", back_populates="skill", cascade="all, delete-orphan")
+    source = relationship("SkillSource", foreign_keys=[skill_source], back_populates="skills", 
+                         primaryjoin="Skill.skill_source == SkillSource.source_name")
+    versions = relationship("SkillVersion", back_populates="skill", cascade="all, delete-orphan")
+    audit_logs = relationship("SkillAuditLog", back_populates="skill")
+
+# ===================================================================
+# PRD-22: Git-backed Skills Models
+# ===================================================================
+
+class SkillFile(Base):
+    """PRD-22: Skill files for progressive disclosure"""
+    __tablename__ = 'skill_files'
+    
+    id = Column(Integer, primary_key=True)
+    skill_id = Column(Integer, ForeignKey('skills.id', ondelete='CASCADE'), nullable=False)
+    file_path = Column(String(500), nullable=False)  # Relative path within skill directory
+    file_type = Column(String(50), nullable=False)   # core, resource, script, example
+    content_summary = Column(Text, nullable=True)    # Brief summary for indexing
+    file_size_bytes = Column(Integer, nullable=True)
+    estimated_tokens = Column(Integer, nullable=True)
+    load_level = Column(Integer, nullable=False, default=3)  # 1=metadata, 2=core, 3=resource
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    skill = relationship("Skill", back_populates="files")
+
+
+class SkillSource(Base):
+    """PRD-22: Skill sources (Git repositories, uploads, etc.)"""
+    __tablename__ = 'skill_sources'
+    
+    id = Column(Integer, primary_key=True)
+    source_name = Column(String(100), nullable=False, unique=True)
+    source_type = Column(String(50), nullable=False)  # git, upload, seed, marketplace
+    
+    # Git-specific fields
+    git_url = Column(Text, nullable=True)
+    git_branch = Column(String(100), nullable=True, default='main')
+    git_commit_sha = Column(String(40), nullable=True)
+    
+    # Local storage
+    local_cache_path = Column(Text, nullable=False)
+    
+    # Auto-update configuration
+    auto_update = Column(Boolean, default=False)
+    update_frequency_hours = Column(Integer, nullable=True, default=24)
+    
+    # Metadata
+    skills_discovered = Column(Integer, default=0)
+    status = Column(String(50), default='active')  # active, error, syncing, inactive
+    last_sync_at = Column(DateTime(timezone=True), nullable=True)
+    last_sync_status = Column(String(50), nullable=True)  # success, error, partial
+    last_sync_error = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_by = Column(String(255), nullable=True)
+    
+    # Relationships
+    skills = relationship("Skill", foreign_keys="Skill.skill_source", back_populates="source",
+                         primaryjoin="SkillSource.source_name == Skill.skill_source")
+    audit_logs = relationship("SkillAuditLog", back_populates="source")
+
+
+class SkillVersion(Base):
+    """PRD-22: Skill version history"""
+    __tablename__ = 'skill_versions'
+    
+    id = Column(Integer, primary_key=True)
+    skill_id = Column(Integer, ForeignKey('skills.id', ondelete='CASCADE'), nullable=False)
+    version = Column(String(20), nullable=False)
+    git_commit_sha = Column(String(40), nullable=True)
+    changelog = Column(Text, nullable=True)
+    is_current = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_by = Column(String(255), nullable=True)
+    
+    # Relationships
+    skill = relationship("Skill", back_populates="versions")
+
+
+class SkillAuditLog(Base):
+    """PRD-22: Audit log for skill operations"""
+    __tablename__ = 'skill_audit_log'
+    
+    id = Column(Integer, primary_key=True)
+    skill_id = Column(Integer, ForeignKey('skills.id', ondelete='SET NULL'), nullable=True)
+    source_id = Column(Integer, ForeignKey('skill_sources.id', ondelete='SET NULL'), nullable=True)
+    
+    # Action details
+    action = Column(String(50), nullable=False)  # create, update, delete, load, execute, sync
+    action_details = Column(JSON, nullable=True)
+    
+    # User context
+    user_id = Column(String(255), nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    
+    # Result
+    status = Column(String(50), nullable=False)  # success, error, warning
+    error_message = Column(Text, nullable=True)
+    execution_time_ms = Column(Integer, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    skill = relationship("Skill", back_populates="audit_logs")
+    source = relationship("SkillSource", back_populates="audit_logs")
+
 
 class Pattern(Base):
     __tablename__ = 'patterns'

@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Plus, 
@@ -45,16 +45,20 @@ import { toast } from 'react-hot-toast'
 
 // API hooks
 import { 
-  useSkills, 
   useAgentSkills, 
   useAddSkillToAgent, 
   useRemoveSkillFromAgent,
   useDeleteSkill,
   useUpdateSkill
 } from '@/hooks/use-agent-api'
+import { useSkillsApi } from '@/hooks/use-skills-api'
 
 import { CreateSkillModal } from "./create-skill-modal"
 import { SkillConfigurationModal } from "./skill-configuration-modal"
+// PRD-22 Skills UI components
+import { ImportGitModal } from './skills/import-git-modal'
+import { SkillSourceList } from './skills/skill-source-list'
+import { SkillBrowser } from './skills/skill-browser'
 type SkillCategory = {
   name: string
   icon: any
@@ -127,9 +131,50 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showConfigureModal, setShowConfigureModal] = useState(false)
   const [selectedSkillForConfig, setSelectedSkillForConfig] = useState<any>(null)
+  // PRD-22: Git import modal
+  const [showImportGit, setShowImportGit] = useState(false)
 
-  // Fetch skills data
-  const { data: allSkills = [], isLoading: skillsLoading } = useSkills()
+  // PRD-22: Fetch skills via Skills API
+  const { listSkills, loading: skillsLoading } = useSkillsApi()
+  const [allSkills, setAllSkills] = useState<any[]>([])
+  const [availableCategories, setAvailableCategories] = useState<string[]>([])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const data = await listSkills({ limit: 200 })
+        const items = Array.isArray(data)
+          ? data
+          : (data?.items || data?.skills || [])
+        if (!mounted) return
+        let results = items
+        // PRD-22: Direct API fallback with supported limit only if empty
+        if (!results || results.length === 0) {
+          try {
+            const res = await fetch('/api/v1/skills?limit=200')
+            if (res.ok) {
+              const json = await res.json()
+              const maybe = Array.isArray(json) ? json : (json?.items || json?.skills || [])
+              results = maybe || []
+            }
+          } catch (_) { /* ignore */ }
+        }
+        if (!mounted) return
+        setAllSkills(results)
+        const cats = Array.from(new Set(
+          (results || []).map((s: any) => (s.category || 'other')).filter(Boolean)
+        ))
+        setAvailableCategories(cats)
+      } catch (_) {
+        if (!mounted) return
+        setAllSkills([])
+        setAvailableCategories([])
+      }
+    })()
+    return () => { mounted = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Run once on mount
   const { data: agentSkills = [], isLoading: agentSkillsLoading } = useAgentSkills(selectedAgentId)
 
   // API mutations
@@ -160,9 +205,7 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
     const grouped: Record<string, any[]> = {}
     filteredSkills.forEach(skill => {
       const category = skill.category || 'other'
-      if (!grouped[category]) {
-        grouped[category] = []
-      }
+      if (!grouped[category]) grouped[category] = []
       grouped[category].push(skill)
     })
     return grouped
@@ -263,47 +306,44 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           </p>
         </div>
 
-        <Button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Skill
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowImportGit(true)}
+            className="border-orange-400/50 hover:border-orange-400"
+          >
+            <Code className="w-4 h-4 mr-2" />
+            Import from Git
+          </Button>
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Create Skill
+          </Button>
+        </div>
 
       </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="all-skills">All Skills</TabsTrigger>
-          <TabsTrigger value="agent-skills" disabled={!selectedAgentId}>
-            Agent Skills {selectedAgentId && `(${Array.isArray(agentSkills) ? agentSkills.length : 0})`}
-          </TabsTrigger>
           <TabsTrigger value="skill-categories">Categories</TabsTrigger>
         </TabsList>
 
-        {/* Filters */}
+        {/* Filters (search removed per request) */}
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-            <Input
-              placeholder="Search skills..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
             <SelectTrigger className="w-48">
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Categories</SelectItem>
-              {Object.entries(skillCategories).map(([key, category]) => (
+              {availableCategories.map((key) => (
                 <SelectItem key={key} value={key}>
-                  {category.name}
+                  {key}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -322,227 +362,14 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           </Select>
         </div>
 
-        {/* All Skills Tab */}
+        {/* All Skills Tab (use PRD-22 SkillBrowser for correct cards and detail modal) */}
         <TabsContent value="all-skills" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSkills.map((skill, index) => {
-              const category = skillCategories[skill.category] || skillCategories.development
-              const hasSkill = agentHasSkill(skill.id)
-              
-              return (
-                <motion.div
-                  key={skill.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: index * 0.05 }}
-                >
-                  <Card className={`glass-card transition-all duration-200 hover:shadow-lg ${
-                    hasSkill ? 'border-green-500/30 bg-green-500/5' : ''
-                  }`}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${category.bgColor}`}>
-                            <category.icon className={`w-5 h-5 ${category.color}`} />
-                          </div>
-                        <div>
-                          <CardTitle className="text-lg">{skill.name}</CardTitle>
-                          <Badge variant="secondary" className="text-xs mt-1">
-                            {skill.skill_type || 'technical'}
-                          </Badge>
-                        </div>
-                        </div>
-                        
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewSkillDetails(skill);
-                            }}>
-                              <Eye className="w-4 h-4 mr-2" />
-                              View Details
-                            </DropdownMenuItem>
-                            
-                            <DropdownMenuItem onClick={(e) => {
-                              e.stopPropagation();
-                              handleConfigureSkill(skill);
-                            }}>
-                              <Settings className="w-4 h-4 mr-2" />
-                              Configure
-                            </DropdownMenuItem>
-                            
-                            {selectedAgentId && (
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                hasSkill ? handleRemoveSkill(skill.id) : handleAddSkill(skill.id);
-                              }}>
-                                {hasSkill ? (
-                                  <>
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Remove from Agent
-                                  </>
-                                ) : (
-                                  <>
-                                    <Plus className="w-4 h-4 mr-2" />
-                                    Add to Agent
-                                  </>
-                                )}
-                              </DropdownMenuItem>
-                            )}
-                            
-                            <DropdownMenuItem 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteSkill(skill.id);
-                              }}
-                              className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Delete Skill
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </CardHeader>
-                    
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        {skill.description}
-                      </p>
-                      
-                      <div className="flex items-center justify-between">
-                        <Badge variant="outline" className={category.color}>
-                          {category.name}
-                        </Badge>
-                        
-                        {hasSkill && (
-                          <div className="flex items-center gap-1 text-green-600">
-                            <Star className="w-4 h-4 fill-current" />
-                            <span className="text-xs">Assigned</span>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              )
-            })}
-          </div>
+          <SkillBrowser hideUnknownSource />
         </TabsContent>
 
-        {/* Agent Skills Tab */}
-        <TabsContent value="agent-skills" className="space-y-6">
-          {selectedAgentId ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {(Array.isArray(agentSkills) ? agentSkills : []).map((skill, index) => {
-                const category = skillCategories[skill.category] || skillCategories.development
-                
-                return (
-                  <motion.div
-                    key={skill.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                  >
-                    <Card className="glass-card border-green-500/30 bg-green-500/5">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${category.bgColor}`}>
-                              <category.icon className={`w-5 h-5 ${category.color}`} />
-                            </div>
-                            <div>
-                              <CardTitle className="text-lg">{skill.name}</CardTitle>
-                              <Badge variant="secondary" className="text-xs mt-1">
-                                {skill.skill_type || 'technical'}
-                              </Badge>
-                            </div>
-                          </div>
-                          
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                handleViewSkillDetails(skill);
-                              }}>
-                                <Eye className="w-4 h-4 mr-2" />
-                                View Details
-                              </DropdownMenuItem>
-                              
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                handleConfigureSkill(skill);
-                              }}>
-                                <Settings className="w-4 h-4 mr-2" />
-                                Configure
-                              </DropdownMenuItem>
-                              
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveSkill(skill.id);
-                              }}>
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Remove from Agent
-                              </DropdownMenuItem>
-                              
-                              <DropdownMenuItem 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteSkill(skill.id);
-                                }}
-                                className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Delete Skill
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </CardHeader>
-                      
-                      <CardContent>
-                        <p className="text-sm text-muted-foreground mb-3">
-                          {skill.description}
-                        </p>
-                        
-                        <div className="flex items-center justify-between">
-                          <Badge variant="outline" className={category.color}>
-                            {category.name}
-                          </Badge>
-                          
-                          <div className="flex items-center gap-1 text-green-600">
-                            <Star className="w-4 h-4 fill-current" />
-                            <span className="text-xs">Active</span>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                )
-              })}
-            </div>
-          ) : (
-            <Card className="glass-card">
-              <CardContent className="p-12 text-center">
-                <Tag className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">Select an Agent</h3>
-                <p className="text-muted-foreground">
-                  Choose an agent to view and manage their assigned skills
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
+      {/* Sources tab removed per request; All Skills now lists PRD-22 skills */}
+
+        {/* Agent Skills tab removed per request */}
 
         {/* Categories Tab */}
         <TabsContent value="skill-categories" className="space-y-6">
@@ -611,6 +438,15 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           }}
         />
       )}
+
+      {/* PRD-22: Import Git Modal */}
+      <ImportGitModal
+        open={showImportGit}
+        onOpenChange={setShowImportGit}
+        onSuccess={() => {
+          setShowImportGit(false)
+        }}
+      />
     </div>
   )
 }

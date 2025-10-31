@@ -79,7 +79,7 @@ LOG_LEVEL=INFO
 ### Settings > Credential Types Tab
 
 **Features**:
-- Browse 400+ credential types (cloned from n8n)
+- Browse 400+ credential types
 - Filter by category (AI, Database, Cloud, etc.)
 - View credential schemas
 - See field requirements
