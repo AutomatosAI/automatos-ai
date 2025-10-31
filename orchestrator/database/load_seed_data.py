@@ -163,6 +163,20 @@ def load_seed_data(load_credentials=True, load_tools=True):
         cursor.close()
         conn.close()
         
+        # Load System Settings (PRD-25)
+        print("\n📂 Loading system settings...")
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from seeds.seed_system_settings import seed_system_settings
+            from database.database import get_db_session
+            
+            with get_db_session() as db:
+                created, updated = seed_system_settings(db)
+                print(f"  ✅ System settings: {created} created, {updated} updated")
+        except Exception as e:
+            print(f"  ⚠️  Error loading system settings: {e}")
+            # Don't fail the entire seed process
+        
         print("\n" + "=" * 60)
         print("✅ SEED DATA LOADED SUCCESSFULLY!")
         print(f"   {cred_count} credential types + {tools_count} MCP tools ready")

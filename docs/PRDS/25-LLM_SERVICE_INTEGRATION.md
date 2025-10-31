@@ -35,7 +35,7 @@ This document outlines the plan to integrate a unified LLM service into Automato
 - **Structure**: `LLM` → `LLMClient` (base) → Provider clients
 - **Providers**: OpenAI, Anthropic, Google, Azure, Bow (custom)
 - **Interface**: `inference()`, `inference_stream()`, `test_connection()`
-- **Location**: `bagofwords/backend/app/ai/llm/`
+- **Location**: `/backend/app/ai/llm/`
 
 ### Credential System (PRD-18)
 - **Status**: ✅ Fully implemented
@@ -129,8 +129,8 @@ touch orchestrator/services/llm_provider/clients/__init__.py
 **Files**:
 1. `clients/openai_client.py` - Move `OpenAIProvider` from `llm_provider.py`
 2. `clients/anthropic_client.py` - Move `AnthropicProvider` from `llm_provider.py`
-3. `clients/google_client.py` - **NEW** - Google Gemini client (based on bagofwords)
-4. `clients/azure_client.py` - **NEW** - Azure OpenAI client (based on bagofwords)
+3. `clients/google_client.py` - **NEW** - Google Gemini client 
+4. `clients/azure_client.py` - **NEW** - Azure OpenAI client 
 5. `clients/huggingface_client.py` - **NEW** - HuggingFace Inference API client
 
 #### Step 1.4: Refactor Main LLM Service

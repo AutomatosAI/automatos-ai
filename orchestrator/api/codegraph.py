@@ -68,22 +68,43 @@ class ProjectResponse(BaseModel):
 
 # Helper functions
 def get_openai_key() -> str:
-    """Lazy load OpenAI API key from credentials or environment"""
+    """
+    Lazy load OpenAI API key from credentials or environment.
+    
+    Note: CodeGraph currently uses OpenAI embeddings API directly.
+    Future: Will support multiple embedding providers via LLM service settings.
+    """
     try:
         from services.credential_resolver import get_credential_resolver
         resolver = get_credential_resolver()
+        # Try to get from LLM service settings first
+        from services.llm_provider.manager import get_provider_and_model_from_settings, get_credential_data
+        
+        provider, _ = get_provider_and_model_from_settings("codegraph")
+        cred_data = get_credential_data(provider, service_name="codegraph")
+        api_key = cred_data.get("api_key")
+        
+        if api_key:
+            return api_key
+        
+        # Fallback to direct credential lookup
         return resolver.get_credential_field("development_openai", "api_key")
     except Exception:
         return os.getenv("OPENAI_API_KEY", "")
 
 
 def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
-    """Get CodeGraph service instance"""
+    """
+    Get CodeGraph service instance.
+    
+    Uses LLM service settings to determine API key source.
+    Future: Will support multiple embedding providers based on codegraph.provider setting.
+    """
     api_key = get_openai_key()
     if not api_key:
         raise HTTPException(
             status_code=500,
-            detail="OPENAI_API_KEY not configured. Add it to Settings > Credentials or set OPENAI_API_KEY environment variable."
+            detail="LLM API key not configured. Add it to Settings > Credentials or configure in CodeGraph Settings."
         )
     return CodeGraphService(db, api_key)
 

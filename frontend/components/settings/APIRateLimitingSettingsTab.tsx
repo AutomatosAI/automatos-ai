@@ -32,7 +32,10 @@ export default function APIRateLimitingSettingsTab({
   React.useEffect(() => {
     const initialData: Record<string, string> = {}
     settings.forEach(setting => {
-      initialData[setting.key] = setting.value || setting.default_value || ''
+      // Use saved value if it exists, otherwise use default, but don't treat empty string as falsy
+      initialData[setting.key] = setting.value !== null && setting.value !== undefined 
+        ? setting.value 
+        : (setting.default_value || '')
     })
     setFormData(initialData)
   }, [settings])

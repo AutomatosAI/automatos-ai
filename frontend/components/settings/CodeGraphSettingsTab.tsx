@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { Save, RotateCcw, Code, Settings, Zap } from 'lucide-react'
+import { Save, RotateCcw, Code, Settings, Zap, Brain, Database } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SystemSetting } from '@/lib/api/system-settings'
 
 interface CodeGraphSettingsTabProps {
@@ -33,7 +34,10 @@ export default function CodeGraphSettingsTab({
   React.useEffect(() => {
     const initialData: Record<string, string> = {}
     settings.forEach(setting => {
-      initialData[setting.key] = setting.value || setting.default_value || ''
+      // Use saved value if it exists, otherwise use default, but don't treat empty string as falsy
+      initialData[setting.key] = setting.value !== null && setting.value !== undefined 
+        ? setting.value 
+        : (setting.default_value || '')
     })
     setFormData(initialData)
   }, [settings])
@@ -55,8 +59,114 @@ export default function CodeGraphSettingsTab({
     onReset()
   }
 
+  const getSetting = (key: string) => settings.find(s => s.key === key)
+
   return (
     <div className="space-y-6">
+      {/* LLM Provider Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Brain className="h-5 w-5" />
+            LLM Provider Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure the LLM provider and model for CodeGraph analysis
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="provider">LLM Provider</Label>
+              <Select 
+                value={formData.provider || ''} 
+                onValueChange={(value) => handleInputChange('provider', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select LLM provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="anthropic">Anthropic</SelectItem>
+                  <SelectItem value="google">Google</SelectItem>
+                  <SelectItem value="azure">Azure OpenAI</SelectItem>
+                  <SelectItem value="huggingface">HuggingFace</SelectItem>
+                </SelectContent>
+              </Select>
+              {getSetting('provider')?.is_required && (
+                <Badge variant="destructive" className="text-xs">Required</Badge>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="model">LLM Model</Label>
+              <Select 
+                value={formData.model || ''} 
+                onValueChange={(value) => handleInputChange('model', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select model" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-4">GPT-4</SelectItem>
+                  <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                  <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                  <SelectItem value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</SelectItem>
+                  <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
+                  <SelectItem value="claude-3-sonnet">Claude 3 Sonnet</SelectItem>
+                  <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
+                  <SelectItem value="gemini-pro">Gemini Pro</SelectItem>
+                  <SelectItem value="gemini-pro-vision">Gemini Pro Vision</SelectItem>
+                  <SelectItem value="mistralai/Mistral-7B-Instruct-v0.2">Mistral 7B Instruct</SelectItem>
+                </SelectContent>
+              </Select>
+              {getSetting('model')?.is_required && (
+                <Badge variant="destructive" className="text-xs">Required</Badge>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Embedding Model Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            Embedding Model Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure embedding model for CodeGraph semantic search
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="embedding_model">Embedding Model</Label>
+            <Select 
+              value={formData.embedding_model || ''} 
+              onValueChange={(value) => handleInputChange('embedding_model', value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select embedding model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text-embedding-ada-002">OpenAI Ada-002 (1536 dims)</SelectItem>
+                <SelectItem value="text-embedding-3-small">OpenAI Embedding 3 Small (1536 dims)</SelectItem>
+                <SelectItem value="text-embedding-3-large">OpenAI Embedding 3 Large (3072 dims)</SelectItem>
+                <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">HuggingFace MiniLM (384 dims, Free)</SelectItem>
+                <SelectItem value="sentence-transformers/all-mpnet-base-v2">HuggingFace MPNet (768 dims, Free)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Note: CodeGraph currently uses OpenAI embeddings. Support for HuggingFace embeddings coming soon.
+            </p>
+            {getSetting('embedding_model')?.is_required && (
+              <Badge variant="destructive" className="text-xs">Required</Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* CodeGraph Configuration */}
       <Card>
         <CardHeader>

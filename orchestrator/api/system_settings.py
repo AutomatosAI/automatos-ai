@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 import logging
 import uuid
 import json
@@ -253,18 +254,41 @@ async def bulk_update_settings(
         
         logger.info(f"Received bulk update request with {len(updates)} items")
         updated_count = 0
+        updated_settings = []
+        
         for update in updates:
-            logger.debug(f"Updating setting {update.id} with value: {update.value}")
             setting = db.query(SystemSetting).filter(SystemSetting.id == update.id).first()
             if setting:
-                setting.value = update.value
+                old_value = setting.value
+                new_value = update.value
+                
+                # Log comparison details for debugging
+                logger.info(
+                    f"Comparing setting {setting.category}.{setting.key} (id={update.id}): "
+                    f"old='{old_value}' (type={type(old_value).__name__}) vs "
+                    f"new='{new_value}' (type={type(new_value).__name__})"
+                )
+                
+                # Always update when explicitly requested (user clicked save)
+                # The frontend should handle preventing unnecessary saves
+                setting.value = new_value
+                # Explicitly update timestamp (onupdate may not always trigger)
+                setting.updated_at = datetime.utcnow()
+                updated_settings.append(setting)
                 updated_count += 1
+                logger.info(f"Updated setting {setting.category}.{setting.key}: '{old_value}' → '{new_value}'")
             else:
                 logger.warning(f"Setting {update.id} not found")
         
-        db.commit()
+        if updated_count > 0:
+            db.commit()
+            # Refresh all updated settings to get latest timestamps
+            for setting in updated_settings:
+                db.refresh(setting)
+            logger.info(f"Bulk updated {updated_count} system settings")
+        else:
+            logger.info("No settings were updated (all values unchanged)")
         
-        logger.info(f"Bulk updated {updated_count} system settings")
         return {"message": f"Updated {updated_count} settings successfully"}
     except HTTPException:
         raise
