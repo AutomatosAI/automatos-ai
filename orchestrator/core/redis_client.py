@@ -134,12 +134,12 @@ class RedisClient:
                 redis_client.close()
 
 
-# Global Redis client instance (initialized in main.py)
+# Global Redis client instance (lazy-initialized)
 _redis_client: Optional[RedisClient] = None
 
 
 def init_redis_client(host: str = '127.0.0.1', port: int = 6379, password: Optional[str] = None, db: int = 0):
-    """Initialize the global Redis client"""
+    """Initialize the global Redis client (explicit init)"""
     global _redis_client
     _redis_client = RedisClient(host=host, port=port, password=password, db=db)
     _redis_client.test_connection()
@@ -147,6 +147,27 @@ def init_redis_client(host: str = '127.0.0.1', port: int = 6379, password: Optio
 
 
 def get_redis_client() -> Optional[RedisClient]:
-    """Get the global Redis client instance"""
+    """
+    Get the global Redis client instance with lazy initialization.
+    Uses centralized config - NO direct os.getenv() calls.
+    Returns None if Redis is not configured (optional service).
+    """
+    global _redis_client
+    if _redis_client is None:
+        from config import config
+        
+        host = config.REDIS_HOST
+        port = config.REDIS_PORT
+        password = config.REDIS_PASSWORD
+        
+        if not host or not port:
+            logger.warning("Redis not configured (REDIS_HOST/REDIS_PORT missing). Redis features disabled.")
+            return None
+        
+        try:
+            init_redis_client(host=host, port=int(port), password=password)
+        except Exception as e:
+            logger.error(f"Failed to initialize Redis client: {e}")
+            return None
     return _redis_client
 

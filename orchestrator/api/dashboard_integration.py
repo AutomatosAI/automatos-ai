@@ -25,22 +25,15 @@ async def startup_dashboard(app: FastAPI):
         # Initialize analytics engine
         analytics_engine = AnalyticsEngine()
         
-        # Initialize Redis client for real-time updates
-        try:
-            import redis
-            redis_client = redis.Redis(
-                host="127.0.0.1",
-                port=6379,
-                password="redis_password_123",
-                decode_responses=True
-            )
-            # Test connection
-            redis_client.ping()
+        # Use centralized Redis client for real-time updates
+        from core.redis_client import get_redis_client
+        redis_client = get_redis_client()
+        if redis_client:
             analytics_engine.redis_client = redis_client
             websocket_manager.redis_client = redis_client
             logger.info("Redis connection established for real-time updates")
-        except Exception as e:
-            logger.warning(f"Redis not available for real-time updates: {e}")
+        else:
+            logger.warning("Redis client not initialized for real-time updates")
         
         # Start WebSocket manager background tasks
         asyncio.create_task(websocket_manager.start_redis_listener())

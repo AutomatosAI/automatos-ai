@@ -98,16 +98,14 @@ class AgentCommunicationProtocol:
     """
     
     def __init__(self, redis_url: str = None):
-        # Build Redis URL from environment variables
+        # Use centralized config - NO os.getenv() calls
         if not redis_url:
-            redis_host = os.getenv("REDIS_HOST", "localhost")
-            redis_port = os.getenv("REDIS_PORT", "6379")
-            redis_password = os.getenv("REDIS_PASSWORD", "")
-            
-            if redis_password:
-                self.redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}"
-            else:
-                self.redis_url = f"redis://{redis_host}:{redis_port}"
+            from config import config
+            try:
+                self.redis_url = config.REDIS_URL
+            except ValueError as e:
+                logger.error(f"Redis not configured: {e}")
+                raise ValueError("Redis must be configured for inter-agent communication")
         else:
             self.redis_url = redis_url
             
@@ -406,11 +404,11 @@ class SharedContextManager:
     """
     
     def __init__(self, db_session: Session = None):
-        self.db_session = db_session
-        if not self.db_session:
-            engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///automatos.db"))
-            Base.metadata.create_all(engine)
-            SessionLocal = sessionmaker(bind=engine)
+        # Use centralized database session
+        if db_session:
+            self.db_session = db_session
+        else:
+            from database.database import SessionLocal
             self.db_session = SessionLocal()
         
         self.contexts: Dict[str, SharedContext] = {}

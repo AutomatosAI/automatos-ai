@@ -113,14 +113,20 @@ class EnhancedMCPBridge:
         self.ai_module_parser = AIModuleParser()
         self.audit_logger = get_audit_logger()
         
-        # Configuration
+        # Use centralized config - NO os.getenv()
+        from config import config as central_config
+        
+        api_key = central_config.API_KEY
+        if not api_key:
+            raise ValueError("API_KEY must be set in .env")
+        
         self.config = {
-            "api_key": os.getenv("API_KEY", "default-api-key"),
-            "redis_host": os.getenv("REDIS_HOST", "localhost"),
-            "redis_port": int(os.getenv("REDIS_PORT", "6379")),
-            "database_url": os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos_ai"),
-            "rate_limit_requests": int(os.getenv("RATE_LIMIT_REQUESTS", "100")),
-            "rate_limit_window": int(os.getenv("RATE_LIMIT_WINDOW", "60"))
+            "api_key": api_key,
+            "redis_host": central_config.REDIS_HOST,
+            "redis_port": int(central_config.REDIS_PORT) if central_config.REDIS_PORT else None,
+            "database_url": central_config.DATABASE_URL,
+            "rate_limit_requests": 100,
+            "rate_limit_window": 60
         }
         
         # Initialize database

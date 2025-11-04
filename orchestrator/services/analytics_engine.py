@@ -27,25 +27,15 @@ class AnalyticsEngine:
     """
     
     def __init__(self, redis_client: redis.Redis = None):
-        self.redis_client = redis_client
-        self.db = next(get_db())
+        # Use centralized Redis client
+        from core.redis_client import get_redis_client
+        self.redis_client = get_redis_client()
+        if self.redis_client:
+            logger.info("Redis connection established successfully")
+        else:
+            logger.warning("Redis client not initialized")
         
-        # Initialize Redis connection if not provided
-        if not self.redis_client:
-            try:
-                import redis
-                self.redis_client = redis.Redis(
-                    host="127.0.0.1",
-                    port=6379,
-                    password="redis_password_123",
-                    decode_responses=True
-                )
-                # Test connection
-                self.redis_client.ping()
-                logger.info("Redis connection established successfully")
-            except Exception as e:
-                logger.warning(f"Failed to connect to Redis: {e}")
-                self.redis_client = None
+        self.db = next(get_db())
     
     async def get_dashboard_overview(self) -> Dict[str, Any]:
         """

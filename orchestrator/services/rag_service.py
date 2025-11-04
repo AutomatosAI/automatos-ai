@@ -139,11 +139,15 @@ class RAGService:
     """
     
     def __init__(self, openai_api_key: Optional[str] = None):
-        # Get API key from credential resolver if not provided
+        # Get API key from centralized config
         if not openai_api_key:
-            from services.credential_resolver import get_credential_resolver
-            resolver = get_credential_resolver()
-            openai_api_key = resolver.get_credential_field("development_openai", "api_key")
+            from config import config
+            openai_api_key = config.OPENAI_API_KEY
+            if openai_api_key:
+                logger.info("Using OpenAI key from centralized config")
+            else:
+                logger.warning("No OpenAI API key configured")
+                openai_api_key = None
         
         self.api_key = openai_api_key
         
@@ -153,123 +157,12 @@ class RAGService:
             logger.info("✅ OpenAI client initialized with API key")
         else:
             self.openai_client = None
-            logger.warning("⚠️  No OpenAI API key found - embeddings will be simulated")
+            logger.warning("⚠️  No OpenAI API key found - RAG service will work without embeddings")
         
         self.vector_store = VectorStore()
         self.cache = {}  # Simple query cache
         self.cache_ttl = 300  # 5 minutes
-        
-        # Pre-load some domain knowledge
-        self._load_default_knowledge()
-    
-    def _load_default_knowledge(self):
-        """Load default knowledge base for common tasks"""
-        
-        # AUTOMATOS-SPECIFIC DOCUMENTATION (Primary)
-        automatos_docs = [
-            {
-                "content": "Automatos AI Platform: Advanced multi-agent orchestration system for enterprise automation. Features include dynamic agent management, intelligent task decomposition, context engineering with RAG, and hierarchical memory systems. Built with FastAPI backend, Next.js frontend, PostgreSQL with pgvector, and Redis for caching.",
-                "metadata": {"category": "platform_overview", "type": "documentation", "source": "README"}
-            },
-            {
-                "content": "Core Features: 1) Multi-type AI Agents (code architects, security experts, analysts), 2) Dynamic Agent Orchestration with auto-scaling, 3) Context Engineering with RAG and vector embeddings, 4) Real-time monitoring and status tracking, 5) Inter-agent communication and collaboration, 6) Hierarchical memory with episodic and semantic storage.",
-                "metadata": {"category": "features", "type": "documentation", "source": "README"}
-            },
-            {
-                "content": "Architecture: FastAPI backend on port 8000 with async API, PostgreSQL database with pgvector extension for embeddings, Redis for caching and real-time updates, Next.js frontend on port 3000, Docker containerized deployment. Backend: /orchestrator/main.py, Frontend: /frontend/app/, Database models: /database/models.py",
-                "metadata": {"category": "architecture", "type": "technical", "source": "README"}
-            },
-            {
-                "content": "9-Stage Workflow Execution: Stage 1: Task Decomposition with RealTaskDecomposer, Stage 2: Context Engineering with RAG/Semantic/CodeGraph, Stage 3: Agent Selection using LLM-based intelligent matching, Stage 4: Agent Execution with tool access, Stage 5: Result Aggregation with quality scoring, Stage 6-9: Memory consolidation, learning, and analytics.",
-                "metadata": {"category": "workflow", "type": "process", "source": "Documentation"}
-            },
-            {
-                "content": "Agent Types Available: researcher (research and information gathering), analyst (data analysis and extraction), writer (documentation and content creation), reviewer (quality assurance and validation), code_architect (code design and structure), security_expert (security analysis), performance_optimizer (optimization tasks).",
-                "metadata": {"category": "agents", "type": "reference", "source": "System"}
-            },
-            {
-                "content": "API Endpoints: GET /health (system health), GET /api/agents (list agents), POST /api/agents (create agent), POST /api/workflows (create workflow), GET /api/workflows/executions (execution history), POST /api/workflows/{id}/execute (run workflow), GET /api/context/stats (RAG metrics), POST /api/documents (upload docs).",
-                "metadata": {"category": "api", "type": "reference", "source": "README"}
-            },
-            {
-                "content": "Context Engineering Integration: Uses RAG service for knowledge retrieval, Semantic Search for finding similar content, CodeGraph for code analysis. Combines multiple sources with weighted quality scores. Provides 5-10 relevant chunks per task with similarity scores 0.7+. Optimizes token usage while maintaining context quality.",
-                "metadata": {"category": "context_engineering", "type": "technical", "source": "System"}
-            },
-            {
-                "content": "Memory System: Hierarchical structure with episodic memory (specific experiences), semantic memory (generalized knowledge), and procedural memory (how-to patterns). Uses embeddings for similarity matching, importance scoring for consolidation, and periodic cleanup of low-value memories. Agents access memories during task execution.",
-                "metadata": {"category": "memory", "type": "technical", "source": "System"}
-            },
-        ]
-        
-        # GENERIC BEST PRACTICES (Secondary)
-        default_docs = [
-            {
-                "content": "When performing code review, check for: security vulnerabilities, performance issues, code style compliance, proper error handling, test coverage, and documentation completeness.",
-                "metadata": {"category": "code_review", "type": "guideline"}
-            },
-            {
-                "content": "For API design, follow RESTful principles: use proper HTTP methods, implement versioning, provide clear error messages, use consistent naming conventions, implement pagination for lists, and include proper authentication.",
-                "metadata": {"category": "api_design", "type": "best_practice"}
-            },
-            {
-                "content": "Python best practices: Use type hints, follow PEP 8, write docstrings, handle exceptions properly, use context managers for resources, prefer list comprehensions over loops when appropriate.",
-                "metadata": {"category": "python", "type": "best_practice"}
-            },
-            {
-                "content": "Security considerations: Validate all inputs, use parameterized queries to prevent SQL injection, implement rate limiting, use HTTPS everywhere, store passwords using bcrypt or similar, implement CORS properly.",
-                "metadata": {"category": "security", "type": "checklist"}
-            },
-            {
-                "content": "Performance optimization strategies: Profile before optimizing, cache expensive operations, use database indexes, implement pagination, optimize images and assets, use CDN for static files, minimize API calls.",
-                "metadata": {"category": "performance", "type": "strategy"}
-            },
-            {
-                "content": "Testing best practices: Write unit tests first (TDD), aim for 80%+ coverage, test edge cases, use mocking for external dependencies, write integration tests for critical paths, automate testing in CI/CD.",
-                "metadata": {"category": "testing", "type": "best_practice"}
-            },
-            {
-                "content": "Documentation standards: Write clear README files, document API endpoints with examples, include installation instructions, provide usage examples, document environment variables, maintain a changelog.",
-                "metadata": {"category": "documentation", "type": "standard"}
-            },
-            {
-                "content": "Git workflow: Use feature branches, write descriptive commit messages, squash commits before merging, use pull requests for code review, tag releases, maintain a clean commit history.",
-                "metadata": {"category": "git", "type": "workflow"}
-            },
-            {
-                "content": "Docker best practices: Use multi-stage builds, minimize layers, use specific base image tags, don't run as root, use .dockerignore, cache dependencies separately, health checks are important.",
-                "metadata": {"category": "docker", "type": "best_practice"}
-            },
-            {
-                "content": "Microservices patterns: Use service discovery, implement circuit breakers, centralized logging, distributed tracing, API gateway pattern, event-driven architecture where appropriate, handle partial failures gracefully.",
-                "metadata": {"category": "microservices", "type": "pattern"}
-            }
-        ]
-        
-        # Index Automatos documentation first (higher priority)
-        for i, doc_data in enumerate(automatos_docs):
-            doc = Document(
-                id=f"automatos_{i}",
-                content=doc_data["content"],
-                metadata=doc_data["metadata"],
-                source="automatos_platform"
-            )
-            doc.embedding = self._generate_embedding(doc.content)
-            self.vector_store.add_document(doc)
-        
-        # Then index generic best practices
-        for i, doc_data in enumerate(default_docs):
-            doc = Document(
-                id=f"default_{i}",
-                content=doc_data["content"],
-                metadata=doc_data["metadata"],
-                source="default_knowledge"
-            )
-            doc.embedding = self._generate_embedding(doc.content)
-            self.vector_store.add_document(doc)
-        
-        self.vector_store.save_to_disk()
-        total_docs = len(automatos_docs) + len(default_docs)
-        logger.info(f"Loaded {total_docs} knowledge documents ({len(automatos_docs)} Automatos-specific, {len(default_docs)} generic best practices)")
+        logger.info("RAG Service initialized - using database documents only")
     
     def _generate_embedding(self, text: str) -> np.ndarray:
         """Generate embedding for text using OpenAI or fallback to simple method"""

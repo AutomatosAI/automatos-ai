@@ -25,6 +25,9 @@ from collections import defaultdict, deque
 env_path = Path(__file__).parent / '.env'
 load_dotenv(env_path)
 
+# Import centralized config
+from config import config
+
 # Import database and models
 from database.database import init_database, get_db
 from models import Base
@@ -125,16 +128,14 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Automotas AI API Server...")
     try:
-        init_database()
-        logger.info("Database initialized successfully")
+        # NOTE: Database initialization is handled by docker-compose on first install
+        # Only run init_database() manually if you need to recreate tables/seed data
+        # init_database()
+        logger.info("Database ready (tables already exist from docker-compose init)")
         
-        # Initialize Redis client for real-time updates
-        from core.redis_client import init_redis_client
-        redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
-        redis_port = int(os.getenv("REDIS_PORT", "6379"))
-        redis_password = os.getenv("REDIS_PASSWORD", None)
-        init_redis_client(host=redis_host, port=redis_port, password=redis_password)
-        logger.info(f"Redis client initialized: {redis_host}:{redis_port}")
+        # NOTE: Redis client uses lazy initialization via get_redis_client()
+        # Services will auto-initialize on first use from environment variables
+        logger.info("Redis client will lazy-initialize on first use")
         
         # Initialize Dashboard Services (PRD-06)
         await startup_dashboard(app)
@@ -301,10 +302,10 @@ app = FastAPI(
     }
 )
 
-# CORS middleware
+# CORS middleware - use centralized config
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://ui.automatos.app").split(","),
+    allow_origins=config.CORS_ALLOW_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -360,10 +361,9 @@ async def api_tracking_middleware(request, call_next):
         if status_code >= 400:
             stats["error_count"] += 1
 
-# Simple API key auth dependency
+# Simple API key auth dependency - use centralized config
 def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
+    if config.REQUIRE_API_KEY and x_api_key != config.API_KEY:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True
 

@@ -254,12 +254,11 @@ class MemorySystemInitializer:
         - success: bool
         """
         try:
-            # Create memory system
+            # Create memory system using centralized clients
+            # No hardcoded defaults - will use centralized get_redis_client()
             memory_system = HierarchicalMemorySystem(
-                redis_host=config.get("REDIS_HOST", "localhost"),
-                redis_port=config.get("REDIS_PORT", 6379),
-                postgres_url=config["DATABASE_URL"],
-                openai_api_key=config["OPENAI_API_KEY"]
+                openai_api_key=config.get("OPENAI_API_KEY")
+                # postgres_url and redis_client will use centralized defaults
             )
             
             # Initialize database

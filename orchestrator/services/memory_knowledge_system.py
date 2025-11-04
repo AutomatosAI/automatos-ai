@@ -126,36 +126,27 @@ class HierarchicalMemorySystem:
     Uses Redis for working memory, PostgreSQL for persistence, and OpenAI for embeddings.
     """
     
-    def __init__(
-        self,
-        redis_host: str = "localhost",
-        redis_port: int = 6379,
-        redis_password: str = None,
-        postgres_url: str = None,
-        openai_api_key: str = None
-    ):
-        # Redis for working memory with TTL
-        redis_kwargs = {
-            "host": redis_host,
-            "port": redis_port,
-            "decode_responses": True
-        }
-        if redis_password:
-            redis_kwargs["password"] = redis_password
+    def __init__(self, openai_api_key: str = None):
+        # ALWAYS use centralized clients - NO PARAMETERS, NO FALLBACKS
+        from core.redis_client import get_redis_client
+        from database.database import get_database_url
         
-        self.redis_client = redis.Redis(**redis_kwargs)
+        redis_from_central = get_redis_client()
+        if not redis_from_central:
+            raise ValueError("Redis client not initialized - check REDIS_HOST/REDIS_PORT in .env")
+        
+        self.redis_client = redis_from_central.get_redis()
+        logger.info("Using centralized Redis client")
         
         # PostgreSQL with pgvector for persistent memory
-        if postgres_url:
-            # Convert postgresql:// to postgresql+asyncpg:// for async support
-            if postgres_url.startswith("postgresql://"):
-                postgres_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://")
-            self.engine = create_async_engine(postgres_url, echo=False)
-            self.async_session = sessionmaker(
-                self.engine, class_=AsyncSession, expire_on_commit=False
-            )
-        else:
-            raise ValueError("PostgreSQL URL required for memory system")
+        db_url = get_database_url()
+        if db_url.startswith("postgresql://"):
+            db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+        self.engine = create_async_engine(db_url, echo=False)
+        self.async_session = sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+        logger.info("Using centralized database connection")
         
         # OpenAI for embeddings
         if openai_api_key:

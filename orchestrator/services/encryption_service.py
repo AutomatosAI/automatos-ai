@@ -166,12 +166,12 @@ class EncryptionService:
             decrypted_bytes = self.cipher.decrypt(ciphertext.encode('utf-8'))
             return decrypted_bytes.decode('utf-8')
         except InvalidToken:
-            logger.error("Decryption failed: Invalid token (wrong key or corrupted data)")
+            # Don't log error - let caller decide if this is unexpected
             raise EncryptionKeyError(
                 "Could not decrypt credential. The encryption key may have changed or data is corrupted."
             )
         except Exception as e:
-            logger.error(f"Decryption failed: {e}")
+            # Don't log error - let caller decide if this is unexpected
             raise EncryptionKeyError(f"Failed to decrypt data: {e}")
     
     def encrypt_dict(self, data: dict) -> str:

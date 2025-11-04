@@ -188,11 +188,11 @@ class CredentialStore:
         name: str,
         environment: str = "production"
     ) -> Optional[Credential]:
-        """Get credential by name and environment"""
+        """Get credential by name (environment-agnostic for MVP single environment)"""
+        # For MVP: Just find the credential by name, ignore environment
         return self.db.query(Credential).filter(
             and_(
                 Credential.name == name,
-                Credential.environment == environment,
                 Credential.is_active == True
             )
         ).first()
@@ -423,7 +423,7 @@ class CredentialStore:
         try:
             decrypted_data = self.encryption_service.decrypt_dict(credential.encrypted_data)
         except Exception as e:
-            logger.error(f"Failed to decrypt credential {credential_id}: {e}")
+            # Don't log error - expected during bootstrap or with wrong key
             self._create_audit_log(
                 credential=credential,
                 action='access_failed',

@@ -476,11 +476,11 @@ class AgentFactory:
     """
     
     def __init__(self, db_session: Session = None):
-        self.db_session = db_session
-        if not self.db_session:
-            engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///automatos.db"))
-            Base.metadata.create_all(engine)
-            SessionLocal = sessionmaker(bind=engine)
+        # Use centralized database session
+        if db_session:
+            self.db_session = db_session
+        else:
+            from database.database import SessionLocal
             self.db_session = SessionLocal()
         
         self.active_agents: Dict[int, AgentRuntime] = {}

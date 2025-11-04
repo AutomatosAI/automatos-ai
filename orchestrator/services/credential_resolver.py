@@ -61,7 +61,7 @@ class CredentialResolver:
         
         Args:
             credential_name: Name of credential in database
-            environment: Environment (defaults to ENVIRONMENT env var or 'production')
+            environment: Environment (defaults to ENVIRONMENT env var or 'development')
             fallback_env: Environment variable name to fall back to
             fallback_value: Default value if credential not found
             service_name: Name of service requesting credential (for audit)
@@ -74,7 +74,7 @@ class CredentialResolver:
         """
         # Determine environment
         if environment is None:
-            environment = os.getenv('ENVIRONMENT', 'production')
+            environment = os.getenv('ENVIRONMENT', 'development')
         
         # Check cache first
         cache_key = f"{credential_name}:{environment}"
@@ -203,16 +203,23 @@ class CredentialResolver:
             finally:
                 db.close()
         
+        except CredentialNotFoundError as e:
+            # Bootstrap phase or credential not found - expected during startup
+            if "bootstrap phase" in str(e):
+                logger.debug(f"Bootstrap phase - credential '{credential_name}' not yet available from database")
+            else:
+                logger.warning(f"Credential '{credential_name}' not found in database: {e}")
         except Exception as e:
-            logger.debug(f"Database credential lookup skipped (using .env): {e}")
+            # Unexpected error - log as warning (not error) to reduce noise
+            logger.warning(f"Could not load credential '{credential_name}' from database: {e}")
         
         # Fallback to environment variables if prefix provided
         if fallback_env_prefix:
-            logger.warning(f"Falling back to environment variables with prefix '{fallback_env_prefix}'")
+            logger.debug(f"Using environment variables with prefix '{fallback_env_prefix}'")
             # Return empty dict - caller should handle fallback
             return {}
         
-        raise CredentialNotFoundError(f"Credential '{credential_name}' not found")
+        raise CredentialNotFoundError(f"Credential '{credential_name}' not found - check logs for database error")
     
     def get_credential_field(
         self,

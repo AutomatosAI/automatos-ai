@@ -30,9 +30,19 @@ class DatabaseCacheService:
     - Semantic definitions
     """
     
-    def __init__(self, redis_url: str = "redis://localhost:6379/0"):
-        """Initialize Redis connection using existing instance."""
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+    def __init__(self, redis_client = None):
+        """Initialize Redis connection using centralized client."""
+        if redis_client:
+            self.redis_client = redis_client
+        else:
+            # Use centralized Redis client
+            from core.redis_client import get_redis_client
+            redis_from_central = get_redis_client()
+            if redis_from_central:
+                self.redis_client = redis_from_central.get_redis()
+                logger.info("Using centralized Redis client for database cache")
+            else:
+                raise ValueError("Redis client not initialized")
         self.default_schema_ttl = 3600  # 1 hour
         self.default_query_ttl = 300    # 5 minutes
         self.default_template_ttl = 600  # 10 minutes
@@ -387,9 +397,9 @@ class DatabaseCacheService:
 # Singleton instance
 _cache_service = None
 
-def get_database_cache_service(redis_url: Optional[str] = None) -> DatabaseCacheService:
-    """Get or create the database cache service singleton."""
+def get_database_cache_service(redis_client = None) -> DatabaseCacheService:
+    """Get or create the database cache service singleton using centralized client."""
     global _cache_service
     if _cache_service is None:
-        _cache_service = DatabaseCacheService(redis_url or "redis://localhost:6379/0")
+        _cache_service = DatabaseCacheService(redis_client=redis_client)
     return _cache_service

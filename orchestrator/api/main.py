@@ -128,13 +128,9 @@ async def lifespan(app: FastAPI):
         init_database()
         logger.info("Database initialized successfully")
         
-        # Initialize Redis client for real-time updates
-        from core.redis_client import init_redis_client
-        redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
-        redis_port = int(os.getenv("REDIS_PORT", "6379"))
-        redis_password = os.getenv("REDIS_PASSWORD", None)
-        init_redis_client(host=redis_host, port=redis_port, password=redis_password)
-        logger.info(f"Redis client initialized: {redis_host}:{redis_port}")
+        # NOTE: Redis uses lazy initialization - no need to call init here
+        # Services will auto-initialize via get_redis_client() from config
+        logger.info("Redis client will lazy-initialize from config on first use")
         
         # Initialize Dashboard Services (PRD-06)
         await startup_dashboard(app)
