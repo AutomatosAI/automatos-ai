@@ -33,7 +33,7 @@ class DatabaseKnowledgeSource(Base):
     __tablename__ = 'database_knowledge_sources'
     __table_args__ = (
         Index('idx_dks_tenant_name', 'tenant_id', 'name'),
-        Index('idx_dks_credential', 'credential_id'),
+        Index('idx_dks_credential', 'credential_name'),
         {'extend_existing': True}
     )
     

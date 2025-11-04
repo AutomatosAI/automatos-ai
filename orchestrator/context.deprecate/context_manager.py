@@ -31,24 +31,26 @@ import numpy as np
 from langchain_community.vectorstores import Chroma, FAISS, Qdrant
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.text_splitter import (
+from langchain_text_splitters import (
     RecursiveCharacterTextSplitter, 
     PythonCodeTextSplitter,
     MarkdownTextSplitter
 )
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_community.document_loaders import (
     DirectoryLoader,
     TextLoader,
     PythonLoader,
     JSONLoader
 )
-from langchain.retrievers import (
+from langchain_community.retrievers import (
     BM25Retriever,
+)
+from langchain_classic.retrievers import (
     EnsembleRetriever,
     ContextualCompressionRetriever
 )
-from langchain.retrievers.document_compressors import LLMChainExtractor
+from langchain_classic.retrievers.document_compressors import LLMChainExtractor
 from langchain_openai import ChatOpenAI
 from sentence_transformers import SentenceTransformer
 import faiss

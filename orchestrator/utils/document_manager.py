@@ -32,7 +32,7 @@ from langchain_text_splitters import (
     MarkdownTextSplitter,
     PythonCodeTextSplitter
 )
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain_openai import OpenAIEmbeddings
 import psycopg2
 from psycopg2.extras import RealDictCursor
