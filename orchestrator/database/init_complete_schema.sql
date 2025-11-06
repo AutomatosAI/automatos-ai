@@ -70,7 +70,18 @@ CREATE TABLE IF NOT EXISTS skills (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
-    created_by VARCHAR(255)
+    created_by VARCHAR(255),
+    -- PRD-22: Enhanced fields for Git-backed skills
+    prompt_template TEXT,
+    skill_version VARCHAR(20),
+    skill_source VARCHAR(50),
+    git_repo_url TEXT,
+    git_commit_sha VARCHAR(40),
+    git_branch VARCHAR(100),
+    filesystem_path TEXT,
+    tags JSONB,
+    skill_metadata JSONB,
+    last_sync_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Agent-Skills many-to-many
@@ -78,6 +89,69 @@ CREATE TABLE IF NOT EXISTS agent_skills (
     agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
     skill_id INTEGER REFERENCES skills(id) ON DELETE CASCADE,
     PRIMARY KEY (agent_id, skill_id)
+);
+
+-- PRD-22: Skill support tables
+CREATE TABLE IF NOT EXISTS skill_files (
+    id SERIAL PRIMARY KEY,
+    skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    file_path VARCHAR(500) NOT NULL,
+    file_type VARCHAR(50) NOT NULL,
+    content_summary TEXT,
+    file_size_bytes INTEGER,
+    estimated_tokens INTEGER,
+    load_level INTEGER NOT NULL DEFAULT 3,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_skill_files_skill_id ON skill_files(skill_id);
+
+CREATE TABLE IF NOT EXISTS skill_sources (
+    id SERIAL PRIMARY KEY,
+    source_name VARCHAR(100) NOT NULL UNIQUE,
+    source_type VARCHAR(50) NOT NULL,
+    git_url TEXT,
+    git_branch VARCHAR(100) DEFAULT 'main',
+    git_commit_sha VARCHAR(40),
+    local_cache_path TEXT NOT NULL,
+    auto_update BOOLEAN DEFAULT FALSE,
+    update_frequency_hours INTEGER DEFAULT 24,
+    skills_discovered INTEGER DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'active',
+    last_sync_at TIMESTAMP WITH TIME ZONE,
+    last_sync_status VARCHAR(50),
+    last_sync_error TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    created_by VARCHAR(255)
+);
+
+CREATE TABLE IF NOT EXISTS skill_versions (
+    id SERIAL PRIMARY KEY,
+    skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    version VARCHAR(20) NOT NULL,
+    git_commit_sha VARCHAR(40),
+    changelog TEXT,
+    is_current BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+    created_by VARCHAR(255),
+    UNIQUE(skill_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS skill_audit_log (
+    id SERIAL PRIMARY KEY,
+    skill_id INTEGER REFERENCES skills(id) ON DELETE SET NULL,
+    source_id INTEGER REFERENCES skill_sources(id) ON DELETE SET NULL,
+    action VARCHAR(50) NOT NULL,
+    action_details JSONB,
+    user_id VARCHAR(255),
+    ip_address VARCHAR(50),
+    user_agent TEXT,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT,
+    execution_time_ms INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
 
 -- Patterns table
@@ -240,6 +314,184 @@ CREATE INDEX IF NOT EXISTS idx_document_usage_timestamp ON document_usage(timest
 CREATE INDEX IF NOT EXISTS idx_document_usage_metadata ON document_usage USING GIN (metadata);
 
 -- ================================================================
+-- MULTIMODAL KNOWLEDGE BASE (PRD-19)
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS kb_types (
+    id SERIAL PRIMARY KEY,
+    type_name VARCHAR(100) UNIQUE NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    icon VARCHAR(50),
+    processor_class VARCHAR(255),
+    storage_strategy VARCHAR(100),
+    supports_embedding BOOLEAN DEFAULT true,
+    supports_search BOOLEAN DEFAULT true,
+    supports_relationships BOOLEAN DEFAULT false,
+    enabled BOOLEAN DEFAULT true,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_types_name ON kb_types(type_name);
+
+CREATE TABLE IF NOT EXISTS knowledge_items (
+    id SERIAL PRIMARY KEY,
+    kb_type_id INTEGER REFERENCES kb_types(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    source_type VARCHAR(100),
+    source_id VARCHAR(255),
+    title VARCHAR(500),
+    content TEXT NOT NULL,
+    summary TEXT,
+    embedding vector(1536),
+    metadata JSONB DEFAULT '{}',
+    quality_score FLOAT DEFAULT 0.0,
+    importance_score FLOAT DEFAULT 0.0,
+    complexity_score FLOAT DEFAULT 0.0,
+    confidence_score FLOAT DEFAULT 1.0,
+    visibility VARCHAR(50) DEFAULT 'system',
+    owner_id VARCHAR(255),
+    permissions JSONB DEFAULT '{}',
+    status VARCHAR(50) DEFAULT 'active',
+    version INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    accessed_at TIMESTAMP,
+    indexed_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_type ON knowledge_items(kb_type_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_embedding ON knowledge_items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+CREATE TABLE IF NOT EXISTS multimodal_content (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    content_modality VARCHAR(50) NOT NULL,
+    original_format VARCHAR(50),
+    original_size_bytes INTEGER,
+    original_data BYTEA,
+    processed_text TEXT,
+    processed_format VARCHAR(50),
+    processed_data JSONB,
+    source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    page_number INTEGER,
+    bounding_box JSONB,
+    position_index INTEGER,
+    extraction_method VARCHAR(100),
+    extraction_confidence FLOAT,
+    extraction_metadata JSONB DEFAULT '{}',
+    context_before TEXT,
+    context_after TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_relationships (
+    id SERIAL PRIMARY KEY,
+    from_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    to_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    relationship_type VARCHAR(100) NOT NULL,
+    strength FLOAT DEFAULT 1.0,
+    bidirectional BOOLEAN DEFAULT false,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    created_by VARCHAR(255),
+    UNIQUE(from_item_id, to_item_id, relationship_type)
+);
+
+CREATE TABLE IF NOT EXISTS kb_tables (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
+    headers JSONB NOT NULL,
+    data_types JSONB,
+    row_count INTEGER NOT NULL,
+    column_count INTEGER NOT NULL,
+    markdown_representation TEXT,
+    csv_data TEXT,
+    json_data JSONB,
+    has_header_row BOOLEAN DEFAULT true,
+    is_numeric BOOLEAN DEFAULT false,
+    has_totals BOOLEAN DEFAULT false,
+    caption TEXT,
+    footnotes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS kb_images (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
+    width INTEGER,
+    height INTEGER,
+    format VARCHAR(50),
+    file_size_bytes INTEGER,
+    description TEXT,
+    caption TEXT,
+    alt_text TEXT,
+    detected_objects JSONB,
+    detected_text TEXT,
+    image_data BYTEA,
+    thumbnail_data BYTEA,
+    storage_path VARCHAR(500),
+    visual_embedding vector(512),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_images_visual_embedding ON kb_images USING ivfflat (visual_embedding vector_cosine_ops) WITH (lists = 50);
+
+CREATE TABLE IF NOT EXISTS kb_formulas (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
+    latex TEXT NOT NULL,
+    mathml TEXT,
+    ascii_math TEXT,
+    variables JSONB,
+    operators JSONB,
+    complexity_level VARCHAR(50),
+    formula_type VARCHAR(100),
+    domain VARCHAR(100),
+    rendered_svg TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_usage (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    context_type VARCHAR(100),
+    query_text TEXT,
+    relevance_score FLOAT,
+    user_rating INTEGER,
+    user_id VARCHAR(255),
+    session_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    timestamp TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_collections (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    kb_type_id INTEGER REFERENCES kb_types(id),
+    icon VARCHAR(50),
+    color VARCHAR(50),
+    visibility VARCHAR(50) DEFAULT 'private',
+    owner_id VARCHAR(255),
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_collection_items (
+    collection_id INTEGER REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    position INTEGER,
+    added_at TIMESTAMP DEFAULT NOW(),
+    added_by VARCHAR(255),
+    PRIMARY KEY (collection_id, knowledge_item_id)
+);
+
+-- ================================================================
 -- MEMORY & KNOWLEDGE GRAPH TABLES
 -- ================================================================
 
@@ -295,6 +547,69 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ================================================================
+-- KNOWLEDGE GRAPH ENTITIES (Migration 007)
+-- ================================================================
+
+CREATE TABLE IF NOT EXISTS kb_entities (
+    id SERIAL PRIMARY KEY,
+    entity_name VARCHAR(255) NOT NULL,
+    entity_type VARCHAR(100) NOT NULL,
+    canonical_name VARCHAR(255),
+    description TEXT,
+    embedding vector(1536),
+    mention_count INTEGER DEFAULT 0,
+    importance_score FLOAT DEFAULT 0.0,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_entities_canonical ON kb_entities(LOWER(canonical_name));
+CREATE INDEX IF NOT EXISTS idx_kb_entities_embedding ON kb_entities USING ivfflat (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS knowledge_entity_mentions (
+    id SERIAL PRIMARY KEY,
+    knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
+    entity_id INTEGER REFERENCES kb_entities(id) ON DELETE CASCADE,
+    mention_context TEXT,
+    confidence FLOAT DEFAULT 1.0,
+    position_in_source INTEGER,
+    extraction_method VARCHAR(50),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON knowledge_entity_mentions(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_knowledge ON knowledge_entity_mentions(knowledge_item_id);
+
+CREATE TABLE IF NOT EXISTS entity_relationships (
+    id SERIAL PRIMARY KEY,
+    from_entity_id INTEGER REFERENCES kb_entities(id) ON DELETE CASCADE,
+    to_entity_id INTEGER REFERENCES kb_entities(id) ON DELETE CASCADE,
+    relationship_type VARCHAR(100) NOT NULL,
+    strength FLOAT DEFAULT 1.0,
+    evidence_source_id INTEGER REFERENCES knowledge_items(id) ON DELETE SET NULL,
+    evidence_text TEXT,
+    bidirectional BOOLEAN DEFAULT false,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_from ON entity_relationships(from_entity_id);
+
+CREATE TABLE IF NOT EXISTS entity_clusters (
+    id SERIAL PRIMARY KEY,
+    cluster_name VARCHAR(255),
+    cluster_topic VARCHAR(500),
+    entity_ids INTEGER[],
+    size INTEGER DEFAULT 0,
+    coherence_score FLOAT DEFAULT 0.0,
+    keywords TEXT[],
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- External Knowledge table
 CREATE TABLE IF NOT EXISTS external_knowledge (
     id SERIAL PRIMARY KEY,
@@ -333,18 +648,25 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_status ON mcp_tools(status);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_category ON mcp_tools(category);
 
--- Agent Tool Assignments table
-CREATE TABLE IF NOT EXISTS agent_tool_assignments (
+-- System Settings table
+CREATE TABLE IF NOT EXISTS system_settings (
     id SERIAL PRIMARY KEY,
-    agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
-    tool_id INTEGER REFERENCES mcp_tools(id) ON DELETE CASCADE NOT NULL,
-    enabled BOOLEAN DEFAULT TRUE,
-    permissions JSON DEFAULT '{}',
-    configuration JSON DEFAULT '{}',
-    assigned_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(agent_id, tool_id)
+    category VARCHAR(50) NOT NULL,
+    key VARCHAR(100) NOT NULL,
+    value TEXT,
+    value_type VARCHAR(20) DEFAULT 'string',
+    description TEXT,
+    is_sensitive BOOLEAN DEFAULT FALSE,
+    is_required BOOLEAN DEFAULT FALSE,
+    default_value TEXT,
+    validation_rules JSON,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    created_by VARCHAR(100) DEFAULT 'system',
+    UNIQUE(category, key)
 );
+
+CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(category);
 
 -- Credential Types table (definitions for credential schemas)
 CREATE TABLE IF NOT EXISTS credential_types (
@@ -391,6 +713,20 @@ CREATE TABLE IF NOT EXISTS credentials (
 CREATE INDEX idx_credentials_type ON credentials(credential_type_id);
 CREATE INDEX idx_credentials_env ON credentials(environment);
 CREATE INDEX idx_credentials_active ON credentials(is_active);
+
+-- Agent Tool Assignments table (moved here after credentials for FK)
+CREATE TABLE IF NOT EXISTS agent_tool_assignments (
+    id SERIAL PRIMARY KEY,
+    agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
+    tool_id INTEGER REFERENCES mcp_tools(id) ON DELETE CASCADE NOT NULL,
+    credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    permissions JSON DEFAULT '{}',
+    configuration JSON DEFAULT '{}',
+    assigned_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(agent_id, tool_id)
+);
 
 -- Tool Credentials table
 CREATE TABLE IF NOT EXISTS tool_credentials (
