@@ -106,6 +106,18 @@ For each subtask, decide intelligently:
   - Research/analysis/understanding tasks = true
 - **context_type**: What kind of context? ("documentation"/"code"/"both"/null)
 - **required_tools**: What tools are needed? (["file_ops"], ["shell"], ["research"], etc.)
+- **agent_type**: Specify the type of agent needed:
+  - "research_agent" - for searching, gathering information
+  - "code_analyst" - for analyzing code, reviewing implementations  
+  - "file_ops_agent" - for creating/editing files (reports, configs, etc.)
+  - "document_generator" - for PDF/DOCX/XLSX creation (use when output must be PDF, Word, Excel)
+  - "technical_writer" - for writing documentation, reports (markdown/text)
+  - "shell_agent" - for running commands, deployments
+
+⚠️ CRITICAL FOR PDF/DOCUMENT GENERATION:
+- If task involves creating PDF, Word, Excel files → use "document_generator" agent type
+- If task involves writing text/markdown reports → use "technical_writer" agent type
+- These are DIFFERENT! document_generator has create_pdf/create_docx tools, technical_writer does not!
 
 Return ONLY valid JSON in this exact format:
 {{

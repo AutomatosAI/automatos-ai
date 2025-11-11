@@ -101,7 +101,13 @@ GRANULARITY EXAMPLES:
 
 For each subtask, provide:
 1. A clear, ATOMIC description focusing on ONE primary skill
-2. The type of agent best suited (e.g., 'researcher', 'analyst', 'developer', 'writer', 'reviewer')
+2. The type of agent best suited:
+   - 'researcher' - For searching/gathering information
+   - 'analyst' - For analyzing data/code
+   - 'developer' - For writing code
+   - 'writer' or 'technical_writer' - For writing text content (reports, documentation)
+   - 'document_generator' - **CRITICAL: Use ONLY for creating PDF/DOCX/XLSX/PPTX files**
+   - 'reviewer' - For reviewing/validating work
 3. Priority level (high/medium/low)
 4. Dependencies (which subtasks must complete first for inter-agent collaboration)
 5. Estimated duration in seconds (30-300 range)
@@ -110,6 +116,7 @@ For each subtask, provide:
    - "research" - For search_knowledge, semantic_search, search_codebase (default for most tasks)
    - "file_ops" - For read_file, write_file, list_directory (code modification tasks)
    - "shell" - For execute_command (deployment, server tasks)
+   - "create_pdf" - **CRITICAL: Use ONLY for PDF generation tasks with agent_type='document_generator'**
 
 Return ONLY valid JSON in this exact format:
 {{

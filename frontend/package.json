@@ -31,6 +31,7 @@
     "typescript": "5.2.2"
   },
   "dependencies": {
+    "@ai-sdk/react": "^2.0.87",
     "@anthropic-ai/sdk": "^0.65.0",
     "@floating-ui/react": "0.26.0",
     "@headlessui/react": "1.7.18",
@@ -72,6 +73,7 @@
     "@types/prismjs": "^1.26.5",
     "@types/react-plotly.js": "2.6.3",
     "@xyflow/react": "^12.8.6",
+    "ai": "^5.0.87",
     "autoprefixer": "10.4.15",
     "bcryptjs": "2.4.3",
     "chart.js": "4.4.0",
@@ -86,7 +88,7 @@
     "dotenv": "16.3.1",
     "embla-carousel-react": "8.0.0",
     "formik": "2.4.5",
-    "framer-motion": "10.16.4",
+    "framer-motion": "^11.18.2",
     "gray-matter": "4.0.3",
     "input-otp": "1.0.1",
     "jotai": "2.4.3",
@@ -116,7 +118,7 @@
     "react-use": "17.4.0",
     "reactflow": "^11.11.4",
     "recharts": "2.8.0",
-    "sonner": "1.0.3",
+    "sonner": "^1.7.4",
     "swr": "2.2.4",
     "tailwind-scrollbar-hide": "1.1.7",
     "use-local-storage-state": "19.1.0",

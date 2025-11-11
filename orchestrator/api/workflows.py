@@ -8,6 +8,7 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
@@ -828,21 +829,51 @@ async def execute_workflow(
 ):
     """Execute workflow (simplified version for journey tests)"""
     try:
-        # Validate workflow exists
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        # Validate workflow exists with proper loading
+        workflow = db.query(Workflow).options(
+            joinedload(Workflow.agents)
+        ).filter(Workflow.id == workflow_id).first()
+        
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
-        # Get agent
-        agent = db.query(Agent).filter(Agent.status == 'active').first()
+        if not workflow.id:
+            raise HTTPException(status_code=400, detail="Invalid workflow data")
+        
+        # Get agent with skills and tool assignments loaded
+        agent = db.query(Agent).options(
+            joinedload(Agent.skills),
+            joinedload(Agent.tool_assignments)
+        ).filter(Agent.status == 'active').first()
+        
         if not agent:
             raise HTTPException(status_code=400, detail="No active agents available")
+        
+        if not agent.id:
+            logger.error(f"❌ Agent object missing ID: {agent}")
+            raise HTTPException(status_code=500, detail="Agent data corruption - missing ID")
+        
+        # Validate input_data
+        input_data = execution_data.get('input_data')
+        if not input_data:
+            logger.warning("⚠️  No input_data provided, using empty dict")
+            input_data = {}
+        
+        if not isinstance(input_data, dict):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"input_data must be a dictionary, got {type(input_data).__name__}"
+            )
+        
+        logger.info(f"🚀 Creating execution for workflow {workflow_id} with agent {agent.id}")
+        logger.info(f"   Agent skills: {len(agent.skills) if agent.skills else 0}")
+        logger.info(f"   Agent tools: {len(agent.tool_assignments) if agent.tool_assignments else 0}")
         
         # Create execution record
         execution = WorkflowExecution(
             workflow_id=workflow_id,
             agent_id=agent.id,
-            input_data=execution_data.get('input_data', {}),
+            input_data=input_data,
             status=ExecutionStatus.PENDING.value
         )
         
@@ -972,6 +1003,54 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         logger.error(f"Error getting execution status {execution_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting execution status: {str(e)}")
 
+
+@router.get("/executions/{execution_id}/stream")
+async def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
+    """
+    SSE stream for real-time workflow execution updates (PRD-28).
+    
+    Replaces WebSocket + Redis + Polling architecture with direct SSE streaming.
+    < 500ms latency, no polling required, smooth progressive updates.
+    
+    Usage (Frontend):
+        const eventSource = new EventSource(`/api/workflows/executions/${id}/stream`);
+        eventSource.onmessage = (event) => {
+            const update = JSON.parse(event.data);
+            // Handle update...
+        };
+    
+    Event types:
+        - connected: Initial connection confirmation
+        - subtask_update: Subtask execution update with FULL details
+        - execution_log: Structured log event (not truncated)
+        - workflow_complete: Final workflow completion
+        - error: Error event
+    """
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    
+    logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
+    
+    try:
+        from services.workflow_streaming_service import stream_workflow_execution
+        
+        return StreamingResponse(
+            stream_workflow_execution(execution_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Access-Control-Allow-Origin": "*",  # CORS for SSE
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating SSE stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
 @router.get("/executions/{execution_id}/results")
 async def get_execution_results(execution_id: int, db: Session = Depends(get_db)):
     """Get workflow execution results"""
@@ -1005,8 +1084,16 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from core.learning_system_updater import LearningSystemUpdater
     from core.workflow_memory_integrator import WorkflowMemoryIntegrator
     from services.memory_knowledge_system import HierarchicalMemorySystem
+    from services.workspace_manager import WorkspaceManager  # Unique workspace per execution
     from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
     import os
+    
+    # Create unique workspace for this execution
+    workspace_manager = WorkspaceManager(execution_id)
+    workspace_path = workspace_manager.create_workspace()
+    
+    logger.info(f"📁 Execution {execution_id} workspace: {workspace_path}")
+    logger.info(f"💾 Results will be saved to: {workspace_manager.get_results_path()}")
     
     try:
         with get_db_session() as db:
@@ -1134,18 +1221,18 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     logger.info(f"  🎯 Task description: {task_desc_str[:100]}...")
                     
                     try:
-                        from core.llm.enhanced_agent_selector import EnhancedLLMAgentSelector
-                        logger.info("  ✅ EnhancedLLMAgentSelector imported successfully")
+                        from core.llm.llm_agent_selector import LLMAgentSelector
+                        logger.info("  ✅ LLMAgentSelector (WITH FUNCTIONS) imported successfully")
                     except ImportError as e:
-                        logger.error(f"  ❌ Failed to import EnhancedLLMAgentSelector: {e}")
+                        logger.error(f"  ❌ Failed to import LLMAgentSelector: {e}")
                         raise
                     
-                    logger.info("  🏗️ Creating LLM selector instance...")
-                    llm_selector = EnhancedLLMAgentSelector(db_session=db)
-                    logger.info("  ✅ LLM selector created")
+                    logger.info("  🏗️ Creating LLM selector instance with function calling...")
+                    llm_selector = LLMAgentSelector(db_session=db)
+                    logger.info("  ✅ LLM selector created with function registry")
                     
-                    logger.info("  📡 Calling select_agents_with_grouping...")
-                    agent_assignments = await llm_selector.select_agents_with_grouping(
+                    logger.info("  📡 Calling select_agents_for_subtasks WITH FUNCTION CALLING...")
+                    agent_assignments = await llm_selector.select_agents_for_subtasks(
                         steps,
                         workflow_context={
                             "description": task_description,
@@ -1428,9 +1515,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 execution_manager = AgentExecutionManager(
                     db_session=db,
                     max_parallel_executions=3,
-                    max_retries=2
+                    max_retries=2,
+                    workspace_dir=workspace_path  # Pass unique workspace
                 )
                 logger.info(f"🔍 DEBUG: AgentExecutionManager created successfully")
+                logger.info(f"📁 Using workspace: {workspace_path}")
                 execution_manager.websocket_manager = manager
                 
                 logger.info(f"🔍 DEBUG: About to call execute_workflow_subtasks...")
@@ -1903,6 +1992,36 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             
             db.commit()
             
+            # Save results and cleanup workspace
+            try:
+                logger.info(f"💾 Saving workflow results to permanent storage...")
+                
+                # Auto-save all result files from workspace
+                saved_files = workspace_manager.save_all_results(
+                    file_patterns=['*.pdf', '*.docx', '*.xlsx', '*.pptx', '*.md', '*.txt', '*.json', '*.html']
+                )
+                
+                # Create manifest with execution metadata
+                manifest_path = workspace_manager.create_result_manifest({
+                    "status": "completed",
+                    "execution_time": f"{total_duration:.1f}s",
+                    "total_tokens": usage_summary.get("total_tokens", 0),
+                    "total_cost": usage_summary.get("total_cost", 0),
+                    "quality_scores": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}),
+                    "stages_completed": stages_completed
+                })
+                
+                logger.info(f"✅ Saved {len(saved_files)} result file(s) to {workspace_manager.get_results_path()}")
+                
+                # Cleanup workspace (keeps results directory)
+                if workspace_manager.cleanup_workspace():
+                    logger.info(f"🧹 Workspace cleaned up: {workspace_path}")
+                else:
+                    logger.warning(f"⚠️  Workspace cleanup skipped (no results saved)")
+                    
+            except Exception as cleanup_err:
+                logger.error(f"❌ Failed to save results or cleanup workspace: {cleanup_err}")
+            
             # Publish execution completion to Redis
             from core.redis_client import get_redis_client
             redis_client = get_redis_client()
@@ -1927,6 +2046,26 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
         logger.error(f"❌ FATAL ERROR in workflow execution {execution_id}: {e}")
         logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         
+        # Save any partial results and cleanup
+        try:
+            logger.info(f"💾 Attempting to save partial results before cleanup...")
+            saved_files = workspace_manager.save_all_results()
+            if saved_files:
+                logger.info(f"✅ Saved {len(saved_files)} partial result file(s)")
+            
+            # Create error manifest
+            workspace_manager.create_result_manifest({
+                "status": "failed",
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            })
+            
+            # Force cleanup (even if no results)
+            workspace_manager.cleanup_workspace(force=True)
+            logger.info(f"🧹 Workspace cleaned up after error")
+        except Exception as cleanup_err:
+            logger.error(f"❌ Failed to cleanup after error: {cleanup_err}")
+        
         try:
             with get_db_session() as db:
                 execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
@@ -1949,6 +2088,83 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     })
         except Exception as inner_e:
             logger.error(f"Error updating failed execution {execution_id}: {inner_e}")
+
+@router.get("/executions/{execution_id}/results")
+async def get_execution_results_files(execution_id: int, db: Session = Depends(get_db)):
+    """
+    Get list of result files for a workflow execution.
+    
+    Returns metadata about all files created during execution that are available for download.
+    """
+    try:
+        from services.workspace_manager import WorkspaceManager
+        
+        # Verify execution exists
+        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Get result files
+        workspace_manager = WorkspaceManager(execution_id)
+        result_files = workspace_manager.get_result_files()
+        
+        return {
+            "execution_id": execution_id,
+            "status": execution.status,
+            "files": result_files,
+            "results_directory": workspace_manager.get_results_path()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting execution results {execution_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting execution results: {str(e)}")
+
+@router.get("/executions/{execution_id}/results/{file_path:path}")
+async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
+    """
+    Download a specific result file from a workflow execution.
+    
+    Args:
+        execution_id: The workflow execution ID
+        file_path: Relative path to the file within the results directory
+    """
+    try:
+        from services.workspace_manager import WorkspaceManager
+        from fastapi.responses import FileResponse
+        import os
+        
+        # Verify execution exists
+        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Get full file path
+        workspace_manager = WorkspaceManager(execution_id)
+        results_dir = Path(workspace_manager.get_results_path())
+        full_path = (results_dir / file_path).resolve()
+        
+        # Security check: ensure path is within results directory
+        if not str(full_path).startswith(str(results_dir)):
+            raise HTTPException(status_code=403, detail="Access denied: path outside results directory")
+        
+        # Check if file exists
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        # Return file for download
+        return FileResponse(
+            path=str(full_path),
+            filename=full_path.name,
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file {file_path} from execution {execution_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
 
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):

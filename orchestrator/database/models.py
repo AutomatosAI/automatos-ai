@@ -194,6 +194,9 @@ class Skill(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
     
+    # PRD-22: Executable tool definitions for agents
+    tools_schema = Column(JSONB, nullable=True)
+    
     # Relationships
     agents = relationship("Agent", secondary=agent_skills, back_populates="skills")
 

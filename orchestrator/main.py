@@ -78,6 +78,7 @@ from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
 from api.websocket_api import router as websocket_api_router
 from api.chatbot_llm import router as chatbot_router
+from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 from api.document_processing import router as document_processing_router
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
@@ -415,7 +416,8 @@ app.include_router(solutions_router)
 app.include_router(synthesis_router)
 app.include_router(websocket_api_router)
 app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
-app.include_router(chatbot_router)
+app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward compatibility)
+app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge

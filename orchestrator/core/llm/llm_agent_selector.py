@@ -579,22 +579,47 @@ Provide your response in this structure:
         
         agents = query.all()
         
-        # Filter by skills (manual because skills are in JSON)
+        # Filter by skills - NOW LOOKING AT ACTUAL SKILL RELATIONSHIP WITH TOOLS!
+        from sqlalchemy.orm import joinedload
+        agents = query.options(joinedload(Agent.skills)).all()
+        
         matching_agents = []
         for agent in agents:
-            # Get agent capabilities
-            capabilities = agent.configuration or {}
-            agent_skills = capabilities.get('skills', [])
+            # Get agent skills AND their tools
+            agent_skill_list = []
+            agent_tools = []
+            if agent.skills:
+                for skill in agent.skills:
+                    agent_skill_list.append(skill.name)
+                    # Extract tool names from tools_schema
+                    if skill.tools_schema:
+                        try:
+                            import json
+                            schema = json.loads(skill.tools_schema) if isinstance(skill.tools_schema, str) else skill.tools_schema
+                            tools = [tool.get('function', {}).get('name', '') for tool in schema]
+                            agent_tools.extend(tools)
+                        except:
+                            pass
             
-            # Calculate skill match
+            # Calculate skill match (check both skill names AND tool names)
             skill_matches = 0
+            matched_by = []
             for required_skill in skills:
-                for agent_skill in agent_skills:
-                    # Fuzzy match (case-insensitive, substring)
-                    if (required_skill.lower() in str(agent_skill).lower() or
-                        str(agent_skill).lower() in required_skill.lower()):
+                # Check skill names
+                for agent_skill in agent_skill_list:
+                    if (required_skill.lower() in agent_skill.lower() or
+                        agent_skill.lower() in required_skill.lower()):
                         skill_matches += 1
+                        matched_by.append(f"skill:{agent_skill}")
                         break
+                else:
+                    # Check tool names (e.g., "create_pdf" matches "create_pdf" tool)
+                    for tool_name in agent_tools:
+                        if (required_skill.lower() in tool_name.lower() or
+                            tool_name.lower() in required_skill.lower()):
+                            skill_matches += 1
+                            matched_by.append(f"tool:{tool_name}")
+                            break
             
             skill_coverage = skill_matches / len(skills) if skills else 1.0
             
@@ -606,7 +631,9 @@ Provide your response in this structure:
                     'agent_id': agent.id,
                     'name': agent.name,
                     'agent_type': agent.agent_type,
-                    'skills': agent_skills,
+                    'skills': agent_skill_list,
+                    'tools': agent_tools,
+                    'matched_by': matched_by,
                     'skill_coverage': skill_coverage,
                     'status': agent.status,
                     'current_workload': perf_metrics.get('current_workload', 0.5),

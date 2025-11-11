@@ -319,7 +319,7 @@ function AgentWorkspace({
                     // Task received log
                     logs.push({
                       timestamp: new Date(execution.started_at).toLocaleTimeString(),
-                      message: `📥 Task received: ${subtask.description.substring(0, 60)}...`,
+                      message: `📥 Task received: ${subtask.description}`,
                       type: 'info'
                     })
                     
@@ -343,10 +343,9 @@ function AgentWorkspace({
                       // Show result
                       if (subtask.execution_result.status === 'completed') {
                         const response = subtask.execution_result.llm_response || subtask.execution_result.response || ''
-                        const preview = response.substring(0, 80)
                         logs.push({
                           timestamp: new Date(execution.started_at).toLocaleTimeString(),
-                          message: `✅ Completed: ${preview}${response.length > 80 ? '...' : ''}`,
+                          message: `✅ Completed: ${response}`,
                           type: 'success'
                         })
                       } else if (subtask.execution_result.status === 'failed') {

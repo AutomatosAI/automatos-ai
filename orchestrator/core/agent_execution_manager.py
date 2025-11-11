@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from enum import Enum
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 
 import numpy as np
@@ -96,12 +96,15 @@ class AgentExecutionManager:
         agent_factory: Optional[AgentFactory] = None,
         max_parallel_executions: int = 3,
         max_retries: int = 2,
-        enable_communication: bool = True  # PHASE 2
+        enable_communication: bool = True,  # PHASE 2
+        workspace_dir: Optional[str] = None  # Unique workspace per execution
     ):
         self.db = db_session
+        self.db_session = db_session  # FIX: Also store as db_session for compatibility
         self.agent_factory = agent_factory or AgentFactory(db_session)
         self.max_parallel_executions = max_parallel_executions
         self.max_retries = max_retries
+        self.workspace_dir = workspace_dir or "/tmp/automatos_workspace"  # Fallback to shared
         self.logger = logging.getLogger(__name__)
         self.memory_injector = MemoryPromptInjector()  # Memory injection support
         
@@ -109,6 +112,9 @@ class AgentExecutionManager:
         self.active_executions: Dict[str, SubtaskExecution] = {}
         self.completed_executions: Dict[str, SubtaskExecution] = {}
         self.websocket_manager = None  # Set externally
+        
+        # Log workspace info
+        self.logger.info(f"📁 Agent execution workspace: {self.workspace_dir}")
         
         # PHASE 2: Inter-agent communication
         self.enable_communication = enable_communication and COMMUNICATION_AVAILABLE
@@ -120,6 +126,8 @@ class AgentExecutionManager:
             except Exception as e:
                 self.logger.warning(f"Failed to initialize communication: {e}")
                 self.enable_communication = False
+                self.communication = None
+                self.context_manager = None  # FIX: Always set context_manager
         else:
             self.communication = None
             self.context_manager = None
@@ -327,7 +335,8 @@ class AgentExecutionManager:
                 f"agent_name: '{agent_name}'"
             )
         
-        self.logger.info(f"🔧 Executing subtask: {description[:50]}... with agent {agent_name} (ID: {agent_id})")
+        self.logger.info(f"🔧 Executing subtask: {description}")
+        self.logger.info(f"   Agent: {agent_name} (ID: {agent_id})")
         
         # Create execution tracking
         # Handle context_enh as dataclass or dict
@@ -505,6 +514,15 @@ class AgentExecutionManager:
             if not agent_id:
                 raise Exception("No agent assigned to subtask")
             
+            # 🔧 FIX: Load agent with skills and tool assignments from database
+            agent = self.db.query(Agent).options(
+                joinedload(Agent.skills),
+                joinedload(Agent.tool_assignments)
+            ).filter(Agent.id == agent_id).first()
+            
+            if not agent:
+                raise Exception(f"Agent {agent_id} not found in database")
+            
             # Get enhanced prompt
             enhanced_prompt = execution.prompt_used
             
@@ -516,7 +534,9 @@ class AgentExecutionManager:
             
             # If subtask has explicit required_tools, use it; otherwise map from skills
             if "required_tools" in subtask:
-                required_tools = subtask.get("required_tools")
+                required_tools = subtask.get("required_tools", [])
+                if not isinstance(required_tools, list):
+                    required_tools = [required_tools] if required_tools else []
             else:
                 # Map common skills to tool categories
                 required_tools = []
@@ -533,10 +553,43 @@ class AgentExecutionManager:
                     skill_lower = skill.lower().replace(" ", "_").replace("-", "_")
                     if skill_lower in skill_to_tool_map:
                         required_tools.append(skill_to_tool_map[skill_lower])
+            
+            # 🦸 PRD-22 FIX: Extract tools from agent's ACTUAL skills (tools_schema)
+            agent_skill_tool_names = []
+            if agent.skills:
+                for skill in agent.skills:
+                    if skill.tools_schema and isinstance(skill.tools_schema, dict):
+                        skill_tools = skill.tools_schema.get('tools', [])
+                        for tool_def in skill_tools:
+                            tool_name = tool_def.get('name')
+                            if tool_name:
+                                agent_skill_tool_names.append(tool_name)
                 
-                # Default to research if no mapping found
-                if not required_tools:
-                    required_tools = ["research"]
+                if agent_skill_tool_names:
+                    self.logger.info(f"🦸 Agent {agent_id} has {len(agent_skill_tool_names)} skill tools: {agent_skill_tool_names}")
+            
+            # 🔧 PRD-20 FIX: Extract MCP tools from agent's tool assignments
+            agent_mcp_tool_names = []
+            if agent.tool_assignments:
+                for assignment in agent.tool_assignments:
+                    if assignment.tool and assignment.tool.name:
+                        agent_mcp_tool_names.append(assignment.tool.name)
+                
+                if agent_mcp_tool_names:
+                    self.logger.info(f"🔧 Agent {agent_id} has {len(agent_mcp_tool_names)} MCP tools: {agent_mcp_tool_names}")
+            
+            # Merge all tools together: subtask tools + agent skill tools + agent MCP tools
+            all_tools = set(required_tools)
+            all_tools.update(agent_skill_tool_names)
+            all_tools.update(agent_mcp_tool_names)
+            required_tools = list(all_tools)
+            
+            # Default to research only if agent has absolutely NO tools
+            if not required_tools:
+                required_tools = ["research"]
+                self.logger.warning(f"⚠️  Agent {agent_id} has no tools, defaulting to research")
+            else:
+                self.logger.info(f"🛠️  Agent {agent_id} executing with {len(required_tools)} tools: {required_tools}")
             
             # Execute with agent factory (with retries)
             result = await self._execute_with_retries(
@@ -555,16 +608,18 @@ class AgentExecutionManager:
                 (execution.end_time - execution.start_time).total_seconds() * 1000
             )
             
-            self.logger.info(
-                f"✅ Subtask completed: {description[:50]}... "
-                f"({execution.tokens_used} tokens, {execution.execution_time_ms}ms)"
-            )
+            self.logger.info(f"✅ Subtask completed: {description}")
+            self.logger.info(f"   Tokens: {execution.tokens_used}, Duration: {execution.execution_time_ms}ms")
+            if execution.llm_response:
+                result_preview = execution.llm_response[:200] + "..." if len(execution.llm_response) > 200 else execution.llm_response
+                self.logger.debug(f"   Result: {result_preview}")
             
             # PHASE 2: Share result with team
             await self._share_result_with_team(execution, subtask_id)
             
         except Exception as e:
-            self.logger.error(f"❌ Subtask failed: {description[:50]}... - {e}")
+            self.logger.error(f"❌ Subtask failed: {description}")
+            self.logger.error(f"   Error: {e}")
             
             execution.status = SubtaskStatus.FAILED
             execution.error_message = str(e)
@@ -614,7 +669,7 @@ class AgentExecutionManager:
                 if attempt > 0:
                     execution.status = SubtaskStatus.RETRYING
                     execution.retry_count = attempt
-                    self.logger.info(f"🔄 Retry {attempt}/{self.max_retries} for {execution.subtask_description[:30]}...")
+                    self.logger.info(f"🔄 Retry {attempt}/{self.max_retries} for: {execution.subtask_description}")
                 
                 # Execute with agent factory - include action_executor for tool calls
                 action_executor = get_action_executor()
@@ -648,25 +703,48 @@ class AgentExecutionManager:
 
 REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                 
-                # PRD-22: Enhance system prompt with skills if agent has them
-                agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
-                if agent and agent.skills:
-                    skill_enhanced_prompt = self.agent_factory._build_agent_system_prompt_with_skills(
-                        agent=agent,
-                        task_context=prompt[:500],  # First 500 chars as context
-                        db=self.db_session
+                # PRD-22: Build agent prompt with skills BEFORE calling execute_with_prompt
+                # Get agent record with skills
+                agent_record = (
+                    self.db_session.query(Agent)
+                    .options(joinedload(Agent.skills))
+                    .filter(Agent.id == agent_id)
+                    .first()
+                )
+                
+                # Build system prompt with skills and extract tool schemas
+                if agent_record and agent_record.skills:
+                    skill_enhanced_prompt, skill_tool_schemas = self.agent_factory._build_agent_system_prompt(
+                        agent=agent_record,
+                        task_context=prompt[:500],
+                        db=self.db_session,
+                        required_tools=required_tools,
+                        enable_smart_skill_selection=True
                     )
-                    # Merge professional prompt with skill-enhanced prompt
-                    professional_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
+                    
+                    # Combine with professional prompt
+                    full_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
+                    
+                    # Merge skill tools with required platform tools
+                    all_required_tools = list(required_tools) if required_tools else []
+                    if skill_tool_schemas:
+                        # Extract tool names from skill schemas
+                        skill_tool_names = [t['function']['name'] for t in skill_tool_schemas]
+                        all_required_tools.extend(skill_tool_names)
+                        self.logger.info(f"✅ Added {len(skill_tool_names)} skill tools: {skill_tool_names}")
+                else:
+                    full_system_prompt = professional_system_prompt
+                    all_required_tools = required_tools
                 
                 result = await self.agent_factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,
-                    system_prompt=professional_system_prompt,
+                    system_prompt=full_system_prompt,
                     use_memory=True,
                     max_retries=0,  # We handle retries here
                     action_executor=action_executor,  # Enable platform tools
-                    required_tools=required_tools  # PRD-17: Dynamic tool assignment
+                    required_tools=all_required_tools,  # Platform + Skill tools
+                    workspace_dir=self.workspace_dir  # Unique workspace per execution
                 )
                 
                 if result.get("status") == "error":
@@ -689,48 +767,50 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
         execution_id: int,
         workflow_id: int
     ):
-        """Publish subtask update to Redis channel (decoupled from execution loop)"""
+        """
+        Broadcast subtask update via SSE (PRD-28 - replaced Redis/WebSocket).
+        Direct streaming to frontend with < 500ms latency.
+        """
         
-        self.logger.info(f"🔔 _broadcast_execution_update called for subtask {execution.subtask_id} - status: {execution.status.value}")
+        self.logger.info(f"🔔 Broadcasting SSE update for subtask {execution.subtask_id} - status: {execution.status.value}")
         
         try:
-            from core.redis_client import get_redis_client
+            from services.workflow_streaming_service import get_stream_manager
             
-            redis_client = get_redis_client()
-            if not redis_client:
-                self.logger.warning(f"⚠️ Redis client not initialized - cannot publish updates!")
+            manager = get_stream_manager()
+            
+            # Only broadcast if there are active SSE streams
+            if not manager.has_active_streams(execution_id):
+                self.logger.debug(f"⏭️ No active SSE streams for execution {execution_id}, skipping broadcast")
                 return
             
-            # Prepare message payload
+            # Prepare message payload (FULL data, no truncation - PRD-28)
             message_data = {
                 "subtask_id": execution.subtask_id,
-                "subtask_description": execution.subtask_description[:100],
+                "subtask_description": execution.subtask_description,  # FULL description
                 "agent_name": execution.agent_name,
                 "status": execution.status.value,
                 "tokens_used": execution.tokens_used,
                 "execution_time_ms": execution.execution_time_ms,
                 "error_message": execution.error_message,
                 "retry_count": execution.retry_count,
+                "result_preview": execution.llm_response[:500] if execution.llm_response and len(execution.llm_response) > 500 else execution.llm_response,
+                "result_truncated": len(execution.llm_response) > 500 if execution.llm_response else False,
                 "timestamp": datetime.now().isoformat()
             }
             
-            self.logger.info(f"📡 Publishing to Redis: {message_data}")
-            
-            # Publish to Redis (non-blocking, immediately flushed)
-            success = redis_client.publish_workflow_event(
-                workflow_id=workflow_id,
+            # Broadcast via SSE (non-blocking, immediate delivery)
+            await manager.broadcast_event(
                 execution_id=execution_id,
-                event_type="subtask_execution_update",
+                event_type="subtask_update",
                 data=message_data
             )
             
-            if success:
-                self.logger.info(f"✅ Redis publish successful for subtask {execution.subtask_id}")
-            else:
-                self.logger.warning(f"⚠️ Redis publish may have failed for subtask {execution.subtask_id}")
+            stream_count = manager.get_active_stream_count(execution_id)
+            self.logger.debug(f"✅ SSE broadcast sent to {stream_count} client(s) for subtask {execution.subtask_id}")
                 
         except Exception as e:
-            self.logger.error(f"❌ Failed to publish to Redis: {e}", exc_info=True)
+            self.logger.error(f"❌ Failed to broadcast SSE update: {e}", exc_info=True)
     
     def _parse_duration(self, duration_str: Any) -> float:
         """Parse duration string to seconds"""
@@ -826,9 +906,17 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                 while len(subtasks_list) <= subtask_index:
                     subtasks_list.append({})
                 
-                # Update this specific subtask
+                # Update this specific subtask (only serialize JSON-safe fields)
                 subtasks_list[subtask_index] = {
-                    **subtask,
+                    "subtask_id": subtask.get("subtask_id"),
+                    "description": subtask.get("description"),
+                    "agent_type": subtask.get("agent_type"),
+                    "priority": subtask.get("priority"),
+                    "required_tools": subtask.get("required_tools"),
+                    "dependencies": subtask.get("dependencies"),
+                    "context_quality": subtask.get("context_quality", 0),
+                    "context_type": subtask.get("context_type"),
+                    "selected_agent": subtask.get("selected_agent"),
                     "execution_result": {
                         "status": result.status.value,
                         "llm_response": result.llm_response,
@@ -871,14 +959,24 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                     self.logger.warning(f"Execution {execution_id} not found for update")
                     return
                 
-                # Update subtasks with execution results
+                # Update subtasks with execution results (only JSON-safe fields)
                 updated_subtasks = []
                 for idx, subtask in enumerate(subtasks):
                     subtask_id = f"subtask_{idx}"
                     result = results.get(subtask_id)
                     
-                    # Copy subtask data
-                    updated_subtask = {**subtask}
+                    # Copy only JSON-serializable subtask data
+                    updated_subtask = {
+                        "subtask_id": subtask.get("subtask_id"),
+                        "description": subtask.get("description"),
+                        "agent_type": subtask.get("agent_type"),
+                        "priority": subtask.get("priority"),
+                        "required_tools": subtask.get("required_tools"),
+                        "dependencies": subtask.get("dependencies"),
+                        "context_quality": subtask.get("context_quality", 0),
+                        "context_type": subtask.get("context_type"),
+                        "selected_agent": subtask.get("selected_agent")
+                    }
                     
                     # Add execution result if available
                     if result:
@@ -950,50 +1048,49 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
         """
         Share completed task result with team via inter-agent communication.
         This allows other agents to learn from and build upon this work.
-        """
-        if not self.enable_communication or not self.communication:
-            return
         
+        CRITICAL: Always updates shared_context even if communication fails!
+        """
         try:
-            # 1. Broadcast result to team
-            from services.inter_agent_communication import Message
-            message = Message(
-                from_agent_id=execution.agent_id,
-                message_type=MessageType.RESULT_SHARE,
-                content={
-                    "subtask_id": subtask_id,
-                    "description": execution.subtask_description,
-                    "result": execution.llm_response[:500],  # First 500 chars
-                    "status": execution.status.value,
-                    "tokens_used": execution.tokens_used,
-                    "execution_time_ms": execution.execution_time_ms,
-                    "context_quality": execution.context_quality
-                },
-                priority=7
-            )
-            await self.communication.broadcast(
-                from_agent=execution.agent_id,
-                team=self.shared_context.team_agents if self.shared_context else [],
-                message=message
-            )
-            
-            # 2. Update shared context with result
+            # 1. CRITICAL: Always store result in shared context (even if communication fails)
             if self.context_manager and hasattr(self, 'shared_context') and self.shared_context:
-                # subtask_id is already "subtask_0", so use f"{subtask_id}_result" not f"subtask_{subtask_id}_result"
                 result_key = f"{subtask_id}_result"
                 await self.context_manager.update_shared_context(
-                    context_id=self.shared_context.id,  # SharedContext uses 'id' not 'context_id'
-                    agent=execution.agent_id,  # Required parameter!
+                    context_id=self.shared_context.id,
+                    agent=execution.agent_id,
                     updates={
                         result_key: {
-                            "response": execution.llm_response[:5000],  # Increased from 1000 to 5000 chars
+                            "response": execution.llm_response[:5000],  # Store up to 5000 chars
                             "status": execution.status.value,
                             "completed_at": datetime.now().isoformat()
                         }
                     },
-                    merge_strategy="override"  # CRITICAL FIX: Use override to actually store results!
+                    merge_strategy="override"
                 )
-                self.logger.info(f"📝 Updated shared context with key: {result_key}")
+                self.logger.info(f"📝 Updated shared context with key: {result_key} ({len(execution.llm_response or '')} chars)")
+            
+            # 2. Optional: Broadcast result to team (only if communication enabled)
+            if self.enable_communication and self.communication:
+                from services.inter_agent_communication import Message
+                message = Message(
+                    from_agent_id=execution.agent_id,
+                    message_type=MessageType.RESULT_SHARE,
+                    content={
+                        "subtask_id": subtask_id,
+                        "description": execution.subtask_description,
+                        "result": execution.llm_response[:500],  # First 500 chars
+                        "status": execution.status.value,
+                        "tokens_used": execution.tokens_used,
+                        "execution_time_ms": execution.execution_time_ms,
+                        "context_quality": execution.context_quality
+                    },
+                    priority=7
+                )
+                await self.communication.broadcast(
+                    from_agent=execution.agent_id,
+                    team=self.shared_context.team_agents if self.shared_context else [],
+                    message=message
+                )
             
             self.logger.info(f"✅ Shared result with team: {subtask_id}")
             

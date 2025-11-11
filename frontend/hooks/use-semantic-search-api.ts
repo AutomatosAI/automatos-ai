@@ -67,7 +67,7 @@ export function useSemanticSearch(
       }
 
       // CRITICAL: Call backend directly to bypass Next.js proxy mock data
-      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
       const url = `${BACKEND_URL}/api/documents/search?${searchParams.toString()}`
       console.log('[Semantic Search] Calling backend directly:', url)
       

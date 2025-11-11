@@ -6,8 +6,8 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table
-from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
+from uuid import uuid4
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
     CRITICAL = "critical"
@@ -149,6 +150,7 @@ class Skill(Base):
     
     # PRD-22: New fields for Git-backed skills
     prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)
+    tools_schema = Column(JSONB, nullable=True)  # PRD-22: Executable tool definitions for agents
     skill_version = Column(String(20), nullable=True)  # Version string
     skill_source = Column(String(50), nullable=True)  # Source identifier (builtin-seeds, anthropic-official, etc.)
     git_repo_url = Column(Text, nullable=True)  # Git repository URL
@@ -985,6 +987,89 @@ class IntegrationAnalysisDB(Base):
     recommendations = Column(JSON)  # Integration improvement recommendations
     confidence_level = Column(Float, nullable=True)
     created_at = Column(DateTime, default=func.now())
+
+
+# ===================================================================
+# PRD-27: CHAT MODELS
+# ===================================================================
+
+class Chat(Base):
+    """Chat session with user (PRD-27)"""
+    __tablename__ = 'chats'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    title = Column(String(255), nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    visibility = Column(String(20), default='private', nullable=False)
+    last_context = Column(JSONB, default=dict, server_default='{}')
+    
+    # Relationships
+    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
+    votes = relationship("Vote", back_populates="chat", cascade="all, delete-orphan")
+    user = relationship("User", backref="chats")
+    
+    __table_args__ = (
+        CheckConstraint("visibility IN ('private', 'public')", name='check_chat_visibility'),
+        {'extend_existing': True}
+    )
+
+
+class Message(Base):
+    """Individual message within a chat (PRD-27)"""
+    __tablename__ = 'messages'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), nullable=False)
+    role = Column(String(20), nullable=False)
+    parts = Column(JSONB, nullable=False, default=list, server_default='[]')
+    attachments = Column(JSONB, default=list, server_default='[]')
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    # Relationships
+    chat = relationship("Chat", back_populates="messages")
+    votes = relationship("Vote", back_populates="message", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant', 'system')", name='check_message_role'),
+        {'extend_existing': True}
+    )
+
+
+class Vote(Base):
+    """User vote on assistant messages (PRD-27)"""
+    __tablename__ = 'votes'
+    
+    chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), primary_key=True)
+    message_id = Column(UUID(as_uuid=True), ForeignKey('messages.id', ondelete='CASCADE'), primary_key=True)
+    is_upvoted = Column(Boolean, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    # Relationships
+    chat = relationship("Chat", back_populates="votes")
+    message = relationship("Message", back_populates="votes")
+
+
+class Artifact(Base):
+    """Versioned artifacts (code, documents, images) (PRD-27)"""
+    __tablename__ = 'artifacts'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    created_at = Column(DateTime, nullable=False, primary_key=True, server_default=func.now())
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'))
+    title = Column(String(255), nullable=False)
+    content = Column(Text)
+    kind = Column(String(20), nullable=False)
+    artifact_metadata = Column('metadata', JSONB, default=dict, server_default='{}')
+    
+    # Relationships
+    user = relationship("User", backref="artifacts")
+    
+    __table_args__ = (
+        CheckConstraint("kind IN ('code', 'text', 'image', 'sheet')", name='check_artifact_kind'),
+        {'extend_existing': True}
+    )
 
 
 # Import WorkflowTemplate model

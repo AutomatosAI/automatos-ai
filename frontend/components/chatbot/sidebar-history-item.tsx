@@ -1,0 +1,103 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
+import { MessageSquare, Trash2, MoreHorizontal } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { deleteChat } from '@/lib/chat/api'
+import { truncate } from '@/lib/utils'
+import type { Chat } from '@/types'
+import { toast } from 'sonner'
+
+export interface SidebarHistoryItemProps {
+  chat: Chat
+  onDelete: (chatId: string) => void
+  onSelect?: (chat: Chat, messages: any[]) => void
+  isActive?: boolean
+}
+
+export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false }: SidebarHistoryItemProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const handleClick = async () => {
+    if (onSelect) {
+      try {
+        // Import here to avoid circular dependency
+        const { getChatMessages } = await import('@/lib/chat/api')
+        const messages = await getChatMessages(chat.id)
+        onSelect(chat, messages)
+      } catch (error) {
+        console.error('Failed to load chat messages:', error)
+        toast.error('Failed to load chat')
+      }
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    
+    if (!confirm('Are you sure you want to delete this chat?')) {
+      return
+    }
+
+    try {
+      setIsDeleting(true)
+      await deleteChat(chat.id)
+      onDelete(chat.id)
+      toast.success('Chat deleted')
+      
+    } catch (error) {
+      toast.error('Failed to delete chat')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={isDeleting}
+      className={`
+        w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-all
+        ${isActive 
+          ? 'bg-gray-800 text-white' 
+          : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'
+        }
+        ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}
+      `}
+    >
+      <MessageSquare className="w-4 h-4 flex-shrink-0" />
+      <span className="flex-1 text-sm truncate">{truncate(chat.title, 30)}</span>
+      
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="opacity-0 group-hover:opacity-100 h-6 w-6 p-0"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="bg-gray-800 border-gray-700">
+          <DropdownMenuItem
+            onClick={handleDelete}
+            className="text-red-400 hover:text-red-300 hover:bg-gray-700 cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </button>
+  )
+}
+

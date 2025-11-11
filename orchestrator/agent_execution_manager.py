@@ -621,48 +621,50 @@ class AgentExecutionManager:
         execution_id: int,
         workflow_id: int
     ):
-        """Publish subtask update to Redis channel (decoupled from execution loop)"""
+        """
+        Broadcast subtask update via SSE (PRD-28 - replaced Redis/WebSocket).
+        Direct streaming to frontend with < 500ms latency.
+        """
         
-        self.logger.info(f"🔔 _broadcast_execution_update called for subtask {execution.subtask_id} - status: {execution.status.value}")
+        self.logger.info(f"🔔 Broadcasting SSE update for subtask {execution.subtask_id} - status: {execution.status.value}")
         
         try:
-            from core.redis_client import get_redis_client
+            from services.workflow_streaming_service import get_stream_manager
             
-            redis_client = get_redis_client()
-            if not redis_client:
-                self.logger.warning(f"⚠️ Redis client not initialized - cannot publish updates!")
+            manager = get_stream_manager()
+            
+            # Only broadcast if there are active SSE streams
+            if not manager.has_active_streams(execution_id):
+                self.logger.debug(f"⏭️ No active SSE streams for execution {execution_id}, skipping broadcast")
                 return
             
-            # Prepare message payload
+            # Prepare message payload (FULL data, no truncation - PRD-28)
             message_data = {
                 "subtask_id": execution.subtask_id,
-                "subtask_description": execution.subtask_description[:100],
+                "subtask_description": execution.subtask_description,  # FULL description
                 "agent_name": execution.agent_name,
                 "status": execution.status.value,
                 "tokens_used": execution.tokens_used,
                 "execution_time_ms": execution.execution_time_ms,
                 "error_message": execution.error_message,
                 "retry_count": execution.retry_count,
+                "result_preview": execution.llm_response[:500] if execution.llm_response and len(execution.llm_response) > 500 else execution.llm_response,
+                "result_truncated": len(execution.llm_response) > 500 if execution.llm_response else False,
                 "timestamp": datetime.now().isoformat()
             }
             
-            self.logger.info(f"📡 Publishing to Redis: {message_data}")
-            
-            # Publish to Redis (non-blocking, immediately flushed)
-            success = redis_client.publish_workflow_event(
-                workflow_id=workflow_id,
+            # Broadcast via SSE (non-blocking, immediate delivery)
+            await manager.broadcast_event(
                 execution_id=execution_id,
-                event_type="subtask_execution_update",
+                event_type="subtask_update",
                 data=message_data
             )
             
-            if success:
-                self.logger.info(f"✅ Redis publish successful for subtask {execution.subtask_id}")
-            else:
-                self.logger.warning(f"⚠️ Redis publish may have failed for subtask {execution.subtask_id}")
+            stream_count = manager.get_active_stream_count(execution_id)
+            self.logger.debug(f"✅ SSE broadcast sent to {stream_count} client(s) for subtask {execution.subtask_id}")
                 
         except Exception as e:
-            self.logger.error(f"❌ Failed to publish to Redis: {e}", exc_info=True)
+            self.logger.error(f"❌ Failed to broadcast SSE update: {e}", exc_info=True)
     
     def _parse_duration(self, duration_str: Any) -> float:
         """Parse duration string to seconds"""
