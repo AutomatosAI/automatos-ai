@@ -48,10 +48,10 @@ def create_system_settings():
         {
             "category": SettingCategory.ORCHESTRATOR_LLM,
             "key": "llm_model",
-            "value": os.getenv("LLM_MODEL", "gpt-4"),
-            "description": "Default LLM model",
+            "value": os.getenv("LLM_MODEL", "gpt-4o"),
+            "description": "Default LLM model (gpt-4o has 128K context vs gpt-4 8K)",
             "is_required": True,
-            "default_value": "gpt-4"
+            "default_value": "gpt-4o"
         },
         {
             "category": SettingCategory.ORCHESTRATOR_LLM,

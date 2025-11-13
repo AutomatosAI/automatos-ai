@@ -266,9 +266,9 @@ def seed_system_settings(db: Session):
         {
             "category": SettingCategory.ORCHESTRATOR_LLM.value,
             "key": "model",
-            "default_value": "gpt-4",
+            "default_value": "gpt-4o",
             "value_type": "string",
-            "description": "LLM model for orchestrator operations",
+            "description": "LLM model for orchestrator operations (gpt-4o has 128K context vs gpt-4 8K)",
             "is_required": True,
             "validation_rules": {
                 "depends_on": {"provider": "..."}

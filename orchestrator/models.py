@@ -91,6 +91,7 @@ class Agent(Base):
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
     performance_metrics = Column(JSON)  # Performance data
+    tags = Column(JSON, default=list)  # Lightweight capability tags
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
@@ -492,6 +493,7 @@ class AgentCreate(BaseModel):
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Phase 3 - Tools
+    tags: Optional[List[str]] = []
     priority_level: Optional[PriorityLevel] = None
     max_concurrent_tasks: Optional[int] = 5
     auto_start: Optional[bool] = False
@@ -502,6 +504,7 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
+    tags: Optional[List[str]] = None
 
 class AgentResponse(BaseModel):
     id: int
@@ -511,6 +514,7 @@ class AgentResponse(BaseModel):
     status: str
     configuration: Optional[Dict[str, Any]]
     performance_metrics: Optional[Dict[str, Any]] = None
+    tags: List[str] = []
     priority_level: str
     max_concurrent_tasks: int
     auto_start: bool

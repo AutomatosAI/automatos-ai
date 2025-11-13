@@ -56,8 +56,27 @@ class Config:
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4")
+    
+    # LLM settings - loaded from database system_settings (fallback to env vars)
+    @property
+    def LLM_PROVIDER(self) -> str:
+        """Get LLM provider from system settings (database) or environment"""
+        try:
+            from services.llm_provider.manager import get_system_setting
+            return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER", "openai"))
+        except:
+            return os.getenv("LLM_PROVIDER", "openai")
+    
+    @property
+    def LLM_MODEL(self) -> str:
+        """Get LLM model from system settings (database) or environment"""
+        try:
+            from services.llm_provider.manager import get_system_setting
+            # Get from database settings, fallback to env var, then hardcoded default
+            return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL", "gpt-4o"))
+        except:
+            return os.getenv("LLM_MODEL", "gpt-4o")  # Default to gpt-4o (128K context) instead of gpt-4 (8K)
+    
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
     

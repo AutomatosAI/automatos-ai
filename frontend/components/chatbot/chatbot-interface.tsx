@@ -21,6 +21,7 @@ import 'prismjs/components/prism-python'
 import 'prismjs/components/prism-typescript'
 import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-json'
+import { apiClient } from '@/lib/api-client'
 
 interface DatabaseResult {
   database: string
@@ -88,16 +89,12 @@ export function ChatbotInterface() {
     // Load available models
     const loadModels = async () => {
       try {
-        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
-        const response = await fetch(`${API_BASE_URL}/api/chatbot/models`)
-        if (response.ok) {
-          const data = await response.json()
-          setAvailableModels(data.providers || {})
-          setDefaultProvider(data.default_provider || 'openai')
-          setDefaultModel(data.default_model || 'gpt-4')
-          setSelectedProvider(data.default_provider || 'openai')
-          setSelectedModel(data.default_model || 'gpt-4')
-        }
+        const data = await apiClient.request<any>('/api/chatbot/models')
+        setAvailableModels(data?.providers || {})
+        setDefaultProvider(data?.default_provider || 'openai')
+        setDefaultModel(data?.default_model || 'gpt-4')
+        setSelectedProvider(data?.default_provider || 'openai')
+        setSelectedModel(data?.default_model || 'gpt-4')
       } catch (error) {
         console.error('Failed to load models:', error)
       }
@@ -161,54 +158,42 @@ Try asking:
 
     try {
       console.log('[Chatbot] Sending query:', messageText)
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
-      const response = await fetch(`${API_BASE_URL}/api/chatbot/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: messageText,
-          context: {
-            currentPage: 'chat',
-            selectedItems: [],
-            userRole: 'user',
-            recentActions: []
-          },
-          session_id: sessionId,
-          provider: selectedProvider || undefined,
-          model: selectedModel || undefined
-        })
+      const data = await apiClient.sendChatbotQuery({
+        query: messageText,
+        context: {
+          currentPage: 'chat',
+          selectedItems: [],
+          userRole: 'user',
+          recentActions: []
+        },
+        sessionId,
+        provider: selectedProvider || undefined,
+        model: selectedModel || undefined
       })
 
-      console.log('[Chatbot] Response status:', response.status, response.statusText)
+      console.log('[Chatbot] Response data:', data)
       
-      if (response.ok) {
-        const data = await response.json()
-        console.log('[Chatbot] Response data:', data)
-        
-        const botMessage: ChatMessage = {
-          id: data.message.id,
-          type: 'bot',
-          content: data.message.content,
-          timestamp: data.message.timestamp,
-          codeSnippets: data.message.code_snippets,
-          documents: data.message.documents,
-          database_results: data.message.database_results,
-          metadata: data.message.metadata
-        }
+      const botMessage: ChatMessage = {
+        id: data.message.id,
+        type: 'bot',
+        content: data.message.content,
+        timestamp: data.message.timestamp,
+        codeSnippets: data.message.code_snippets,
+        documents: data.message.documents,
+        database_results: data.message.database_results,
+        metadata: data.message.metadata
+      }
 
-        setMessages(prev => [...prev, botMessage])
-        
-        if (data.message.code_snippets && data.message.code_snippets.length > 0) {
-          setSelectedCode(data.message.code_snippets[0])
-          setActiveTab('code')
-          setIsViewerVisible(true)
-        } else if (data.message.documents && data.message.documents.length > 0) {
-          setSelectedDocument(data.message.documents[0])
-          setActiveTab('docs')
-          setIsViewerVisible(true)
-        }
-      } else {
-        throw new Error('Failed to get response')
+      setMessages(prev => [...prev, botMessage])
+      
+      if (data.message.code_snippets && data.message.code_snippets.length > 0) {
+        setSelectedCode(data.message.code_snippets[0])
+        setActiveTab('code')
+        setIsViewerVisible(true)
+      } else if (data.message.documents && data.message.documents.length > 0) {
+        setSelectedDocument(data.message.documents[0])
+        setActiveTab('docs')
+        setIsViewerVisible(true)
       }
     } catch (error) {
       console.error('Chat error:', error)

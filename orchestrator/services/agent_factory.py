@@ -1034,6 +1034,25 @@ Available Shell Tools:
         else:
             agent_runtime = agent
         
+        # Log agent execution start prominently WITH MODEL INFORMATION
+        agent_name = agent_runtime.metadata.name if hasattr(agent_runtime, 'metadata') else "Unknown"
+        agent_id = agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else "Unknown"
+        agent_type = agent_runtime.metadata.agent_type if hasattr(agent_runtime, 'metadata') else "Unknown"
+        
+        # Get model information
+        model_name = "Unknown"
+        if hasattr(agent_runtime, 'llm_client') and agent_runtime.llm_client:
+            model_name = getattr(agent_runtime.llm_client, 'model', 'Unknown')
+        elif hasattr(agent_runtime, 'metadata') and hasattr(agent_runtime.metadata, 'llm_config'):
+            llm_config = agent_runtime.metadata.llm_config
+            if llm_config:
+                model_name = llm_config.get('model', 'Unknown')
+        
+        self.logger.info("=" * 80)
+        self.logger.info(f"🤖 EXECUTING AGENT: {agent_name} (ID: {agent_id}, Type: {agent_type})")
+        self.logger.info(f"📋 MODEL: {model_name}")
+        self.logger.info("=" * 80)
+        
         # Update state
         agent_runtime.lifecycle_state = AgentLifecycle.BUSY
         
@@ -1545,6 +1564,8 @@ To use actions, respond with JSON blocks like:
 
         # Identity
         sections.append(f"# Agent: {agent.name}")
+        sections.append(f"Agent ID: {agent.id}")
+        sections.append(f"Agent Type: {getattr(agent, 'agent_type', 'unknown')}")
         if agent.description:
             sections.append(agent.description)
 
@@ -1572,6 +1593,7 @@ To use actions, respond with JSON blocks like:
                 )
 
             for skill in skills_to_load:
+                self.logger.info(f"📚 Loading skill: {skill.name}")
                 sections.append(f"### {skill.name}")
 
                 # Load prompt content
@@ -1580,7 +1602,10 @@ To use actions, respond with JSON blocks like:
                     try:
                         # Level 2: core content from SKILL.md body or prompt_template
                         core_content = loader.load_skill_core(skill.name, db=db)
-                    except Exception:
+                        if core_content:
+                            self.logger.info(f"  ✅ Loaded {len(core_content)} chars of core content for '{skill.name}'")
+                    except Exception as e:
+                        self.logger.warning(f"  ⚠️  Failed to load core content for '{skill.name}': {e}")
                         core_content = None
 
                 if core_content and isinstance(core_content, str) and core_content.strip():
@@ -1589,26 +1614,31 @@ To use actions, respond with JSON blocks like:
                     # Fallback for legacy/seed skills
                     fallback = skill.prompt_template or skill.description or ""
                     if fallback:
+                        self.logger.info(f"  📝 Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
                         sections.append(str(fallback))
+                    else:
+                        self.logger.warning(f"  ⚠️  No content available for skill '{skill.name}'")
                 
                 # PRD-22: Extract tool schemas from skills
                 if hasattr(skill, 'tools_schema') and skill.tools_schema:
                     try:
                         tools = skill.tools_schema.get('tools', [])
                         for tool_def in tools:
+                            tool_name = tool_def.get("name")
                             # Convert to OpenAI function calling format
                             skill_tool_schemas.append({
                                 "type": "function",
                                 "function": {
-                                    "name": tool_def.get("name"),
+                                    "name": tool_name,
                                     "description": tool_def.get("description", ""),
                                     "parameters": tool_def.get("parameters", {})
                                 }
                             })
+                            self.logger.info(f"  🛠️  Extracted tool: {tool_name}")
                         if tools:
-                            self.logger.info(f"🦸 Extracted {len(tools)} tools from skill '{skill.name}'")
+                            self.logger.info(f"  🦸 Total: {len(tools)} tool(s) from skill '{skill.name}'")
                     except Exception as e:
-                        self.logger.warning(f"Failed to extract tools from skill '{skill.name}': {e}")
+                        self.logger.warning(f"  ❌ Failed to extract tools from skill '{skill.name}': {e}")
 
         # Optional tools section (kept minimal; main tool wiring remains elsewhere)
         if required_tools:
@@ -1618,6 +1648,35 @@ To use actions, respond with JSON blocks like:
                 sections.append(json.dumps(tool_schemas))
             except Exception:
                 pass
+        
+        # Add instructions for handling dependency context
+        sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
+        sections.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
+        sections.append("1. This contains outputs from previous tasks that you need to use")
+        sections.append("2. Read and understand all the context provided")
+        sections.append("3. For compilation/report tasks: Synthesize the information into a coherent document")
+        sections.append("4. For document generation tasks: Transform the input into the requested format")
+        sections.append("\nWhen your task involves writing/creating documents:")
+        sections.append("- Use the write_file tool to save your output")
+        sections.append("- The task description will specify the output filename")
+        sections.append("- Actually WRITE the content, don't just describe what you would write")
+        sections.append("- Process and synthesize the dependency context into meaningful output")
+        
+        # Add explicit instructions to USE skill tools if any were extracted
+        if skill_tool_schemas:
+            tool_names_list = [t['function']['name'] for t in skill_tool_schemas]
+            sections.append("\n## IMPORTANT: Using Your Skill Tools\n")
+            sections.append(f"You have access to the following specialized tools from your skills: {', '.join(tool_names_list)}")
+            sections.append("\n**These skills were loaded specifically because they match your task requirements.**")
+            sections.append("When your task requires capabilities provided by these tools, you MUST use them via function calling.")
+            sections.append("\n**Critical Workflow:**")
+            sections.append("1. Analyze your task description to understand what needs to be accomplished")
+            sections.append("2. Check if any of your available skill tools match what the task requires")
+            sections.append("3. If a tool matches the task requirement, CALL IT using function calling - do not just describe what you would do")
+            sections.append("4. Use tool results to complete the task properly")
+            sections.append("\nExample: If your task is 'create a PDF' and you have a 'create_pdf' tool → you MUST call create_pdf")
+            sections.append("Example: If your task is 'write documentation' and you have 'write_technical_content' tool → you MUST call that tool")
+            sections.append("\n**Your skills are your capabilities - use them when they match the task!**")
 
         prompt_text = "\n\n".join([s for s in sections if s is not None])
         return (prompt_text, skill_tool_schemas)

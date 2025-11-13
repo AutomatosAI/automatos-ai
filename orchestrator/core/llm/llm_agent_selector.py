@@ -15,6 +15,7 @@ This implements the Software 3.0 pattern:
 
 import json
 import logging
+import asyncio
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -35,8 +36,36 @@ from core.llm import (
     FunctionParameter,
     FunctionCategory
 )
+from core.llm.semantic_skill_matcher import SemanticSkillMatcher, get_skill_matcher
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_tags(raw_tags: Optional[Any]) -> List[str]:
+    """Normalize raw tag inputs into a deduplicated list of lowercase-trimmed strings."""
+    if raw_tags is None:
+        return []
+    items: List[str] = []
+    if isinstance(raw_tags, str):
+        items = [segment.strip() for segment in raw_tags.split(',')]
+    elif isinstance(raw_tags, (list, tuple, set)):
+        for value in raw_tags:
+            if isinstance(value, str):
+                items.extend([segment.strip() for segment in value.split(',')])
+    else:
+        return []
+
+    seen = set()
+    normalized: List[str] = []
+    for item in items:
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+    return normalized
 
 
 @dataclass
@@ -106,6 +135,13 @@ class LLMAgentSelector:
         self.llm = llm or OrchestratorLLM(temperature=0.7)
         self.use_caching = use_caching
         self.cache_ttl = cache_ttl_seconds
+        
+        # Initialize semantic skill matcher for intelligent matching
+        # Get OpenAI API key from config
+        from config import Config
+        config = Config()
+        self.skill_matcher = get_skill_matcher(config.OPENAI_API_KEY)
+        logger.info("✅ Semantic skill matcher initialized (using embeddings for fuzzy matching)")
         
         # Initialize function registry and executor
         self.registry = FunctionRegistry()
@@ -351,53 +387,130 @@ class LLMAgentSelector:
         )
         
         # Execute LLM reasoning with function calling
+        # Reduced max_function_calls from 10 to 5 to prevent context overflow
         response = await self.llm.generate_with_functions(
             prompt=prompt,
             functions=functions,
             function_executor=self._execute_function,
-            max_function_calls=10,
+            max_function_calls=5,  # Reduced to prevent 8K token limit
             context={"subtask": subtask, "workflow": workflow_context}
         )
         
         # Parse response
         try:
-            # Extract structured response
+            # Extract structured response - try multiple methods
             import re
-            json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
-            if json_match:
-                result_data = json.loads(json_match.group())
-            else:
-                # Fallback parsing
+            result_data = None
+            
+            # Method 1: Check if response.content is already a dict (happens with some LLM clients)
+            if isinstance(response.content, dict):
+                result_data = response.content
+                logger.info("✅ Response content is already a dict")
+            # Method 2: Try to parse entire response as JSON string
+            elif isinstance(response.content, str):
+                try:
+                    result_data = json.loads(response.content)
+                    logger.info("✅ Parsed response as direct JSON")
+                except json.JSONDecodeError:
+                    pass
+            
+            # Method 3: Extract JSON from markdown code blocks (only for strings)
+            if not result_data and isinstance(response.content, str):
+                code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response.content, re.DOTALL)
+                if code_block_match:
+                    try:
+                        result_data = json.loads(code_block_match.group(1))
+                        logger.info("✅ Parsed response from code block")
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Method 4: Find any JSON object in the response (only for strings)
+            if not result_data and isinstance(response.content, str):
+                json_match = re.search(r'\{[^{]*"selected_agent_id"[^}]*\}', response.content, re.DOTALL)
+                if json_match:
+                    try:
+                        result_data = json.loads(json_match.group())
+                        logger.info("✅ Parsed response from regex match")
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Method 4: Extract from function calls if agent was mentioned
+            if not result_data and response.function_calls:
+                # Try to find agent selection from function call context
+                for fc in response.function_calls:
+                    if fc.get("name") in ["get_agent_performance_history", "check_agent_availability"]:
+                        params = fc.get("parameters", {})
+                        if "agent_id" in params:
+                            agent_id = params["agent_id"]
+                            if isinstance(agent_id, list):
+                                agent_id = agent_id[0]
+                            
+                            # Get agent info
+                            agent = self.db.query(Agent).filter(Agent.id == agent_id).first()
+                            if agent:
+                                result_data = {
+                                    "selected_agent_id": agent.id,
+                                    "selected_agent_name": agent.name,
+                                    "reasoning": f"Inferred from function calls: {fc['name']}",
+                                    "confidence": 0.6
+                                }
+                                logger.info(f"✅ Inferred agent {agent.id} from function calls")
+                                break
+            
+            # Fallback: Create minimal structure
+            if not result_data:
+                logger.warning("⚠️ Could not parse JSON, using fallback structure")
+                # Handle different response.content types
+                content_str = str(response.content)[:500] if response.content else "No content"
                 result_data = {
                     "selected_agent_id": 0,
                     "selected_agent_name": "Unknown",
-                    "reasoning": response.content,
-                    "confidence": response.confidence,
+                    "reasoning": content_str,  # First 500 chars
+                    "confidence": response.confidence if hasattr(response, 'confidence') else 0.3,
                     "alternatives_considered": [],
-                    "risk_factors": [],
-                    "function_calls_made": [fc["name"] for fc in response.function_calls]
+                    "risk_factors": ["Response parsing required fallback"],
+                    "function_calls_made": [fc.get("name", "unknown") for fc in response.function_calls] if response.function_calls else []
                 }
             
+            # Validate required fields and provide defaults
+            result_data.setdefault("selected_agent_id", 0)
+            result_data.setdefault("selected_agent_name", "Unknown")
+            result_data.setdefault("reasoning", "No reasoning provided")
+            result_data.setdefault("confidence", 0.5)
+            result_data.setdefault("alternatives_considered", [])
+            result_data.setdefault("risk_factors", [])
+            result_data.setdefault("function_calls_made", [])
+            
             selection_result = AgentSelectionResult(
-                agent_id=result_data.get("selected_agent_id", 0),
-                agent_name=result_data.get("selected_agent_name", "Unknown"),
-                reasoning=result_data.get("reasoning", response.reasoning or ""),
-                confidence=float(result_data.get("confidence", response.confidence)),
-                alternatives_considered=result_data.get("alternatives_considered", []),
-                risk_factors=result_data.get("risk_factors", []),
-                function_calls_made=result_data.get("function_calls_made", []),
+                agent_id=int(result_data["selected_agent_id"]),
+                agent_name=result_data["selected_agent_name"],
+                reasoning=result_data["reasoning"],
+                confidence=float(result_data["confidence"]),
+                alternatives_considered=result_data["alternatives_considered"],
+                risk_factors=result_data["risk_factors"],
+                function_calls_made=result_data["function_calls_made"],
                 selection_time=asyncio.get_event_loop().time() - start_time,
                 metadata={
-                    "tokens_used": response.tokens_used,
-                    "cost": response.cost,
-                    "model": self.llm.model
+                    "tokens_used": response.tokens_used if hasattr(response, 'tokens_used') else 0,
+                    "cost": response.cost if hasattr(response, 'cost') else 0,
+                    "model": self.llm.model if hasattr(self.llm, 'model') else "unknown"
                 }
             )
             
+            # If we got agent_id 0 or "Unknown", try fallback
+            if selection_result.agent_id == 0 or selection_result.agent_name == "Unknown":
+                logger.warning("⚠️ Parsed response has invalid agent, attempting fallback")
+                raise ValueError("Invalid agent selection: agent_id is 0 or Unknown")
+            
         except Exception as e:
             logger.error(f"Failed to parse LLM response: {e}")
+            logger.info(f"Response content (first 500 chars): {response.content[:500]}")
+            
             # Fallback to first available agent
-            agents = await self._query_agents({"skills": subtask.get("skills_required", [])})
+            agents = await self._query_agents({
+                "skills": subtask.get("skills_required", []),
+                "tags": subtask.get("tags", [])
+            })
             if agents["matching_agents"]:
                 first_agent = agents["matching_agents"][0]
                 selection_result = AgentSelectionResult(
@@ -410,8 +523,9 @@ class LLMAgentSelector:
                     function_calls_made=[],
                     selection_time=asyncio.get_event_loop().time() - start_time
                 )
+                logger.info(f"✅ Fallback: Using agent {first_agent['agent_id']} ({first_agent['name']})")
             else:
-                raise ValueError("No agents available and LLM parsing failed")
+                raise ValueError(f"No agents available and LLM parsing failed: {e}")
         
         # Log the decision
         logger.info(f"🤖 AGENT SELECTED: {selection_result.agent_name}")
@@ -448,6 +562,7 @@ SUBTASK DETAILS:
 - ID: {subtask.get('subtask_id')}
 - Description: {subtask.get('description')}
 - Required Skills: {subtask.get('skills_required', [])}
+- Tags: {subtask.get('tags', [])}
 - Agent Type Suggested: {subtask.get('agent_type')}
 - Priority: {subtask.get('priority', 'medium')}
 - Dependencies: {subtask.get('dependencies', [])}
@@ -558,36 +673,56 @@ Provide your response in this structure:
     async def _query_agents(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Query agents from database"""
         skills = parameters.get('skills', [])
+        tags = parameters.get('tags', [])
         min_proficiency = parameters.get('min_proficiency', 0.6)
         status = parameters.get('status', 'available')
         max_workload = parameters.get('max_workload', 0.8)
         agent_type = parameters.get('agent_type')
         
+        if isinstance(skills, str):
+            skills = [skills]
+        if isinstance(tags, str):
+            tags = [tags]
+        skills = [skill for skill in skills if isinstance(skill, str) and skill.strip()]
+        tags = [tag for tag in tags if isinstance(tag, str) and tag.strip()]
+        requirements = skills + tags
+        
         # Build query
         query = self.db.query(Agent)
         
         # Filter by status if not 'any'
-        if status != 'any':
+        # FIXED: Treat 'available' as 'active' since that's the actual status in DB
+        if status == 'available':
+            query = query.filter(Agent.status == 'active')
+        elif status != 'any':
             query = query.filter(Agent.status == status)
         
         # Filter by agent type if provided
-        if agent_type:
-            query = query.filter(Agent.agent_type == agent_type)
+        # FIXED: More lenient matching - check if requested type is IN agent_type or vice versa
+        if agent_type and agent_type != 'any':
+            # Try exact match first
+            exact_query = query.filter(Agent.agent_type == agent_type)
+            if exact_query.count() > 0:
+                query = exact_query
+            # If no exact match, skip agent_type filter and rely on skill matching
+            # This allows 'document_generator' to match 'custom' type agents with PDF skills
         
         # Note: workload filtering would require additional field
         # For now, we'll use performance_metrics
         
-        agents = query.all()
-        
-        # Filter by skills - NOW LOOKING AT ACTUAL SKILL RELATIONSHIP WITH TOOLS!
+        # Get agents WITH skills eagerly loaded (FIXED: don't double-query!)
         from sqlalchemy.orm import joinedload
         agents = query.options(joinedload(Agent.skills)).all()
+        
+        logger.info(f"🔍 _query_agents: Found {len(agents)} agents from database")
+        logger.info(f"   Filters: skills={skills}, tags={tags}, agent_type={agent_type}, status={status}")
         
         matching_agents = []
         for agent in agents:
             # Get agent skills AND their tools
             agent_skill_list = []
             agent_tools = []
+            agent_tags = _normalize_tags(getattr(agent, 'tags', None))
             if agent.skills:
                 for skill in agent.skills:
                     agent_skill_list.append(skill.name)
@@ -596,34 +731,71 @@ Provide your response in this structure:
                         try:
                             import json
                             schema = json.loads(skill.tools_schema) if isinstance(skill.tools_schema, str) else skill.tools_schema
-                            tools = [tool.get('function', {}).get('name', '') for tool in schema]
+                            # FIXED: Check both formats - {'tools': [...]} and direct list
+                            if isinstance(schema, dict) and 'tools' in schema:
+                                tools = [tool.get('name', '') for tool in schema['tools'] if tool.get('name')]
+                            elif isinstance(schema, list):
+                                # Old format: list of tool specs with 'function' key
+                                tools = [tool.get('function', {}).get('name', '') for tool in schema if tool.get('function')]
+                            else:
+                                tools = []
                             agent_tools.extend(tools)
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Failed to parse tools_schema for skill {skill.name}: {e}")
                             pass
             
-            # Calculate skill match (check both skill names AND tool names)
+            logger.info(f"   Agent {agent.id} ({agent.name}): skills={agent_skill_list}, tags={agent_tags}, tools={agent_tools}")
+            
+            # Calculate skill match using SEMANTIC MATCHING (not dumb substring matching!)
             skill_matches = 0
             matched_by = []
-            for required_skill in skills:
-                # Check skill names
-                for agent_skill in agent_skill_list:
-                    if (required_skill.lower() in agent_skill.lower() or
-                        agent_skill.lower() in required_skill.lower()):
-                        skill_matches += 1
-                        matched_by.append(f"skill:{agent_skill}")
-                        break
-                else:
-                    # Check tool names (e.g., "create_pdf" matches "create_pdf" tool)
-                    for tool_name in agent_tools:
-                        if (required_skill.lower() in tool_name.lower() or
-                            tool_name.lower() in required_skill.lower()):
-                            skill_matches += 1
-                            matched_by.append(f"tool:{tool_name}")
-                            break
             
-            skill_coverage = skill_matches / len(skills) if skills else 1.0
+            # If NO skills required, match all agents (100% coverage)
+            if not requirements:
+                skill_matches = 1
+                skill_coverage = 1.0
+                matched_by.append("no_requirements")
+            else:
+                # Use semantic matching with embeddings!
+                # This intelligently matches "writing" → "writer", "author", "documentation"
+                skill_coverage, match_details = await self.skill_matcher.compute_skill_coverage(
+                    required_skills=requirements,
+                    agent_skills=agent_skill_list,
+                    agent_tools=agent_tools,
+                    agent_tags=agent_tags
+                )
+                
+                # Extract match info
+                skill_matches = sum(1 for m in match_details if m["matched"])
+                for match in match_details:
+                    if match["matched"]:
+                        match_type = match["match_type"]  # 'skill' or 'tool'
+                        capability = match["agent_capability"]
+                        similarity = match["similarity"]
+                        matched_by.append(f"{match_type}:{capability}(sim={similarity:.2f})")
+                        logger.debug(
+                            f"      ✅ Semantic match: '{match['required']}' → '{capability}' "
+                            f"(similarity={similarity:.3f})"
+                        )
             
-            if skill_coverage >= min_proficiency:
+            # CRITICAL FIX: If agent has NO skills, give it a HIGH baseline score based on agent_type/description
+            # This allows the LLM to select agents based on their type/description even without explicit skill mappings
+            if len(agent_skill_list) == 0:
+                # Agent has no skills mapped - use agent_type/description as fallback
+                # Give it a HIGH baseline score so LLM seriously considers it
+                skill_coverage = 0.8  # HIGH score - let LLM judge based on type/description
+                matched_by.append(f"agent_type:{agent.agent_type}")
+                matched_by.append(f"description_based_match")
+                logger.info(f"      → Agent has NO skills, using HIGH baseline (0.8) for LLM semantic matching")
+                logger.info(f"         agent_type={agent.agent_type}, description={agent.description[:100] if agent.description else 'N/A'}...")
+            
+            logger.info(f"      → skill_coverage={skill_coverage:.2f}, min_proficiency={min_proficiency}, matched={skill_coverage >= min_proficiency}")
+            
+            # RELAXED FILTER: Include agents even with low skill_coverage if they have no skills
+            # Let the LLM decide if agent_type/description is a good match
+            include_agent = skill_coverage >= min_proficiency or len(agent_skill_list) == 0
+            
+            if include_agent:
                 # Get performance metrics
                 perf_metrics = agent.performance_metrics or {}
                 
@@ -631,8 +803,10 @@ Provide your response in this structure:
                     'agent_id': agent.id,
                     'name': agent.name,
                     'agent_type': agent.agent_type,
+                    'description': agent.description or '',  # CRITICAL: Include description for LLM reasoning
                     'skills': agent_skill_list,
                     'tools': agent_tools,
+                    'tags': agent_tags,
                     'matched_by': matched_by,
                     'skill_coverage': skill_coverage,
                     'status': agent.status,
@@ -646,6 +820,7 @@ Provide your response in this structure:
             'total_found': len(matching_agents),
             'query_criteria': {
                 'skills': skills,
+                'tags': tags,
                 'min_proficiency': min_proficiency,
                 'status': status,
                 'max_workload': max_workload
@@ -668,7 +843,7 @@ Provide your response in this structure:
         
         executions = self.db.query(WorkflowExecution).filter(
             WorkflowExecution.agent_id == agent_id,
-            WorkflowExecution.created_at >= cutoff_date
+            WorkflowExecution.started_at >= cutoff_date
         ).all()
         
         # Calculate metrics
@@ -857,6 +1032,7 @@ Provide your response in this structure:
         key_parts = [
             subtask.get('subtask_id', ''),
             str(subtask.get('skills_required', [])),
+            str(subtask.get('tags', [])),
             subtask.get('priority', 'medium')
         ]
         key_str = '|'.join(key_parts)
@@ -875,51 +1051,352 @@ Provide your response in this structure:
         and formats the results for compatibility with existing code.
         """
         results = {}
-        workflow_ctx = workflow_context or {
+        
+        # Merge workflow_context with defaults to ensure required keys exist
+        default_ctx = {
             "workflow_id": "unknown",
             "total_subtasks": len(subtasks),
             "completed_subtasks": [],
             "selected_agents": []
         }
         
+        if workflow_context:
+            # Start with defaults, then override with provided values
+            workflow_ctx = {**default_ctx, **workflow_context}
+            # Ensure selected_agents is always a list (in case it was provided as None)
+            if "selected_agents" not in workflow_ctx or workflow_ctx["selected_agents"] is None:
+                workflow_ctx["selected_agents"] = []
+        else:
+            workflow_ctx = default_ctx
+        
+        # BATCH PROCESSING - NO LOOPS!
+        logger.info(f"🚀 BATCH MODE: Processing ALL {len(subtasks)} subtasks at once")
+        
+        # Step 1: Query ALL agents ONCE
+        agents_result = await self._query_agents({"status": "available"})
+        all_agents = agents_result.get("matching_agents", [])
+        logger.info(f"  📊 Found {len(all_agents)} available agents")
+        
+        # Step 2: Batch semantic scoring for ALL subtasks
+        import asyncio
+        scoring_tasks = []
         for idx, subtask in enumerate(subtasks):
             subtask_id = subtask.get('subtask_id', f'subtask_{idx}')
-            
-            logger.info(f"\n{'='*60}")
-            logger.info(f"🔍 LLM AGENT SELECTION: Processing {subtask_id}")
-            
-            try:
-                # Get LLM selection
-                selection = await self.select_agent_with_reasoning(subtask, workflow_ctx)
-                
-                # Convert to AgentMatch format for compatibility
+            task = self._score_agents_for_subtask(subtask, all_agents, subtask_id)
+            scoring_tasks.append((subtask_id, task))
+        
+        # Run all scoring in parallel
+        logger.info(f"  🧠 Computing semantic scores for {len(scoring_tasks)} subtasks...")
+        scored_results = await asyncio.gather(*[task for _, task in scoring_tasks])
+        
+        # Map scored agents back to subtask IDs
+        subtask_scores = {}
+        for (subtask_id, _), scores in zip(scoring_tasks, scored_results):
+            subtask_scores[subtask_id] = scores
+        
+        logger.info(f"  ✅ Semantic scoring complete")
+        
+        # Step 3: DIRECT ASSIGNMENT - Use best semantic match (NO LLM!)
+        logger.info(f"  ⚡ FAST MODE: Using semantic scores directly (NO LLM)")
+        
+        for idx, (subtask_id, scores) in enumerate(subtask_scores.items()):
+            normalized_id = f"subtask_{idx}"
+            if scores:
+                best = scores[0]  # Already sorted by score (highest first)
                 agent_match = AgentMatch(
-                    agent_id=selection.agent_id,
-                    agent_name=selection.agent_name,
-                    agent_type="llm_selected",
-                    match_score=selection.confidence,
-                    reasoning=selection.reasoning,
-                    skills_matched=subtask.get('skills_required', []),
-                    performance_score=0.8,  # Would come from function calls
-                    availability_score=0.9,  # Would come from function calls
-                    collaboration_score=0.85  # Would come from function calls
+                    agent_id=best['agent_id'],
+                    agent_name=best['name'],
+                    agent_type=best.get('agent_type', 'general'),
+                    match_score=best['score'],
+                    reasoning=f"Semantic match: {best['score']:.0%} skill coverage ({len(best.get('skills_matched', []))} skills matched)",
+                    skills_matched=best.get('skills_matched', []),
+                    performance_score=0.8,
+                    availability_score=0.9,
+                    collaboration_score=0.85
                 )
-                
-                results[subtask_id] = [agent_match]  # Single best agent
-                
-                # Update workflow context for next selection
-                workflow_ctx["selected_agents"].append({
-                    "subtask_id": subtask_id,
-                    "agent_id": selection.agent_id,
-                    "agent_name": selection.agent_name
-                })
-                
-            except Exception as e:
-                logger.error(f"LLM agent selection failed for {subtask_id}: {e}")
-                # Fallback to empty list
-                results[subtask_id] = []
+                # Always store using normalized execution key
+                results[normalized_id] = [agent_match]
+                # Preserve original key if different (for analytics/logging)
+                if subtask_id != normalized_id:
+                    results[subtask_id] = [agent_match]
+                logger.info(f"    ✓ {normalized_id}: Agent {best['agent_id']} ({best['name']}) - {best['score']:.0%} match")
+            else:
+                logger.warning(f"    ⚠️  {normalized_id}: No suitable agents found")
+                results[normalized_id] = []
+                if subtask_id != normalized_id:
+                    results[subtask_id] = []
+        
+        logger.info(f"  ✅ Assigned {len(results)} agents using pure semantic matching")
         
         return results
+    
+    async def _score_agents_for_subtask(
+        self,
+        subtask: Dict[str, Any],
+        all_agents: List[Dict[str, Any]],
+        subtask_id: str
+    ) -> List[Dict[str, Any]]:
+        """Score all agents for a single subtask using semantic matching"""
+        
+        # Handle both field names and ensure it's a list
+        required_skills = subtask.get('skills_required', subtask.get('primary_skill', []))
+        if isinstance(required_skills, str):
+            required_skills = [required_skills]
+        elif not required_skills:
+            required_skills = []
+        
+        required_tags = subtask.get('tags', [])
+        if isinstance(required_tags, str):
+            required_tags = [required_tags]
+        elif not required_tags:
+            required_tags = []
+        
+        requirements = [req for req in required_skills + required_tags if isinstance(req, str) and req.strip()]
+            
+        if not requirements:
+            logger.info(f"⚠️ Subtask {subtask_id} arrived with no required requirements (skills/tags). Will rely on agent_type={required_type}")
+        
+        # Log what we're matching
+        logger.info(
+            f"🔍 Matching subtask {subtask_id}: skills={required_skills}, tags={required_tags}, "
+            f"desc='{subtask.get('description', '')[:100]}'"
+        )
+        
+        required_type = subtask.get('agent_type')
+        
+        if not requirements and not required_type:
+            # No requirements - return all agents with default score
+            return [{
+                'agent_id': agent['agent_id'],
+                'name': agent['name'],
+                'agent_type': agent.get('agent_type', 'general'),
+                'score': 0.5,
+                'skills_matched': []
+            } for agent in all_agents[:5]]  # Top 5
+        
+        # Score each agent
+        scored = []
+        for agent in all_agents:
+            agent_skills = agent.get('skills', [])
+            agent_tools = agent.get('tools', [])
+            agent_tags = agent.get('tags', [])
+            
+            # Log agent capabilities for first few agents
+            if len(scored) < 3:
+                logger.info(
+                    f"  🤖 Agent {agent['agent_id']} ({agent['name']}): "
+                    f"skills={agent_skills[:3] if agent_skills else 'none'}, "
+                    f"tags={agent_tags[:3] if agent_tags else 'none'}, "
+                    f"tools={len(agent_tools)} tools"
+                )
+            
+            # Semantic skill coverage
+            coverage, match_details = await self.skill_matcher.compute_skill_coverage(
+                required_skills=requirements,
+                agent_skills=agent_skills,
+                agent_tools=agent_tools,
+                agent_tags=agent_tags
+            )
+            if match_details:
+                summary = ", ".join(
+                    f"{m['required']}→{m['agent_capability']}({m['similarity']:.2f})" if m['matched']
+                    else f"{m['required']}→∅({m['similarity']:.2f})"
+                    for m in match_details
+                )
+                logger.info(f"     📊 Match details: {summary}")
+            else:
+                logger.info("     📊 Match details: (none)")
+            
+            # Agent type match
+            type_match = bool(required_type and agent.get('agent_type') == required_type)
+            
+            # How many skills did we actually match?
+            matched_skills = [d['required'] for d in match_details if d['matched']]
+            matched_count = len(matched_skills)
+            
+            # Build a composite score used only for ordering.
+            # Start with semantic coverage, then add adjustments for type/skill alignment.
+            sort_score = coverage
+            
+            if requirements:
+                if matched_count == 0:
+                    # Hard-penalize agents that meet none of the requested skills
+                    sort_score -= 0.4
+                else:
+                    # Small boost proportional to skill coverage
+                    sort_score += min(0.2, matched_count * 0.05)
+            
+            if required_type:
+                sort_score += 0.2 if type_match else -0.2
+            else:
+                # Light boost for specialists even when no type stated
+                sort_score += 0.05 if agent.get('agent_type') != 'general' else 0.0
+            
+            scored.append({
+                'agent_id': agent['agent_id'],
+                'name': agent['name'],
+                'agent_type': agent.get('agent_type', 'general'),
+                'score': coverage,
+                'skills_matched': matched_skills,
+                'tags': agent_tags,
+                'coverage': coverage,
+                'matched_skill_count': matched_count,
+                'type_match': type_match,
+                'sort_score': sort_score
+            })
+        
+        # Sort by score and return top matches
+        scored.sort(
+            key=lambda x: (
+                x.get('matched_skill_count', 0) > 0,
+                x.get('type_match', False),
+                x.get('sort_score', 0.0),
+                x.get('coverage', 0.0)
+            ),
+            reverse=True
+        )
+        
+        # ALWAYS return at least the top agent (no empty lists!)
+        if scored:
+            return scored[:5]  # Top 5 agents
+        elif all_agents:
+            # Fallback: return first available agent with low score
+            return [{
+                'agent_id': all_agents[0]['agent_id'],
+                'name': all_agents[0]['name'],
+                'agent_type': all_agents[0].get('agent_type', 'general'),
+                'score': 0.2,
+                'skills_matched': [],
+                'tags': all_agents[0].get('tags', []),
+                'coverage': 0.0
+            }]
+        else:
+            return []  # Only return empty if NO agents exist at all
+    
+    def _build_batch_assignment_prompt(
+        self,
+        subtasks: List[Dict[str, Any]],
+        subtask_scores: Dict[str, List[Dict[str, Any]]],
+        workflow_context: Dict[str, Any]
+    ) -> str:
+        """Build prompt for single LLM call with ALL subtask data"""
+        
+        prompt = f"""You have {len(subtasks)} subtasks to assign to agents. Based on semantic skill matching, here are the top agent candidates for each subtask.
+
+**Your Task:** Assign the BEST agent to each subtask. Consider:
+- Semantic skill coverage scores
+- Agent specialization and type
+- Load balancing (don't overload one agent)
+- Workflow context
+
+**Subtasks and Top Candidates:**
+
+"""
+        
+        for idx, subtask in enumerate(subtasks):
+            subtask_id = subtask.get('subtask_id', f'subtask_{idx}')
+            scores = subtask_scores.get(subtask_id, [])
+            
+            prompt += f"\n{'='*60}\n"
+            prompt += f"**Subtask {idx+1}:** {subtask.get('description', 'No description')[:100]}\n"
+            prompt += f"- Required Skills: {', '.join(subtask.get('skills_required', []))}\n"
+            prompt += f"- Tags: {', '.join(subtask.get('tags', []))}\n"
+            prompt += f"- Agent Type: {subtask.get('agent_type', 'any')}\n"
+            prompt += f"- Priority: {subtask.get('priority', 'medium')}\n\n"
+            
+            prompt += "**Top Agent Candidates:**\n"
+            for i, agent in enumerate(scores[:3], 1):
+                prompt += f"{i}. Agent {agent['agent_id']} ({agent['name']})\n"
+                prompt += f"   - Type: {agent['agent_type']}\n"
+                prompt += f"   - Score: {agent['score']:.0%}\n"
+                prompt += f"   - Skills Matched: {', '.join(agent.get('skills_matched', []))}\n"
+            
+            if not scores:
+                prompt += "⚠️ No strong candidates found\n"
+        
+        prompt += f"\n\n**Response Format (JSON):**\n"
+        prompt += "```json\n{\n"
+        for idx, subtask in enumerate(subtasks):
+            subtask_id = subtask.get('subtask_id', f'subtask_{idx}')
+            prompt += f'  "{subtask_id}": {{"agent_id": <id>, "reasoning": "<why>"}}'
+            if idx < len(subtasks) - 1:
+                prompt += ","
+            prompt += "\n"
+        prompt += "}\n```\n"
+        
+        return prompt
+    
+    def _parse_batch_assignments(
+        self,
+        llm_response: str,
+        subtask_scores: Dict[str, List[Dict[str, Any]]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Parse LLM's batch assignment response"""
+        import json
+        import re
+        
+        # Try to extract JSON from response
+        try:
+            # Look for JSON block
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', llm_response, re.DOTALL)
+            if json_match:
+                assignments_raw = json.loads(json_match.group(1))
+            else:
+                # Try direct JSON parse
+                assignments_raw = json.loads(llm_response)
+            
+            # Validate and enrich assignments
+            assignments = {}
+            for subtask_id, assignment in assignments_raw.items():
+                agent_id = assignment.get('agent_id')
+                reasoning = assignment.get('reasoning', 'LLM assignment')
+                
+                # Find agent details from scores
+                scores = subtask_scores.get(subtask_id, [])
+                agent_data = next((a for a in scores if a['agent_id'] == agent_id), None)
+                
+                if agent_data:
+                    assignments[subtask_id] = {
+                        'agent_id': agent_id,
+                        'agent_name': agent_data['name'],
+                        'agent_type': agent_data.get('agent_type'),
+                        'score': agent_data['score'],
+                        'reasoning': reasoning,
+                        'skills_matched': agent_data.get('skills_matched', [])
+                    }
+                else:
+                    # Use first available agent if LLM picked invalid ID
+                    if scores:
+                        best = scores[0]
+                        assignments[subtask_id] = {
+                            'agent_id': best['agent_id'],
+                            'agent_name': best['name'],
+                            'agent_type': best.get('agent_type'),
+                            'score': best['score'],
+                            'reasoning': f"Fallback to best match (LLM picked invalid ID)",
+                            'skills_matched': best.get('skills_matched', [])
+                        }
+            
+            return assignments
+                
+        except Exception as e:
+            logger.error(f"Failed to parse LLM batch response: {e}")
+            logger.error(f"Response was: {llm_response[:500]}")
+            
+            # Fallback: Use best semantic match for each subtask
+            assignments = {}
+            for subtask_id, scores in subtask_scores.items():
+                if scores:
+                    best = scores[0]
+                    assignments[subtask_id] = {
+                        'agent_id': best['agent_id'],
+                        'agent_name': best['name'],
+                        'agent_type': best.get('agent_type'),
+                        'score': best['score'],
+                        'reasoning': 'Best semantic match (LLM parse failed)',
+                        'skills_matched': best.get('skills_matched', [])
+                    }
+            return assignments
 
 
 

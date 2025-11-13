@@ -169,6 +169,7 @@ export function AgentConfigurationModal({
       setFormData({
         name: (agent as any).name || '',
         description: (agent as any).description || '',
+        tags: Array.isArray((agent as any).tags) ? ((agent as any).tags as string[]).join(', ') : '',
         agent_type: (agent as any).agent_type || 'custom',
         priority_level: (agentConfig as any).priority_level || 'medium',
         max_concurrent_tasks: (agentConfig as any).max_concurrent_tasks || 5,
@@ -265,10 +266,16 @@ export function AgentConfigurationModal({
     })
     
     try {
+      const tags = (formData.tags || '')
+        .split(',')
+        .map((tag: string) => tag.trim())
+        .filter((tag: string) => tag.length > 0)
+      
       const updatePayload = {
         name: formData.name,
         description: formData.description,
         agent_type: formData.agent_type,
+        tags,
         configuration: {
           priority_level: formData.priority_level,
           max_concurrent_tasks: formData.max_concurrent_tasks,
@@ -282,7 +289,8 @@ export function AgentConfigurationModal({
           },
           environment: formData.environment,
           logging_level: formData.logging_level,
-          performance_monitoring: formData.performance_monitoring
+          performance_monitoring: formData.performance_monitoring,
+          tags
         },
         skill_assignments: formData.assigned_skills
       }
@@ -451,6 +459,19 @@ export function AgentConfigurationModal({
                           placeholder="Enter agent description"
                           rows={3}
                         />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="tags">Tags (comma separated)</Label>
+                        <Input
+                          id="tags"
+                          value={formData.tags || ''}
+                          onChange={(e) => updateFormData('tags', e.target.value)}
+                          placeholder="e.g. writing, pdf, research"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Lightweight keywords that describe the agent&apos;s strengths.
+                        </p>
                       </div>
                       
                       <div className="space-y-2">

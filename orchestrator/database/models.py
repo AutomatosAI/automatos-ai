@@ -91,6 +91,7 @@ class Agent(Base):
     status = Column(String(50), default='active')  # 'active', 'inactive', 'training'
     configuration = Column(JSON)  # Agent-specific config
     performance_metrics = Column(JSON)  # Performance data
+    tags = Column(JSON, default=list)  # Lightweight capability tags
     
     # NEW FIELDS for UI requirements
     priority_level = Column(String(50), default='medium')  # 'low', 'medium', 'high', 'critical'
@@ -380,6 +381,7 @@ class AgentCreate(BaseModel):
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Support for tool assignment during creation
+    tags: Optional[List[str]] = []
     priority_level: Optional[PriorityLevel] = PriorityLevel.MEDIUM
     max_concurrent_tasks: Optional[int] = Field(default=5, ge=1, le=100)
     auto_start: Optional[bool] = False
@@ -390,6 +392,7 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
+    tags: Optional[List[str]] = None
     priority_level: Optional[PriorityLevel] = None
     max_concurrent_tasks: Optional[int] = Field(default=None, ge=1, le=100)
     auto_start: Optional[bool] = None
@@ -402,6 +405,7 @@ class AgentResponse(BaseModel):
     status: str
     configuration: Optional[Dict[str, Any]]
     performance_metrics: Optional[Dict[str, Any]]
+    tags: List[str] = []
     priority_level: str
     max_concurrent_tasks: int
     auto_start: bool

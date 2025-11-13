@@ -172,7 +172,7 @@ class LLMContextStrategySelector:
                     type="string",
                     description="Target model",
                     required=False,
-                    default="gpt-4"
+                    default="gpt-4o"
                 )
             ],
             implementation=self._get_token_budget
@@ -588,17 +588,18 @@ RESPONSE FORMAT:
     async def _get_token_budget(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Get token budget for subtask"""
         subtask_id = parameters['subtask_id']
-        model = parameters.get('model', 'gpt-4')
+        model = parameters.get('model', 'gpt-4o')
         
         # Model context windows
         context_windows = {
             "gpt-4": 8192,
+            "gpt-4o": 128000,  # GPT-4o has 128K context window
             "gpt-4-turbo": 128000,
             "claude-3": 100000,
             "gpt-3.5-turbo": 4096
         }
         
-        max_context = context_windows.get(model, 8192)
+        max_context = context_windows.get(model, 128000)  # Default to 128K for unknown models
         
         # Reserve tokens for response
         response_reserve = 2000

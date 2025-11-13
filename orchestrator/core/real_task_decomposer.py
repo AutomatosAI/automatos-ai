@@ -100,6 +100,10 @@ AVAILABLE TOOLS:
 - "file_ops" - read_file, write_file, create_directory, list_directory (for file operations)
 - "shell" - execute_command (for running commands, restarting services, etc.)
 
+TAGS:
+- Provide lightweight keywords (e.g., ["research", "writing", "pdf"]) describing the required capabilities.
+- Tags are used in semantic matching alongside skills. Keep them short (1-3 words) and reuse existing vocabulary when possible.
+
 For each subtask, decide intelligently:
 - **requires_context**: Does the agent need to research/read docs/code to complete this? (true/false)
   - Simple operations (create file, run command) = false
@@ -131,6 +135,7 @@ Return ONLY valid JSON in this exact format:
       "estimated_duration": "60-120 seconds",
       "primary_skill": "single_main_skill",
       "skills_required": ["primary_skill_only"],
+      "tags": ["keyword1", "keyword2"],
       "required_tools": ["file_ops"],
       "requires_context": false,
       "context_type": null
@@ -221,9 +226,22 @@ REMEMBER:
                     skills = subtask.get('skills_required', subtask.get('primary_skill', []))
                     if isinstance(skills, str):
                         skills = [skills]
+                    skills = [skill for skill in skills if skill]
+                    subtask['skills_required'] = skills
                     logger.info(f"  📋 Subtask {i+1}: {subtask.get('description', 'N/A')[:80]}...")
                     logger.info(f"      🤖 Agent type: {subtask.get('agent_type', 'N/A')}")
                     logger.info(f"      🎯 Skills: {skills}")
+                    tags = subtask.get('tags', [])
+                    if isinstance(tags, str):
+                        tags = [tag.strip() for tag in tags.split(',')]
+                    elif not tags:
+                        tags = []
+                    else:
+                        tags = [tag.strip() for tag in tags if isinstance(tag, str)]
+                    tags = [tag for tag in tags if tag]
+                    subtask['tags'] = tags
+                    if tags:
+                        logger.info(f"      🏷️ Tags: {tags}")
                     logger.info(f"      🔗 Dependencies: {subtask.get('dependencies', [])}")
                 
                 return result
@@ -254,6 +272,7 @@ REMEMBER:
                     "dependencies": [],
                     "estimated_duration": "60-120 seconds",
                     "skills_required": ["analysis", "planning"],
+                    "tags": ["analysis"],
                     "required_tools": ["research"]
                 },
                 {
@@ -264,6 +283,7 @@ REMEMBER:
                     "dependencies": [f"{task_id}_analyze"],
                     "estimated_duration": "120-180 seconds",
                     "skills_required": ["implementation", "problem_solving"],
+                    "tags": ["implementation"],
                     "required_tools": ["research"]
                 },
                 {
@@ -274,6 +294,7 @@ REMEMBER:
                     "dependencies": [f"{task_id}_implement"],
                     "estimated_duration": "60-90 seconds",
                     "skills_required": ["testing", "validation"],
+                    "tags": ["testing"],
                     "required_tools": ["research"]
                 }
             ],

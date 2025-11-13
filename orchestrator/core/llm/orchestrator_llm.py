@@ -442,15 +442,33 @@ Begin by analyzing what information you need to complete this task.
         return self._parse_reasoning_response(content)
     
     def _extract_function_call(self, content: str) -> Optional[Dict[str, Any]]:
-        """Extract function call from response"""
+        """Extract function call from response with proper nested JSON handling"""
         try:
             if "FUNCTION_CALL:" in content:
                 json_str = content.split("FUNCTION_CALL:")[1].strip()
-                # Find the JSON object
-                import re
-                json_match = re.search(r'\{.*?\}', json_str, re.DOTALL)
-                if json_match:
-                    return json.loads(json_match.group())
+                
+                # Find the complete JSON object by counting braces
+                brace_count = 0
+                start_idx = -1
+                end_idx = -1
+                
+                for i, char in enumerate(json_str):
+                    if char == '{':
+                        if start_idx == -1:
+                            start_idx = i
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0 and start_idx != -1:
+                            end_idx = i + 1
+                            break
+                
+                if start_idx != -1 and end_idx != -1:
+                    json_obj_str = json_str[start_idx:end_idx]
+                    return json.loads(json_obj_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON in function call: {e}")
+            logger.error(f"JSON string: {json_obj_str if 'json_obj_str' in locals() else 'N/A'}")
         except Exception as e:
             logger.error(f"Failed to extract function call: {e}")
         
@@ -461,6 +479,7 @@ Begin by analyzing what information you need to complete this task.
         # Pricing per 1K tokens (approximate)
         pricing = {
             "gpt-4": {"input": 0.03, "output": 0.06},
+            "gpt-4o": {"input": 0.0025, "output": 0.01},  # GPT-4o pricing
             "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
             "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002},
             "claude-3-opus-20240229": {"input": 0.015, "output": 0.075},

@@ -1651,10 +1651,30 @@
     }
   
     // ===== CHATBOT ENDPOINTS =====
-    async sendChatbotQuery(message: string, context?: any) {
+    async sendChatbotQuery(params: {
+      query: string
+      context?: any
+      sessionId?: string
+      provider?: string
+      model?: string
+    }) {
+      const payload: Record<string, any> = {
+        query: params.query,
+        context: params.context,
+        session_id: params.sessionId,
+        provider: params.provider,
+        model: params.model
+      }
+
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === undefined || payload[key] === null) {
+          delete payload[key]
+        }
+      })
+
       return this.request('/api/chatbot/query', {
         method: 'POST',
-        body: JSON.stringify({ message, context })
+        body: JSON.stringify(payload)
       })
     }
   
@@ -1743,7 +1763,7 @@
   
   
     async sendChatMessage(message: string, context?: any) {
-      return this.sendChatbotQuery(message, context)
+      return this.sendChatbotQuery({ query: message, context })
     }
   
     async testChat() {

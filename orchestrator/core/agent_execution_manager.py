@@ -213,8 +213,10 @@ class AgentExecutionManager:
                 
                 # Get agent assignment
                 agent_match = agent_assignments.get(subtask_id, {})
+                self.logger.info(f"🔍 DEBUG: Raw agent_match for {subtask_id}: type={type(agent_match)}, value={agent_match}")
                 if isinstance(agent_match, list) and agent_match:
                     agent_match = agent_match[0]  # First match
+                    self.logger.info(f"🔍 DEBUG: After list extraction: type={type(agent_match)}, value={agent_match}")
                 
                 # Get context enhancement
                 context_enh = context_enhancements.get(subtask_id, {})
@@ -713,6 +715,9 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                 )
                 
                 # Build system prompt with skills and extract tool schemas
+                full_system_prompt = professional_system_prompt
+                all_required_tools = list(required_tools or [])
+                skill_tool_schemas = []
                 if agent_record and agent_record.skills:
                     skill_enhanced_prompt, skill_tool_schemas = self.agent_factory._build_agent_system_prompt(
                         agent=agent_record,
@@ -721,21 +726,44 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                         required_tools=required_tools,
                         enable_smart_skill_selection=True
                     )
-                    
-                    # Combine with professional prompt
                     full_system_prompt = skill_enhanced_prompt + "\n\n" + professional_system_prompt
-                    
-                    # Merge skill tools with required platform tools
-                    all_required_tools = list(required_tools) if required_tools else []
-                    if skill_tool_schemas:
-                        # Extract tool names from skill schemas
-                        skill_tool_names = [t['function']['name'] for t in skill_tool_schemas]
-                        all_required_tools.extend(skill_tool_names)
-                        self.logger.info(f"✅ Added {len(skill_tool_names)} skill tools: {skill_tool_names}")
-                else:
-                    full_system_prompt = professional_system_prompt
-                    all_required_tools = required_tools
-                
+
+                if skill_tool_schemas:
+                    skill_tool_names = [t['function']['name'] for t in skill_tool_schemas]
+                    all_required_tools.extend(skill_tool_names)
+                    self.logger.info(f"✅ Added {len(skill_tool_names)} skill tools: {skill_tool_names}")
+
+                # Append workspace and deliverable guidance for every agent
+                workspace_guidance_lines = [
+                    "## Workspace & Deliverable Rules",
+                    f"- Workspace root: {self.workspace_dir}",
+                    "- Keep every file operation inside this workspace (use relative paths).",
+                    "- Persist all artifacts with write_file (or the appropriate skill tool) so the orchestrator can save them.",
+                    "- In your final answer, list the relative paths of every file you created or updated."
+                ]
+
+                conversion_tools = {
+                    "create_pdf": "pdf",
+                    "create_docx": "docx",
+                    "create_pptx": "pptx",
+                    "create_xlsx": "xlsx"
+                }
+                base_stub = execution.subtask_id.replace("subtask_", "task")
+
+                for tool_name, extension in conversion_tools.items():
+                    if tool_name in all_required_tools:
+                        source_name = f"{base_stub}.md"
+                        output_name = f"{base_stub}.{extension}"
+                        workspace_guidance_lines.extend([
+                            "",
+                            f"- This task includes the `{tool_name}` capability. Follow this workflow:",
+                            f"  1. Draft the complete deliverable into `{source_name}` using `write_file`.",
+                            f"  2. Call `{tool_name}` with {{\"source_file\": \"{source_name}\", \"output_file\": \"{output_name}\", \"title\": \"{execution.subtask_description}\"}}.",
+                            f"  3. Verify the tool succeeds and report the saved file `{output_name}`."
+                        ])
+
+                full_system_prompt = full_system_prompt + "\n\n" + "\n".join(workspace_guidance_lines)
+
                 result = await self.agent_factory.execute_with_prompt(
                     agent=agent_id,
                     prompt=prompt,
@@ -746,12 +774,12 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
                     required_tools=all_required_tools,  # Platform + Skill tools
                     workspace_dir=self.workspace_dir  # Unique workspace per execution
                 )
-                
+
                 if result.get("status") == "error":
                     raise Exception(result.get("error", "Unknown error"))
-                
+
                 return result
-                
+
             except Exception as e:
                 last_error = e
                 if attempt < self.max_retries:

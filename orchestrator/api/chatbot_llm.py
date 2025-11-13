@@ -161,26 +161,56 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
 
 
 async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
-    """Query database using natural language"""
+    """Query database using natural language via knowledge source endpoints."""
     try:
         logger.info(f"[Database] Querying: {query}, DB: {database_name}")
-        
+
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # Resolve database source
+            selected_source: Optional[Dict[str, Any]] = None
+            sources: List[Dict[str, Any]] = []
+
+            try:
+                sources_response = await client.get(
+                    "http://127.0.0.1:8000/api/knowledge/sources/database/",
+                    params={"active_only": True}
+                )
+                if sources_response.status_code == 200:
+                    sources = sources_response.json() or []
+            except Exception as source_err:
+                logger.warning(f"[Database] Failed to list database sources: {source_err}")
+
+            if database_name and sources:
+                lowered = database_name.lower()
+                selected_source = next(
+                    (src for src in sources if str(src.get("name", "")).lower() == lowered),
+                    None
+                )
+
+            if not selected_source and sources:
+                selected_source = sources[0]
+
+            if not selected_source:
+                return {"success": False, "error": "No active database sources available"}
+
+            source_id = selected_source.get("id")
             response = await client.post(
-                "http://127.0.0.1:8000/api/database-knowledge/nl-query",
+                f"http://127.0.0.1:8000/api/knowledge/sources/database/{source_id}/query",
                 json={
                     "query": query,
-                    "database_name": database_name
+                    "source_id": source_id,
+                    "use_cache": True,
+                    "include_explanation": True
                 }
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"[Database] Query successful")
-                
+                logger.info(f"[Database] Query successful (source={selected_source.get('name')})")
+
                 return {
                     "success": True,
-                    "database": data.get('database', ''),
+                    "database": data.get('database') or selected_source.get('name', ''),
                     "sql": data.get('sql', ''),
                     "row_count": data.get('row_count', 0),
                     "data": data.get('data', []),
@@ -189,7 +219,7 @@ async def query_database_tool(query: str, database_name: Optional[str] = None) -
                 }
             else:
                 return {"success": False, "error": f"API returned {response.status_code}"}
-                
+
     except Exception as e:
         logger.error(f"[Database] Query error: {e}")
         return {"success": False, "error": str(e)}

@@ -95,13 +95,13 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     # Default models if not set in settings
     if not model_str:
         default_models = {
-            "openai": "gpt-4",
+            "openai": "gpt-4o",  # GPT-4o has 128K context vs gpt-4 8K
             "anthropic": "claude-3-5-sonnet-20241022",
             "google": "gemini-pro",
-            "azure": "gpt-4",
+            "azure": "gpt-4o",
             "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
         }
-        model_str = default_models.get(provider_str, "gpt-4")
+        model_str = default_models.get(provider_str, "gpt-4o")
     
     return provider_str, model_str
 

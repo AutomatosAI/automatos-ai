@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-
-// API base URL
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+import apiClient from '@/lib/api-client'
 
 interface DatabaseSource {
   id: number
@@ -50,16 +48,20 @@ export function useDatabaseKnowledge() {
   const fetchSources = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/knowledge/sources/database`)
-      if (response.ok) {
-        const data = await response.json()
-        setSources(data)
-      } else {
-        throw new Error('Failed to fetch database sources')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to load database sources')
+      const data = await apiClient.request<any[]>('/api/knowledge/sources/database/')
+      const normalized = (Array.isArray(data) ? data : data?.items || []).map((source: any) => ({
+        id: source.id,
+        name: source.name,
+        dialect: source.dialect,
+        status: source.status,
+        tables_count: source.schema_tables_count ?? source.tables_count ?? 0,
+        last_synced: source.last_introspected ?? source.last_synced ?? 'Never',
+        credential_id: source.credential_id ?? null,
+      }))
+      setSources(normalized)
+    } catch (err: any) {
+      setError(err.message || 'Failed to load database sources')
+      toast.error(err.message || 'Failed to load database sources')
     } finally {
       setLoading(false)
     }
@@ -73,23 +75,17 @@ export function useDatabaseKnowledge() {
   }) => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/knowledge/sources/database`, {
+      const result = await apiClient.request('/api/knowledge/sources/database/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sourceData)
+        body: sourceData,
       })
-      
-      if (response.ok) {
-        const newSource = await response.json()
-        setSources([...sources, newSource])
-        toast.success('Database source created successfully')
-        return newSource
-      } else {
-        throw new Error('Failed to create database source')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to create database source')
+
+      toast.success('Database source created successfully')
+      await fetchSources()
+      return result
+    } catch (err: any) {
+      setError(err.message || 'Failed to create database source')
+      toast.error(err.message || 'Failed to create database source')
       throw err
     } finally {
       setLoading(false)
@@ -107,26 +103,20 @@ export function useDatabaseKnowledge() {
   ): Promise<QueryResult> => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/knowledge/sources/database/${sourceId}/query`, {
+      const result = await apiClient.request(`${'/api/knowledge/sources/database'}/${sourceId}/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           source_id: sourceId,
-          query: naturalLanguageQuery
-        })
+          query: naturalLanguageQuery,
+          ...(options || {}),
+        },
       })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(`Query executed! ${result.row_count || 0} rows returned`)
-        return result
-      } else {
-        const error = await response.json()
-        throw new Error(error.detail || error.error || 'Query execution failed')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error(err.message)
+
+      toast.success(`Query executed! ${result.row_count || 0} rows returned`)
+      return result
+    } catch (err: any) {
+      setError(err.message || 'Query execution failed')
+      toast.error(err.message || 'Query execution failed')
       throw err
     } finally {
       setLoading(false)
@@ -137,20 +127,14 @@ export function useDatabaseKnowledge() {
   const syncSchema = async (sourceId: number) => {
     setLoading(true)
     try {
-      const response = await fetch(
-        `${API_BASE}/api/knowledge/sources/database/${sourceId}/sync`,
-        { method: 'POST' }
-      )
-      
-      if (response.ok) {
-        toast.success('Schema sync started')
-        await fetchSources() // Refresh sources
-      } else {
-        throw new Error('Failed to sync schema')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to sync schema')
+      await apiClient.request(`/api/knowledge/sources/database/${sourceId}/introspect`, {
+        method: 'POST',
+      })
+      toast.success('Schema sync started')
+      await fetchSources()
+    } catch (err: any) {
+      setError(err.message || 'Failed to sync schema')
+      toast.error(err.message || 'Failed to sync schema')
     } finally {
       setLoading(false)
     }
@@ -159,17 +143,9 @@ export function useDatabaseKnowledge() {
   // Get schema metadata
   const getSchemaMetadata = async (sourceId: number) => {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/knowledge/sources/database/${sourceId}/schema`
-      )
-      
-      if (response.ok) {
-        return await response.json()
-      } else {
-        throw new Error('Failed to fetch schema metadata')
-      }
-    } catch (err) {
-      toast.error('Failed to load schema metadata')
+      return await apiClient.request(`/api/knowledge/sources/database/${sourceId}/schema`)
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load schema metadata')
       throw err
     }
   }
@@ -184,24 +160,16 @@ export function useDatabaseKnowledge() {
   ) => {
     setLoading(true)
     try {
-      const response = await fetch(
-        `${API_BASE}/api/knowledge/sources/database/${sourceId}/semantic-layer`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(semanticData)
-        }
-      )
-      
-      if (response.ok) {
-        toast.success('Semantic layer updated')
-        return await response.json()
-      } else {
-        throw new Error('Failed to update semantic layer')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to update semantic layer')
+      const result = await apiClient.request(`/api/knowledge/sources/database/${sourceId}/semantic-layer`, {
+        method: 'PUT',
+        body: semanticData,
+      })
+
+      toast.success('Semantic layer updated')
+      return result
+    } catch (err: any) {
+      setError(err.message || 'Failed to update semantic layer')
+      toast.error(err.message || 'Failed to update semantic layer')
       throw err
     } finally {
       setLoading(false)
@@ -212,20 +180,14 @@ export function useDatabaseKnowledge() {
   const fetchTemplates = async (dialect?: string) => {
     try {
       const url = dialect 
-        ? `${API_BASE}/api/knowledge/sources/database/templates/list?dialect=${dialect}`
-        : `${API_BASE}/api/knowledge/sources/database/templates/list`
-      
-      const response = await fetch(url)
-      
-      if (response.ok) {
-        const data = await response.json()
-        setTemplates(data)
-        return data
-      } else {
-        throw new Error('Failed to fetch templates')
-      }
-    } catch (err) {
-      toast.error('Failed to load query templates')
+        ? `/api/knowledge/sources/database/templates/list?dialect=${dialect}`
+        : '/api/knowledge/sources/database/templates/list'
+
+      const data = await apiClient.request(url)
+      setTemplates(data)
+      return data
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load query templates')
       throw err
     }
   }
@@ -238,28 +200,19 @@ export function useDatabaseKnowledge() {
   ) => {
     setLoading(true)
     try {
-      const response = await fetch(
-        `${API_BASE}/api/knowledge/sources/database/templates/${templateId}/execute`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_id: sourceId,
-            parameters
-          })
-        }
-      )
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success('Template executed successfully')
-        return result
-      } else {
-        throw new Error('Failed to execute template')
-      }
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to execute template')
+      const result = await apiClient.request(`/api/knowledge/sources/database/templates/${templateId}/execute`, {
+        method: 'POST',
+        body: {
+          source_id: sourceId,
+          parameters,
+        },
+      })
+
+      toast.success('Template executed successfully')
+      return result
+    } catch (err: any) {
+      setError(err.message || 'Failed to execute template')
+      toast.error(err.message || 'Failed to execute template')
       throw err
     } finally {
       setLoading(false)
@@ -269,15 +222,7 @@ export function useDatabaseKnowledge() {
   // Get cache statistics
   const getCacheStats = async (): Promise<CacheStats> => {
     try {
-      const response = await fetch(
-        `${API_BASE}/api/knowledge/sources/database/cache/stats`
-      )
-      
-      if (response.ok) {
-        return await response.json()
-      } else {
-        throw new Error('Failed to fetch cache stats')
-      }
+      return await apiClient.request('/api/knowledge/sources/database/cache/stats')
     } catch (err) {
       console.error('Failed to load cache stats:', err)
       return {

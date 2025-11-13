@@ -355,14 +355,14 @@ class FunctionExecutor:
         # Check if function is async
         if asyncio.iscoroutinefunction(func):
             return await asyncio.wait_for(
-                func(**parameters),
+                func(parameters),  # Pass as single dict argument
                 timeout=timeout
             )
         else:
             # Run sync function in executor
             loop = asyncio.get_event_loop()
             return await asyncio.wait_for(
-                loop.run_in_executor(None, func, **parameters),
+                loop.run_in_executor(None, lambda: func(parameters)),  # Pass as single dict argument
                 timeout=timeout
             )
     
