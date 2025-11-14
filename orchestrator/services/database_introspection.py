@@ -1,5 +1,6 @@
 import time
 from typing import Dict, Any, List
+from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, date
 
@@ -14,6 +15,8 @@ def make_json_serializable(obj):
         return obj.isoformat()
     elif isinstance(obj, bytes):
         return obj.decode('utf-8', errors='ignore')
+    elif isinstance(obj, UUID):
+        return str(obj)
     elif isinstance(obj, dict):
         return {k: make_json_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
@@ -90,11 +93,20 @@ class DatabaseIntrospectionService:
                             "default": column_default
                         }
                         if include_samples:
+                            data_type_lower = (data_type or "").lower()
+                            if "json" in data_type_lower or "array" in data_type_lower:
+                                col["samples"] = []
+                                columns.append(col)
+                                continue
                             try:
                                 sample_sql = text(f"SELECT DISTINCT {col_name} FROM {schema}.\"{table}\" WHERE {col_name} IS NOT NULL LIMIT :lim")
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
                             except Exception:
+                                try:
+                                    conn.rollback()
+                                except Exception:
+                                    pass
                                 col["samples"] = []
                         columns.append(col)
 
@@ -103,6 +115,10 @@ class DatabaseIntrospectionService:
                         cnt = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.\"{table}\""))
                         row_count = cnt.scalar() or 0
                     except Exception:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
                         row_count = 0
 
                     metadata["tables"].append({
@@ -168,11 +184,20 @@ class DatabaseIntrospectionService:
                             "default": column_default
                         }
                         if include_samples:
+                            data_type_lower = (data_type or "").lower()
+                            if "json" in data_type_lower or "array" in data_type_lower:
+                                col["samples"] = []
+                                columns.append(col)
+                                continue
                             try:
                                 sample_sql = text(f"SELECT DISTINCT `{col_name}` FROM `{table}` WHERE `{col_name}` IS NOT NULL LIMIT :lim")
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
                             except Exception:
+                                try:
+                                    conn.rollback()
+                                except Exception:
+                                    pass
                                 col["samples"] = []
                         columns.append(col)
 
@@ -180,6 +205,10 @@ class DatabaseIntrospectionService:
                         cnt = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`"))
                         row_count = cnt.scalar() or 0
                     except Exception:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
                         row_count = 0
 
                     metadata["tables"].append({

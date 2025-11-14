@@ -10,7 +10,7 @@ import os
 import hashlib
 import tempfile
 import json
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
@@ -542,6 +542,11 @@ async def get_document_content(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error getting document content: {str(e)}")
 
 
+PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
+PREVIEW_CONTEXT_RADIUS = 2  # Number of chunks to include before the best match
+PREVIEW_CHAR_LIMIT = 2000  # Safety limit for preview text length
+
+
 @router.post("/search")
 async def semantic_search(
     query: str = Query(..., description="Search query"),
@@ -557,10 +562,7 @@ async def semantic_search(
     Returns chunks ranked by semantic similarity to the query.
     """
     try:
-        import openai
         import time
-        from sqlalchemy import text
-        
         start_time = time.time()
         
         # Generate query embedding using OpenAI (matches DB - 1536-dim)
@@ -620,27 +622,100 @@ async def semantic_search(
         result = db.execute(similarity_query, params)
         rows = result.fetchall()
         
-        # Format results
-        search_results = []
+        # Group results by document so we can surface full files
+        grouped_results: Dict[int, Dict[str, Any]] = {}
+        doc_order: List[int] = []
+
         for row in rows:
-            search_results.append({
-                "chunk_id": row.chunk_id,
-                "document_id": row.document_id,
-                "chunk_index": row.chunk_index,
-                "content": row.content,
-                "similarity": float(row.similarity),
-                "metadata": row.metadata if row.metadata else {},
-                "source": {
-                    "filename": row.filename,
-                    "file_type": row.file_type,
-                    "file_size": row.file_size,
-                    "upload_date": row.upload_date.isoformat() if row.upload_date else None
+            doc_id = row.document_id
+            similarity = float(row.similarity)
+
+            if doc_id not in grouped_results:
+                grouped_results[doc_id] = {
+                    "document_id": doc_id,
+                    "best_similarity": similarity,
+                    "best_excerpt": row.content,
+                    "best_chunk_index": row.chunk_index,
+                    "metadata": row.metadata if row.metadata else {},
+                    "source": {
+                        "filename": row.filename,
+                        "file_type": row.file_type,
+                        "file_size": row.file_size,
+                        "upload_date": row.upload_date.isoformat() if row.upload_date else None,
+                    },
                 }
-            })
-        
+                doc_order.append(doc_id)
+            else:
+                existing = grouped_results[doc_id]
+                if similarity > existing["best_similarity"]:
+                    existing["best_similarity"] = similarity
+                    existing["best_excerpt"] = row.content
+                    existing["best_chunk_index"] = row.chunk_index
+
+        # Fetch limited previews + stats for surfaced docs
+        aggregated_results: List[Dict[str, Any]] = []
+        for doc_id in doc_order[:limit]:
+            entry = grouped_results[doc_id]
+
+            chunk_count_query = text(
+                """
+                SELECT COUNT(*) AS chunk_count
+                FROM document_chunks
+                WHERE document_id = :document_id
+                """
+            )
+            chunk_count_row = db.execute(chunk_count_query, {"document_id": doc_id}).fetchone()
+            chunk_count = int(chunk_count_row.chunk_count) if chunk_count_row and chunk_count_row.chunk_count is not None else 0
+
+            best_chunk_index = entry.get("best_chunk_index") or 0
+            preview_start_index = max(best_chunk_index - PREVIEW_CONTEXT_RADIUS, 0)
+            preview_end_index = preview_start_index + PREVIEW_CHUNK_LIMIT - 1
+
+            preview_query = text(
+                """
+                SELECT string_agg(content, '\n\n' ORDER BY chunk_index) AS preview_content
+                FROM document_chunks
+                WHERE document_id = :document_id
+                  AND chunk_index BETWEEN :start_index AND :end_index
+                """
+            )
+            preview_row = db.execute(
+                preview_query,
+                {
+                    "document_id": doc_id,
+                    "start_index": preview_start_index,
+                    "end_index": preview_end_index,
+                },
+            ).fetchone()
+
+            preview_content = preview_row.preview_content if preview_row and preview_row.preview_content else ""
+            preview_truncated = False
+            if preview_content and len(preview_content) > PREVIEW_CHAR_LIMIT:
+                preview_content = preview_content[:PREVIEW_CHAR_LIMIT] + "…"
+                preview_truncated = True
+            if preview_end_index < (chunk_count - 1):
+                preview_truncated = True
+
+            aggregated_results.append(
+                {
+                    "document_id": doc_id,
+                    "excerpt": entry["best_excerpt"],
+                    "similarity": entry["best_similarity"],
+                    "chunk_index": entry["best_chunk_index"],
+                    "chunk_count": chunk_count,
+                    "metadata": entry["metadata"],
+                    "source": entry["source"],
+                    "preview": preview_content,
+                    "preview_truncated": preview_truncated,
+                    "full_content_available": chunk_count > 0,
+                    "preview_chunk_start": preview_start_index,
+                    "preview_chunk_end": min(preview_end_index, max(chunk_count - 1, 0)),
+                }
+            )
+ 
         execution_time_ms = int((time.time() - start_time) * 1000)
-        
-        logger.info(f"Search completed: {len(search_results)} results in {execution_time_ms}ms")
+
+        logger.info(f"Search completed: {len(aggregated_results)} documents in {execution_time_ms}ms")
         
         # Track search event for analytics
         try:
@@ -652,23 +727,23 @@ async def semantic_search(
                 tracking_query,
                 {
                     "query": query,
-                    "results_count": len(search_results),
+                    "results_count": len(aggregated_results),
                     "execution_time_ms": execution_time_ms,
                     "metadata": json.dumps({"min_similarity": min_similarity}),
                     "timestamp": datetime.now()
                 }
             )
             db.commit()
-            logger.info(f"✅ Search tracked: '{query[:50]}' ({len(search_results)} results)")
+            logger.info(f"✅ Search tracked: '{query[:50]}' ({len(aggregated_results)} results)")
         except Exception as track_error:
             logger.warning(f"Could not track search event: {track_error}")
             db.rollback()
         
         return {
             "query": query,
-            "total_results": len(search_results),
+            "total_results": len(aggregated_results),
             "execution_time_ms": execution_time_ms,
-            "results": search_results
+            "results": aggregated_results,
         }
         
     except HTTPException:

@@ -238,11 +238,11 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
-        className="w-full max-w-4xl h-[90vh] bg-gray-900/95 backdrop-blur-sm border border-gray-800/50 rounded-2xl shadow-2xl flex flex-col"
+        className="w-full max-w-4xl h-[90vh] bg-gray-900/95 backdrop-blur-lg border-0 rounded-3xl shadow-xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-800/50">
+        <div className="flex items-center justify-between p-6">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
               <Bot className="w-6 h-6 text-white" />
@@ -357,7 +357,7 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleActionClick(action)}
-                                className="bg-gray-800/50 border-gray-700 hover:bg-gray-700 text-gray-300 hover:text-white text-xs"
+                                className="bg-gray-900/40 border-gray-800/20 hover:bg-gray-800/70 text-gray-300 hover:text-white text-xs"
                               >
                                 {action.label}
                               </Button>
@@ -417,7 +417,7 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
                     <Bot className="w-5 h-5 text-white" />
                   </div>
-                  <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-4">
+                  <div className="bg-gray-800/40 rounded-xl p-4">
                     <div className="flex space-x-1">
                       <motion.div
                         className="w-2 h-2 bg-gray-400 rounded-full"
@@ -445,7 +445,7 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
         </ScrollArea>
 
         {/* Input */}
-        <div className="p-6 border-t border-gray-800/50">
+        <div className="p-6">
           <form 
             onSubmit={(e) => {
               e.preventDefault()
@@ -467,7 +467,7 @@ export function ChatInterface({ onClose, context, initialQuery }: ChatInterfaceP
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               placeholder="Ask me anything about your system..."
-              className="flex-1 bg-gray-800/50 border-gray-700 text-white placeholder-gray-400"
+              className="flex-1 bg-gray-900/50 border-gray-800/20 text-white placeholder-gray-400"
               disabled={isTyping}
             />
             

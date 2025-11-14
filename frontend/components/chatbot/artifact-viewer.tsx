@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Copy, Download, Maximize2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { X, Copy, Download, Maximize2, Eye, EyeOff } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +19,14 @@ export interface ArtifactViewerProps {
 
 export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showMetadata, setShowMetadata] = useState(false)
+
+  const cleanedMetadata = useMemo(() => {
+    if (!artifact.metadata) return {}
+    return Object.fromEntries(
+      Object.entries(artifact.metadata).filter(([_, value]) => value !== undefined && value !== null && value !== '')
+    )
+  }, [artifact.metadata])
 
   const handleCopy = async () => {
     if (await copyToClipboard(artifact.content)) {
@@ -114,17 +122,44 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
       </div>
 
       {/* Metadata */}
-      {artifact.metadata && Object.keys(artifact.metadata).length > 0 && (
+      {cleanedMetadata && Object.keys(cleanedMetadata).length > 0 && (
         <div className="p-4 border-t border-gray-800">
-          <h4 className="text-sm font-semibold text-gray-400 mb-2">Metadata</h4>
-          <div className="space-y-1 text-xs text-gray-500">
-            {Object.entries(artifact.metadata).map(([key, value]) => (
-              <div key={key} className="flex justify-between">
-                <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
-                <span className="text-gray-400">{String(value)}</span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-400">Metadata</h4>
+              <p className="text-xs text-gray-500">
+                {Object.keys(cleanedMetadata).length} field{Object.keys(cleanedMetadata).length === 1 ? '' : 's'}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-gray-400 hover:text-white"
+              onClick={() => setShowMetadata((prev) => !prev)}
+            >
+              {showMetadata ? (
+                <>
+                  <EyeOff className="w-4 h-4 mr-2" />
+                  Hide
+                </>
+              ) : (
+                <>
+                  <Eye className="w-4 h-4 mr-2" />
+                  Show
+                </>
+              )}
+            </Button>
           </div>
+          {showMetadata && (
+            <div className="space-y-1 text-xs text-gray-500">
+              {Object.entries(cleanedMetadata).map(([key, value]) => (
+                <div key={key} className="flex justify-between gap-4">
+                  <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
+                  <span className="text-gray-300 text-right">{String(value)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

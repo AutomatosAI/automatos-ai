@@ -79,7 +79,7 @@ export function MultimodalInput({
   return (
     <form onSubmit={handleSubmit} className="w-full">
       {/* Large input box with everything inside - ai-chatbot style */}
-      <div className="relative w-full rounded-3xl border border-orange-500/20 bg-muted/30 focus-within:border-orange-500/40 transition-all shadow-lg">
+      <div className="relative w-full rounded-3xl border border-orange-500/10 bg-transparent focus-within:border-orange-500/30 transition-all shadow-sm">
         {/* Textarea */}
         <Textarea
           ref={textareaRef}
@@ -92,7 +92,7 @@ export function MultimodalInput({
         />
         
         {/* Bottom toolbar - inside the input */}
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 border-t border-border/30">
+        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 border-t border-transparent">
           {/* Left side: Attachment + Model Selector */}
           <div className="flex items-center gap-2">
             <Button

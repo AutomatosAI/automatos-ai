@@ -64,8 +64,9 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
     }
   }
 
-  const handleQuerySubmit = async () => {
-    if (!query.trim() || !selectedSourceId) {
+  const handleQuerySubmit = async (forcedQuery?: string) => {
+    const queryToRun = (forcedQuery ?? query).trim()
+    if (!queryToRun || !selectedSourceId) {
       toast.error('Please enter a query and select a database')
       return
     }
@@ -80,7 +81,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source_id: selectedSourceId,
-          query: query
+          query: queryToRun
         })
       })
 
@@ -89,12 +90,13 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
         setGeneratedSQL(data.sql)
         setQueryResult(data.data) // Backend returns 'data' not 'results'
         setValidationResult({ valid: data.success })
+        setQuery(queryToRun)
         
         // Add to history
         setQueryHistory([
           {
             timestamp: new Date().toISOString(),
-            query: query,
+            query: queryToRun,
             sql: data.sql,
             rowCount: data.row_count || 0
           },
@@ -181,12 +183,14 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
   }
 
   const suggestedQueries = [
-    "Show me the top 10 customers by revenue",
-    "What's the monthly revenue trend for this year?",
-    "Find all orders from last week",
-    "Calculate the average order value by product category",
-    "Show me customers who haven't ordered in 30 days",
-    "What are the best selling products this month?"
+    "Using workflow_executions, break down completions vs failures by day over the last 14 days",
+    "From document_usage, summarize daily document search volume and average latency for the past 7 days",
+    "Plot hourly CPU and memory utilization from the system_metrics table over the last 24 hours",
+    "Highlight the most frequent CodeGraph queries this week based on codegraph_query_logs",
+    "Show chat sessions created per day over the last 14 days from the chats table",
+    "Report on the fastest agent task completion times this week using task_assignments",
+    "List the documents most frequently searched in the past month from document_usage",
+    "Compare average tool execution time by tool name over the last 14 days (tool_usage_logs)"
   ]
 
   return (
@@ -243,7 +247,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
               }}
             />
             <Button
-              onClick={handleQuerySubmit}
+              onClick={() => handleQuerySubmit()}
               disabled={isLoading || !query.trim() || !selectedSourceId}
               className="absolute bottom-2 right-2"
               size="sm"
@@ -268,7 +272,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
                   key={idx}
                   variant="outline"
                   className="cursor-pointer hover:bg-muted"
-                  onClick={() => setQuery(suggestion)}
+                  onClick={() => handleQuerySubmit(suggestion)}
                 >
                   {suggestion}
                 </Badge>

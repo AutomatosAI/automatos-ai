@@ -118,6 +118,7 @@
     "react-use": "17.4.0",
     "reactflow": "^11.11.4",
     "recharts": "2.8.0",
+    "remark-gfm": "^4.0.1",
     "sonner": "^1.7.4",
     "swr": "2.2.4",
     "tailwind-scrollbar-hide": "1.1.7",

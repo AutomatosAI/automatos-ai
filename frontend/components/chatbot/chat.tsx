@@ -11,6 +11,8 @@ import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'
 import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult } from '@/types'
+import { apiClient } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 export interface ChatProps {
   id: string
@@ -125,24 +127,149 @@ export function Chat({
   }, [])
   
   const handleDocumentSelect = useCallback((doc: DocumentReference) => {
+    const artifactId = `doc-${Date.now()}`
+    const initialContent = doc.excerpt || doc.preview || doc.content || 'Loading document...'
+
+    const curatedMetadata: Record<string, any> = {
+      document_id: doc.id,
+      filename: doc.filename,
+      similarity: doc.similarity,
+      chunk_count: doc.chunk_count ?? undefined,
+      preview_chunk_start: doc.preview_chunk_start ?? undefined,
+      preview_chunk_end: doc.preview_chunk_end ?? undefined,
+      has_full_content: doc.has_full_content ?? false,
+      preview_excerpt: doc.excerpt,
+      is_loading_full_content: doc.has_full_content ?? false,
+    }
+
     setSelectedArtifact({
-      id: `doc-${Date.now()}`,
+      id: artifactId,
       kind: 'text',
       title: doc.filename,
-      content: doc.excerpt,
-      metadata: doc,
+      content: initialContent,
+      metadata: curatedMetadata,
     })
     setIsArtifactViewerVisible(true)
+
+    if (!doc.id) {
+      return
+    }
+
+    apiClient.request(`/api/documents/${doc.id}/content`)
+      .then((data: any) => {
+        const fullContent = Array.isArray(data?.chunks)
+          ? data.chunks.map((chunk: any) => chunk?.content ?? '').filter(Boolean).join('\n\n')
+          : initialContent
+
+        setSelectedArtifact((current) => {
+          if (!current || current.id !== artifactId) {
+            return current
+          }
+          return {
+            ...current,
+            content: fullContent || initialContent,
+            metadata: {
+              ...(current.metadata || {}),
+              chunk_count: data?.chunk_count ?? current.metadata?.chunk_count,
+              document_id: data?.document_id ?? current.metadata?.document_id ?? doc.id,
+              is_loading_full_content: false,
+            },
+          }
+        })
+      })
+      .catch((error) => {
+        console.error('Failed to load document content', error)
+        toast.error('Failed to load full document content')
+        setSelectedArtifact((current) => {
+          if (!current || current.id !== artifactId) {
+            return current
+          }
+          return {
+            ...current,
+            metadata: {
+              ...(current.metadata || {}),
+              is_loading_full_content: false,
+              load_error: 'Unable to load full document',
+            },
+          }
+        })
+      })
   }, [])
   
   const handleDatabaseSelect = useCallback((db: DatabaseResult) => {
-    setSelectedArtifact({
-      id: `db-${Date.now()}`,
-      kind: 'text',
-      title: db.database,
-      content: `SQL Query:\n${db.sql}\n\nRows: ${db.row_count}\nExecution time: ${db.execution_time_ms}ms\n\nResults:\n${JSON.stringify(db.data.slice(0, 5), null, 2)}${db.data.length > 5 ? '\n\n... and ' + (db.data.length - 5) + ' more rows' : ''}`,
-      metadata: db,
-    })
+    const idBase = `db-${Date.now()}`
+    const columns = db.columns && db.columns.length > 0
+      ? db.columns
+      : (db.data && db.data.length > 0 ? Object.keys(db.data[0]) : [])
+
+    const summaryContentLines = [
+      `# ${db.database} Insight`,
+      `**Rows returned:** ${db.row_count}`,
+      `**Execution time:** ${db.execution_time_ms?.toFixed(0)} ms`,
+    ]
+ 
+    if (db.pandas_ai?.summary) {
+      summaryContentLines.push('', db.pandas_ai.summary)
+    }
+ 
+    if (db.data && db.data.length > 0) {
+      const numericColumns = columns.filter((col) =>
+        db.data!.some((row) => typeof row[col] === 'number' && !Number.isNaN(row[col]))
+      )
+
+      if (numericColumns.length > 0) {
+        summaryContentLines.push('', '## Key Metrics')
+        numericColumns.slice(0, 3).forEach((col) => {
+          const values = db.data!
+            .map((row) => (typeof row[col] === 'number' ? (row[col] as number) : null))
+            .filter((value): value is number => value !== null && !Number.isNaN(value))
+
+          if (values.length > 0) {
+            const max = Math.max(...values)
+            const min = Math.min(...values)
+            const avg = values.reduce((acc, val) => acc + val, 0) / values.length
+
+            summaryContentLines.push(
+              `- **${col}** → peak ${max.toFixed(2)}, low ${min.toFixed(2)}, avg ${avg.toFixed(2)}`
+            )
+          }
+        })
+      }
+    }
+
+    if (columns.length > 0 && db.data && db.data.length > 0) {
+      summaryContentLines.push('', '## Sample Data (first 5 rows)', '')
+      const headerRow = `| ${columns.join(' | ')} |`
+      const separatorRow = `| ${columns.map(() => '---').join(' | ')} |`
+      summaryContentLines.push(headerRow, separatorRow)
+      db.data.slice(0, 5).forEach((row) => {
+        const rowValues = columns.map((col) => {
+          const value = row[col]
+          if (value === null || value === undefined) return '-'
+          const str = String(value)
+          return str.length > 60 ? `${str.slice(0, 57)}…` : str
+        })
+        summaryContentLines.push(`| ${rowValues.join(' | ')} |`)
+      })
+    }
+
+    summaryContentLines.push('', '<details><summary>View SQL query</summary>', '', '```sql', db.sql, '```', '', '</details>')
+
+    const artifact = {
+      id: idBase,
+      kind: 'text' as const,
+      title: `${db.database} Insight`,
+      content: summaryContentLines.join('\n'),
+      metadata: {
+        database: db.database,
+        sql: db.sql,
+        row_count: db.row_count,
+        execution_time_ms: db.execution_time_ms,
+        pandas_ai: db.pandas_ai,
+      },
+    }
+
+    setSelectedArtifact(artifact)
     setIsArtifactViewerVisible(true)
   }, [])
 
@@ -150,10 +277,10 @@ export function Chat({
   const hasSentMessage = messages.length > 0
 
   const suggestedActions = [
-    "How does authentication work?",
-    "Search documents about deployment",
-    "Show me the top 10 customers",
-    "Explain the agent coordination system",
+    "Using the workflow_executions table, break down workflow completions and failures by day over the last 14 days and plot the trend",
+    "From the document_usage table, summarize daily document search volume and average response time for the past 7 days with a chart",
+    "Plot hourly CPU and memory utilization over the last 24 hours using the system_metrics table",
+    "Highlight the most frequent CodeGraph queries this week by counting entries in codegraph_query_logs and visualize their counts",
   ]
 
   return (
@@ -390,7 +517,7 @@ export function Chat({
 
           {/* Input Area */}
           {!isReadonly && (
-            <div className="sticky bottom-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t border-border">
+            <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
                 {/* Suggested Actions - above input */}
                 {!hasSentMessage && (
@@ -405,15 +532,15 @@ export function Chat({
                       >
                         <Button
                           variant="outline"
-                          className="h-auto w-full whitespace-normal p-3 text-left rounded-xl border-orange-500/30 hover:border-orange-500/50 hover:bg-orange-500/5"
+                          className="w-full rounded-xl border-orange-500/30 bg-transparent px-4 py-3 text-left text-sm font-medium leading-snug hover:border-orange-500/50 hover:bg-orange-500/5"
                           onClick={() => {
-                            sendMessage({
-                              role: 'user',
-                              parts: [{ type: 'text', text: suggestion }],
-                            })
+                            sendMessage(suggestion)
                           }}
+                          title={suggestion}
                         >
-                          {suggestion}
+                          <span className="block line-clamp-2 text-left text-sm text-foreground/90">
+                            {suggestion}
+                          </span>
                         </Button>
                       </motion.div>
                     ))}

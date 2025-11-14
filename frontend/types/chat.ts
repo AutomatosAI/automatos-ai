@@ -20,6 +20,18 @@ export interface Artifact {
   createdAt?: string
 }
 
+export interface PandasAIChart {
+  filename: string
+  mime_type: string
+  base64: string
+}
+
+export interface PandasAIInsight {
+  summary: string
+  charts?: PandasAIChart[]
+  error?: string
+}
+
 /**
  * Database query result
  */
@@ -30,6 +42,7 @@ export interface DatabaseResult {
   data: any[]
   columns: string[]
   execution_time_ms: number
+  pandas_ai?: PandasAIInsight
 }
 
 /**
@@ -51,7 +64,14 @@ export interface DocumentReference {
   id: number
   filename: string
   excerpt: string
+  content?: string
+  preview?: string
+  chunk_count?: number
+  chunk_index?: number
+  preview_chunk_start?: number
+  preview_chunk_end?: number
   similarity: number
+  has_full_content?: boolean
 }
 
 /**

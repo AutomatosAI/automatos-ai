@@ -18,12 +18,15 @@ from pydantic import BaseModel
 import httpx
 
 from database.database import get_db
+from services.llm_provider import create_llm_manager
+from services.pandas_ai_service import get_pandasai_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
 # Lazy initialization of LLM Manager
 _llm_manager = None
+
 
 def get_llm_manager():
     """
@@ -35,7 +38,6 @@ def get_llm_manager():
     global _llm_manager
     if _llm_manager is None:
         try:
-            from services.llm_provider import create_llm_manager
             # Use orchestrator settings (default for chatbot)
             _llm_manager = create_llm_manager(service_name="orchestrator")
         except Exception as e:
@@ -141,10 +143,17 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 results = []
                 for doc in data.get('results', [])[:8]:
                     results.append({
-                        "id": doc.get('id'),
-                        "filename": doc.get('filename'),
+                        "id": doc.get('document_id'),
+                        "filename": (doc.get('source', {}) or {}).get('filename') if isinstance(doc.get('source'), dict) else doc.get('filename'),
                         "excerpt": doc.get('excerpt', ''),
-                        "similarity": doc.get('similarity', 0.0)
+                        "content": doc.get('preview', ''),
+                        "preview": doc.get('preview', ''),
+                        "chunk_count": doc.get('chunk_count'),
+                        "chunk_index": doc.get('chunk_index'),
+                        "preview_chunk_start": doc.get('preview_chunk_start'),
+                        "preview_chunk_end": doc.get('preview_chunk_end'),
+                        "similarity": doc.get('similarity', 0.0),
+                        "has_full_content": doc.get('full_content_available', False)
                     })
                 
                 return {
@@ -160,7 +169,11 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
+async def query_database_tool(
+    query: str,
+    database_name: Optional[str] = None,
+    analysis_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
     """Query database using natural language via knowledge source endpoints."""
     try:
         logger.info(f"[Database] Querying: {query}, DB: {database_name}")
@@ -481,9 +494,19 @@ Then provide a helpful, technical response based on the search results."""
                         elif tool_name == "query_database":
                             tool_result = await query_database_tool(
                                 tool_input.get("query", ""),
-                                tool_input.get("database_name")
+                                tool_input.get("database_name"),
+                                analysis_prompt=chat_query.query,
                             )
                             if tool_result.get("success"):
+                                pandasai = get_pandasai_service()
+                                if pandasai:
+                                    insight = pandasai.generate_insight(
+                                        analysis_prompt or tool_input.get("query", ""),
+                                        tool_result.get("data", []),
+                                        tool_result.get("columns", []),
+                                    )
+                                    if insight:
+                                        tool_result["pandas_ai"] = insight
                                 database_results.append(tool_result)
                         else:
                             tool_result = {"error": f"Unknown tool: {tool_name}"}

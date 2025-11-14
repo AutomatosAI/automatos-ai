@@ -22,49 +22,7 @@ import 'prismjs/components/prism-typescript'
 import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-json'
 import { apiClient } from '@/lib/api-client'
-
-interface DatabaseResult {
-  database: string
-  sql: string
-  row_count: number
-  data: any[]
-  columns: string[]
-  execution_time_ms: number
-}
-
-interface ChatMessage {
-  id: string
-  type: 'user' | 'bot' | 'system'
-  content: string
-  timestamp: string
-  codeSnippets?: CodeSnippet[]
-  documents?: DocumentReference[]
-  database_results?: DatabaseResult[]
-  metadata?: {
-    intent?: string
-    confidence?: number
-    source: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
-    processing_time?: number
-    tools_used?: string[]
-    database_count?: number
-  }
-}
-
-interface CodeSnippet {
-  language: string
-  code: string
-  file_path: string
-  line_number?: number
-  symbol_name?: string
-  explanation?: string
-}
-
-interface DocumentReference {
-  id: number
-  filename: string
-  excerpt: string
-  similarity: number
-}
+import type { ChatMessage, CodeSnippet, DocumentReference, DatabaseResult, PandasAIChart } from '@/types'
 
 export function ChatbotInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -513,6 +471,36 @@ async def search_symbols(query: str, limit: int = 10):
                                         <p className="text-xs text-gray-500 mt-2 text-center">
                                           +{dbResult.row_count - 3} more rows
                                         </p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* PandasAI Insight */}
+                                  {dbResult.pandas_ai && (
+                                    <div className="mt-4 space-y-3">
+                                      {dbResult.pandas_ai.summary && (
+                                        <div className="p-3 rounded bg-gray-900/40 border border-gray-800/60 text-sm text-gray-200">
+                                          {dbResult.pandas_ai.summary}
+                                        </div>
+                                      )}
+                                      {dbResult.pandas_ai.charts && dbResult.pandas_ai.charts.length > 0 && (
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                          {dbResult.pandas_ai.charts.map((chart, chartIdx) => (
+                                            <div
+                                              key={`${chart.filename}-${chartIdx}`}
+                                              className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3 flex flex-col items-center"
+                                            >
+                                              <img
+                                                src={`data:${chart.mime_type};base64,${chart.base64}`}
+                                                alt={chart.filename}
+                                                className="rounded-md border border-gray-800/40 max-h-64 object-contain"
+                                              />
+                                              <span className="mt-2 text-xs text-gray-500">
+                                                {chart.filename}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
                                       )}
                                     </div>
                                   )}

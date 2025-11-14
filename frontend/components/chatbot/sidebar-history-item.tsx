@@ -68,8 +68,8 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
       className={`
         w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-all
         ${isActive 
-          ? 'bg-gray-800 text-white' 
-          : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'
+          ? 'bg-orange-500/10 border border-orange-500/40 text-white' 
+          : 'text-gray-400 hover:bg-orange-500/5 hover:border hover:border-orange-500/20 hover:text-white'
         }
         ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}
       `}

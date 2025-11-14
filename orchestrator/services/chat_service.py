@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 import httpx
 
+from services.pandas_ai_service import get_pandasai_service
+
 # Import models - handle both models.py and models/ package
 import sys
 import importlib.util
@@ -95,9 +97,16 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                     # RAG API returns nested structure: {content, source: {filename}, ...}
                     results.append({
                         "id": doc.get('document_id'),
-                        "filename": doc.get('source', {}).get('filename') if isinstance(doc.get('source'), dict) else None,
-                        "excerpt": doc.get('content', ''),
-                        "similarity": doc.get('similarity', 0.0)
+                        "filename": (doc.get('source', {}) or {}).get('filename') if isinstance(doc.get('source'), dict) else doc.get('filename'),
+                        "excerpt": doc.get('excerpt', ''),
+                        "content": doc.get('preview', ''),
+                        "preview": doc.get('preview', ''),
+                        "chunk_count": doc.get('chunk_count'),
+                        "chunk_index": doc.get('chunk_index'),
+                        "preview_chunk_start": doc.get('preview_chunk_start'),
+                        "preview_chunk_end": doc.get('preview_chunk_end'),
+                        "similarity": doc.get('similarity', 0.0),
+                        "has_full_content": doc.get('full_content_available', False)
                     })
                 
                 logger.info(f"[RAG Tool] Formatted result: {results[0] if results else 'NO RESULTS'}")
@@ -110,7 +119,11 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
+async def query_database_tool(
+    query: str,
+    database_name: Optional[str] = None,
+    analysis_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
     """Query database using natural language via knowledge source endpoints."""
     try:
         logger.info(f"[Database Tool] Querying: {query}, DB: {database_name}")
@@ -156,7 +169,7 @@ async def query_database_tool(query: str, database_name: Optional[str] = None) -
 
             if response.status_code == 200:
                 data = response.json()
-                return {
+                tool_result = {
                     "success": True,
                     "database": data.get('database') or selected_source.get('name', ''),
                     "sql": data.get('sql', ''),
@@ -165,6 +178,16 @@ async def query_database_tool(query: str, database_name: Optional[str] = None) -
                     "columns": data.get('columns', []),
                     "execution_time_ms": data.get('execution_time_ms', 0)
                 }
+                pandasai = get_pandasai_service()
+                if pandasai:
+                    insight = pandasai.generate_insight(
+                        analysis_prompt or query,
+                        tool_result.get('data', []),
+                        tool_result.get('columns', []),
+                    )
+                    if insight:
+                        tool_result["pandas_ai"] = insight
+                return tool_result
             else:
                 return {"success": False, "error": f"API returned {response.status_code}"}
 
@@ -456,6 +479,8 @@ class StreamingChatService:
                     messages=llm_messages,
                     tools=tools or CHAT_TOOLS
                 )
+
+                latest_user_question = self._extract_latest_user_text(messages)
                 
                 # Handle tool calls if present
                 if response.tool_calls:
@@ -494,7 +519,8 @@ class StreamingChatService:
                         elif tool_name == 'query_database':
                             result = await query_database_tool(
                                 query=tool_args.get('query', ''),
-                                database_name=tool_args.get('database_name')
+                                database_name=tool_args.get('database_name'),
+                                analysis_prompt=latest_user_question,
                             )
                             if result.get('success'):
                                 tool_data['database_results'] = [{
@@ -503,7 +529,8 @@ class StreamingChatService:
                                     'row_count': result.get('row_count'),
                                     'data': result.get('data'),
                                     'columns': result.get('columns'),
-                                    'execution_time_ms': result.get('execution_time_ms')
+                                    'execution_time_ms': result.get('execution_time_ms'),
+                                    'pandas_ai': result.get('pandas_ai')
                                 }]
                         else:
                             result = {"error": f"Unknown tool: {tool_name}"}
@@ -619,11 +646,14 @@ class StreamingChatService:
         for msg in messages:
             if msg.get('parts'):
                 # Extract text content from parts
-                text_parts = [
-                    p.get('text', '') 
-                    for p in msg['parts'] 
-                    if p.get('type') == 'text'
-                ]
+                text_parts = []
+                for p in msg['parts']:
+                    if p.get('type') != 'text':
+                        continue
+                    text_value = p.get('text')
+                    if text_value is None:
+                        continue
+                    text_parts.append(str(text_value))
                 content = '\n'.join(text_parts)
             else:
                 content = msg.get('content', '')
@@ -634,6 +664,23 @@ class StreamingChatService:
             })
         
         return llm_messages
+
+    def _extract_latest_user_text(self, messages: List[Dict[str, Any]]) -> str:
+        for msg in reversed(messages):
+            if msg.get('role') != 'user':
+                continue
+            if msg.get('parts'):
+                text_parts = [
+                    part.get('text', '')
+                    for part in msg['parts']
+                    if part.get('type') == 'text'
+                ]
+                content = '\n'.join(filter(None, text_parts))
+            else:
+                content = msg.get('content', '')
+            if content:
+                return content
+        return ''
     
     def _format_sse_chunk(self, chunk: Dict[str, Any]) -> str:
         """Format chunk as SSE data - compatible with @ai-sdk/react"""

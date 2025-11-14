@@ -83,7 +83,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
   })
 
   return (
-    <div className="flex flex-col h-full w-64 bg-gray-900 border-r border-gray-800">
+    <div className="flex flex-col h-full w-64 bg-transparent border-r border-orange-500/20 backdrop-blur-lg">
       {/* Header */}
       <div className="p-4 space-y-4">
         <div className="flex items-center justify-between">
@@ -105,12 +105,12 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search chats..."
-            className="pl-10 bg-gray-800/50 border-gray-700 text-white placeholder-gray-400"
+            className="pl-10 bg-gray-900/40 border-gray-800/20 text-white placeholder-gray-400"
           />
         </div>
       </div>
 
-      <Separator className="bg-gray-800" />
+      <Separator className="bg-gray-800/40" />
 
       {/* Chat History */}
       <ScrollArea className="flex-1 px-2">
@@ -127,7 +127,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
             <>
               {todayChats.length > 0 && (
                 <div>
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     Today
                   </div>
                   <div className="space-y-1">
@@ -145,7 +145,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
 
               {yesterdayChats.length > 0 && (
                 <div>
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     Yesterday
                   </div>
                   <div className="space-y-1">
@@ -163,7 +163,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
 
               {olderChats.length > 0 && (
                 <div>
-                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     Older
                   </div>
                   <div className="space-y-1">
@@ -183,12 +183,12 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
         </div>
       </ScrollArea>
 
-      <Separator className="bg-gray-800" />
+      <Separator className="bg-gray-800/40" />
 
       {/* User Section */}
       {user && (
         <div className="p-4">
-          <div className="flex items-center space-x-3 p-2 rounded-lg bg-gray-800/50">
+          <div className="flex items-center space-x-3 p-2 rounded-lg bg-gray-900/40 border border-gray-800/30">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
               <span className="text-sm font-semibold text-white">
                 {user.name?.[0] || user.email?.[0] || 'U'}

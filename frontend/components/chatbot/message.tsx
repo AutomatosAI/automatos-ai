@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Bot, User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,8 @@ import { voteMessage } from '@/lib/chat/api'
 import { copyToClipboard, formatTimestamp } from '@/lib/utils'
 import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, UseChatHelpers } from '@/types'
 import { toast } from 'sonner'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export interface MessageProps {
   chatId: string
@@ -57,13 +59,85 @@ export function Message({
     }
   }
 
+  const markdownComponents = useMemo(() => ({
+    p: ({ children }: any) => (
+      <p className="text-gray-200 leading-relaxed">{children}</p>
+    ),
+    strong: ({ children }: any) => (
+      <strong className="text-gray-100 font-semibold">{children}</strong>
+    ),
+    em: ({ children }: any) => <em className="text-gray-300 italic">{children}</em>,
+    a: ({ href, children }: any) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-orange-300 hover:text-orange-200 underline"
+      >
+        {children}
+      </a>
+    ),
+    ul: ({ children }: any) => (
+      <ul className="list-disc pl-6 space-y-3 text-gray-100">{children}</ul>
+    ),
+    ol: ({ children }: any) => (
+      <ol className="list-decimal pl-6 space-y-3 text-gray-100">{children}</ol>
+    ),
+    li: ({ children }: any) => (
+      <li className="bg-gray-900/40 border border-gray-800/60 rounded-lg px-4 py-3 shadow-sm">
+        <div className="space-y-1 text-gray-100">{children}</div>
+      </li>
+    ),
+    code: ({ inline, children }: any) => (
+      inline ? (
+        <code className="rounded bg-gray-900/60 px-1.5 py-0.5 text-xs text-orange-200">
+          {children}
+        </code>
+      ) : (
+        <pre className="rounded-lg bg-gray-900/70 p-4 text-xs overflow-x-auto border border-gray-800/60">
+          <code>{children}</code>
+        </pre>
+      )
+    ),
+    table: ({ children }: any) => (
+      <div className="overflow-x-auto rounded-xl border border-gray-800/60 bg-gray-900/40">
+        <table className="min-w-full divide-y divide-gray-800/70 text-sm text-gray-100">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }: any) => (
+      <thead className="bg-gray-900/60 text-xs uppercase tracking-wide text-gray-400">
+        {children}
+      </thead>
+    ),
+    tbody: ({ children }: any) => (
+      <tbody className="divide-y divide-gray-800/70">{children}</tbody>
+    ),
+    tr: ({ children }: any) => (
+      <tr className="hover:bg-gray-900/60 transition-colors">{children}</tr>
+    ),
+    th: ({ children }: any) => (
+      <th className="px-4 py-3 text-left font-semibold text-gray-300">
+        {children}
+      </th>
+    ),
+    td: ({ children }: any) => (
+      <td className="px-4 py-3 align-top text-gray-200">{children}</td>
+    ),
+  }), [])
+
   const renderMessageContent = () => {
     // Handle AI SDK format (content field)
     if ('content' in message && message.content && (!message.parts || message.parts.length === 0)) {
       return (
-        <div className="space-y-3">
-          <p className="text-gray-300 whitespace-pre-wrap">{message.content}</p>
-        </div>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          className="prose prose-invert prose-sm max-w-none space-y-3"
+          components={markdownComponents}
+        >
+          {message.content}
+        </ReactMarkdown>
       )
     }
 
@@ -77,9 +151,14 @@ export function Message({
         {message.parts.map((part, index) => {
           if (part.type === 'text' && 'text' in part) {
             return (
-              <p key={index} className="text-gray-300 whitespace-pre-wrap">
+              <ReactMarkdown
+                key={index}
+                remarkPlugins={[remarkGfm]}
+                className="prose prose-invert prose-sm max-w-none space-y-3"
+                components={markdownComponents}
+              >
                 {part.text}
-              </p>
+              </ReactMarkdown>
             )
           }
 
@@ -189,20 +268,14 @@ export function Message({
           )}
 
           {/* Documents */}
-          {(() => {
-            console.log('[Message] Rendering - has documents?', !!message.documents, 'count:', message.documents?.length)
-            console.log('[Message] Documents array:', message.documents)
-            return null
-          })()}
           {message.documents && message.documents.length > 0 && (
             <div className="space-y-2">
               {message.documents.map((doc, idx) => {
-                console.log(`[Message] Document ${idx}:`, JSON.stringify(doc, null, 2))
                 return (
                 <button
                   key={idx}
                   onClick={() => onDocumentSelect?.(doc)}
-                  className="w-full text-left p-3 rounded-lg bg-gray-800/30 border border-gray-700/50 hover:bg-gray-800/50 hover:border-gray-600 transition-all group"
+                  className="w-full text-left rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 hover:border-blue-400/60 hover:bg-blue-500/10 transition-all group"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
@@ -214,6 +287,21 @@ export function Message({
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
                   </div>
+                  {doc.excerpt && (
+                    <p className="mt-2 line-clamp-3 text-sm text-gray-200 opacity-90">
+                      {doc.excerpt}
+                    </p>
+                  )}
+                  {doc.chunk_count !== undefined && (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
+                      <span>{doc.chunk_count} chunks indexed</span>
+                      {doc.chunk_index !== undefined && (
+                        <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] uppercase tracking-wide text-blue-200">
+                          match @ chunk {doc.chunk_index}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </button>
               )})}
             </div>
@@ -238,10 +326,36 @@ export function Message({
                     </div>
                     <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-green-300" />
                   </div>
-                  
+
                   <div className="mt-2 p-2 bg-gray-900/50 rounded text-xs font-mono text-gray-300 overflow-x-auto">
                     {dbResult.sql.substring(0, 100)}{dbResult.sql.length > 100 ? '...' : ''}
                   </div>
+
+                  {dbResult.pandas_ai?.summary && (
+                    <div className="mt-3 text-sm text-gray-200 bg-gray-900/40 border border-gray-800/60 rounded p-3 text-left">
+                      {dbResult.pandas_ai.summary}
+                    </div>
+                  )}
+
+                  {dbResult.pandas_ai?.charts && dbResult.pandas_ai.charts.length > 0 && (
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {dbResult.pandas_ai.charts.slice(0, 2).map((chart, chartIdx) => (
+                        <div
+                          key={`${chart.filename}-${chartIdx}`}
+                          className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-2 flex flex-col items-center"
+                        >
+                          <img
+                            src={`data:${chart.mime_type};base64,${chart.base64}`}
+                            alt={chart.filename}
+                            className="rounded-md border border-gray-800/40 max-h-32 object-contain"
+                          />
+                          <span className="mt-1 text-xs text-gray-500 truncate w-full text-center">
+                            {chart.filename}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
