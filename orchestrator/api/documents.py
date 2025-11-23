@@ -653,65 +653,105 @@ async def semantic_search(
                     existing["best_chunk_index"] = row.chunk_index
 
         # Fetch limited previews + stats for surfaced docs
-        aggregated_results: List[Dict[str, Any]] = []
-        for doc_id in doc_order[:limit]:
-            entry = grouped_results[doc_id]
-
-            chunk_count_query = text(
-                """
-                SELECT COUNT(*) AS chunk_count
-                FROM document_chunks
-                WHERE document_id = :document_id
-                """
-            )
-            chunk_count_row = db.execute(chunk_count_query, {"document_id": doc_id}).fetchone()
-            chunk_count = int(chunk_count_row.chunk_count) if chunk_count_row and chunk_count_row.chunk_count is not None else 0
-
-            best_chunk_index = entry.get("best_chunk_index") or 0
-            preview_start_index = max(best_chunk_index - PREVIEW_CONTEXT_RADIUS, 0)
-            preview_end_index = preview_start_index + PREVIEW_CHUNK_LIMIT - 1
-
-            preview_query = text(
-                """
-                SELECT string_agg(content, '\n\n' ORDER BY chunk_index) AS preview_content
-                FROM document_chunks
-                WHERE document_id = :document_id
-                  AND chunk_index BETWEEN :start_index AND :end_index
-                """
-            )
-            preview_row = db.execute(
-                preview_query,
-                {
-                    "document_id": doc_id,
+        # Collect doc_ids and calculate preview ranges upfront
+        doc_ids = doc_order[:limit]
+        if not doc_ids:
+            aggregated_results = []
+        else:
+            # Calculate preview ranges for each document
+            doc_preview_ranges: Dict[int, Dict[str, int]] = {}
+            for doc_id in doc_ids:
+                entry = grouped_results[doc_id]
+                best_chunk_index = entry.get("best_chunk_index") or 0
+                preview_start_index = max(best_chunk_index - PREVIEW_CONTEXT_RADIUS, 0)
+                preview_end_index = preview_start_index + PREVIEW_CHUNK_LIMIT - 1
+                doc_preview_ranges[doc_id] = {
                     "start_index": preview_start_index,
                     "end_index": preview_end_index,
-                },
-            ).fetchone()
-
-            preview_content = preview_row.preview_content if preview_row and preview_row.preview_content else ""
-            preview_truncated = False
-            if preview_content and len(preview_content) > PREVIEW_CHAR_LIMIT:
-                preview_content = preview_content[:PREVIEW_CHAR_LIMIT] + "…"
-                preview_truncated = True
-            if preview_end_index < (chunk_count - 1):
-                preview_truncated = True
-
-            aggregated_results.append(
-                {
-                    "document_id": doc_id,
-                    "excerpt": entry["best_excerpt"],
-                    "similarity": entry["best_similarity"],
-                    "chunk_index": entry["best_chunk_index"],
-                    "chunk_count": chunk_count,
-                    "metadata": entry["metadata"],
-                    "source": entry["source"],
-                    "preview": preview_content,
-                    "preview_truncated": preview_truncated,
-                    "full_content_available": chunk_count > 0,
-                    "preview_chunk_start": preview_start_index,
-                    "preview_chunk_end": min(preview_end_index, max(chunk_count - 1, 0)),
                 }
+
+            # Batch query: Get chunk counts for all documents at once
+            chunk_count_query = text(
+                """
+                SELECT document_id, COUNT(*) AS chunk_count
+                FROM document_chunks
+                WHERE document_id = ANY(:document_ids)
+                GROUP BY document_id
+                """
             )
+            chunk_count_rows = db.execute(chunk_count_query, {"document_ids": doc_ids}).fetchall()
+            chunk_counts_map: Dict[int, int] = {
+                int(row.document_id): int(row.chunk_count) for row in chunk_count_rows
+            }
+
+            # Batch query: Get previews for all documents using UNION ALL
+            # Build UNION ALL query with one SELECT per document
+            preview_queries = []
+            preview_params: Dict[str, Any] = {}
+            for idx, doc_id in enumerate(doc_ids):
+                ranges = doc_preview_ranges[doc_id]
+                start_param = f"start_{idx}"
+                end_param = f"end_{idx}"
+                doc_param = f"doc_{idx}"
+                preview_params[start_param] = ranges["start_index"]
+                preview_params[end_param] = ranges["end_index"]
+                preview_params[doc_param] = doc_id
+                
+                preview_queries.append(
+                    f"""
+                    SELECT 
+                        :{doc_param} AS document_id,
+                        string_agg(content, '\n\n' ORDER BY chunk_index) AS preview_content
+                    FROM document_chunks
+                    WHERE document_id = :{doc_param}
+                      AND chunk_index BETWEEN :{start_param} AND :{end_param}
+                    """
+                )
+
+            if preview_queries:
+                preview_query = text(" UNION ALL ".join(preview_queries))
+                preview_rows = db.execute(preview_query, preview_params).fetchall()
+                previews_map: Dict[int, str] = {
+                    int(row.document_id): (row.preview_content if row.preview_content else "")
+                    for row in preview_rows
+                }
+            else:
+                previews_map = {}
+
+            # Build aggregated results using batched data
+            aggregated_results: List[Dict[str, Any]] = []
+            for doc_id in doc_ids:
+                entry = grouped_results[doc_id]
+                chunk_count = chunk_counts_map.get(doc_id, 0)
+                
+                ranges = doc_preview_ranges[doc_id]
+                preview_start_index = ranges["start_index"]
+                preview_end_index = ranges["end_index"]
+                
+                preview_content = previews_map.get(doc_id, "")
+                preview_truncated = False
+                if preview_content and len(preview_content) > PREVIEW_CHAR_LIMIT:
+                    preview_content = preview_content[:PREVIEW_CHAR_LIMIT] + "…"
+                    preview_truncated = True
+                if preview_end_index < (chunk_count - 1):
+                    preview_truncated = True
+
+                aggregated_results.append(
+                    {
+                        "document_id": doc_id,
+                        "excerpt": entry["best_excerpt"],
+                        "similarity": entry["best_similarity"],
+                        "chunk_index": entry["best_chunk_index"],
+                        "chunk_count": chunk_count,
+                        "metadata": entry["metadata"],
+                        "source": entry["source"],
+                        "preview": preview_content,
+                        "preview_truncated": preview_truncated,
+                        "full_content_available": chunk_count > 0,
+                        "preview_chunk_start": preview_start_index,
+                        "preview_chunk_end": min(preview_end_index, max(chunk_count - 1, 0)),
+                    }
+                )
  
         execution_time_ms = int((time.time() - start_time) * 1000)
 

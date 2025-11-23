@@ -46,6 +46,7 @@ class LLMResponse:
     provider: str = None
     tool_calls: List[Dict[str, Any]] = None  # PRD-17: Support function calling
     finish_reason: str = None  # PRD-17: Track if stopped for tool use
+    additional_blocks: List[Dict[str, Any]] = None  # Additional content blocks (images, documents, etc.)
 
 
 class BaseLLMProvider(ABC):

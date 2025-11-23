@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Brain,
@@ -124,11 +124,33 @@ export function EnhancedOrchestratorView({
   const [historicalData, setHistoricalData] = useState<any>(null)
   const [executionOptions, setExecutionOptions] = useState<ExecutionOption[]>([])
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(executionId ?? null)
+  // Track whether user has manually changed selection to prevent prop from overwriting user choice
+  const userChangedSelectionRef = useRef(false)
+  const previousExecutionIdRef = useRef<string | undefined>(executionId)
 
+  // Sync selectedExecutionId with executionId prop, but respect user's manual selection
+  // - If prop changes to a NEW value: always update (prop-driven navigation overrides user selection)
+  // - If prop stays the same but user manually changed: don't overwrite user's choice
+  // - If prop is cleared: only clear if user hasn't manually changed
   useEffect(() => {
-    if (executionId) {
+    // Prop changed to a new value - always update (this is intentional navigation)
+    if (executionId && executionId !== previousExecutionIdRef.current) {
       setSelectedExecutionId(executionId)
+      userChangedSelectionRef.current = false // Reset flag since this is prop-driven
+      previousExecutionIdRef.current = executionId
     }
+    // Prop is set and user hasn't manually changed - allow prop to sync
+    else if (executionId && !userChangedSelectionRef.current) {
+      setSelectedExecutionId(executionId)
+      previousExecutionIdRef.current = executionId
+    }
+    // Prop is cleared and user hasn't manually changed - clear selection
+    else if (!executionId && !userChangedSelectionRef.current) {
+      setSelectedExecutionId(null)
+      previousExecutionIdRef.current = undefined
+    }
+    // If user has manually changed and prop hasn't changed to a new value, do nothing
+    // (preserves user's manual selection)
   }, [executionId])
 
   // Load execution list so historical runs can be selected
@@ -798,7 +820,10 @@ export function EnhancedOrchestratorView({
                 </span>
                 <Select
                   value={selectedExecutionId ?? undefined}
-                  onValueChange={(value) => setSelectedExecutionId(value)}
+                  onValueChange={(value) => {
+                    userChangedSelectionRef.current = true
+                    setSelectedExecutionId(value)
+                  }}
                 >
                   <SelectTrigger className="w-[220px]">
                     <SelectValue placeholder="Select execution" />

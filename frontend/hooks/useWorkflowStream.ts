@@ -67,6 +67,7 @@ export function useWorkflowStream({
   
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoDisconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const shouldConnectRef = useRef(true);
 
   const disconnect = useCallback(() => {
@@ -75,6 +76,11 @@ export function useWorkflowStream({
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    
+    if (autoDisconnectTimeoutRef.current) {
+      clearTimeout(autoDisconnectTimeoutRef.current);
+      autoDisconnectTimeoutRef.current = null;
     }
     
     if (eventSourceRef.current) {
@@ -139,10 +145,14 @@ export function useWorkflowStream({
                 onWorkflowComplete(data.data);
               }
               // Auto-disconnect on completion
-              setTimeout(() => disconnect(), 1000);
+              if (autoDisconnectTimeoutRef.current) {
+                clearTimeout(autoDisconnectTimeoutRef.current);
+              }
+              autoDisconnectTimeoutRef.current = setTimeout(() => disconnect(), 1000);
               break;
               
             case 'error':
+            {
               console.error('❌ [useWorkflowStream] Server error:', data);
               const errorMsg = data.data?.message || 'Server error';
               setError(errorMsg);
@@ -150,6 +160,7 @@ export function useWorkflowStream({
                 onError(errorMsg);
               }
               break;
+            }
               
             default:
               console.warn('[useWorkflowStream] Unknown event type:', data.type);

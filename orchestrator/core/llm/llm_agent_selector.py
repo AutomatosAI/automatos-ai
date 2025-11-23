@@ -1151,6 +1151,8 @@ Provide your response in this structure:
         elif not required_tags:
             required_tags = []
         
+        required_type = subtask.get('agent_type')
+        
         requirements = [req for req in required_skills + required_tags if isinstance(req, str) and req.strip()]
             
         if not requirements:
@@ -1161,8 +1163,6 @@ Provide your response in this structure:
             f"🔍 Matching subtask {subtask_id}: skills={required_skills}, tags={required_tags}, "
             f"desc='{subtask.get('description', '')[:100]}'"
         )
-        
-        required_type = subtask.get('agent_type')
         
         if not requirements and not required_type:
             # No requirements - return all agents with default score

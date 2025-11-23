@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Dict, Any, List
 from uuid import UUID
@@ -5,6 +6,8 @@ from decimal import Decimal
 from datetime import datetime, date
 
 from sqlalchemy import create_engine, text
+
+logger = logging.getLogger(__name__)
 
 
 def make_json_serializable(obj):
@@ -103,22 +106,27 @@ class DatabaseIntrospectionService:
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
                             except Exception:
+                                logger.warning(
+                                    f"Failed to sample column {col_name} in {table}",
+                                    exc_info=True
+                                )
                                 try:
                                     conn.rollback()
                                 except Exception:
-                                    pass
-                                col["samples"] = []
-                        columns.append(col)
-
+                                    logger.debug("Rollback failed or unnecessary", exc_info=True)
                     # Row count
                     try:
                         cnt = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.\"{table}\""))
                         row_count = cnt.scalar() or 0
                     except Exception:
+                        logger.warning(
+                            f"Failed to count rows in {schema}.{table}",
+                            exc_info=True
+                        )
                         try:
                             conn.rollback()
                         except Exception:
-                            pass
+                            logger.debug("Rollback failed or unnecessary", exc_info=True)
                         row_count = 0
 
                     metadata["tables"].append({

@@ -467,8 +467,7 @@ Begin by analyzing what information you need to complete this task.
                     json_obj_str = json_str[start_idx:end_idx]
                     return json.loads(json_obj_str)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON in function call: {e}")
-            logger.error(f"JSON string: {json_obj_str if 'json_obj_str' in locals() else 'N/A'}")
+            logger.exception(f"Failed to parse JSON in function call. JSON string: {locals().get('json_obj_str', 'N/A')}")
         except Exception as e:
             logger.error(f"Failed to extract function call: {e}")
         

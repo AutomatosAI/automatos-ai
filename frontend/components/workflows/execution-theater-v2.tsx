@@ -173,6 +173,24 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
   const [currentExecutionId, setCurrentExecutionId] = useState<number | null>(null)
   const [activeView, setActiveView] = useState<'orchestrator' | 'analytics'>('orchestrator')
 
+  const loadExecutionById = useCallback(async (executionId: number) => {
+    try {
+      console.log('🔄 Fetching execution data for ID:', executionId)
+      const executionDetails = await apiClient.getWorkflowExecution(executionId.toString())
+      console.log('📦 Received execution data:', {
+        status: executionDetails.status,
+        subtasks: executionDetails.output_data?.subtasks?.length || 0,
+        started_at: executionDetails.started_at
+      })
+      setExecutionData((prev: any) => ({
+        ...prev,
+        execution: executionDetails
+      }))
+    } catch (err) {
+      console.error('❌ Error loading execution by ID:', err)
+    }
+  }, [])
+
   // SSE for real-time workflow updates (PRD-28 - replaces polling!)
   const { isConnected: sseConnected, error: sseError } = useWorkflowStream({
     executionId: currentExecutionId,
@@ -184,14 +202,14 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
       if (currentExecutionId) {
         loadExecutionById(currentExecutionId)
       }
-    }, [currentExecutionId]),
+    }, [currentExecutionId, loadExecutionById]),
     onWorkflowComplete: useCallback((data) => {
       console.log('✅ [SSE] Workflow completed:', data)
       setIsExecuting(false)
       if (currentExecutionId) {
         loadExecutionById(currentExecutionId)
       }
-    }, [currentExecutionId]),
+    }, [currentExecutionId, loadExecutionById]),
     onLog: useCallback((log) => {
       console.log('📋 [SSE] Log:', log.level, log.message, log.details)
     }, []),
@@ -250,7 +268,7 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
       default:
         console.log('❓ Unhandled WebSocket message type:', message.type)
     }
-  }, [currentExecutionId])
+  }, [currentExecutionId, loadExecutionById])
 
   // WebSocket connection with proper execution ID handling
   const { isConnected, error: wsError } = useWorkflowWebSocket({
@@ -259,24 +277,6 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
     onMessage: handleWebSocketMessage,
     autoConnect: !!currentExecutionId
   })
-
-  const loadExecutionById = async (executionId: number) => {
-    try {
-      console.log('🔄 Fetching execution data for ID:', executionId)
-      const executionDetails = await apiClient.getWorkflowExecution(executionId.toString())
-      console.log('📦 Received execution data:', {
-        status: executionDetails.status,
-        subtasks: executionDetails.output_data?.subtasks?.length || 0,
-        started_at: executionDetails.started_at
-      })
-      setExecutionData((prev: any) => ({
-        ...prev,
-        execution: executionDetails
-      }))
-    } catch (err) {
-      console.error('❌ Error loading execution by ID:', err)
-    }
-  }
 
   // Load workflow data (NO MORE POLLING! SSE handles real-time updates)
   useEffect(() => {

@@ -13,7 +13,6 @@ AWS Bedrock unified provider for multiple LLM models:
 Bedrock acts as a cost-effective gateway to multiple providers.
 """
 
-import os
 import json
 import logging
 from typing import Dict, Any, List, Optional
@@ -31,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 class BedrockProvider(BaseLLMProvider):
     """AWS Bedrock provider implementation - gateway to multiple LLM models"""
+    
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        self.bedrock_api_key: Optional[str] = None  # Store API key for header injection
     
     # Model ID mappings for easier use
     MODEL_IDS = {
@@ -60,8 +63,8 @@ class BedrockProvider(BaseLLMProvider):
         if boto3 is None:
             raise ImportError("boto3 package not installed. Run: pip install boto3")
         
-        # Get region
-        aws_region = getattr(self.config, 'region', None) or os.getenv("AWS_REGION", "us-east-1")
+        # Get region from config (stored in base_url field by manager)
+        aws_region = self.config.base_url or "us-east-1"
         
         # Configure boto3 client with optimized settings
         boto_config = Config(
@@ -71,15 +74,12 @@ class BedrockProvider(BaseLLMProvider):
         )
         
         # Method 1: NEW Bedrock API Keys (single key authentication)
-        bedrock_api_key = (
-            getattr(self.config, 'bedrock_api_key', None) or 
-            os.getenv("BEDROCK_API_KEY") or
-            os.getenv("AWS_BEDROCK_API_KEY")
-        )
+        # Bedrock API key is stored in config.api_key when using new API key method
+        bedrock_api_key = self.config.api_key if self.config.api_key and self.config.api_key.startswith('bedrock-api-') else None
         
-        if bedrock_api_key and bedrock_api_key.startswith('bedrock-api-'):
-            # New API Key method - set as environment variable for boto3
-            os.environ['AWS_BEDROCK_API_KEY'] = bedrock_api_key
+        if bedrock_api_key:
+            # Store API key for header injection via boto3 event system
+            self.bedrock_api_key = bedrock_api_key
             logger.info("Using new Bedrock API Key authentication")
             
             try:
@@ -87,14 +87,28 @@ class BedrockProvider(BaseLLMProvider):
                     service_name='bedrock-runtime',
                     config=boto_config
                 )
+                
+                # Add API key to all requests via boto3 event system
+                # Use before-sign event which has access to the request object
+                def add_api_key_header(signer, request, **kwargs):
+                    """Event handler to add Bedrock API key header to requests before signing"""
+                    if 'headers' not in request:
+                        request['headers'] = {}
+                    request['headers']['x-amz-api-key'] = self.bedrock_api_key
+                
+                # Register event handler for all bedrock-runtime operations
+                # before-sign.bedrock-runtime fires before request signing
+                self.client.meta.events.register('before-sign.bedrock-runtime', add_api_key_header)
+                
             except Exception as e:
                 logger.warning(f"Bedrock API Key method failed: {e}. Falling back to default credentials.")
                 self.client = None
+                self.bedrock_api_key = None
         
         # Method 2: OLD IAM credentials (Access Key ID + Secret)
         else:
-            aws_access_key = self.config.api_key  # api_key field repurposed for access_key_id
-            aws_secret_key = getattr(self.config, 'secret_key', None) or os.getenv("AWS_SECRET_ACCESS_KEY")
+            aws_access_key = self.config.api_key  # api_key field contains access_key_id for IAM auth
+            aws_secret_key = self.config.secret_key
             
             if aws_access_key and aws_secret_key:
                 logger.info("Using IAM Access Key authentication")
@@ -295,14 +309,20 @@ class BedrockProvider(BaseLLMProvider):
             raise
     
     def _parse_claude_response(self, response_body: Dict) -> LLMResponse:
-        """Parse Claude/Anthropic model response"""
+        """Parse Claude/Anthropic model response with support for all content block types"""
         content = ""
         tool_calls = None
+        additional_blocks = []
         
         for block in response_body.get("content", []):
-            if block.get("type") == "text":
+            block_type = block.get("type")
+            
+            if block_type == "text":
+                # Standard text content
                 content += block.get("text", "")
-            elif block.get("type") == "tool_use":
+            
+            elif block_type in ("tool_use", "toolUse"):
+                # Tool/function calling blocks
                 if tool_calls is None:
                     tool_calls = []
                 tool_calls.append({
@@ -312,6 +332,99 @@ class BedrockProvider(BaseLLMProvider):
                         "name": block.get("name"),
                         "arguments": json.dumps(block.get("input", {}))
                     }
+                })
+            
+            elif block_type == "image":
+                # Image content block
+                additional_blocks.append({
+                    "type": "image",
+                    "source": block.get("source", {}),
+                    "format": block.get("format"),
+                    "data": block.get("data")
+                })
+                logger.debug(f"Extracted image block: {block.get('format', 'unknown format')}")
+            
+            elif block_type == "document":
+                # Document content block
+                additional_blocks.append({
+                    "type": "document",
+                    "source": block.get("source", {}),
+                    "format": block.get("format"),
+                    "data": block.get("data")
+                })
+                logger.debug(f"Extracted document block: {block.get('format', 'unknown format')}")
+            
+            elif block_type == "video":
+                # Video content block
+                additional_blocks.append({
+                    "type": "video",
+                    "source": block.get("source", {}),
+                    "format": block.get("format"),
+                    "data": block.get("data")
+                })
+                logger.debug(f"Extracted video block: {block.get('format', 'unknown format')}")
+            
+            elif block_type == "cachePoint":
+                # Cache point block (for caching responses)
+                additional_blocks.append({
+                    "type": "cachePoint",
+                    "cache_control": block.get("cache_control", {}),
+                    "ttl": block.get("ttl")
+                })
+                logger.debug("Extracted cache point block")
+            
+            elif block_type == "citationsContent":
+                # Citations content block
+                additional_blocks.append({
+                    "type": "citationsContent",
+                    "citations": block.get("citations", []),
+                    "content": block.get("content", "")
+                })
+                logger.debug(f"Extracted citations content block with {len(block.get('citations', []))} citations")
+            
+            elif block_type == "reasoningContent":
+                # Reasoning content block (for models with reasoning capabilities)
+                reasoning_text = block.get("content", "") or block.get("text", "")
+                if reasoning_text:
+                    # Append reasoning to content with a marker
+                    content += f"\n[Reasoning: {reasoning_text}]\n"
+                additional_blocks.append({
+                    "type": "reasoningContent",
+                    "content": reasoning_text,
+                    "metadata": block.get("metadata", {})
+                })
+                logger.debug("Extracted reasoning content block")
+            
+            elif block_type == "guardContent":
+                # Guard content block (safety/content filtering)
+                additional_blocks.append({
+                    "type": "guardContent",
+                    "guard_type": block.get("guard_type"),
+                    "action": block.get("action"),
+                    "details": block.get("details", {})
+                })
+                logger.warning(f"Guard content block detected: {block.get('guard_type')} - {block.get('action')}")
+            
+            elif block_type == "toolResult":
+                # Tool result block (response from tool execution)
+                additional_blocks.append({
+                    "type": "toolResult",
+                    "tool_use_id": block.get("tool_use_id"),
+                    "content": block.get("content", []),
+                    "is_error": block.get("is_error", False)
+                })
+                logger.debug(f"Extracted tool result block for tool_use_id: {block.get('tool_use_id')}")
+            
+            else:
+                # Unknown/unsupported block type - log and preserve
+                logger.warning(
+                    f"Unsupported Claude content block type encountered: {block_type}. "
+                    f"Block data: {json.dumps(block, default=str)[:200]}"
+                )
+                additional_blocks.append({
+                    "type": block_type,
+                    "raw": block,
+                    "warning": "Unsupported block type"
                 })
         
         usage = response_body.get("usage", {})
@@ -325,7 +438,8 @@ class BedrockProvider(BaseLLMProvider):
             model=self.model_id,
             provider="aws_bedrock",
             tool_calls=tool_calls,
-            finish_reason=response_body.get("stop_reason")
+            finish_reason=response_body.get("stop_reason"),
+            additional_blocks=additional_blocks if additional_blocks else None
         )
     
     def _parse_llama_response(self, response_body: Dict) -> LLMResponse:

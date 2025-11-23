@@ -64,7 +64,7 @@ class Config:
         try:
             from services.llm_provider.manager import get_system_setting
             return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER", "openai"))
-        except:
+        except Exception:
             return os.getenv("LLM_PROVIDER", "openai")
     
     @property
@@ -74,7 +74,7 @@ class Config:
             from services.llm_provider.manager import get_system_setting
             # Get from database settings, fallback to env var, then hardcoded default
             return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL", "gpt-4o"))
-        except:
+        except Exception:
             return os.getenv("LLM_MODEL", "gpt-4o")  # Default to gpt-4o (128K context) instead of gpt-4 (8K)
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
@@ -112,6 +112,11 @@ class Config:
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
+    
+    # =============================================================================
+    # RAG / KNOWLEDGE SERVICES API
+    # =============================================================================
+    KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")
     
     def validate(self) -> bool:
         """

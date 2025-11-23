@@ -2137,7 +2137,11 @@ async def download_execution_result_file(execution_id: int, file_path: str, db: 
         
         # Get full file path
         workspace_manager = WorkspaceManager(execution_id)
-        results_dir = Path(workspace_manager.get_results_path())
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from pathlib import Path
+from sqlalchemy.orm import Session, joinedload, attributes
         full_path = (results_dir / file_path).resolve()
         
         # Security check: ensure path is within results directory

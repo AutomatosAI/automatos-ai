@@ -326,6 +326,6 @@ WHERE name = 'Document Writer' AND (tools_schema IS NULL OR tools_schema = '{}':
 -- Log the update
 DO $$
 BEGIN
-    RAISE NOTICE 'Added tools_schema to 9 skills: writing-plans, writing-skills, Code Reviewer, Security Expert, Tester, Researcher, Data Analysit, Document Writer, and existing document skills (pdf, docx, xlsx, pptx from previous migration)';
+    RAISE NOTICE 'Added tools_schema to 8 skills: writing-plans, writing-skills, Code Reviewer, Security Expert, Tester, Researcher, Data Analysit, Document Writer. Previous migration (002) added tools_schema to 4 document skills (pdf, docx, xlsx, pptx).';
 END $$;
 

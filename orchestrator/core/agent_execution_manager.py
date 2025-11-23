@@ -13,6 +13,9 @@ PHASE 2 ENHANCED: Now includes inter-agent communication
 
 import logging
 import asyncio
+import os
+import shutil
+import tempfile
 from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -90,6 +93,39 @@ class AgentExecutionManager:
     - Performance tracking
     """
     
+    @staticmethod
+    def _create_secure_temp_dir() -> str:
+        """
+        Create a secure temporary directory with proper permissions.
+        
+        Returns:
+            Path to the created temporary directory
+            
+        Security features:
+        - Unique per execution (tempfile.mkdtemp)
+        - Restricted permissions (0o700)
+        - Symlink validation
+        - Owned by running user
+        """
+        # Create unique temporary directory
+        temp_dir = tempfile.mkdtemp(prefix="automatos_workspace_")
+        
+        # Set restrictive permissions (0o700 = rwx------)
+        os.chmod(temp_dir, 0o700)
+        
+        # Validate path is not a symlink (security check)
+        if os.path.islink(temp_dir):
+            # This shouldn't happen with mkdtemp, but check anyway
+            raise ValueError(f"Temporary directory path is a symlink: {temp_dir}")
+        
+        # Resolve any symlinks in parent path
+        real_path = os.path.realpath(temp_dir)
+        if real_path != temp_dir:
+            # Parent directory had symlinks, use resolved path
+            temp_dir = real_path
+        
+        return temp_dir
+    
     def __init__(
         self,
         db_session: Session,
@@ -104,7 +140,22 @@ class AgentExecutionManager:
         self.agent_factory = agent_factory or AgentFactory(db_session)
         self.max_parallel_executions = max_parallel_executions
         self.max_retries = max_retries
-        self.workspace_dir = workspace_dir or "/tmp/automatos_workspace"  # Fallback to shared
+        
+        # Create secure temporary directory if not provided
+        if workspace_dir is None:
+            self.workspace_dir = self._create_secure_temp_dir()
+            self._workspace_created_by_manager = True  # Track for cleanup
+        else:
+            # Validate provided workspace directory
+            if not os.path.isabs(workspace_dir):
+                raise ValueError(f"Workspace directory must be absolute path: {workspace_dir}")
+            if os.path.islink(workspace_dir):
+                raise ValueError(f"Workspace directory cannot be a symlink: {workspace_dir}")
+            # Ensure directory exists with proper permissions
+            os.makedirs(workspace_dir, mode=0o700, exist_ok=True)
+            self.workspace_dir = workspace_dir
+            self._workspace_created_by_manager = False
+        
         self.logger = logging.getLogger(__name__)
         self.memory_injector = MemoryPromptInjector()  # Memory injection support
         
@@ -132,6 +183,32 @@ class AgentExecutionManager:
             self.communication = None
             self.context_manager = None
     
+    def _cleanup_workspace(self):
+        """
+        Clean up the temporary workspace directory if it was created by this manager.
+        
+        This method is called automatically after execution completes or fails.
+        Only cleans up directories created by _create_secure_temp_dir().
+        """
+        if hasattr(self, '_workspace_created_by_manager') and self._workspace_created_by_manager:
+            try:
+                if os.path.exists(self.workspace_dir):
+                    # Validate it's still our temp directory (security check)
+                    if self.workspace_dir.startswith(tempfile.gettempdir()):
+                        shutil.rmtree(self.workspace_dir)
+                        self.logger.info(f"🧹 Cleaned up temporary workspace: {self.workspace_dir}")
+                    else:
+                        self.logger.warning(f"⚠️  Skipping cleanup of non-temp directory: {self.workspace_dir}")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to cleanup workspace {self.workspace_dir}: {e}", exc_info=True)
+    
+    def __del__(self):
+        """Destructor to ensure cleanup on object deletion"""
+        try:
+            self._cleanup_workspace()
+        except Exception:
+            pass  # Ignore errors in destructor
+    
     async def execute_workflow_subtasks(
         self,
         subtasks: List[Dict[str, Any]],
@@ -157,99 +234,103 @@ class AgentExecutionManager:
         """
         self.logger.info(f"🚀 Starting execution of {len(subtasks)} subtasks for workflow {workflow_id}")
         
-        # PHASE 2: Create shared context for agent team
-        shared_context = None
-        if self.enable_communication and self.context_manager:
-            try:
-                # Get all agent IDs from assignments
-                agent_ids = []
-                for subtask_id, agent_match in agent_assignments.items():
-                    if isinstance(agent_match, list) and agent_match:
-                        agent_ids.append(agent_match[0].agent_id if hasattr(agent_match[0], 'agent_id') else agent_match[0].get("agent_id"))
-                    elif isinstance(agent_match, dict):
-                        agent_ids.append(agent_match.get("agent_id"))
-                    elif hasattr(agent_match, 'agent_id'):
-                        agent_ids.append(agent_match.agent_id)
-                
-                # Remove duplicates and None values
-                agent_ids = list(set(filter(None, agent_ids)))
-                
-                if agent_ids:
-                    shared_context = await self.context_manager.create_shared_context(
-                        team=agent_ids,
-                        initial_context={
-                            "workflow_id": workflow_id,
-                            "execution_id": execution_id,
-                            "total_subtasks": len(subtasks),
-                            "subtask_descriptions": [st.get("description", "") for st in subtasks]
-                        }
-                    )
-                    self.logger.info(f"✅ Shared context created for {len(agent_ids)} agents")
-            except Exception as e:
-                self.logger.warning(f"Failed to create shared context: {e}")
-        
-        # 1. Create execution plan based on strategy
-        execution_plan = self._create_execution_plan(subtasks, execution_strategy)
-        
-        # 2. Execute subtasks based on strategy
-        all_results = {}
-        self.shared_context = shared_context  # Store for use in subtask execution
-        
-        # Store results for memory sharing between sequential tasks
-        if execution_strategy == "sequential":
-            self.execution_memory = {}  # Store outputs for next task
-        
-        for group_idx, parallel_group in enumerate(execution_plan.parallel_groups):
+        try:
+            # PHASE 2: Create shared context for agent team
+            shared_context = None
+            if self.enable_communication and self.context_manager:
+                try:
+                    # Get all agent IDs from assignments
+                    agent_ids = []
+                    for subtask_id, agent_match in agent_assignments.items():
+                        if isinstance(agent_match, list) and agent_match:
+                            agent_ids.append(agent_match[0].agent_id if hasattr(agent_match[0], 'agent_id') else agent_match[0].get("agent_id"))
+                        elif isinstance(agent_match, dict):
+                            agent_ids.append(agent_match.get("agent_id"))
+                        elif hasattr(agent_match, 'agent_id'):
+                            agent_ids.append(agent_match.agent_id)
+                    
+                    # Remove duplicates and None values
+                    agent_ids = list(set(filter(None, agent_ids)))
+                    
+                    if agent_ids:
+                        shared_context = await self.context_manager.create_shared_context(
+                            team=agent_ids,
+                            initial_context={
+                                "workflow_id": workflow_id,
+                                "execution_id": execution_id,
+                                "total_subtasks": len(subtasks),
+                                "subtask_descriptions": [st.get("description", "") for st in subtasks]
+                            }
+                        )
+                        self.logger.info(f"✅ Shared context created for {len(agent_ids)} agents")
+                except Exception as e:
+                    self.logger.warning(f"Failed to create shared context: {e}")
+            
+            # 1. Create execution plan based on strategy
+            execution_plan = self._create_execution_plan(subtasks, execution_strategy)
+            
+            # 2. Execute subtasks based on strategy
+            all_results = {}
+            self.shared_context = shared_context  # Store for use in subtask execution
+            
+            # Store results for memory sharing between sequential tasks
             if execution_strategy == "sequential":
-                self.logger.info(f"📦 Executing task {group_idx + 1}/{len(execution_plan.parallel_groups)} sequentially")
-            else:
-                self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
+                self.execution_memory = {}  # Store outputs for next task
             
-            # Execute this group (1 task if sequential, multiple if parallel)
-            group_tasks = []
-            for subtask_id in parallel_group:
-                subtask_idx = int(subtask_id.split("_")[1])
-                subtask = subtasks[subtask_idx]
-                
-                # Get agent assignment
-                agent_match = agent_assignments.get(subtask_id, {})
-                self.logger.info(f"🔍 DEBUG: Raw agent_match for {subtask_id}: type={type(agent_match)}, value={agent_match}")
-                if isinstance(agent_match, list) and agent_match:
-                    agent_match = agent_match[0]  # First match
-                    self.logger.info(f"🔍 DEBUG: After list extraction: type={type(agent_match)}, value={agent_match}")
-                
-                # Get context enhancement
-                context_enh = context_enhancements.get(subtask_id, {})
-                
-                # Create execution task
-                task = self._execute_single_subtask(
-                    subtask_id=subtask_id,
-                    subtask=subtask,
-                    agent_match=agent_match,
-                    context_enh=context_enh,
-                    execution_id=execution_id,
-                    workflow_id=workflow_id,
-                    memory_retrieval_results=memory_retrieval_results
-                )
-                group_tasks.append(task)
-            
-            # Wait for all subtasks in this group to complete
-            group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
-            
-            # Process results
-            for subtask_id, result in zip(parallel_group, group_results):
-                if isinstance(result, Exception):
-                    self.logger.error(f"❌ Subtask {subtask_id} failed with exception: {result}")
-                    all_results[subtask_id] = self._create_failed_execution(subtask_id, str(result))
+            for group_idx, parallel_group in enumerate(execution_plan.parallel_groups):
+                if execution_strategy == "sequential":
+                    self.logger.info(f"📦 Executing task {group_idx + 1}/{len(execution_plan.parallel_groups)} sequentially")
                 else:
-                    all_results[subtask_id] = result
+                    self.logger.info(f"📦 Executing group {group_idx + 1}/{len(execution_plan.parallel_groups)} ({len(parallel_group)} subtasks)")
                 
-                # ✨ REAL-TIME UPDATE: Save to database immediately after each subtask
-                await self._update_execution_output_data(execution_id, subtasks, all_results)
-        
-        self.logger.info(f"✅ Completed execution of {len(all_results)} subtasks")
-        
-        return all_results
+                # Execute this group (1 task if sequential, multiple if parallel)
+                group_tasks = []
+                for subtask_id in parallel_group:
+                    subtask_idx = int(subtask_id.split("_")[1])
+                    subtask = subtasks[subtask_idx]
+                    
+                    # Get agent assignment
+                    agent_match = agent_assignments.get(subtask_id, {})
+                    self.logger.info(f"🔍 DEBUG: Raw agent_match for {subtask_id}: type={type(agent_match)}, value={agent_match}")
+                    if isinstance(agent_match, list) and agent_match:
+                        agent_match = agent_match[0]  # First match
+                        self.logger.info(f"🔍 DEBUG: After list extraction: type={type(agent_match)}, value={agent_match}")
+                    
+                    # Get context enhancement
+                    context_enh = context_enhancements.get(subtask_id, {})
+                    
+                    # Create execution task
+                    task = self._execute_single_subtask(
+                        subtask_id=subtask_id,
+                        subtask=subtask,
+                        agent_match=agent_match,
+                        context_enh=context_enh,
+                        execution_id=execution_id,
+                        workflow_id=workflow_id,
+                        memory_retrieval_results=memory_retrieval_results
+                    )
+                    group_tasks.append(task)
+                
+                # Wait for all subtasks in this group to complete
+                group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
+                
+                # Process results
+                for subtask_id, result in zip(parallel_group, group_results):
+                    if isinstance(result, Exception):
+                        self.logger.error(f"❌ Subtask {subtask_id} failed with exception: {result}")
+                        all_results[subtask_id] = self._create_failed_execution(subtask_id, str(result))
+                    else:
+                        all_results[subtask_id] = result
+                    
+                    # ✨ REAL-TIME UPDATE: Save to database immediately after each subtask
+                    await self._update_execution_output_data(execution_id, subtasks, all_results)
+            
+            self.logger.info(f"✅ Completed execution of {len(all_results)} subtasks")
+            
+            return all_results
+        finally:
+            # Cleanup temporary workspace if we created it (on completion or failure)
+            self._cleanup_workspace()
     
     def _create_execution_plan(self, subtasks: List[Dict[str, Any]], execution_strategy: str = "parallel") -> ExecutionPlan:
         """

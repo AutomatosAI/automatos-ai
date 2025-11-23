@@ -73,13 +73,20 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
                     "assigned_at": assignment.assigned_at
                 })
     
+    # Read-time adapter: Remove tags from configuration if present (legacy data cleanup)
+    # agent.tags is the single source of truth, configuration should not contain tags
+    configuration = agent.configuration.copy() if agent.configuration else {}
+    if "tags" in configuration:
+        configuration.pop("tags", None)
+        logger.debug(f"Removed legacy tags from configuration for agent {agent.id}")
+    
     return AgentResponse(
         id=agent.id,
         name=agent.name,
         description=agent.description,
         agent_type=agent.agent_type,
         status=agent.status,
-        configuration=agent.configuration or {},
+        configuration=configuration,
         skills=[SkillResponse(
             id=skill.id,
             name=skill.name,
@@ -201,12 +208,9 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
                     raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
                 agent.skills.extend(skills)
             
-            # Mirror tags into configuration metadata for compatibility if requested
-            if tags:
-                agent.configuration = {
-                    **(agent.configuration or {}),
-                    "tags": tags
-                }
+            # Note: agent.tags is the single source of truth for tags.
+            # Tags are NOT stored in agent.configuration to avoid duplicate state.
+            # Legacy clients reading tags from configuration should migrate to use agent.tags.
             
             created_agents.append(agent)
         
@@ -270,12 +274,9 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
                 raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
             agent.skills.extend(skills)
 
-        # Store tags in configuration metadata as well for legacy clients
-        if tags:
-            agent.configuration = {
-                **(agent.configuration or {}),
-                "tags": tags
-            }
+        # Note: agent.tags is the single source of truth for tags.
+        # Tags are NOT stored in agent.configuration to avoid duplicate state.
+        # Legacy clients reading tags from configuration should migrate to use agent.tags.
         
         # Add tools if provided (NEW FEATURE)
         if agent_data.tool_ids:
@@ -528,10 +529,11 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         if agent_update.tags is not None:
             tags = _normalize_tags(agent_update.tags)
             agent.tags = tags
-            agent.configuration = {
-                **(agent.configuration or {}),
-                "tags": tags
-            }
+            # Remove tags from configuration if present (cleanup legacy data)
+            if agent.configuration and "tags" in agent.configuration:
+                config = agent.configuration.copy()
+                config.pop("tags", None)
+                agent.configuration = config
         
         db.commit()
         db.refresh(agent)

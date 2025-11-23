@@ -18,7 +18,7 @@ export function useChat({
   const [usage, setUsage] = useState<AppUsage | undefined>()
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState<'idle' | 'streaming' | 'error'>('idle')
-  let abortController: AbortController | null = null
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const stop = useCallback(() => {
     if (abortController) {

@@ -149,8 +149,8 @@ async def stream_chat(
 @router.get("/history")
 async def get_chat_history(
     limit: int = 20,
-    starting_after: Optional[str] = None,
     db: Session = Depends(get_db)
+):
 ):
     """Get chat history for the current user"""
     chat_service = ChatService(db)

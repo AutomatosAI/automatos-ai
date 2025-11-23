@@ -20,6 +20,7 @@ import httpx
 from database.database import get_db
 from services.llm_provider import create_llm_manager
 from services.pandas_ai_service import get_pandasai_service
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
@@ -81,9 +82,10 @@ async def search_code_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[CodeGraph] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
-                "http://127.0.0.1:8000/api/code-graph/search/semantic",
+                f"{base_url}/api/code-graph/search/semantic",
                 params={
                     "project": "Automatos-ai",
                     "q": query,
@@ -125,9 +127,10 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[Documents] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                "http://127.0.0.1:8000/api/documents/search",
+                f"{base_url}/api/documents/search",
                 params={
                     "query": query,
                     "limit": 8,
@@ -178,6 +181,7 @@ async def query_database_tool(
     try:
         logger.info(f"[Database] Querying: {query}, DB: {database_name}")
 
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Resolve database source
             selected_source: Optional[Dict[str, Any]] = None
@@ -185,7 +189,7 @@ async def query_database_tool(
 
             try:
                 sources_response = await client.get(
-                    "http://127.0.0.1:8000/api/knowledge/sources/database/",
+                    f"{base_url}/api/knowledge/sources/database/",
                     params={"active_only": True}
                 )
                 if sources_response.status_code == 200:
@@ -208,7 +212,7 @@ async def query_database_tool(
 
             source_id = selected_source.get("id")
             response = await client.post(
-                f"http://127.0.0.1:8000/api/knowledge/sources/database/{source_id}/query",
+                f"{base_url}/api/knowledge/sources/database/{source_id}/query",
                 json={
                     "query": query,
                     "source_id": source_id,
@@ -492,16 +496,18 @@ Then provide a helpful, technical response based on the search results."""
                             if tool_result.get("success"):
                                 document_results.extend(tool_result.get("results", []))
                         elif tool_name == "query_database":
+                            # Define analysis_prompt with explicit fallback to prevent NameError
+                            analysis_prompt = chat_query.query or tool_input.get("query", "")
                             tool_result = await query_database_tool(
                                 tool_input.get("query", ""),
                                 tool_input.get("database_name"),
-                                analysis_prompt=chat_query.query,
+                                analysis_prompt=analysis_prompt,
                             )
                             if tool_result.get("success"):
                                 pandasai = get_pandasai_service()
                                 if pandasai:
                                     insight = pandasai.generate_insight(
-                                        analysis_prompt or tool_input.get("query", ""),
+                                        analysis_prompt,
                                         tool_result.get("data", []),
                                         tool_result.get("columns", []),
                                     )

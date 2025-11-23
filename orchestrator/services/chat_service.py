@@ -16,6 +16,7 @@ from sqlalchemy import and_, desc
 import httpx
 
 from services.pandas_ai_service import get_pandasai_service
+from config import config
 
 # Import models - handle both models.py and models/ package
 import sys
@@ -42,9 +43,10 @@ async def search_code_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[CodeGraph Tool] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
-                "http://127.0.0.1:8000/api/code-graph/search/semantic",
+                f"{base_url}/api/code-graph/search/semantic",
                 params={
                     "project": "Automatos-ai",
                     "q": query,
@@ -79,9 +81,10 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[RAG Tool] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                "http://127.0.0.1:8000/api/documents/search",
+                f"{base_url}/api/documents/search",
                 params={
                     "query": query,
                     "limit": 8,
@@ -128,6 +131,7 @@ async def query_database_tool(
     try:
         logger.info(f"[Database Tool] Querying: {query}, DB: {database_name}")
 
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             # List active sources and select match or default
             selected_source: Optional[Dict[str, Any]] = None
@@ -135,7 +139,7 @@ async def query_database_tool(
 
             try:
                 sources_response = await client.get(
-                    "http://127.0.0.1:8000/api/knowledge/sources/database/",
+                    f"{base_url}/api/knowledge/sources/database/",
                     params={"active_only": True}
                 )
                 if sources_response.status_code == 200:
@@ -158,7 +162,7 @@ async def query_database_tool(
 
             source_id = selected_source.get("id")
             response = await client.post(
-                f"http://127.0.0.1:8000/api/knowledge/sources/database/{source_id}/query",
+                f"{base_url}/api/knowledge/sources/database/{source_id}/query",
                 json={
                     "query": query,
                     "source_id": source_id,

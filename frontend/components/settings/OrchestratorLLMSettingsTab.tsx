@@ -5,7 +5,7 @@
  * Manages LLM configuration for the orchestrator system.
  */
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Save, RotateCcw, Brain, Zap, Settings } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
+import { useModels } from '@/hooks/use-model-api'
 
 interface OrchestratorLLMSettingsTabProps {
   settings: SystemSetting[]
@@ -29,6 +30,19 @@ export default function OrchestratorLLMSettingsTab({
   onReset 
 }: OrchestratorLLMSettingsTabProps) {
   const [formData, setFormData] = useState<Record<string, string>>({})
+  
+  // Load models from API
+  const { data: allModels = [], isLoading: modelsLoading } = useModels(undefined, 'active')
+  
+  // Get selected provider to filter models
+  const selectedProvider = formData.llm_provider || ''
+  
+  // Filter models by selected provider
+  const availableModels = useMemo(() => {
+    if (!Array.isArray(allModels)) return []
+    if (!selectedProvider) return allModels
+    return allModels.filter((model: { provider: string }) => model.provider === selectedProvider)
+  }, [allModels, selectedProvider])
 
   // Initialize form data from settings
   React.useEffect(() => {
@@ -103,24 +117,39 @@ export default function OrchestratorLLMSettingsTab({
               <Select 
                 value={formData.llm_model || ''} 
                 onValueChange={(value) => handleInputChange('llm_model', value)}
+                disabled={modelsLoading || !selectedProvider}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select model" />
+                  <SelectValue placeholder={
+                    modelsLoading 
+                      ? "Loading models..." 
+                      : !selectedProvider 
+                        ? "Select provider first" 
+                        : "Select model"
+                  } />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gpt-4">GPT-4</SelectItem>
-                  <SelectItem value="gpt-4o">GPT-4o (128K context)</SelectItem>
-                  <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                  <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-                  <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
-                  <SelectItem value="claude-3-sonnet">Claude 3 Sonnet</SelectItem>
-                  <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
-                  <SelectItem value="gemini-pro">Gemini Pro</SelectItem>
-                  <SelectItem value="gemini-pro-vision">Gemini Pro Vision</SelectItem>
+                  {availableModels.length > 0 ? (
+                    availableModels.map((model: { model_id: string; display_name: string; context_window: number }) => (
+                      <SelectItem key={model.model_id} value={model.model_id}>
+                        {model.display_name}
+                        {model.context_window >= 100000 && ` (${(model.context_window / 1000).toFixed(0)}K context)`}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    !modelsLoading && selectedProvider && (
+                      <SelectItem value="" disabled>No models available for {selectedProvider}</SelectItem>
+                    )
+                  )}
                 </SelectContent>
               </Select>
               {getSetting('llm_model')?.is_required && (
                 <Badge variant="destructive" className="text-xs">Required</Badge>
+              )}
+              {!selectedProvider && (
+                <p className="text-xs text-muted-foreground">
+                  Please select a provider first to see available models
+                </p>
               )}
             </div>
           </div>

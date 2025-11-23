@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { toast } from 'sonner'
 
 export interface TextArtifactProps {
   content: string
@@ -181,8 +182,17 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                     </button>
                     <button
                       className="rounded border border-gray-700/60 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-300 hover:border-orange-400/60 hover:text-orange-300"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`data:${chart.mime_type};base64,${chart.base64}`)
+                      onClick={async () => {
+                        if (!navigator.clipboard) {
+                          toast.error('Clipboard API is not available')
+                          return
+                        }
+                        try {
+                          await navigator.clipboard.writeText(`data:${chart.mime_type};base64,${chart.base64}`)
+                          toast.success('Copied to clipboard')
+                        } catch (error) {
+                          toast.error('Failed to copy to clipboard')
+                        }
                       }}
                     >
                       Copy

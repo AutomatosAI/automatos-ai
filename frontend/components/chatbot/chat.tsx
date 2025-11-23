@@ -40,7 +40,7 @@ export function Chat({
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
 
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1920)
@@ -69,17 +69,25 @@ export function Chat({
 
   const regenerate = () => reload()
 
-  // Track scroll
+  // Track scroll - ensure listener is always attached to the current container
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container) return
+
     const checkScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container
       setIsAtBottom(scrollHeight - scrollTop - clientHeight < 50)
     }
+
     container.addEventListener('scroll', checkScroll)
-    return () => container.removeEventListener('scroll', checkScroll)
-  }, [])
+    // Run once to initialize state
+    checkScroll()
+
+    return () => {
+      container.removeEventListener('scroll', checkScroll)
+    }
+    // Re-attach when the artifact viewer visibility toggles, since the DOM node can change
+  }, [isArtifactViewerVisible])
 
   // Auto-scroll
   useEffect(() => {

@@ -131,25 +131,52 @@ Try asking:
 
       console.log('[Chatbot] Response data:', data)
       
+      // Defensive null check: validate data structure before processing
+      if (!data || typeof data !== 'object' || !('message' in data) || !data.message) {
+        console.error('[Chatbot] Invalid response structure:', data)
+        const errorMessage: ChatMessage = {
+          id: `bot-error-${Date.now()}`,
+          type: 'bot',
+          content: '⚠️ **Error**: Received invalid response from the server. Please try again or contact support if the issue persists.',
+          timestamp: new Date().toISOString(),
+          metadata: {
+            intent: 'error',
+            source: 'llm',
+            processing_time: 0
+          }
+        }
+        setMessages(prev => [...prev, errorMessage])
+        return
+      }
+
+      // Extract message after validation for type safety
+      // Type assertion is safe here because we've validated the structure above
+      const message = (data as { message: any }).message
+
+      // Build botMessage with optional chaining and default values
       const botMessage: ChatMessage = {
-        id: data.message.id,
+        id: message.id || `bot-${Date.now()}`,
         type: 'bot',
-        content: data.message.content,
-        timestamp: data.message.timestamp,
-        codeSnippets: data.message.code_snippets,
-        documents: data.message.documents,
-        database_results: data.message.database_results,
-        metadata: data.message.metadata
+        content: message.content || 'No response content available.',
+        timestamp: message.timestamp || new Date().toISOString(),
+        codeSnippets: Array.isArray(message.code_snippets) ? message.code_snippets : undefined,
+        documents: Array.isArray(message.documents) ? message.documents : undefined,
+        database_results: Array.isArray(message.database_results) ? message.database_results : undefined,
+        metadata: message.metadata || undefined
       }
 
       setMessages(prev => [...prev, botMessage])
       
-      if (data.message.code_snippets && data.message.code_snippets.length > 0) {
-        setSelectedCode(data.message.code_snippets[0])
+      // Guard array checks: ensure they are arrays before accessing length/index
+      const codeSnippets = Array.isArray(message.code_snippets) ? message.code_snippets : []
+      const documents = Array.isArray(message.documents) ? message.documents : []
+      
+      if (codeSnippets.length > 0) {
+        setSelectedCode(codeSnippets[0])
         setActiveTab('code')
         setIsViewerVisible(true)
-      } else if (data.message.documents && data.message.documents.length > 0) {
-        setSelectedDocument(data.message.documents[0])
+      } else if (documents.length > 0) {
+        setSelectedDocument(documents[0])
         setActiveTab('docs')
         setIsViewerVisible(true)
       }
