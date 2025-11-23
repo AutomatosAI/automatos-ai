@@ -21,49 +21,8 @@ import 'prismjs/components/prism-python'
 import 'prismjs/components/prism-typescript'
 import 'prismjs/components/prism-javascript'
 import 'prismjs/components/prism-json'
-
-interface DatabaseResult {
-  database: string
-  sql: string
-  row_count: number
-  data: any[]
-  columns: string[]
-  execution_time_ms: number
-}
-
-interface ChatMessage {
-  id: string
-  type: 'user' | 'bot' | 'system'
-  content: string
-  timestamp: string
-  codeSnippets?: CodeSnippet[]
-  documents?: DocumentReference[]
-  database_results?: DatabaseResult[]
-  metadata?: {
-    intent?: string
-    confidence?: number
-    source: 'rag' | 'semantic' | 'codegraph' | 'llm' | 'database'
-    processing_time?: number
-    tools_used?: string[]
-    database_count?: number
-  }
-}
-
-interface CodeSnippet {
-  language: string
-  code: string
-  file_path: string
-  line_number?: number
-  symbol_name?: string
-  explanation?: string
-}
-
-interface DocumentReference {
-  id: number
-  filename: string
-  excerpt: string
-  similarity: number
-}
+import { apiClient } from '@/lib/api-client'
+import type { ChatMessage, CodeSnippet, DocumentReference, DatabaseResult, PandasAIChart } from '@/types'
 
 export function ChatbotInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -88,16 +47,12 @@ export function ChatbotInterface() {
     // Load available models
     const loadModels = async () => {
       try {
-        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
-        const response = await fetch(`${API_BASE_URL}/api/chatbot/models`)
-        if (response.ok) {
-          const data = await response.json()
-          setAvailableModels(data.providers || {})
-          setDefaultProvider(data.default_provider || 'openai')
-          setDefaultModel(data.default_model || 'gpt-4')
-          setSelectedProvider(data.default_provider || 'openai')
-          setSelectedModel(data.default_model || 'gpt-4')
-        }
+        const data = await apiClient.request<any>('/api/chatbot/models')
+        setAvailableModels(data?.providers || {})
+        setDefaultProvider(data?.default_provider || 'openai')
+        setDefaultModel(data?.default_model || 'gpt-4')
+        setSelectedProvider(data?.default_provider || 'openai')
+        setSelectedModel(data?.default_model || 'gpt-4')
       } catch (error) {
         console.error('Failed to load models:', error)
       }
@@ -161,54 +116,69 @@ Try asking:
 
     try {
       console.log('[Chatbot] Sending query:', messageText)
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
-      const response = await fetch(`${API_BASE_URL}/api/chatbot/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: messageText,
-          context: {
-            currentPage: 'chat',
-            selectedItems: [],
-            userRole: 'user',
-            recentActions: []
-          },
-          session_id: sessionId,
-          provider: selectedProvider || undefined,
-          model: selectedModel || undefined
-        })
+      const data = await apiClient.sendChatbotQuery({
+        query: messageText,
+        context: {
+          currentPage: 'chat',
+          selectedItems: [],
+          userRole: 'user',
+          recentActions: []
+        },
+        sessionId,
+        provider: selectedProvider || undefined,
+        model: selectedModel || undefined
       })
 
-      console.log('[Chatbot] Response status:', response.status, response.statusText)
+      console.log('[Chatbot] Response data:', data)
       
-      if (response.ok) {
-        const data = await response.json()
-        console.log('[Chatbot] Response data:', data)
-        
-        const botMessage: ChatMessage = {
-          id: data.message.id,
+      // Defensive null check: validate data structure before processing
+      if (!data || typeof data !== 'object' || !('message' in data) || !data.message) {
+        console.error('[Chatbot] Invalid response structure:', data)
+        const errorMessage: ChatMessage = {
+          id: `bot-error-${Date.now()}`,
           type: 'bot',
-          content: data.message.content,
-          timestamp: data.message.timestamp,
-          codeSnippets: data.message.code_snippets,
-          documents: data.message.documents,
-          database_results: data.message.database_results,
-          metadata: data.message.metadata
+          content: '⚠️ **Error**: Received invalid response from the server. Please try again or contact support if the issue persists.',
+          timestamp: new Date().toISOString(),
+          metadata: {
+            intent: 'error',
+            source: 'llm',
+            processing_time: 0
+          }
         }
+        setMessages(prev => [...prev, errorMessage])
+        return
+      }
 
-        setMessages(prev => [...prev, botMessage])
-        
-        if (data.message.code_snippets && data.message.code_snippets.length > 0) {
-          setSelectedCode(data.message.code_snippets[0])
-          setActiveTab('code')
-          setIsViewerVisible(true)
-        } else if (data.message.documents && data.message.documents.length > 0) {
-          setSelectedDocument(data.message.documents[0])
-          setActiveTab('docs')
-          setIsViewerVisible(true)
-        }
-      } else {
-        throw new Error('Failed to get response')
+      // Extract message after validation for type safety
+      // Type assertion is safe here because we've validated the structure above
+      const message = (data as { message: any }).message
+
+      // Build botMessage with optional chaining and default values
+      const botMessage: ChatMessage = {
+        id: message.id || `bot-${Date.now()}`,
+        type: 'bot',
+        content: message.content || 'No response content available.',
+        timestamp: message.timestamp || new Date().toISOString(),
+        codeSnippets: Array.isArray(message.code_snippets) ? message.code_snippets : undefined,
+        documents: Array.isArray(message.documents) ? message.documents : undefined,
+        database_results: Array.isArray(message.database_results) ? message.database_results : undefined,
+        metadata: message.metadata || undefined
+      }
+
+      setMessages(prev => [...prev, botMessage])
+      
+      // Guard array checks: ensure they are arrays before accessing length/index
+      const codeSnippets = Array.isArray(message.code_snippets) ? message.code_snippets : []
+      const documents = Array.isArray(message.documents) ? message.documents : []
+      
+      if (codeSnippets.length > 0) {
+        setSelectedCode(codeSnippets[0])
+        setActiveTab('code')
+        setIsViewerVisible(true)
+      } else if (documents.length > 0) {
+        setSelectedDocument(documents[0])
+        setActiveTab('docs')
+        setIsViewerVisible(true)
       }
     } catch (error) {
       console.error('Chat error:', error)
@@ -528,6 +498,36 @@ async def search_symbols(query: str, limit: int = 10):
                                         <p className="text-xs text-gray-500 mt-2 text-center">
                                           +{dbResult.row_count - 3} more rows
                                         </p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* PandasAI Insight */}
+                                  {dbResult.pandas_ai && (
+                                    <div className="mt-4 space-y-3">
+                                      {dbResult.pandas_ai.summary && (
+                                        <div className="p-3 rounded bg-gray-900/40 border border-gray-800/60 text-sm text-gray-200">
+                                          {dbResult.pandas_ai.summary}
+                                        </div>
+                                      )}
+                                      {dbResult.pandas_ai.charts && dbResult.pandas_ai.charts.length > 0 && (
+                                        <div className="grid gap-3 md:grid-cols-2">
+                                          {dbResult.pandas_ai.charts.map((chart, chartIdx) => (
+                                            <div
+                                              key={`${chart.filename}-${chartIdx}`}
+                                              className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3 flex flex-col items-center"
+                                            >
+                                              <img
+                                                src={`data:${chart.mime_type};base64,${chart.base64}`}
+                                                alt={chart.filename}
+                                                className="rounded-md border border-gray-800/40 max-h-64 object-contain"
+                                              />
+                                              <span className="mt-2 text-xs text-gray-500">
+                                                {chart.filename}
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
                                       )}
                                     </div>
                                   )}

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Generate OpenAPI JSON from running FastAPI server
 
-API_URL="${API_URL:-https://api.automatos.app}"
+API_URL="${API_URL:-http://localhost:8000}"  # Default to local, override with: API_URL=https://your-api-url.com ./generate_openapi.sh
 OUTPUT_FILE="${OUTPUT_FILE:-openapi.json}"
 
 echo "Fetching OpenAPI spec from $API_URL/openapi.json..."

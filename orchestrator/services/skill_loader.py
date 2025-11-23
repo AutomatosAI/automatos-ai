@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 # Import models exclusively from database.models (single source of truth)
-from database.models import (
+from models import (
     Skill, SkillFile, SkillSource, SkillVersion, SkillAuditLog
 )
 

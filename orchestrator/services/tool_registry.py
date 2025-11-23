@@ -2,10 +2,12 @@
 Tool Registry - Centralized Tool Management System
 ===================================================
 PRD-17: Dynamic Tool Assignment & Centralized Tool Management
+REBUILD: Enhanced with AgentRegistry integration (Phase 1.2)
 
 Provides a single source of truth for ALL platform tools, accessible to:
 - Orchestrator (task decomposition with tool recommendations)
 - Agent Factory (dynamic tool injection)
+- AgentRegistry (tool-based agent lookup)
 - ChatBot (tool-augmented responses)
 - User/API (tool discovery & execution)
 - Future integrations (plugins, extensions)
@@ -16,6 +18,7 @@ Design Principles:
 - Discoverable: Tools are queryable by category, task type, or name
 - Secure: Maintains existing security controls
 - Extensible: Easy to add new tools or categories
+- Integrated: Works seamlessly with AgentRegistry and GlobalFunctionRegistry
 """
 
 import logging

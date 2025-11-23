@@ -75,7 +75,7 @@ export function useRAGRetrieval(
       }
 
       // CRITICAL: Call backend directly to bypass Next.js proxy mock data
-      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
       const url = `${BACKEND_URL}/api/documents/rag/retrieve?${searchParams.toString()}`
       console.log('[RAG Retrieval] Calling backend directly:', url)
       console.log('[RAG Retrieval] Params:', params)
@@ -115,7 +115,7 @@ export function useRAGRetrievalMutation() {
       })
 
       // CRITICAL: Call backend directly to bypass Next.js proxy mock data
-      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
       const url = `${BACKEND_URL}/api/documents/rag/retrieve?${searchParams.toString()}`
       console.log('[RAG Mutation] Calling backend directly:', url)
       console.log('[RAG Mutation] Params:', params)

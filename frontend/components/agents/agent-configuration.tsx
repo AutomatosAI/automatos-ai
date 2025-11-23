@@ -89,10 +89,16 @@ export function AgentConfiguration({
   // Initialize config data when agent config is loaded
   useEffect(() => {
     if (agentConfig) {
-      setConfigData(agentConfig)
+      const existingTags = Array.isArray((agent as any)?.tags)
+        ? ((agent as any).tags as string[]).join(', ')
+        : (agentConfig as any)?.tags || ''
+      setConfigData({
+        ...agentConfig,
+        tags: existingTags
+      })
       setHasUnsavedChanges(false)
     }
-  }, [agentConfig])
+  }, [agentConfig, agent])
   
   // PRD-15: Initialize model config data
   useEffect(() => {
@@ -169,6 +175,12 @@ export function AgentConfiguration({
 
     try {
       toast.loading('Saving configuration...')
+      const normalizedTags = Array.isArray(configData.tags)
+        ? configData.tags
+        : String(configData.tags || '')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter((tag) => tag.length > 0)
       
       // 1. Update basic agent info (name, description)
       await updateConfigMutation.mutateAsync({
@@ -176,6 +188,7 @@ export function AgentConfiguration({
         config: {
           name: configData.name || (agent as any)?.name,
           description: configData.description || (agent as any)?.description,
+          tags: normalizedTags
         }
       })
       
@@ -428,6 +441,19 @@ export function AgentConfiguration({
                 placeholder="Describe the agent's purpose and capabilities"
                 rows={3}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="agent-tags">Tags (comma separated)</Label>
+              <Input
+                id="agent-tags"
+                value={configData.tags || ''}
+                onChange={(e) => handleConfigChange('tags', e.target.value)}
+                placeholder="e.g. writing, pdf, research"
+              />
+              <p className="text-xs text-muted-foreground">
+                Lightweight keywords that describe this agent&apos;s strengths.
+              </p>
             </div>
 
             <div className="space-y-2">

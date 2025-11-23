@@ -6,12 +6,12 @@ import time
 import logging
 
 from database.database import get_db
-from database.models import PriorityLevel
-from database.models import Agent, Skill, Pattern, agent_skills
+from models import PriorityLevel
+from models import Agent, Skill, Pattern, agent_skills
 # Import MCP tool models from database.models (SQLAlchemy models)
-from database.models import AgentToolAssignment, MCPTool
+from models import AgentToolAssignment, MCPTool
 # Import Pydantic models from database.models (not models.py)
-from database.models import (
+from models import (
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,
@@ -21,6 +21,34 @@ from database.models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+
+def _normalize_tags(raw_tags) -> List[str]:
+    """Normalize incoming tags into a list of unique, lower-trimmed strings."""
+    if raw_tags is None:
+        return []
+    items: List[str] = []
+    if isinstance(raw_tags, str):
+        items = [segment.strip() for segment in raw_tags.split(',')]
+    elif isinstance(raw_tags, (list, tuple, set)):
+        for value in raw_tags:
+            if isinstance(value, str):
+                items.extend([segment.strip() for segment in value.split(',')])
+    else:
+        return []
+
+    # Deduplicate while preserving order
+    seen = set()
+    normalized = []
+    for item in items:
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(item)
+    return normalized
+
 
 def _build_agent_response(agent: Agent) -> AgentResponse:
     """Build agent response with skills and tools"""
@@ -45,13 +73,20 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
                     "assigned_at": assignment.assigned_at
                 })
     
+    # Read-time adapter: Remove tags from configuration if present (legacy data cleanup)
+    # agent.tags is the single source of truth, configuration should not contain tags
+    configuration = agent.configuration.copy() if agent.configuration else {}
+    if "tags" in configuration:
+        configuration.pop("tags", None)
+        logger.debug(f"Removed legacy tags from configuration for agent {agent.id}")
+    
     return AgentResponse(
         id=agent.id,
         name=agent.name,
         description=agent.description,
         agent_type=agent.agent_type,
         status=agent.status,
-        configuration=agent.configuration or {},
+        configuration=configuration,
         skills=[SkillResponse(
             id=skill.id,
             name=skill.name,
@@ -66,6 +101,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
         priority_level=getattr(agent, 'priority_level', 'medium') or 'medium',
         max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5) or 5,
         auto_start=getattr(agent, 'auto_start', False) or False,
+        tags=_normalize_tags(agent.tags) if getattr(agent, 'tags', None) else [],
         created_at=agent.created_at,
         updated_at=agent.updated_at or agent.created_at,
         performance_metrics=agent.performance_metrics or {},
@@ -138,6 +174,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         created_agents = []
         
         for agent_data in agents:
+            tags = _normalize_tags(getattr(agent_data, 'tags', None))
             # Check if agent with this name already exists
             existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
             if existing:
@@ -152,6 +189,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
                 priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
                 max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
                 auto_start=agent_data.auto_start or False,
+                tags=tags,
                 created_by="api"
             )
             
@@ -169,6 +207,10 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
                     missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
                     raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
                 agent.skills.extend(skills)
+            
+            # Note: agent.tags is the single source of truth for tags.
+            # Tags are NOT stored in agent.configuration to avoid duplicate state.
+            # Legacy clients reading tags from configuration should migrate to use agent.tags.
             
             created_agents.append(agent)
         
@@ -202,6 +244,8 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         if existing:
             raise HTTPException(status_code=400, detail="Agent with this name already exists")
         
+        tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
+        
         # Create agent with new fields
         agent = Agent(
             name=agent_data.name,
@@ -211,6 +255,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
             priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
             max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
             auto_start=agent_data.auto_start or False,
+            tags=tags,
             created_by="api"
         )
         
@@ -228,6 +273,10 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
                 missing_ids = [sid for sid in agent_data.skill_ids if sid not in found_ids]
                 raise HTTPException(status_code=404, detail=f"Skills not found: {missing_ids}")
             agent.skills.extend(skills)
+
+        # Note: agent.tags is the single source of truth for tags.
+        # Tags are NOT stored in agent.configuration to avoid duplicate state.
+        # Legacy clients reading tags from configuration should migrate to use agent.tags.
         
         # Add tools if provided (NEW FEATURE)
         if agent_data.tool_ids:
@@ -476,6 +525,15 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         
         if agent_update.status is not None:
             agent.status = agent_update.status.value
+
+        if agent_update.tags is not None:
+            tags = _normalize_tags(agent_update.tags)
+            agent.tags = tags
+            # Remove tags from configuration if present (cleanup legacy data)
+            if agent.configuration and "tags" in agent.configuration:
+                config = agent.configuration.copy()
+                config.pop("tags", None)
+                agent.configuration = config
         
         db.commit()
         db.refresh(agent)

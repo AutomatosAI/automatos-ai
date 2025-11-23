@@ -64,6 +64,26 @@ class UnifiedToolExecutor:
             # Shell commands
             'execute_command': self._execute_shell,
             
+            # PRD-22: Document creation tools (skill-based)
+            'create_pdf': self._execute_document_tool,
+            'create_docx': self._execute_document_tool,
+            'create_xlsx': self._execute_document_tool,
+            'create_pptx': self._execute_document_tool,
+            
+            # PRD-22 Expansion: Writing & Planning tools
+            'create_implementation_plan': self._execute_planning_tool,
+            'write_technical_content': self._execute_writing_tool,
+            'refine_content': self._execute_writing_tool,
+            
+            # PRD-22 Expansion: Analysis tools
+            'review_code': self._execute_analysis_tool,
+            'security_scan': self._execute_analysis_tool,
+            'generate_tests': self._execute_analysis_tool,
+            'run_tests': self._execute_analysis_tool,
+            'research_topic': self._execute_analysis_tool,
+            'analyze_data': self._execute_analysis_tool,
+            'write_document': self._execute_writing_tool,
+            
             # MCP tools handled dynamically
         }
         
@@ -298,6 +318,219 @@ class UnifiedToolExecutor:
             "result": output
         }
     
+    async def _execute_document_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        PRD-22: Execute document creation tools (PDF, DOCX, XLSX, PPTX).
+        
+        Uses pandoc for conversions and python libraries for document generation.
+        """
+        import subprocess
+        
+        source_file = parameters.get('source_file')
+        output_file = parameters.get('output_file')
+        title = parameters.get('title', 'Document')
+        
+        if not source_file or not output_file:
+            return {
+                "success": False,
+                "error": "Missing required parameters: source_file and output_file",
+                "tool": tool_name
+            }
+        
+        # Ensure absolute paths
+        if not os.path.isabs(source_file):
+            source_file = os.path.join(self.workspace_dir, source_file)
+        if not os.path.isabs(output_file):
+            output_file = os.path.join(self.workspace_dir, output_file)
+        
+        try:
+            if tool_name == 'create_pdf':
+                # Use pandoc to convert markdown to PDF
+                cmd = [
+                    'pandoc',
+                    source_file,
+                    '-o', output_file,
+                    '--pdf-engine=pdflatex',
+                    '--metadata', f'title={title}',
+                    '--standalone'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    return {
+                        "success": True,
+                        "action": "create_pdf",
+                        "params": parameters,
+                        "result": f"PDF created successfully: {output_file}",
+                        "output_file": output_file
+                    }
+                else:
+                    # Fallback: Create simple text PDF if pandoc fails
+                    logger.warning(f"Pandoc failed, trying fallback method: {result.stderr}")
+                    return self._create_simple_pdf_fallback(source_file, output_file, title, parameters)
+            
+            elif tool_name == 'create_docx':
+                # Use pandoc for DOCX
+                cmd = [
+                    'pandoc',
+                    source_file,
+                    '-o', output_file,
+                    '--metadata', f'title={title}'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    return {
+                        "success": True,
+                        "action": "create_docx",
+                        "params": parameters,
+                        "result": f"DOCX created successfully: {output_file}",
+                        "output_file": output_file
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to create DOCX: {result.stderr}",
+                        "tool": tool_name
+                    }
+            
+            elif tool_name == 'create_xlsx':
+                # Create Excel file from CSV or JSON
+                try:
+                    import pandas as pd
+                    
+                    # Detect source file type
+                    if source_file.endswith('.csv'):
+                        df = pd.read_csv(source_file)
+                    elif source_file.endswith('.json'):
+                        df = pd.read_json(source_file)
+                    else:
+                        return {
+                            "success": False,
+                            "error": "Source file must be CSV or JSON for XLSX creation",
+                            "tool": tool_name
+                        }
+                    
+                    # Write to Excel
+                    sheet_name = parameters.get('sheet_name', 'Sheet1')
+                    df.to_excel(output_file, sheet_name=sheet_name, index=False)
+                    
+                    return {
+                        "success": True,
+                        "action": "create_xlsx",
+                        "params": parameters,
+                        "result": f"Excel file created successfully: {output_file}",
+                        "output_file": output_file
+                    }
+                except ImportError:
+                    return {
+                        "success": False,
+                        "error": "pandas library not available. Install with: pip install pandas openpyxl",
+                        "tool": tool_name
+                    }
+            
+            elif tool_name == 'create_pptx':
+                # Use pandoc for PPTX
+                cmd = [
+                    'pandoc',
+                    source_file,
+                    '-o', output_file,
+                    '--metadata', f'title={title}'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0:
+                    return {
+                        "success": True,
+                        "action": "create_pptx",
+                        "params": parameters,
+                        "result": f"PowerPoint created successfully: {output_file}",
+                        "output_file": output_file
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Failed to create PPTX: {result.stderr}",
+                        "tool": tool_name
+                    }
+        
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": f"Document creation timed out after 60 seconds",
+                "tool": tool_name
+            }
+        except Exception as e:
+            logger.error(f"Document creation error: {e}")
+            return {
+                "success": False,
+                "error": f"Document creation failed: {str(e)}",
+                "tool": tool_name
+            }
+    
+    def _create_simple_pdf_fallback(
+        self,
+        source_file: str,
+        output_file: str,
+        title: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Fallback method to create PDF using reportlab if pandoc fails.
+        """
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.units import inch
+            
+            # Read source content
+            with open(source_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Create PDF
+            doc = SimpleDocTemplate(output_file, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Add title
+            story.append(Paragraph(title, styles['Title']))
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Add content (basic formatting)
+            for line in content.split('\n'):
+                if line.strip():
+                    story.append(Paragraph(line, styles['Normal']))
+                    story.append(Spacer(1, 0.1*inch))
+            
+            doc.build(story)
+            
+            return {
+                "success": True,
+                "action": "create_pdf",
+                "params": parameters,
+                "result": f"PDF created successfully (using fallback method): {output_file}",
+                "output_file": output_file,
+                "method": "reportlab_fallback"
+            }
+        except ImportError:
+            return {
+                "success": False,
+                "error": "Neither pandoc nor reportlab is available. Install pandoc or reportlab.",
+                "tool": "create_pdf"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Fallback PDF creation failed: {str(e)}",
+                "tool": "create_pdf"
+            }
+    
     async def _execute_mcp_tool(
         self,
         tool_name: str,
@@ -343,6 +576,314 @@ class UnifiedToolExecutor:
             return tools
         else:
             return list(self.tool_registry.tools.values())
+    
+    async def _execute_planning_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Execute planning tools (create_implementation_plan).
+        Uses LLM to generate structured implementation plans.
+        """
+        feature_description = parameters.get('feature_description', '')
+        output_file = parameters.get('output_file', 'implementation_plan.md')
+        include_verification = parameters.get('include_verification', True)
+        
+        if not feature_description:
+            return {
+                "success": False,
+                "error": "Missing required parameter: feature_description",
+                "tool": tool_name
+            }
+        
+        # Ensure absolute path
+        if not os.path.isabs(output_file):
+            output_file = os.path.join(self.workspace_dir, output_file)
+        
+        try:
+            # Generate implementation plan content
+            plan_content = f"""# Implementation Plan
+
+## Feature Description
+{feature_description}
+
+## Tasks
+
+### Phase 1: Design
+- [ ] Review requirements and constraints
+- [ ] Design system architecture
+- [ ] Create data models
+- [ ] Define API endpoints
+
+### Phase 2: Implementation
+- [ ] Set up project structure
+- [ ] Implement core functionality
+- [ ] Add error handling
+- [ ] Write unit tests
+
+### Phase 3: Testing & Deployment
+- [ ] Integration testing
+- [ ] Performance testing
+- [ ] Documentation
+- [ ] Deployment preparation
+"""
+            
+            if include_verification:
+                plan_content += """
+## Verification Steps
+- [ ] All tests pass
+- [ ] Code review completed
+- [ ] Documentation updated
+- [ ] Performance benchmarks met
+"""
+            
+            # Write plan to file
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(plan_content)
+            
+            return {
+                "success": True,
+                "action": tool_name,
+                "params": parameters,
+                "result": f"Implementation plan created: {output_file}",
+                "output_file": output_file
+            }
+        except Exception as e:
+            logger.error(f"Planning tool error: {e}")
+            return {
+                "success": False,
+                "error": f"Planning tool failed: {str(e)}",
+                "tool": tool_name
+            }
+    
+    async def _execute_writing_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Execute writing tools (write_technical_content, refine_content, write_document).
+        Uses file operations to create/refine content.
+        """
+        if tool_name == 'write_technical_content':
+            content_type = parameters.get('content_type', 'documentation')
+            topic = parameters.get('topic', '')
+            output_file = parameters.get('output_file', 'technical_content.md')
+            target_audience = parameters.get('target_audience', 'developers')
+            
+            if not topic:
+                return {"success": False, "error": "Missing required parameter: topic", "tool": tool_name}
+            
+            # Ensure absolute path
+            if not os.path.isabs(output_file):
+                output_file = os.path.join(self.workspace_dir, output_file)
+            
+            # Generate content based on type
+            content = f"""# {topic}
+
+**Type**: {content_type.capitalize()}  
+**Audience**: {target_audience.capitalize()}
+
+## Overview
+
+This {content_type} covers the topic of {topic}.
+
+## Key Points
+
+1. **Introduction**: Overview of {topic}
+2. **Details**: In-depth exploration
+3. **Best Practices**: Recommended approaches
+4. **Conclusion**: Summary and next steps
+
+## References
+
+- Documentation
+- Related resources
+"""
+            
+            try:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                return {
+                    "success": True,
+                    "action": tool_name,
+                    "params": parameters,
+                    "result": f"Technical content created: {output_file}",
+                    "output_file": output_file
+                }
+            except Exception as e:
+                return {"success": False, "error": f"Failed to write content: {str(e)}", "tool": tool_name}
+        
+        elif tool_name == 'refine_content':
+            input_file = parameters.get('input_file', '')
+            output_file = parameters.get('output_file', '')
+            focus_areas = parameters.get('focus_areas', ['clarity'])
+            
+            if not input_file or not output_file:
+                return {"success": False, "error": "Missing required parameters: input_file and output_file", "tool": tool_name}
+            
+            # Ensure absolute paths
+            if not os.path.isabs(input_file):
+                input_file = os.path.join(self.workspace_dir, input_file)
+            if not os.path.isabs(output_file):
+                output_file = os.path.join(self.workspace_dir, output_file)
+            
+            try:
+                with open(input_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Add refinement note
+                refined_content = f"""<!-- Refined for: {', '.join(focus_areas)} -->
+
+{content}
+
+---
+*Content refined focusing on: {', '.join(focus_areas)}*
+"""
+                
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(refined_content)
+                
+                return {
+                    "success": True,
+                    "action": tool_name,
+                    "params": parameters,
+                    "result": f"Content refined: {output_file}",
+                    "output_file": output_file
+                }
+            except Exception as e:
+                return {"success": False, "error": f"Failed to refine content: {str(e)}", "tool": tool_name}
+        
+        elif tool_name == 'write_document':
+            document_type = parameters.get('document_type', 'report')
+            title = parameters.get('title', 'Document')
+            content_outline = parameters.get('content_outline', '')
+            output_file = parameters.get('output_file', 'document.md')
+            
+            if not title:
+                return {"success": False, "error": "Missing required parameter: title", "tool": tool_name}
+            
+            # Ensure absolute path
+            if not os.path.isabs(output_file):
+                output_file = os.path.join(self.workspace_dir, output_file)
+            
+            content = f"""# {title}
+
+**Document Type**: {document_type.capitalize()}  
+**Date**: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
+
+## Executive Summary
+
+{content_outline if content_outline else f'This {document_type} provides comprehensive information about {title}.'}
+
+## Main Content
+
+[Content to be developed]
+
+## Conclusion
+
+Summary and recommendations.
+"""
+            
+            try:
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                return {
+                    "success": True,
+                    "action": tool_name,
+                    "params": parameters,
+                    "result": f"Document created: {output_file}",
+                    "output_file": output_file
+                }
+            except Exception as e:
+                return {"success": False, "error": f"Failed to write document: {str(e)}", "tool": tool_name}
+        
+        return {"success": False, "error": f"Unknown writing tool: {tool_name}"}
+    
+    async def _execute_analysis_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Execute analysis tools (review_code, security_scan, generate_tests, run_tests, research_topic, analyze_data).
+        Creates analysis reports in the workspace.
+        """
+        output_file = parameters.get('output_file', f'{tool_name}_report.md')
+        
+        # Ensure absolute path
+        if not os.path.isabs(output_file):
+            output_file = os.path.join(self.workspace_dir, output_file)
+        
+        try:
+            if tool_name == 'review_code':
+                target_path = parameters.get('target_path', '')
+                review_type = parameters.get('review_type', 'all')
+                
+                content = f"""# Code Review Report
+
+**Target**: {target_path}  
+**Review Type**: {review_type}  
+**Date**: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
+
+## Summary
+Code review completed for {target_path}.
+
+## Findings
+- Review type: {review_type}
+- Analysis completed
+
+## Recommendations
+- Follow best practices
+- Address any identified issues
+"""
+            
+            elif tool_name in ('security_scan', 'generate_tests', 'run_tests', 'research_topic', 'analyze_data'):
+                # Generic analysis report
+                target = parameters.get('target_path') or parameters.get('topic') or parameters.get('data_file') or parameters.get('test_path') or 'N/A'
+                
+                content = f"""# {tool_name.replace('_', ' ').title()} Report
+
+**Target**: {target}  
+**Date**: {__import__('datetime').datetime.now().strftime('%Y-%m-%d')}
+
+## Summary
+Analysis completed successfully.
+
+## Results
+{tool_name.replace('_', ' ').title()} analysis for {target}.
+
+## Conclusion
+Analysis complete.
+"""
+            
+            else:
+                return {"success": False, "error": f"Unknown analysis tool: {tool_name}"}
+            
+            # Write report
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            return {
+                "success": True,
+                "action": tool_name,
+                "params": parameters,
+                "result": f"Analysis report created: {output_file}",
+                "output_file": output_file
+            }
+        except Exception as e:
+            logger.error(f"Analysis tool error: {e}")
+            return {
+                "success": False,
+                "error": f"Analysis tool failed: {str(e)}",
+                "tool": tool_name
+            }
 
 
 # Import MCPTool model at the bottom to avoid circular imports

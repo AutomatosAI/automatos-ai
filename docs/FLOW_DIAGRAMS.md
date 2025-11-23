@@ -300,11 +300,11 @@ graph TD
     A --> C[Log Aggregation]
     A --> D[Trace Collection]
     
-    B --> E[Prometheus]
+    B --> E[Monitoring Service]
     C --> F[Log Storage]
     D --> G[Tracing System]
     
-    E --> H[Grafana Dashboard]
+    E --> H[System Metrics]
     F --> I[Log Analysis]
     G --> J[Performance Analysis]
     

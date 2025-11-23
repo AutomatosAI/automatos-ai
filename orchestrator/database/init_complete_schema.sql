@@ -24,6 +24,61 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ================================================================
+-- CHAT TABLES (PRD-27)
+-- ================================================================
+
+-- Chat sessions table
+CREATE TABLE IF NOT EXISTS chats (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    visibility VARCHAR(20) DEFAULT 'private' CHECK (visibility IN ('private', 'public')),
+    last_context JSONB DEFAULT '{}'::jsonb,
+    CONSTRAINT unique_user_title UNIQUE(user_id, title)
+);
+
+-- Messages table with parts support
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    parts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    attachments JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Message voting table
+CREATE TABLE IF NOT EXISTS votes (
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    is_upvoted BOOLEAN NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, message_id)
+);
+
+-- Artifacts table (for code snippets, documents, images)
+CREATE TABLE IF NOT EXISTS artifacts (
+    id UUID NOT NULL DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('code', 'text', 'image', 'sheet')),
+    artifact_metadata JSONB DEFAULT '{}'::jsonb,
+    PRIMARY KEY (id, created_at)
+);
+
+-- Indexes for chat tables
+CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id);
+CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(chat_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_votes_chat_message ON votes(chat_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_user_id ON artifacts(user_id);
+
 -- Agents table
 CREATE TABLE IF NOT EXISTS agents (
     id SERIAL PRIMARY KEY,
@@ -33,6 +88,7 @@ CREATE TABLE IF NOT EXISTS agents (
     status VARCHAR(50) DEFAULT 'active',
     configuration JSON,
     performance_metrics JSON,
+    tags JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     created_by VARCHAR(255),
@@ -71,7 +127,7 @@ CREATE TABLE IF NOT EXISTS skills (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     created_by VARCHAR(255),
-    -- PRD-22: Enhanced fields for Git-backed skills
+    -- PRD-22: Enhanced fields for Git-backed skills and progressive disclosure
     prompt_template TEXT,
     skill_version VARCHAR(20),
     skill_source VARCHAR(50),
@@ -81,7 +137,9 @@ CREATE TABLE IF NOT EXISTS skills (
     filesystem_path TEXT,
     tags JSONB,
     skill_metadata JSONB,
-    last_sync_at TIMESTAMP WITH TIME ZONE
+    last_sync_at TIMESTAMP WITH TIME ZONE,
+    -- PRD-22: Tools schema for executable tool definitions
+    tools_schema JSONB DEFAULT NULL
 );
 
 -- Agent-Skills many-to-many
@@ -91,7 +149,7 @@ CREATE TABLE IF NOT EXISTS agent_skills (
     PRIMARY KEY (agent_id, skill_id)
 );
 
--- PRD-22: Skill support tables
+-- PRD-22: Skill Files table for progressive disclosure
 CREATE TABLE IF NOT EXISTS skill_files (
     id SERIAL PRIMARY KEY,
     skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
@@ -106,7 +164,10 @@ CREATE TABLE IF NOT EXISTS skill_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_skill_files_skill_id ON skill_files(skill_id);
+CREATE INDEX IF NOT EXISTS idx_skill_files_type ON skill_files(file_type);
+CREATE INDEX IF NOT EXISTS idx_skill_files_level ON skill_files(load_level);
 
+-- PRD-22: Skill Sources table for Git repository tracking
 CREATE TABLE IF NOT EXISTS skill_sources (
     id SERIAL PRIMARY KEY,
     source_name VARCHAR(100) NOT NULL UNIQUE,
@@ -127,6 +188,11 @@ CREATE TABLE IF NOT EXISTS skill_sources (
     created_by VARCHAR(255)
 );
 
+CREATE INDEX IF NOT EXISTS idx_skill_sources_type ON skill_sources(source_type);
+CREATE INDEX IF NOT EXISTS idx_skill_sources_status ON skill_sources(status);
+CREATE INDEX IF NOT EXISTS idx_skill_sources_name ON skill_sources(source_name);
+
+-- PRD-22: Skill Versions table
 CREATE TABLE IF NOT EXISTS skill_versions (
     id SERIAL PRIMARY KEY,
     skill_id INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
@@ -139,6 +205,10 @@ CREATE TABLE IF NOT EXISTS skill_versions (
     UNIQUE(skill_id, version)
 );
 
+CREATE INDEX IF NOT EXISTS idx_skill_versions_skill_id ON skill_versions(skill_id);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_current ON skill_versions(is_current);
+
+-- PRD-22: Skill Audit Log table
 CREATE TABLE IF NOT EXISTS skill_audit_log (
     id SERIAL PRIMARY KEY,
     skill_id INTEGER REFERENCES skills(id) ON DELETE SET NULL,
@@ -153,6 +223,16 @@ CREATE TABLE IF NOT EXISTS skill_audit_log (
     execution_time_ms INTEGER,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_skill_audit_action ON skill_audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_skill_audit_created ON skill_audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_skill_audit_skill ON skill_audit_log(skill_id);
+CREATE INDEX IF NOT EXISTS idx_skill_audit_source ON skill_audit_log(source_id);
+
+-- Additional indexes for skills
+CREATE INDEX IF NOT EXISTS idx_skills_source_active ON skills(skill_source, is_active);
+CREATE INDEX IF NOT EXISTS idx_skills_tags_gin ON skills USING GIN (tags jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_skills_tools_schema ON skills USING GIN (tools_schema);
 
 -- Patterns table
 CREATE TABLE IF NOT EXISTS patterns (
@@ -178,11 +258,14 @@ CREATE TABLE IF NOT EXISTS workflows (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    goal TEXT,
+    context TEXT,
     workflow_definition JSON,
     status VARCHAR(50) DEFAULT 'draft',
     owner VARCHAR(255),
     tags JSONB DEFAULT '[]'::jsonb,
     default_policy_id VARCHAR(128),
+    last_execution JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     created_by VARCHAR(255),
@@ -314,9 +397,10 @@ CREATE INDEX IF NOT EXISTS idx_document_usage_timestamp ON document_usage(timest
 CREATE INDEX IF NOT EXISTS idx_document_usage_metadata ON document_usage USING GIN (metadata);
 
 -- ================================================================
--- MULTIMODAL KNOWLEDGE BASE (PRD-19)
+-- MULTIMODAL KNOWLEDGE BASE (PRD-19, Migration 006)
 -- ================================================================
 
+-- Knowledge Base Types Registry
 CREATE TABLE IF NOT EXISTS kb_types (
     id SERIAL PRIMARY KEY,
     type_name VARCHAR(100) UNIQUE NOT NULL,
@@ -335,7 +419,9 @@ CREATE TABLE IF NOT EXISTS kb_types (
 );
 
 CREATE INDEX IF NOT EXISTS idx_kb_types_name ON kb_types(type_name);
+CREATE INDEX IF NOT EXISTS idx_kb_types_enabled ON kb_types(enabled);
 
+-- Unified Knowledge Items Table (polymorphic storage)
 CREATE TABLE IF NOT EXISTS knowledge_items (
     id SERIAL PRIMARY KEY,
     kb_type_id INTEGER REFERENCES kb_types(id) ON DELETE CASCADE,
@@ -363,8 +449,18 @@ CREATE TABLE IF NOT EXISTS knowledge_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_type ON knowledge_items(kb_type_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_parent ON knowledge_items(parent_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_source ON knowledge_items(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_status ON knowledge_items(status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_owner ON knowledge_items(owner_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_quality ON knowledge_items(quality_score DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_importance ON knowledge_items(importance_score DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_items_embedding ON knowledge_items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_metadata ON knowledge_items USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_content_fts ON knowledge_items USING GIN (to_tsvector('english', content));
+CREATE INDEX IF NOT EXISTS idx_knowledge_items_title_fts ON knowledge_items USING GIN (to_tsvector('english', title));
 
+-- Multimodal Content Table
 CREATE TABLE IF NOT EXISTS multimodal_content (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
@@ -387,6 +483,12 @@ CREATE TABLE IF NOT EXISTS multimodal_content (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_multimodal_knowledge_item ON multimodal_content(knowledge_item_id);
+CREATE INDEX IF NOT EXISTS idx_multimodal_modality ON multimodal_content(content_modality);
+CREATE INDEX IF NOT EXISTS idx_multimodal_source_doc ON multimodal_content(source_document_id);
+CREATE INDEX IF NOT EXISTS idx_multimodal_extraction ON multimodal_content(extraction_method);
+
+-- Knowledge Relationships Table
 CREATE TABLE IF NOT EXISTS knowledge_relationships (
     id SERIAL PRIMARY KEY,
     from_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
@@ -400,6 +502,12 @@ CREATE TABLE IF NOT EXISTS knowledge_relationships (
     UNIQUE(from_item_id, to_item_id, relationship_type)
 );
 
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_from ON knowledge_relationships(from_item_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_to ON knowledge_relationships(to_item_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_type ON knowledge_relationships(relationship_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_relationships_strength ON knowledge_relationships(strength DESC);
+
+-- Table-Specific Storage
 CREATE TABLE IF NOT EXISTS kb_tables (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
@@ -418,6 +526,10 @@ CREATE TABLE IF NOT EXISTS kb_tables (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_kb_tables_knowledge_item ON kb_tables(knowledge_item_id);
+CREATE INDEX IF NOT EXISTS idx_kb_tables_size ON kb_tables(row_count, column_count);
+
+-- Image-Specific Storage
 CREATE TABLE IF NOT EXISTS kb_images (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
@@ -437,8 +549,11 @@ CREATE TABLE IF NOT EXISTS kb_images (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_kb_images_knowledge_item ON kb_images(knowledge_item_id);
+CREATE INDEX IF NOT EXISTS idx_kb_images_format ON kb_images(format);
 CREATE INDEX IF NOT EXISTS idx_kb_images_visual_embedding ON kb_images USING ivfflat (visual_embedding vector_cosine_ops) WITH (lists = 50);
 
+-- Formula-Specific Storage
 CREATE TABLE IF NOT EXISTS kb_formulas (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE UNIQUE,
@@ -454,6 +569,11 @@ CREATE TABLE IF NOT EXISTS kb_formulas (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_kb_formulas_knowledge_item ON kb_formulas(knowledge_item_id);
+CREATE INDEX IF NOT EXISTS idx_kb_formulas_type ON kb_formulas(formula_type);
+CREATE INDEX IF NOT EXISTS idx_kb_formulas_domain ON kb_formulas(domain);
+
+-- Knowledge Usage Analytics
 CREATE TABLE IF NOT EXISTS knowledge_usage (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
@@ -468,6 +588,11 @@ CREATE TABLE IF NOT EXISTS knowledge_usage (
     timestamp TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_knowledge_usage_item ON knowledge_usage(knowledge_item_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_usage_event ON knowledge_usage(event_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_usage_timestamp ON knowledge_usage(timestamp DESC);
+
+-- Knowledge Collections
 CREATE TABLE IF NOT EXISTS knowledge_collections (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -490,6 +615,10 @@ CREATE TABLE IF NOT EXISTS knowledge_collection_items (
     added_by VARCHAR(255),
     PRIMARY KEY (collection_id, knowledge_item_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_collections_owner ON knowledge_collections(owner_id);
+CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON knowledge_collection_items(collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_items_item ON knowledge_collection_items(knowledge_item_id);
 
 -- ================================================================
 -- MEMORY & KNOWLEDGE GRAPH TABLES
@@ -551,6 +680,7 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
 -- KNOWLEDGE GRAPH ENTITIES (Migration 007)
 -- ================================================================
 
+-- KB Entities Table (extracted entities from documents)
 CREATE TABLE IF NOT EXISTS kb_entities (
     id SERIAL PRIMARY KEY,
     entity_name VARCHAR(255) NOT NULL,
@@ -566,8 +696,12 @@ CREATE TABLE IF NOT EXISTS kb_entities (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_entities_canonical ON kb_entities(LOWER(canonical_name));
+CREATE INDEX IF NOT EXISTS idx_kb_entities_type ON kb_entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_kb_entities_importance ON kb_entities(importance_score DESC);
 CREATE INDEX IF NOT EXISTS idx_kb_entities_embedding ON kb_entities USING ivfflat (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_kb_entities_name_fts ON kb_entities USING gin(to_tsvector('english', entity_name || ' ' || COALESCE(description, '')));
 
+-- Knowledge Entity Mentions (links entities to knowledge items)
 CREATE TABLE IF NOT EXISTS knowledge_entity_mentions (
     id SERIAL PRIMARY KEY,
     knowledge_item_id INTEGER REFERENCES knowledge_items(id) ON DELETE CASCADE,
@@ -581,7 +715,9 @@ CREATE TABLE IF NOT EXISTS knowledge_entity_mentions (
 
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity ON knowledge_entity_mentions(entity_id);
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_knowledge ON knowledge_entity_mentions(knowledge_item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_mentions_unique ON knowledge_entity_mentions(knowledge_item_id, entity_id, position_in_source);
 
+-- Entity Relationships (entity-to-entity graph)
 CREATE TABLE IF NOT EXISTS entity_relationships (
     id SERIAL PRIMARY KEY,
     from_entity_id INTEGER REFERENCES kb_entities(id) ON DELETE CASCADE,
@@ -597,7 +733,12 @@ CREATE TABLE IF NOT EXISTS entity_relationships (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entity_relationships_from ON entity_relationships(from_entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_to ON entity_relationships(to_entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_type ON entity_relationships(relationship_type);
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_strength ON entity_relationships(strength DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_unique ON entity_relationships(from_entity_id, to_entity_id, relationship_type);
 
+-- Entity Clusters (semantic clustering)
 CREATE TABLE IF NOT EXISTS entity_clusters (
     id SERIAL PRIMARY KEY,
     cluster_name VARCHAR(255),
@@ -609,6 +750,8 @@ CREATE TABLE IF NOT EXISTS entity_clusters (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_entity_clusters_size ON entity_clusters(size DESC);
 
 -- External Knowledge table
 CREATE TABLE IF NOT EXISTS external_knowledge (
@@ -647,8 +790,9 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_status ON mcp_tools(status);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_category ON mcp_tools(category);
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_provider ON mcp_tools(provider);
 
--- System Settings table
+-- System Settings table (database-backed configuration management)
 CREATE TABLE IF NOT EXISTS system_settings (
     id SERIAL PRIMARY KEY,
     category VARCHAR(50) NOT NULL,
@@ -667,8 +811,11 @@ CREATE TABLE IF NOT EXISTS system_settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_system_settings_category ON system_settings(category);
+CREATE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings(key);
+CREATE INDEX IF NOT EXISTS idx_system_settings_category_key ON system_settings(category, key);
 
 -- Credential Types table (definitions for credential schemas)
+-- MUST be before credentials and agent_tool_assignments
 CREATE TABLE IF NOT EXISTS credential_types (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) UNIQUE NOT NULL,
@@ -714,7 +861,8 @@ CREATE INDEX idx_credentials_type ON credentials(credential_type_id);
 CREATE INDEX idx_credentials_env ON credentials(environment);
 CREATE INDEX idx_credentials_active ON credentials(is_active);
 
--- Agent Tool Assignments table (moved here after credentials for FK)
+-- Agent Tool Assignments table
+-- References credentials, so must come after
 CREATE TABLE IF NOT EXISTS agent_tool_assignments (
     id SERIAL PRIMARY KEY,
     agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
@@ -728,6 +876,11 @@ CREATE TABLE IF NOT EXISTS agent_tool_assignments (
     UNIQUE(agent_id, tool_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_agent_tools_agent ON agent_tool_assignments(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tools_tool ON agent_tool_assignments(tool_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tools_enabled ON agent_tool_assignments(enabled);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_credential ON agent_tool_assignments(credential_id);
+
 -- Tool Credentials table
 CREATE TABLE IF NOT EXISTS tool_credentials (
     id SERIAL PRIMARY KEY,
@@ -739,6 +892,10 @@ CREATE TABLE IF NOT EXISTS tool_credentials (
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(tool_id, agent_id, environment)
 );
+
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_tool ON tool_credentials(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_agent ON tool_credentials(agent_id);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_env ON tool_credentials(environment);
 
 -- Tool Usage Logs table
 CREATE TABLE IF NOT EXISTS tool_usage_logs (
@@ -757,6 +914,8 @@ CREATE TABLE IF NOT EXISTS tool_usage_logs (
 
 CREATE INDEX IF NOT EXISTS idx_tool_usage_agent ON tool_usage_logs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_tool_usage_tool ON tool_usage_logs(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_execution ON tool_usage_logs(execution_id);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_success ON tool_usage_logs(success);
 
 -- Tools table (UI registry)
 CREATE TABLE IF NOT EXISTS tools (
@@ -806,17 +965,23 @@ CREATE TABLE IF NOT EXISTS agent_tool_permissions (
 -- Credential Audit Logs table
 CREATE TABLE IF NOT EXISTS credential_audit_logs (
     id SERIAL PRIMARY KEY,
-    credential_id VARCHAR,
-    tool_id VARCHAR,
-    action VARCHAR,
-    user_id VARCHAR,
-    timestamp TIMESTAMP DEFAULT NOW(),
+    credential_id INTEGER REFERENCES credentials(id) ON DELETE CASCADE,
+    tool_id INTEGER,
+    action VARCHAR(100) NOT NULL,
+    user_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     details JSON,
-    ip_address VARCHAR,
+    metadata JSON,
+    ip_address VARCHAR(45),
     user_agent VARCHAR,
     success BOOLEAN,
     error_message TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit_logs(credential_id);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_action ON credential_audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_created ON credential_audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_user ON credential_audit_logs(user_id);
 
 -- Permission Audit Logs table
 CREATE TABLE IF NOT EXISTS permission_audit_logs (
@@ -948,14 +1113,6 @@ CREATE TABLE IF NOT EXISTS context_optimizations (
     parameters JSON,
     results JSON,
     created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Context Optimization Metrics table
-CREATE TABLE IF NOT EXISTS context_optimization_metrics (
-    id SERIAL PRIMARY KEY,
-    metric_name VARCHAR(100),
-    metric_value FLOAT,
-    timestamp TIMESTAMP DEFAULT NOW()
 );
 
 -- Context Patterns table
@@ -1215,10 +1372,29 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
 CREATE TABLE IF NOT EXISTS system_metrics (
     id SERIAL PRIMARY KEY,
     metric_type VARCHAR(100),
+    metric_name VARCHAR(255),
     metric_value FLOAT,
+    metric_unit VARCHAR(50),
     metric_data JSON,
-    timestamp TIMESTAMP DEFAULT NOW()
+    timestamp TIMESTAMP DEFAULT NOW(),
+    recorded_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_system_metrics_metric_name ON system_metrics(metric_name);
+CREATE INDEX IF NOT EXISTS idx_system_metrics_recorded_at ON system_metrics(recorded_at);
+
+-- Context Optimization Metrics table
+CREATE TABLE IF NOT EXISTS context_optimization_metrics (
+    id SERIAL PRIMARY KEY,
+    tokens_saved INTEGER DEFAULT 0,
+    compression_ratio FLOAT DEFAULT 1.0,
+    optimization_type VARCHAR(100),
+    context_size_before INTEGER,
+    context_size_after INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_optimization_created_at ON context_optimization_metrics(created_at);
 
 -- Custom Metrics table
 CREATE TABLE IF NOT EXISTS custom_metrics (

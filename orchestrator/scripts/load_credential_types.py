@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.database import SessionLocal, init_database
 from models.credentials import CredentialType
-from credential_types.all_credential_types import ALL_CREDENTIAL_TYPES
+from credentials.types import ALL_CREDENTIAL_TYPES
 import json
 
 

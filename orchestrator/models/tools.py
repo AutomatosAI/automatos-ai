@@ -11,7 +11,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
-from database.database import Base
+from .core import Base
 
 # ====================================
 # Tools Models
@@ -62,7 +62,7 @@ class Tool(Base):
     credentials = relationship("ToolCredentials", back_populates="tool", cascade="all, delete-orphan")
     configurations = relationship("ToolConfiguration", back_populates="tool", cascade="all, delete-orphan")
     permissions_assignments = relationship("AgentToolPermission", back_populates="tool", cascade="all, delete-orphan")
-    usage_logs = relationship("ToolUsageLog", back_populates="tool", cascade="all, delete-orphan")
+    # Note: ToolUsageLog is defined in core.py and references mcp_tools, not tools
 
 class ToolCredentials(Base):
     """
@@ -145,62 +145,14 @@ class AgentToolPermission(Base):
     tool = relationship("Tool", back_populates="permissions_assignments")
     agent = relationship("Agent")  # Assumes Agent model exists in main models.py
 
-class ToolUsageLog(Base):
-    """
-    Comprehensive logging of tool usage for analytics and auditing.
-    Tracks all tool interactions and performance metrics.
-    """
-    __tablename__ = 'tool_usage_logs'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    
-    # Usage tracking
-    action = Column(String(100), nullable=False, index=True)  # install, configure, use, uninstall, etc.
-    agent_id = Column(Integer, ForeignKey('agents.id'), index=True)  # Optional: which agent used it
-    environment = Column(String(50), index=True)
-    
-    # Performance metrics
-    response_time_ms = Column(Integer)
-    success = Column(Boolean, index=True)
-    error_message = Column(Text)
-    
-    # Additional details
-    details = Column(JSON, default=dict)  # Action-specific data
-    timestamp = Column(DateTime, default=func.now(), index=True)
-    
-    # Relationships
-    tool = relationship("Tool", back_populates="usage_logs")
-    agent = relationship("Agent")
+# ToolUsageLog is defined in core.py for MCP tools
+# This file defines Tool model for the UI tool registry
 
 # ====================================
 # Audit and Security Models
 # ====================================
 
-class CredentialAuditLog(Base):
-    """
-    Audit log for all credential-related operations.
-    Tracks who accessed or modified credentials for security compliance.
-    """
-    __tablename__ = 'credential_audit_logs'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    credential_key = Column(String(100), nullable=False)
-    
-    # Audit details
-    action = Column(String(100), nullable=False, index=True)  # create, read, update, delete, access
-    environment = Column(String(50), index=True)
-    user_id = Column(String(255), index=True)  # Who performed the action
-    
-    # Context and metadata
-    details = Column(JSON, default=dict)
-    timestamp = Column(DateTime, default=func.now(), index=True)
-    
-    # Relationships
-    tool = relationship("Tool")
+# CredentialAuditLog is defined in credentials.py - removed duplicate definition
 
 class PermissionAuditLog(Base):
     """

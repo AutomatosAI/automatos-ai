@@ -21,6 +21,7 @@ class LLMProvider(Enum):
     GOOGLE = "google"
     AZURE = "azure"
     HUGGINGFACE = "huggingface"
+    AWS_BEDROCK = "aws_bedrock"  # Cost-effective gateway to multiple models
 
 
 @dataclass
@@ -33,6 +34,7 @@ class LLMConfig:
     api_key: str = None
     base_url: Optional[str] = None  # For custom endpoints
     organization_id: Optional[str] = None  # For OpenAI
+    secret_key: Optional[str] = None  # For AWS Bedrock IAM auth
 
 
 @dataclass
@@ -44,6 +46,7 @@ class LLMResponse:
     provider: str = None
     tool_calls: List[Dict[str, Any]] = None  # PRD-17: Support function calling
     finish_reason: str = None  # PRD-17: Track if stopped for tool use
+    additional_blocks: List[Dict[str, Any]] = None  # Additional content blocks (images, documents, etc.)
 
 
 class BaseLLMProvider(ABC):

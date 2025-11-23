@@ -812,30 +812,9 @@ services:
       - redis_data:/data
     restart: unless-stopped
     
-  prometheus:
-    image: prom/prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    restart: unless-stopped
-    
-  grafana:
-    image: grafana/grafana
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-    volumes:
-      - grafana_data:/var/lib/grafana
-    restart: unless-stopped
-
 volumes:
   postgres_data:
   redis_data:
-  prometheus_data:
-  grafana_data:
 ```
 
 ### **Kubernetes Deployment**

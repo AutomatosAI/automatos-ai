@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database.database import SessionLocal
-from database.models import MCPTool
+from models import MCPTool
 import logging
 
 logging.basicConfig(

@@ -14,7 +14,7 @@ import json
 import logging
 
 from database.database import get_db
-from database.models import WorkflowExecution, Workflow
+from models import WorkflowExecution, Workflow
 
 logger = logging.getLogger(__name__)
 

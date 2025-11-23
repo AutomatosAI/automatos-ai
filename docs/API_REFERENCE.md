@@ -36,8 +36,10 @@ The Automatos AI API provides **373+ endpoints** across all platform features:
 #### Option 1: Swagger UI (Recommended)
 
 ```
-https://api.automatos.app/docs
+{API_URL}/docs
 ```
+
+> **Note**: Replace `{API_URL}` with your API server URL (e.g., `https://api.automatos.app` for production, `http://localhost:8000` for local)
 
 **Features**:
 - ✅ Interactive "Try it out" functionality
@@ -49,7 +51,7 @@ https://api.automatos.app/docs
 #### Option 2: ReDoc
 
 ```
-https://api.automatos.app/redoc
+{API_URL}/redoc
 ```
 
 **Features**:
@@ -61,7 +63,7 @@ https://api.automatos.app/redoc
 #### Option 3: OpenAPI JSON
 
 ```
-https://api.automatos.app/openapi.json
+{API_URL}/openapi.json
 ```
 
 **Use for**:
@@ -91,8 +93,8 @@ This will:
 ### Manual Generation
 
 ```bash
-# Option 1: From running server
-curl -s https://api.automatos.app/openapi.json -o docs/openapi.json
+# Option 1: From running server (replace $API_URL with your server URL)
+curl -s ${API_URL:-https://your-api-url.com}/openapi.json -o docs/openapi.json
 
 # Option 2: From local server
 curl -s http://localhost:8000/openapi.json -o docs/openapi.json
@@ -114,9 +116,11 @@ with open('../docs/openapi.json', 'w') as f:
 ### Base URLs
 
 ```
-Production:  https://api.automatos.app
+Production:  {API_URL} (e.g., https://api.automatos.app)
 Local:       http://localhost:8000
 ```
+
+> **Note**: Set `API_URL` environment variable or replace `{API_URL}` with your server URL in all examples
 
 ### Authentication
 
@@ -124,7 +128,7 @@ All endpoints require API key in header:
 
 ```bash
 curl -H "X-API-Key: your_api_key_here" \
-     https://api.automatos.app/api/v1/agents
+     ${API_URL:-https://your-api-url.com}/api/v1/agents
 ```
 
 ---
@@ -231,11 +235,13 @@ Your `book.json` is configured for GitBook. To integrate the OpenAPI spec:
 ```json
 {
   "variables": {
-    "apiDocs": "https://api.automatos.app/docs",
-    "apiSpec": "https://api.automatos.app/openapi.json"
+    "apiDocs": "{API_URL}/docs",
+    "apiSpec": "{API_URL}/openapi.json"
   }
 }
 ```
+
+> **Note**: Replace `{API_URL}` with your actual API server URL
 
 **Option 2**: GitBook OpenAPI Plugin
 
@@ -280,8 +286,11 @@ npm install -g gitbook-plugin-openapi
 ### Create and Execute Agent
 
 ```bash
+# Set your API URL (or replace $API_URL in commands below)
+export API_URL="https://your-api-url.com"  # or http://localhost:8000 for local
+
 # 1. Create specialized agent
-curl -X POST https://api.automatos.app/api/v1/agents/create-specialized \
+curl -X POST ${API_URL}/api/v1/agents/create-specialized \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_key" \
   -d '{
@@ -297,7 +306,7 @@ curl -X POST https://api.automatos.app/api/v1/agents/create-specialized \
 # Response: {"id": 42, "status": "active", ...}
 
 # 2. Execute task
-curl -X POST https://api.automatos.app/api/v1/agents/42/execute \
+curl -X POST ${API_URL}/api/v1/agents/42/execute \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_key" \
   -d '{
@@ -311,7 +320,7 @@ curl -X POST https://api.automatos.app/api/v1/agents/42/execute \
 ### Execute Workflow
 
 ```bash
-curl -X POST https://api.automatos.app/api/v1/workflows/15/execute \
+curl -X POST ${API_URL}/api/v1/workflows/15/execute \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_key" \
   -d '{
@@ -352,13 +361,13 @@ Use the OpenAPI spec to generate client libraries:
 ```bash
 # Generate Python client
 openapi-generator-cli generate \
-  -i https://api.automatos.app/openapi.json \
+  -i ${API_URL}/openapi.json \
   -g python \
   -o ./python-client
 
 # Generate TypeScript client  
 openapi-generator-cli generate \
-  -i https://api.automatos.app/openapi.json \
+  -i ${API_URL}/openapi.json \
   -g typescript-axios \
   -o ./ts-client
 ```
@@ -380,7 +389,7 @@ git commit -m "Update OpenAPI spec"
 
 ### Use Swagger UI Search
 
-Navigate to `https://api.automatos.app/docs` and use the search box to find endpoints by:
+Navigate to `{API_URL}/docs` and use the search box to find endpoints by:
 - Functionality (e.g., "create agent")
 - Resource type (e.g., "workflow")
 - HTTP method (e.g., "POST")
@@ -389,7 +398,7 @@ Navigate to `https://api.automatos.app/docs` and use the search box to find endp
 
 ```bash
 # Download spec
-curl -s https://api.automatos.app/openapi.json > openapi.json
+curl -s ${API_URL}/openapi.json > openapi.json
 
 # Search for specific endpoints
 jq '.paths | keys[] | select(contains("agent"))' openapi.json
@@ -446,7 +455,7 @@ The Swagger UI is superior because it's:
 
 ```bash
 # Download OpenAPI spec
-curl https://api.automatos.app/openapi.json > automatos-api.json
+curl ${API_URL}/openapi.json > automatos-api.json
 
 # Import in Postman:
 # 1. Open Postman
@@ -459,7 +468,7 @@ curl https://api.automatos.app/openapi.json > automatos-api.json
 
 ## 🚀 Next Steps
 
-1. **📖 [Explore Swagger UI](https://api.automatos.app/docs)** - Interactive API docs
+1. **📖 [Explore Swagger UI]({API_URL}/docs)** - Interactive API docs
 2. **🤖 [Agent APIs](AGENT_SYSTEM_GUIDE.md#api-reference)** - Agent management
 3. **🔄 [Workflow APIs](WORKFLOW_SYSTEM_GUIDE.md#api-reference)** - Workflow execution
 4. **🔧 [Tool APIs](TOOLS_INTEGRATION_GUIDE.md#api-reference)** - Tool integration

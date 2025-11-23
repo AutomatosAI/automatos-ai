@@ -177,9 +177,28 @@ def load_seed_data(load_credentials=True, load_tools=True):
             print(f"  ⚠️  Error loading system settings: {e}")
             # Don't fail the entire seed process
         
+        # Load LLM Models
+        print("\n📂 Loading LLM models...")
+        try:
+            from seeds.seed_models import seed_models
+            seed_models()
+            print("  ✅ LLM models seeded")
+        except Exception as e:
+            print(f"  ⚠️  Error loading LLM models: {e}")
+        
+        # Load Skills and Patterns
+        print("\n📂 Loading skills and patterns...")
+        try:
+            from seeds.seed_skills import seed_skills, seed_patterns
+            seed_skills()
+            seed_patterns()
+            print("  ✅ Skills and patterns seeded")
+        except Exception as e:
+            print(f"  ⚠️  Error loading skills/patterns: {e}")
+        
         print("\n" + "=" * 60)
         print("✅ SEED DATA LOADED SUCCESSFULLY!")
-        print(f"   {cred_count} credential types + {tools_count} MCP tools ready")
+        print(f"   {cred_count} credential types + {tools_count} MCP tools + system settings + models + skills")
         return True
         
     except Exception as e:

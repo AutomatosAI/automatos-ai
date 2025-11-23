@@ -172,7 +172,7 @@ class LLMContextStrategySelector:
                     type="string",
                     description="Target model",
                     required=False,
-                    default="gpt-4"
+                    default="gpt-4o"
                 )
             ],
             implementation=self._get_token_budget
@@ -588,17 +588,53 @@ RESPONSE FORMAT:
     async def _get_token_budget(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Get token budget for subtask"""
         subtask_id = parameters['subtask_id']
-        model = parameters.get('model', 'gpt-4')
+        model = parameters.get('model', 'gpt-4o')
         
-        # Model context windows
-        context_windows = {
-            "gpt-4": 8192,
-            "gpt-4-turbo": 128000,
-            "claude-3": 100000,
-            "gpt-3.5-turbo": 4096
-        }
+        # Try to get context window from database model registry
+        max_context = None
+        try:
+            # Lazy import to avoid circular dependencies
+            import sys
+            if 'database.database' in sys.modules and hasattr(sys.modules.get('database.database'), 'SessionLocal'):
+                from database.database import SessionLocal
+                from services.model_registry import ModelRegistry
+                
+                db = SessionLocal()
+                try:
+                    registry = ModelRegistry(db)
+                    model_info = registry.get_model(model)
+                    if model_info:
+                        # Validate context_window attribute exists and has valid value
+                        if (hasattr(model_info, 'context_window') and 
+                            model_info.context_window is not None and
+                            isinstance(model_info.context_window, int) and
+                            model_info.context_window > 0):
+                            max_context = model_info.context_window
+                            logger.debug(f"Found context window for model '{model}': {max_context} tokens")
+                        else:
+                            # context_window is missing or invalid
+                            context_window_value = getattr(model_info, 'context_window', 'missing')
+                            logger.warning(
+                                f"⚠️  Invalid or missing context_window for model '{model}' "
+                                f"(value: {context_window_value}). "
+                                f"Falling back to default context window. "
+                                f"Please verify the model registry entry for '{model}'."
+                            )
+                finally:
+                    db.close()
+        except Exception as e:
+            logger.debug(f"Could not query model registry for '{model}': {e}")
         
-        max_context = context_windows.get(model, 8192)
+        # Fallback to conservative default if model not found in registry
+        if max_context is None:
+            # Conservative default: 8192 tokens (safe for most legacy/smaller models)
+            max_context = 8192
+            logger.warning(
+                f"⚠️  Model '{model}' not found in model registry. "
+                f"Using conservative default context window of {max_context} tokens. "
+                f"This may be too small for larger models. Please verify the model name is correct "
+                f"or add it to the model registry with the correct context_window value."
+            )
         
         # Reserve tokens for response
         response_reserve = 2000

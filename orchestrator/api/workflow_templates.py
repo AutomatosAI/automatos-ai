@@ -17,12 +17,8 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflow-templates", tags=["workflow-templates"])
 
-# Import the model (will be added to models.py)
-try:
-    from database.workflow_template_model import WorkflowTemplate
-except ImportError:
-    logger.warning("WorkflowTemplate model not yet imported. Add to models.py")
-    WorkflowTemplate = None
+# Import the model from main models file
+from models import WorkflowTemplate
 
 
 @router.get("")

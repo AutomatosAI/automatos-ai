@@ -101,7 +101,7 @@ Automatos AI implements **7 layers of security**:
 
 ```bash
 curl -H "X-API-Key: your_secure_api_key" \
-     https://api.automatos.app/api/v1/agents
+     ${API_URL}/api/v1/agents
 ```
 
 **API Key Generation**:
@@ -776,7 +776,7 @@ npm update
 ### Generate Compliance Report
 
 ```bash
-curl -X GET https://api.automatos.app/api/compliance/report?standard=soc2 \
+curl -X GET ${API_URL}/api/compliance/report?standard=soc2 \
   -H "X-API-Key: admin_key"
 ```
 

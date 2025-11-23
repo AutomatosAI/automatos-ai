@@ -16,6 +16,7 @@ from .clients.anthropic_client import AnthropicProvider
 from .clients.google_client import GoogleProvider
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
+from .clients.bedrock_client import BedrockProvider
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,13 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     # Default models if not set in settings
     if not model_str:
         default_models = {
-            "openai": "gpt-4",
+            "openai": "gpt-4o",  # GPT-4o has 128K context vs gpt-4 8K
             "anthropic": "claude-3-5-sonnet-20241022",
             "google": "gemini-pro",
-            "azure": "gpt-4",
+            "azure": "gpt-4o",
             "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
         }
-        model_str = default_models.get(provider_str, "gpt-4")
+        model_str = default_models.get(provider_str, "gpt-4o")
     
     return provider_str, model_str
 
@@ -178,7 +179,9 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             "anthropic": "anthropic_api",
             "google": "google_api",
             "azure": "azure_openai",
-            "huggingface": "huggingface_api"
+            "huggingface": "huggingface_api",
+            "aws_bedrock": "aws_bedrock_api",
+            "bedrock": "aws_bedrock_api"
         }
         
         credential_type = credential_type_map.get(provider.lower())
@@ -205,6 +208,17 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
                 "Huggingface",
                 f"{environment}_HuggingFace",
                 f"{environment}_huggingface",
+            ])
+        
+        # AWS Bedrock credential variations
+        if provider.lower() in ["aws_bedrock", "bedrock"]:
+            credential_name_variations.extend([
+                f"{environment}_aws_bedrock",
+                f"{environment}_bedrock",
+                f"{environment}_aws",
+                "aws_bedrock",
+                "bedrock",
+                "aws",
             ])
         
         # Try each credential name variation
@@ -366,6 +380,7 @@ class LLMManager:
         api_key = None
         base_url = None
         organization_id = None
+        secret_key = None  # For AWS Bedrock IAM auth
         
         if provider == LLMProvider.OPENAI:
             api_key = cred_data.get("api_key")
@@ -381,6 +396,19 @@ class LLMManager:
             base_url = cred_data.get("endpoint_url") or cred_data.get("base_url")
         elif provider == LLMProvider.HUGGINGFACE:
             api_key = cred_data.get("api_token") or cred_data.get("api_key")
+        elif provider == LLMProvider.AWS_BEDROCK:
+            # AWS Bedrock - simplified to use new API Keys by default
+            # Primary method: New Bedrock API Key (single key - recommended)
+            api_key = cred_data.get("bedrock_api_key")
+            
+            # Fallback: Traditional IAM method (if API key not found)
+            if not api_key:
+                api_key = cred_data.get("aws_access_key_id")
+                secret_key = cred_data.get("aws_secret_access_key")
+            
+            # Region is stored in base_url for compatibility with LLMConfig
+            aws_region = cred_data.get("aws_region", "us-east-1")
+            base_url = aws_region  # Store region in base_url field
         
         # Fallback to environment variables if credentials not found
         if not api_key:
@@ -389,7 +417,8 @@ class LLMManager:
                 LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
                 LLMProvider.GOOGLE: "GOOGLE_API_KEY",
                 LLMProvider.AZURE: "AZURE_OPENAI_API_KEY",
-                LLMProvider.HUGGINGFACE: "HUGGINGFACE_API_TOKEN"
+                LLMProvider.HUGGINGFACE: "HUGGINGFACE_API_TOKEN",
+                LLMProvider.AWS_BEDROCK: "AWS_ACCESS_KEY_ID"
             }
             env_var = fallback_env_vars.get(provider)
             if env_var:
@@ -402,7 +431,8 @@ class LLMManager:
             max_tokens=max_tokens,
             api_key=api_key,
             base_url=base_url,
-            organization_id=organization_id
+            organization_id=organization_id,
+            secret_key=secret_key if provider == LLMProvider.AWS_BEDROCK else None
         )
     
     def _ensure_provider_initialized(self):
@@ -422,6 +452,8 @@ class LLMManager:
             return AzureProvider(self.config)
         elif self.config.provider == LLMProvider.HUGGINGFACE:
             return HuggingFaceProvider(self.config)
+        elif self.config.provider == LLMProvider.AWS_BEDROCK:
+            return BedrockProvider(self.config)
         else:
             raise ValueError(f"Unsupported provider: {self.config.provider}")
     

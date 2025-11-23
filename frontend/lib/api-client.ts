@@ -1,7 +1,7 @@
 
 /**
  * API Client - Only calls endpoints that actually exist based on test results
- * Base URL: http://206.81.0.227:8000
+ * Base URL: Configured via NEXT_PUBLIC_API_URL environment variable (set by Docker Compose or .env.local)
  * 
  * MOCK SYSTEM:
  * - Tries real API first, falls back to mock data on failure
@@ -85,7 +85,7 @@
   constructor() {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
+    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
     
     // Get API key from environment variables
     const apiKey = typeof window !== 'undefined' 
@@ -1381,7 +1381,7 @@
       delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
       
       // CRITICAL: Upload must go DIRECTLY to backend, bypassing Next.js proxy
-      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
       const url = `${BACKEND_URL}/api/documents/upload`
       console.log('[Upload] Uploading DIRECTLY to backend:', url)
       console.log('[Upload] FormData entries:', Array.from(formData.entries()).map(([k, v]) => [k, typeof v === 'string' ? v : 'File']))
@@ -1651,10 +1651,30 @@
     }
   
     // ===== CHATBOT ENDPOINTS =====
-    async sendChatbotQuery(message: string, context?: any) {
+    async sendChatbotQuery(params: {
+      query: string
+      context?: any
+      sessionId?: string
+      provider?: string
+      model?: string
+    }) {
+      const payload: Record<string, any> = {
+        query: params.query,
+        context: params.context,
+        session_id: params.sessionId,
+        provider: params.provider,
+        model: params.model
+      }
+
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === undefined || payload[key] === null) {
+          delete payload[key]
+        }
+      })
+
       return this.request('/api/chatbot/query', {
         method: 'POST',
-        body: JSON.stringify({ message, context })
+        body: JSON.stringify(payload)
       })
     }
   
@@ -1743,7 +1763,7 @@
   
   
     async sendChatMessage(message: string, context?: any) {
-      return this.sendChatbotQuery(message, context)
+      return this.sendChatbotQuery({ query: message, context })
     }
   
     async testChat() {

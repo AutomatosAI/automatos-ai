@@ -461,6 +461,7 @@ Begin by analyzing what information you need to complete this task.
         # Pricing per 1K tokens (approximate)
         pricing = {
             "gpt-4": {"input": 0.03, "output": 0.06},
+            "gpt-4o": {"input": 0.0025, "output": 0.01},  # GPT-4o pricing
             "gpt-4-turbo-preview": {"input": 0.01, "output": 0.03},
             "gpt-3.5-turbo": {"input": 0.0015, "output": 0.002},
             "claude-3-opus-20240229": {"input": 0.015, "output": 0.075},

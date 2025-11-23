@@ -10,14 +10,14 @@ Multiple agents of different types can run simultaneously.
 import os
 import logging
 import time
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 import asyncio
 import json
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -25,7 +25,7 @@ from services.llm_provider import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
 )
-from database.models import (
+from models import (
     Agent, Skill, PriorityLevel, Base,
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
@@ -44,10 +44,10 @@ def get_rag_service():
     from services.rag_service import get_rag_service as _get_rag
     return _get_rag()
 
-def get_unified_tool_executor(db_session: Session):
-    """PRD-17 Phase 3: Get UnifiedToolExecutor instance"""
+def get_unified_tool_executor(db_session: Session, workspace_dir: str = "/tmp/automatos_workspace"):
+    """PRD-17 Phase 3: Get UnifiedToolExecutor instance with workspace support"""
     from services.unified_tool_executor import UnifiedToolExecutor
-    return UnifiedToolExecutor(db_session)
+    return UnifiedToolExecutor(db_session, workspace_dir=workspace_dir)
 
 def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
     """
@@ -277,6 +277,72 @@ def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
     
     return tools
 
+
+def _build_skill_tool_schemas(agent_skills: List) -> List[Dict]:
+    """
+    PRD-22: Extract executable tool schemas from agent skills.
+    
+    Skills can define tools in their tools_schema field (JSONB).
+    This gives agents "superpowers" - they can both READ (prompt) and EXECUTE (tools).
+    
+    Args:
+        agent_skills: List of Skill objects assigned to the agent
+        
+    Returns:
+        List of OpenAI function schemas from skills
+    """
+    tools = []
+    
+    logger.info(f"🔍 _build_skill_tool_schemas called with {len(agent_skills)} skills")
+    
+    for skill in agent_skills:
+        logger.info(f"🔍 Processing skill: {skill.name if hasattr(skill, 'name') else 'UNNAMED'}")
+        
+        # Check if skill has tools_schema defined
+        has_attr = hasattr(skill, 'tools_schema')
+        logger.info(f"  - has 'tools_schema' attribute: {has_attr}")
+        
+        if has_attr:
+            tools_schema_value = skill.tools_schema
+            logger.info(f"  - tools_schema value: {tools_schema_value}")
+            logger.info(f"  - tools_schema type: {type(tools_schema_value)}")
+            
+        if not hasattr(skill, 'tools_schema') or not skill.tools_schema:
+            logger.warning(f"  ⚠️ Skill '{skill.name}' has no tools_schema, skipping")
+            continue
+        
+        # Extract tools array from tools_schema
+        if not isinstance(skill.tools_schema, dict):
+            logger.error(f"  ❌ Skill '{skill.name}' tools_schema is not a dict! Type: {type(skill.tools_schema)}")
+            continue
+            
+        skill_tools = skill.tools_schema.get('tools', [])
+        logger.info(f"  - Found {len(skill_tools)} tools in schema")
+        
+        for tool_def in skill_tools:
+            tool_name = tool_def.get('name', 'UNKNOWN')
+            logger.info(f"  🔧 Loading tool: {tool_name}")
+            
+            # Convert to OpenAI function calling format
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool_def.get('name'),
+                    "description": tool_def.get('description', f"Tool from {skill.name} skill"),
+                    "parameters": tool_def.get('parameters', {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    })
+                }
+            })
+            
+            logger.info(f"  ✅ Successfully loaded tool '{tool_name}' from skill '{skill.name}'")
+    
+    logger.info(f"🔍 _build_skill_tool_schemas returning {len(tools)} total tools")
+    return tools
+
+
 logger = logging.getLogger(__name__)
 
 # Agent lifecycle states
@@ -289,12 +355,14 @@ class AgentLifecycle(Enum):
     RETIRED = "retired"
 
 # Default LLM configuration for agents
+# NOTE: This is a fallback - the system prefers to use settings from system_settings table
+# Use get_default_llm_config() to get settings-aware configuration
 DEFAULT_LLM_CONFIG = {
     "provider": "openai",  # Use environment default
-    "model": "gpt-4",
+    "model": "gpt-4",  # Will be overridden by system settings if configured
     "temperature": 0.7,
     "max_tokens": 2000,
-    "context_window": 8192
+    "context_window": 8192  # Will be updated from LLM models registry
 }
 
 # PRD-15: Multi-Model Configuration
@@ -485,6 +553,69 @@ class AgentFactory:
         
         self.active_agents: Dict[int, AgentRuntime] = {}
         self.logger = logging.getLogger(__name__)
+    
+    def _get_default_llm_config_from_settings(self) -> Dict[str, Any]:
+        """
+        Get default LLM configuration from system settings (Settings page).
+        Falls back to DEFAULT_LLM_CONFIG if settings not available.
+        
+        This respects user's model selection from the Settings UI instead of hard-coding.
+        
+        Returns:
+            Dictionary with LLM configuration
+        """
+        try:
+            from services.llm_provider.manager import get_system_setting
+            
+            # Get provider and model from settings
+            provider = get_system_setting("orchestrator_llm", "provider", "openai")
+            model = get_system_setting("orchestrator_llm", "model")
+            
+            # If no model in settings, use provider-specific defaults
+            if not model:
+                provider_defaults = {
+                    "openai": "gpt-4o",  # Modern model with large context
+                    "anthropic": "claude-3-5-sonnet-20241022",
+                    "google": "gemini-pro",
+                    "azure": "gpt-4o"
+                }
+                model = provider_defaults.get(provider, "gpt-4")
+            
+            # Get context window from LLM models registry
+            try:
+                from models import LLMModel
+                llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
+                if llm_model:
+                    context_window = llm_model.context_window
+                    max_tokens = llm_model.max_output_tokens
+                else:
+                    # Fallback to reasonable defaults for common models
+                    model_contexts = {
+                        "gpt-4o": 128000,
+                        "gpt-4-turbo": 128000,
+                        "gpt-4": 8192,
+                        "claude-3-5-sonnet-20241022": 200000,
+                        "claude-3-opus": 200000,
+                        "gemini-pro": 32768
+                    }
+                    context_window = model_contexts.get(model, 8192)
+                    max_tokens = 4000 if context_window > 100000 else 2000
+            except Exception as e:
+                self.logger.warning(f"Could not get context window from registry: {e}")
+                context_window = 8192
+                max_tokens = 2000
+            
+            self.logger.info(f"📋 Using model from settings: {model} (context: {context_window})")
+            return {
+                "provider": provider,
+                "model": model,
+                "temperature": 0.7,
+                "max_tokens": max_tokens,
+                "context_window": context_window
+            }
+        except Exception as e:
+            self.logger.warning(f"Could not get LLM config from settings: {e}, using DEFAULT_LLM_CONFIG")
+            return DEFAULT_LLM_CONFIG.copy()
     
     def _build_tools_prompt(self, required_tools: List[str]) -> str:
         """
@@ -776,12 +907,13 @@ Available Shell Tools:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    async def activate_agent(self, agent_id: int) -> Optional[AgentRuntime]:
+    async def activate_agent(self, agent_id: int, workspace_dir: str = "/tmp/automatos_workspace") -> Optional[AgentRuntime]:
         """
         Load an agent from database and activate it in runtime.
         
         Args:
             agent_id: ID of agent to activate
+            workspace_dir: Workspace directory for file operations
             
         Returns:
             AgentRuntime if successful, None if agent not found or activation failed
@@ -803,9 +935,9 @@ Available Shell Tools:
             llm_config_dict = config.get("llm_config")
             
             if not llm_config_dict:
-                # Use default if not configured
-                self.logger.warning(f"Agent {agent_id} has no llm_config, using DEFAULT_LLM_CONFIG")
-                llm_config_dict = DEFAULT_LLM_CONFIG.copy()
+                # Get from system settings (respects Settings UI)
+                self.logger.info(f"Agent {agent_id} has no llm_config, getting from system settings")
+                llm_config_dict = self._get_default_llm_config_from_settings()
             
             # Create LLM manager
             provider = LLMProvider(llm_config_dict.get("provider", "openai"))
@@ -837,7 +969,7 @@ Available Shell Tools:
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
                 tools=agent_tools,
-                tool_executor=get_unified_tool_executor(self.db_session)  # PRD-17: Initialize once, reuse
+                tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace")  # PRD-17: Initialize once, reuse
             )
             
             # Add to active agents
@@ -865,7 +997,8 @@ Available Shell Tools:
         max_retries: int = 2,
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
-        required_tools: Optional[List[str]] = None
+        required_tools: Optional[List[str]] = None,
+        workspace_dir: Optional[str] = None  # Unique workspace per execution
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
@@ -879,6 +1012,7 @@ Available Shell Tools:
             context: Additional structured context
             use_memory: Include agent's short-term memory
             max_retries: Number of retries on failure
+            workspace_dir: Workspace directory for file operations
             
         Returns:
             Execution result with LLM response
@@ -891,7 +1025,7 @@ Available Shell Tools:
             if not agent_runtime:
                 # Agent not in runtime - try to activate it
                 self.logger.info(f"Agent {agent} not in runtime, attempting to activate...")
-                agent_runtime = await self.activate_agent(agent)
+                agent_runtime = await self.activate_agent(agent, workspace_dir=workspace_dir or "/tmp/automatos_workspace")
                 if not agent_runtime:
                     return {
                         "status": "error",
@@ -900,6 +1034,25 @@ Available Shell Tools:
         else:
             agent_runtime = agent
         
+        # Log agent execution start prominently WITH MODEL INFORMATION
+        agent_name = agent_runtime.metadata.name if hasattr(agent_runtime, 'metadata') else "Unknown"
+        agent_id = agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else "Unknown"
+        agent_type = agent_runtime.metadata.agent_type if hasattr(agent_runtime, 'metadata') else "Unknown"
+        
+        # Get model information
+        model_name = "Unknown"
+        if hasattr(agent_runtime, 'llm_client') and agent_runtime.llm_client:
+            model_name = getattr(agent_runtime.llm_client, 'model', 'Unknown')
+        elif hasattr(agent_runtime, 'metadata') and hasattr(agent_runtime.metadata, 'llm_config'):
+            llm_config = agent_runtime.metadata.llm_config
+            if llm_config:
+                model_name = llm_config.get('model', 'Unknown')
+        
+        self.logger.info("=" * 80)
+        self.logger.info(f"🤖 EXECUTING AGENT: {agent_name} (ID: {agent_id}, Type: {agent_type})")
+        self.logger.info(f"📋 MODEL: {model_name}")
+        self.logger.info("=" * 80)
+        
         # Update state
         agent_runtime.lifecycle_state = AgentLifecycle.BUSY
         
@@ -907,9 +1060,28 @@ Available Shell Tools:
             # Build messages - orchestrator provides the engineered prompts
             messages = []
             
-            # System prompt from orchestrator (contains context engineering)
+            # System prompt - either from orchestrator or built with skills
+            # PRD-22: Build system prompt with skills AND extract skill tools
+            skill_tool_schemas_from_prompt = []
+            
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
+            else:
+                # Get database agent for skill loading
+                db_agent = self.db_session.query(Agent).filter_by(id=agent_runtime.agent_id).first()
+                if db_agent:
+                    # This NOW returns (prompt_text, skill_tools) tuple!
+                    built_system_prompt, skill_tool_schemas_from_prompt = self._build_agent_system_prompt(
+                        agent=db_agent,
+                        task_context=prompt,  # Use the task prompt for skill selection
+                        db=self.db_session,
+                        required_tools=required_tools,
+                        enable_smart_skill_selection=True
+                    )
+                    messages.append({"role": "system", "content": built_system_prompt})
+                    self.logger.info(f"✨ Built system prompt with intelligent skill selection for agent {agent_runtime.agent_id}")
+                    if skill_tool_schemas_from_prompt:
+                        self.logger.info(f"🦸 PRD-22: Extracted {len(skill_tool_schemas_from_prompt)} skill tools from prompt building")
             
             # Add short-term memory if enabled
             if use_memory and agent_runtime.memory:
@@ -941,9 +1113,17 @@ To use actions, respond with JSON blocks like:
             if required_tools is None:
                 required_tools = ["research"]
             
-            # Build OpenAI function calling schemas
+            # Build OpenAI function calling schemas (traditional tools)
             tool_schemas = _build_tool_schemas(required_tools)
-            self.logger.info(f"📦 PRD-17: Providing {len(tool_schemas)} tools to agent: {[t['function']['name'] for t in tool_schemas]}")
+            
+            # PRD-22: Add skill-based tools extracted during prompt building
+            if skill_tool_schemas_from_prompt:
+                tool_schemas.extend(skill_tool_schemas_from_prompt)
+                tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
+                self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
+            
+            all_tool_names = [t['function']['name'] for t in tool_schemas]
+            self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
             
             action_executor = action_executor or get_action_executor()  # Ensure executor exists
             
@@ -1200,6 +1380,157 @@ To use actions, respond with JSON blocks like:
         return agent
 
     # ======================================================================
+    # PRD-22: Intelligent skill selection helper
+    # ======================================================================
+    def _estimate_skill_tokens(self, skill_name: str) -> int:
+        """Estimate token count for a skill based on typical sizes"""
+        # Averages based on actual PRD-22 skills
+        skill_sizes = {
+            'pdf': 1682,
+            'docx': 2424,
+            'xlsx': 2523,
+            'pptx': 6293,
+            'writing-skills': 5117,
+            'writing-plans': 784
+        }
+        return skill_sizes.get(skill_name.lower(), 3000)  # Default 3K tokens
+    
+    def _calculate_max_skills(
+        self,
+        context_window: int,
+        agent_skills: List,
+        task_size_estimate: int = 2000
+    ) -> int:
+        """
+        Dynamically calculate how many skills can fit in context window.
+        
+        Args:
+            context_window: Total context window size
+            agent_skills: List of agent skills
+            task_size_estimate: Estimated tokens for task/prompt
+            
+        Returns:
+            Maximum number of skills that can fit
+        """
+        # Reserve tokens for: task, system prompt, response buffer
+        reserved = task_size_estimate + 1000 + 2000  # task + overhead + response
+        available = context_window - reserved
+        
+        if available < 1000:
+            self.logger.warning(f"Very limited context space: {available} tokens available")
+            return 1  # At least try to load 1 skill
+        
+        # Sort skills by estimated size to pack efficiently
+        skill_sizes = [(skill, self._estimate_skill_tokens(skill.name)) for skill in agent_skills]
+        skill_sizes.sort(key=lambda x: x[1])  # Smallest first
+        
+        # Greedily pack skills
+        total_tokens = 0
+        max_skills = 0
+        for _, size in skill_sizes:
+            if total_tokens + size <= available:
+                total_tokens += size
+                max_skills += 1
+            else:
+                break
+        
+        self.logger.info(f"📊 Context analysis: {context_window}K window, can fit up to {max_skills}/{len(agent_skills)} skills")
+        return max(1, max_skills)  # At least 1 skill
+    
+    def _select_relevant_skills(
+        self,
+        agent_skills: List,
+        task_context: Optional[str] = None,
+        context_window: int = 8192
+    ) -> List:
+        """
+        Intelligently select the most relevant skills for the current task.
+        
+        NEW: Dynamically calculates max skills based on context window size.
+        Uses enhanced keyword matching against both skill names and descriptions.
+        
+        Args:
+            agent_skills: List of all agent skills
+            task_context: The task description to match against
+            context_window: Available context window (from model config)
+            
+        Returns:
+            List of selected skills
+        """
+        if not agent_skills:
+            return []
+        
+        if not task_context:
+            # No context - return limited skills
+            return agent_skills[:1]
+        
+        # Calculate dynamic max based on context window
+        max_skills = self._calculate_max_skills(context_window, agent_skills)
+        
+        task_lower = task_context.lower()
+        
+        # 🎯 INTELLIGENT SKILL MATCHING - Pure database-driven, NO hard-coding!
+        # Extract keywords from:
+        # 1. Skill name (e.g., "pdf" → ["pdf"])
+        # 2. Skill description (extract meaningful words)
+        # 3. Tool names from tools_schema (e.g., "create_pdf" → ["create", "pdf"])
+        
+        skill_scores = []
+        for skill in agent_skills:
+            # Build dynamic keyword list from skill metadata
+            keywords = []
+            
+            # 1. Skill name keywords (split on hyphens, underscores, camelCase)
+            skill_name = skill.name.lower()
+            keywords.append(skill_name)
+            keywords.extend(skill_name.replace('-', ' ').replace('_', ' ').split())
+            
+            # 2. Description keywords (if available)
+            if hasattr(skill, 'description') and skill.description:
+                description_lower = skill.description.lower()
+                # Extract meaningful words (>3 chars) from description
+                desc_words = [w for w in description_lower.split() if len(w) > 3]
+                keywords.extend(desc_words[:10])  # Top 10 words from description
+            
+            # 3. Tool names from tools_schema (if available)
+            if hasattr(skill, 'tools_schema') and skill.tools_schema and isinstance(skill.tools_schema, dict):
+                tools = skill.tools_schema.get('tools', [])
+                for tool in tools:
+                    tool_name = tool.get('name', '')
+                    if tool_name:
+                        # "create_pdf" → ["create", "pdf"]
+                        tool_keywords = tool_name.replace('_', ' ').split()
+                        keywords.extend(tool_keywords)
+            
+            # Calculate relevance score by checking keywords against task
+            score = 0
+            for keyword in keywords:
+                if keyword in task_lower:
+                    # Longer matches get higher scores
+                    score += len(keyword.split())
+            
+            skill_scores.append((skill, score))
+            if score > 0:
+                self.logger.debug(f"  Skill '{skill.name}': score={score} (keywords: {keywords[:5]})")
+        
+        # Sort by relevance score (descending)
+        skill_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Take top N with positive scores
+        selected = [skill for skill, score in skill_scores[:max_skills] if score > 0]
+        
+        # If no skills matched keywords, use ALL assigned skills (up to max)
+        # Rationale: If user assigned skills to agent, they're ALL relevant
+        if not selected:
+            self.logger.info(f"ℹ️  No exact keyword matches - using all {len(agent_skills)} assigned skills (user knows best!)")
+            selected = agent_skills[:max_skills]
+        
+        skill_names = [s.name for s in selected]
+        self.logger.info(f"✅ Selected {len(selected)}/{len(agent_skills)} skills: {skill_names} (max: {max_skills})")
+        
+        return selected
+
+    # ======================================================================
     # PRD-22: Build agent system prompt with progressive skill injection
     # ======================================================================
     def _build_agent_system_prompt(
@@ -1207,19 +1538,34 @@ To use actions, respond with JSON blocks like:
         agent: Agent,
         task_context: Optional[str] = None,
         db: Optional[Session] = None,
-        required_tools: Optional[List[str]] = None
-    ) -> str:
+        required_tools: Optional[List[str]] = None,
+        enable_smart_skill_selection: bool = True
+    ) -> Tuple[str, List[Dict]]:
         """
-        Build the agent system prompt, injecting PRD-22 skill content (Level 2).
+        Build the agent system prompt AND extract skill tool schemas.
 
         - Loads core content for each assigned skill via SkillLoader (progressive disclosure)
+        - Extracts tools_schema from skills for function calling
         - Falls back to skill.description for legacy/seed skills without filesystem content
-        - Keeps tool schemas separate; optionally appends a tools section if provided
+        - NEW: Intelligently selects relevant skills based on context window and task relevance
+        
+        Args:
+            agent: The agent to build prompt for
+            task_context: Optional task description for context
+            db: Database session
+            required_tools: List of tool categories to include
+            enable_smart_skill_selection: If True, dynamically selects skills (default: True)
+            
+        Returns:
+            Tuple of (system_prompt_string, skill_tool_schemas_list)
         """
         sections: List[str] = []
+        skill_tool_schemas: List[Dict] = []
 
         # Identity
         sections.append(f"# Agent: {agent.name}")
+        sections.append(f"Agent ID: {agent.id}")
+        sections.append(f"Agent Type: {getattr(agent, 'agent_type', 'unknown')}")
         if agent.description:
             sections.append(agent.description)
 
@@ -1227,20 +1573,39 @@ To use actions, respond with JSON blocks like:
         if task_context:
             sections.append("\n## Task Context\n" + str(task_context))
 
-        # Skills (progressive disclosure)
+        # Skills (progressive disclosure with intelligent selection)
         if getattr(agent, 'skills', None):
             sections.append("\n## Your Specialized Skills\n")
             loader = get_skill_loader(db) if db is not None else None
+            
+            # Get agent's context window for intelligent selection
+            agent_config = agent.configuration or {}
+            llm_config = agent_config.get('llm_config') or agent.model_config or {}
+            context_window = llm_config.get('context_window', 8192)
+            
+            # Intelligently select relevant skills to prevent context overflow
+            skills_to_load = agent.skills
+            if enable_smart_skill_selection and len(agent.skills) > 1:
+                skills_to_load = self._select_relevant_skills(
+                    agent.skills, 
+                    task_context,
+                    context_window=context_window  # Dynamic based on model
+                )
 
-            for skill in agent.skills:
+            for skill in skills_to_load:
+                self.logger.info(f"📚 Loading skill: {skill.name}")
                 sections.append(f"### {skill.name}")
 
+                # Load prompt content
                 core_content = None
                 if loader is not None:
                     try:
                         # Level 2: core content from SKILL.md body or prompt_template
                         core_content = loader.load_skill_core(skill.name, db=db)
-                    except Exception:
+                        if core_content:
+                            self.logger.info(f"  ✅ Loaded {len(core_content)} chars of core content for '{skill.name}'")
+                    except Exception as e:
+                        self.logger.warning(f"  ⚠️  Failed to load core content for '{skill.name}': {e}")
                         core_content = None
 
                 if core_content and isinstance(core_content, str) and core_content.strip():
@@ -1249,7 +1614,31 @@ To use actions, respond with JSON blocks like:
                     # Fallback for legacy/seed skills
                     fallback = skill.prompt_template or skill.description or ""
                     if fallback:
+                        self.logger.info(f"  📝 Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
                         sections.append(str(fallback))
+                    else:
+                        self.logger.warning(f"  ⚠️  No content available for skill '{skill.name}'")
+                
+                # PRD-22: Extract tool schemas from skills
+                if hasattr(skill, 'tools_schema') and skill.tools_schema:
+                    try:
+                        tools = skill.tools_schema.get('tools', [])
+                        for tool_def in tools:
+                            tool_name = tool_def.get("name")
+                            # Convert to OpenAI function calling format
+                            skill_tool_schemas.append({
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "description": tool_def.get("description", ""),
+                                    "parameters": tool_def.get("parameters", {})
+                                }
+                            })
+                            self.logger.info(f"  🛠️  Extracted tool: {tool_name}")
+                        if tools:
+                            self.logger.info(f"  🦸 Total: {len(tools)} tool(s) from skill '{skill.name}'")
+                    except Exception as e:
+                        self.logger.warning(f"  ❌ Failed to extract tools from skill '{skill.name}': {e}")
 
         # Optional tools section (kept minimal; main tool wiring remains elsewhere)
         if required_tools:
@@ -1259,8 +1648,38 @@ To use actions, respond with JSON blocks like:
                 sections.append(json.dumps(tool_schemas))
             except Exception:
                 pass
+        
+        # Add instructions for handling dependency context
+        sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
+        sections.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
+        sections.append("1. This contains outputs from previous tasks that you need to use")
+        sections.append("2. Read and understand all the context provided")
+        sections.append("3. For compilation/report tasks: Synthesize the information into a coherent document")
+        sections.append("4. For document generation tasks: Transform the input into the requested format")
+        sections.append("\nWhen your task involves writing/creating documents:")
+        sections.append("- Use the write_file tool to save your output")
+        sections.append("- The task description will specify the output filename")
+        sections.append("- Actually WRITE the content, don't just describe what you would write")
+        sections.append("- Process and synthesize the dependency context into meaningful output")
+        
+        # Add explicit instructions to USE skill tools if any were extracted
+        if skill_tool_schemas:
+            tool_names_list = [t['function']['name'] for t in skill_tool_schemas]
+            sections.append("\n## IMPORTANT: Using Your Skill Tools\n")
+            sections.append(f"You have access to the following specialized tools from your skills: {', '.join(tool_names_list)}")
+            sections.append("\n**These skills were loaded specifically because they match your task requirements.**")
+            sections.append("When your task requires capabilities provided by these tools, you MUST use them via function calling.")
+            sections.append("\n**Critical Workflow:**")
+            sections.append("1. Analyze your task description to understand what needs to be accomplished")
+            sections.append("2. Check if any of your available skill tools match what the task requires")
+            sections.append("3. If a tool matches the task requirement, CALL IT using function calling - do not just describe what you would do")
+            sections.append("4. Use tool results to complete the task properly")
+            sections.append("\nExample: If your task is 'create a PDF' and you have a 'create_pdf' tool → you MUST call create_pdf")
+            sections.append("Example: If your task is 'write documentation' and you have 'write_technical_content' tool → you MUST call that tool")
+            sections.append("\n**Your skills are your capabilities - use them when they match the task!**")
 
-        return "\n\n".join([s for s in sections if s is not None])
+        prompt_text = "\n\n".join([s for s in sections if s is not None])
+        return (prompt_text, skill_tool_schemas)
     
     async def get_agent_status(self, agent_id: int) -> Dict[str, Any]:
         """

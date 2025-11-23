@@ -5,7 +5,7 @@
 
 // Environment configuration
 export const API_CONFIG = {
-  BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL || '',
+  BASE_URL: process.env.NEXT_PUBLIC_API_URL || '',
   TIMEOUT: 10000, // 10 seconds
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000, // 1 second
@@ -100,8 +100,20 @@ function generateRequestId(): string {
 }
 
 // WebSocket configuration for real-time updates
+// Derive WebSocket URL from API URL if WS_URL not explicitly set
+const getWebSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL
+  }
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+  if (apiUrl) {
+    return apiUrl.replace(/^https?/, 'ws') + '/ws'
+  }
+  return ''
+}
+
 export const WEBSOCKET_CONFIG = {
-  URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws',
+  URL: getWebSocketUrl(),
   RECONNECT_INTERVAL: 5000, // 5 seconds
   MAX_RECONNECT_ATTEMPTS: 5,
   PING_INTERVAL: 30000, // 30 seconds

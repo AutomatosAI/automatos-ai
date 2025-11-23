@@ -24,6 +24,7 @@ import { CommunicationLog } from './execution-theater/communication-log'
 import { EnhancedOrchestratorView } from './execution-theater/enhanced-orchestrator-view'
 import { apiClient } from '@/lib/api-client'
 import { useWorkflowWebSocket } from '@/hooks/use-workflow-websocket'
+import { useWorkflowStream } from '@/hooks/useWorkflowStream'
 import { cn } from '@/lib/utils'
 
 interface ExecutionTheaterV2Props {
@@ -172,7 +173,52 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
   const [currentExecutionId, setCurrentExecutionId] = useState<number | null>(null)
   const [activeView, setActiveView] = useState<'orchestrator' | 'analytics'>('orchestrator')
 
-  // WebSocket for real-time updates
+  const loadExecutionById = useCallback(async (executionId: number) => {
+    try {
+      console.log('🔄 Fetching execution data for ID:', executionId)
+      const executionDetails = await apiClient.getWorkflowExecution(executionId.toString())
+      console.log('📦 Received execution data:', {
+        status: executionDetails.status,
+        subtasks: executionDetails.output_data?.subtasks?.length || 0,
+        started_at: executionDetails.started_at
+      })
+      setExecutionData((prev: any) => ({
+        ...prev,
+        execution: executionDetails
+      }))
+    } catch (err) {
+      console.error('❌ Error loading execution by ID:', err)
+    }
+  }, [])
+
+  // SSE for real-time workflow updates (PRD-28 - replaces polling!)
+  const { isConnected: sseConnected, error: sseError } = useWorkflowStream({
+    executionId: currentExecutionId,
+    onSubtaskUpdate: useCallback((update) => {
+      console.log('📊 [SSE] Subtask update:', update.subtask_id, update.status)
+      console.log('📝 [SSE] FULL description:', update.subtask_description)  // NO TRUNCATION!
+      
+      // Refresh execution data when subtask updates
+      if (currentExecutionId) {
+        loadExecutionById(currentExecutionId)
+      }
+    }, [currentExecutionId, loadExecutionById]),
+    onWorkflowComplete: useCallback((data) => {
+      console.log('✅ [SSE] Workflow completed:', data)
+      setIsExecuting(false)
+      if (currentExecutionId) {
+        loadExecutionById(currentExecutionId)
+      }
+    }, [currentExecutionId, loadExecutionById]),
+    onLog: useCallback((log) => {
+      console.log('📋 [SSE] Log:', log.level, log.message, log.details)
+    }, []),
+    onError: useCallback((error) => {
+      console.error('❌ [SSE] Error:', error)
+    }, [])
+  })
+
+  // WebSocket for real-time updates (kept for backwards compatibility during transition)
   const handleWebSocketMessage = useCallback((message: any) => {
     console.log('🔥 Real-time WebSocket update:', message.type, message)
 
@@ -222,7 +268,7 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
       default:
         console.log('❓ Unhandled WebSocket message type:', message.type)
     }
-  }, [currentExecutionId])
+  }, [currentExecutionId, loadExecutionById])
 
   // WebSocket connection with proper execution ID handling
   const { isConnected, error: wsError } = useWorkflowWebSocket({
@@ -232,36 +278,11 @@ export function ExecutionTheaterV2({ workflowId, onBack, autoStart = false }: Ex
     autoConnect: !!currentExecutionId
   })
 
-  const loadExecutionById = async (executionId: number) => {
-    try {
-      console.log('🔄 Fetching execution data for ID:', executionId)
-      const executionDetails = await apiClient.getWorkflowExecution(executionId.toString())
-      console.log('📦 Received execution data:', {
-        status: executionDetails.status,
-        subtasks: executionDetails.output_data?.subtasks?.length || 0,
-        started_at: executionDetails.started_at
-      })
-      setExecutionData((prev: any) => ({
-        ...prev,
-        execution: executionDetails
-      }))
-    } catch (err) {
-      console.error('❌ Error loading execution by ID:', err)
-    }
-  }
-
-  // Load workflow data
+  // Load workflow data (NO MORE POLLING! SSE handles real-time updates)
   useEffect(() => {
     loadWorkflowData()
-    
-    const interval = setInterval(() => {
-      if (isExecuting) {
-        loadLiveProgress()
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [workflowId, isExecuting])
+    // REMOVED: 2-second polling interval - replaced by SSE streaming (PRD-28)
+  }, [workflowId])
 
   // Auto-start execution if requested
   useEffect(() => {

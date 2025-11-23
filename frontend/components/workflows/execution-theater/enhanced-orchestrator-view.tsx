@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Brain,
@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { apiClient } from '@/lib/api-client'
 
 interface MemoryActivity {
@@ -77,6 +78,13 @@ interface OrchestrationMetrics {
   estimatedCost: number
 }
 
+interface ExecutionOption {
+  id: string
+  label: string
+  status?: string
+  startedAt?: string
+}
+
 interface EnhancedOrchestratorViewProps {
   workflowId: number
   executionId?: string
@@ -114,31 +122,127 @@ export function EnhancedOrchestratorView({
   const [selectedTab, setSelectedTab] = useState('overview')
   const [isLoading, setIsLoading] = useState(false)
   const [historicalData, setHistoricalData] = useState<any>(null)
+  const [executionOptions, setExecutionOptions] = useState<ExecutionOption[]>([])
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(executionId ?? null)
+  // Track whether user has manually changed selection to prevent prop from overwriting user choice
+  const userChangedSelectionRef = useRef(false)
+  const previousExecutionIdRef = useRef<string | undefined>(executionId)
 
-  // Load historical data when component mounts or executionId changes
+  // Sync selectedExecutionId with executionId prop, but respect user's manual selection
+  // - If prop changes to a NEW value: always update (prop-driven navigation overrides user selection)
+  // - If prop stays the same but user manually changed: don't overwrite user's choice
+  // - If prop is cleared: only clear if user hasn't manually changed
   useEffect(() => {
-    const loadHistoricalData = async () => {
-      if (!executionId && !isExecuting) {
-        // Try to get the latest execution for this workflow
-        try {
-          setIsLoading(true)
-          const response = await apiClient.getWorkflowExecutions(workflowId.toString())
-            if (response && Array.isArray(response) && response.length > 0) {
-              const latestExecution = response[0]
-              await loadExecutionData(latestExecution.id)
+    // Prop changed to a new value - always update (this is intentional navigation)
+    if (executionId && executionId !== previousExecutionIdRef.current) {
+      setSelectedExecutionId(executionId)
+      userChangedSelectionRef.current = false // Reset flag since this is prop-driven
+      previousExecutionIdRef.current = executionId
+    }
+    // Prop is set and user hasn't manually changed - allow prop to sync
+    else if (executionId && !userChangedSelectionRef.current) {
+      setSelectedExecutionId(executionId)
+      previousExecutionIdRef.current = executionId
+    }
+    // Prop is cleared and user hasn't manually changed - clear selection
+    else if (!executionId && !userChangedSelectionRef.current) {
+      setSelectedExecutionId(null)
+      previousExecutionIdRef.current = undefined
+    }
+    // If user has manually changed and prop hasn't changed to a new value, do nothing
+    // (preserves user's manual selection)
+  }, [executionId])
+
+  // Load execution list so historical runs can be selected
+  useEffect(() => {
+    let active = true
+
+    const fetchExecutionOptions = async () => {
+      try {
+        const response = await apiClient.getWorkflowExecutions(workflowId.toString())
+        const rawItems = Array.isArray(response) ? response : response?.items || []
+
+        const normalized: ExecutionOption[] = rawItems
+          .map((item: any) => {
+            const rawId = item?.id ?? item?.execution_id
+            if (!rawId) {
+              return null
             }
-        } catch (error) {
-          console.error('Error loading workflow executions:', error)
-        } finally {
-          setIsLoading(false)
+            const startedAt: string | undefined =
+              item?.started_at ||
+              item?.created_at ||
+              item?.startedAt ||
+              item?.createdAt ||
+              undefined
+            const status: string | undefined = item?.status || item?.execution_status || item?.state
+            const formattedDate = startedAt ? new Date(startedAt).toLocaleString() : null
+            const labelParts = [`#${rawId}`, status, formattedDate].filter(Boolean)
+
+            return {
+              id: String(rawId),
+              label: labelParts.join(' • '),
+              status,
+              startedAt
+            }
+          })
+          .filter((option): option is ExecutionOption => Boolean(option?.id))
+          .sort((a, b) => {
+            const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0
+            const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0
+            return bTime - aTime
+          })
+
+        const currentExecutionKey = executionId ? executionId.toString() : null
+        if (
+          currentExecutionKey &&
+          !normalized.some((option) => option.id === currentExecutionKey)
+        ) {
+          normalized.unshift({
+            id: currentExecutionKey,
+            label: `#${currentExecutionKey} • current run`,
+            status: 'running'
+          })
         }
-      } else if (executionId) {
-        await loadExecutionData(executionId)
+
+        if (!active) {
+          return
+        }
+
+        setExecutionOptions(normalized)
+
+        if (
+          !executionId &&
+          !isExecuting &&
+          !selectedExecutionId &&
+          normalized.length > 0
+        ) {
+          setSelectedExecutionId(normalized[0].id)
+        }
+      } catch (error) {
+        if (active) {
+          console.error('Error loading workflow executions:', error)
+        }
       }
     }
 
-    loadHistoricalData()
-  }, [workflowId, executionId])
+    fetchExecutionOptions()
+
+    return () => {
+      active = false
+    }
+  }, [workflowId, isExecuting, executionId, selectedExecutionId])
+
+  useEffect(() => {
+    if (!selectedExecutionId) {
+      return
+    }
+
+    loadExecutionData(selectedExecutionId)
+  }, [selectedExecutionId])
+
+  const selectedExecution = selectedExecutionId
+    ? executionOptions.find(option => option.id === selectedExecutionId)
+    : null
 
   const loadExecutionData = async (execId: string) => {
     try {
@@ -148,6 +252,8 @@ export function EnhancedOrchestratorView({
       const execution = await apiClient.getWorkflowExecution(execId.toString()) as any
 
       // Extract memory activities from execution data
+      const subtasks = execution?.output_data?.subtasks || []
+      let generatedMemoryActivities: MemoryActivity[] = []
       if (execution?.input_data?.memory_retrieval) {
         const memActivities: MemoryActivity[] = []
         const memData = execution.input_data.memory_retrieval
@@ -185,10 +291,11 @@ export function EnhancedOrchestratorView({
           })
         }
         
-        setMemoryActivities(memActivities)
+        generatedMemoryActivities = memActivities
       }
 
       // Extract communication events from execution logs
+      let generatedCommunications: CommunicationEvent[] = []
       if (execution?.orchestrator_logs) {
         const commEvents: CommunicationEvent[] = []
         execution.orchestrator_logs.forEach((log: string, index: number) => {
@@ -205,7 +312,7 @@ export function EnhancedOrchestratorView({
             })
           }
         })
-        setCommunications(commEvents)
+        generatedCommunications = commEvents
       }
 
       // Extract learning insights
@@ -242,20 +349,96 @@ export function EnhancedOrchestratorView({
         setLearningInsights(insights)
       }
 
-      // Update metrics from execution data
-      const subtasks = execution?.output_data?.subtasks || []
-      setMetrics({
-        totalTasks: subtasks.length,
-        completedTasks: subtasks.filter((t: any) => t.completed).length,
-        activeAgents: 0,
-        memoryOperations: 0,
-        messagesExchanged: 0,
-        patternsLearned: 0,
-        avgResponseTime: 0,
-        successRate: 0,
-        tokenUsage: 0,
-        estimatedCost: 0
-      })
+      // Fallback: if no memory/communication records were found, synthesize them from subtasks
+      if (generatedMemoryActivities.length === 0 && subtasks.length > 0) {
+        generatedMemoryActivities = subtasks
+          .filter((task: any) => task.selected_agent)
+          .map((task: any, index: number) => ({
+            id: `mem_subtask_${index}`,
+            timestamp: execution.completed_at || execution.started_at || new Date().toISOString(),
+            type: 'working',
+            action: 'retrieve',
+            agentId: task.selected_agent.agent_id,
+            agentName: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+            content: `Replaying context for subtask: ${task.description?.substring(0, 60)}...`,
+            relevance: 0.8,
+            itemCount: 1
+          }))
+      }
+
+      if (generatedCommunications.length === 0 && subtasks.length > 0) {
+        const synthesizedComms: CommunicationEvent[] = []
+        subtasks.forEach((task: any, index: number) => {
+          if (!task.selected_agent) {
+            return
+          }
+          synthesizedComms.push({
+            id: `comm_assign_${index}`,
+            timestamp: execution.started_at || new Date().toISOString(),
+            fromAgent: 'Orchestrator',
+            toAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+            messageType: 'query',
+            priority: task.priority === 'high' ? 'high' : 'normal',
+            content: `Task assigned: ${task.description?.substring(0, 60)}...`,
+            status: 'sent'
+          })
+
+          if (task.execution_result) {
+            synthesizedComms.push({
+              id: `comm_result_${index}`,
+              timestamp: execution.completed_at || new Date().toISOString(),
+              fromAgent: task.selected_agent.agent_name || `Agent ${task.selected_agent.agent_id}`,
+              toAgent: 'Orchestrator',
+              messageType: 'response',
+              priority: task.execution_result.status === 'completed' ? 'normal' : 'high',
+              content: `Task completed: ${task.execution_result.status} (${task.execution_result.tokens_used || 0} tokens)`,
+              status: 'sent'
+            })
+          }
+        })
+        generatedCommunications = synthesizedComms
+      }
+
+      setMemoryActivities(generatedMemoryActivities.slice(0, 50))
+      setCommunications(generatedCommunications.slice(0, 50))
+
+      if (subtasks.length > 0) {
+        const completedSubtasks = subtasks.filter((t: any) => t.execution_result?.status === 'completed')
+        const uniqueAgents = new Set(subtasks.map((t: any) => t.selected_agent?.agent_id).filter(Boolean))
+        const totalTokens = subtasks.reduce((sum: number, task: any) =>
+          sum + (task.execution_result?.tokens_used || 0), 0)
+        const successRate = subtasks.length > 0 ? completedSubtasks.length / subtasks.length : 0
+        const avgTime = subtasks.length > 0
+          ? subtasks.reduce((sum: number, t: any) => sum + (t.execution_result?.execution_time_ms || 0), 0) / subtasks.length
+          : 0
+        const estimatedCost = totalTokens * 0.00001
+
+        setMetrics({
+          totalTasks: subtasks.length,
+          completedTasks: completedSubtasks.length,
+          activeAgents: uniqueAgents.size,
+          memoryOperations: generatedMemoryActivities.length,
+          messagesExchanged: generatedCommunications.length,
+          patternsLearned: execution.input_data?.memory_consolidation?.results?.patterns_extracted || 0,
+          avgResponseTime: avgTime,
+          successRate,
+          tokenUsage: totalTokens,
+          estimatedCost
+        })
+      } else {
+        setMetrics({
+          totalTasks: 0,
+          completedTasks: 0,
+          activeAgents: 0,
+          memoryOperations: 0,
+          messagesExchanged: 0,
+          patternsLearned: 0,
+          avgResponseTime: 0,
+          successRate: 0,
+          tokenUsage: 0,
+          estimatedCost: 0
+        })
+      }
 
       setHistoricalData({ execution })
     } catch (error) {
@@ -618,17 +801,49 @@ export function EnhancedOrchestratorView({
       {/* Metrics Overview */}
       <Card className="glass-card">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span className="flex items-center">
-              <BarChart3 className="w-5 h-5 mr-2" />
-              Orchestration Metrics
-            </span>
-            {!isExecuting && historicalData && (
-              <Badge variant="secondary" className="text-xs">
-                Historical Data
-              </Badge>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <span className="flex items-center">
+                <BarChart3 className="w-5 h-5 mr-2" />
+                Orchestration Metrics
+              </span>
+              {!isExecuting && historicalData && (
+                <Badge variant="secondary" className="text-xs">
+                  Historical Data
+                </Badge>
+              )}
+            </CardTitle>
+            {executionOptions.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Execution
+                </span>
+                <Select
+                  value={selectedExecutionId ?? undefined}
+                  onValueChange={(value) => {
+                    userChangedSelectionRef.current = true
+                    setSelectedExecutionId(value)
+                  }}
+                >
+                  <SelectTrigger className="w-[220px]">
+                    <SelectValue placeholder="Select execution" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {executionOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedExecution?.status && (
+                  <Badge variant="outline" className="text-xs capitalize">
+                    {selectedExecution.status}
+                  </Badge>
+                )}
+              </div>
             )}
-          </CardTitle>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -954,3 +1169,4 @@ export function EnhancedOrchestratorView({
     </div>
   )
 }
+

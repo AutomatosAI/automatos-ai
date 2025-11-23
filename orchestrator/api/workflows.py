@@ -8,6 +8,8 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
+from fastapi.responses import StreamingResponse, FileResponse
+from pathlib import Path
 from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
@@ -16,13 +18,14 @@ import logging
 import json
 
 from database.database import get_db
-from database.models import (
+from models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
 from services.websocket_manager import manager
+from services.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -271,8 +274,9 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from database.models import WorkflowAgent
-            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id == workflow_id).delete()
+            from models import workflow_agents
+            from sqlalchemy import delete
+            db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id == workflow_id))
         except Exception as e:
             logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
         
@@ -326,8 +330,9 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from database.models import WorkflowAgent
-            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
+            from models import workflow_agents
+            from sqlalchemy import delete
+            db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id.in_(workflow_ids)))
         except Exception as e:
             logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
         
@@ -828,21 +833,51 @@ async def execute_workflow(
 ):
     """Execute workflow (simplified version for journey tests)"""
     try:
-        # Validate workflow exists
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        # Validate workflow exists with proper loading
+        workflow = db.query(Workflow).options(
+            joinedload(Workflow.agents)
+        ).filter(Workflow.id == workflow_id).first()
+        
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
-        # Get agent
-        agent = db.query(Agent).filter(Agent.status == 'active').first()
+        if not workflow.id:
+            raise HTTPException(status_code=400, detail="Invalid workflow data")
+        
+        # Get agent with skills and tool assignments loaded
+        agent = db.query(Agent).options(
+            joinedload(Agent.skills),
+            joinedload(Agent.tool_assignments)
+        ).filter(Agent.status == 'active').first()
+        
         if not agent:
             raise HTTPException(status_code=400, detail="No active agents available")
+        
+        if not agent.id:
+            logger.error(f"❌ Agent object missing ID: {agent}")
+            raise HTTPException(status_code=500, detail="Agent data corruption - missing ID")
+        
+        # Validate input_data
+        input_data = execution_data.get('input_data')
+        if not input_data:
+            logger.warning("⚠️  No input_data provided, using empty dict")
+            input_data = {}
+        
+        if not isinstance(input_data, dict):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"input_data must be a dictionary, got {type(input_data).__name__}"
+            )
+        
+        logger.info(f"🚀 Creating execution for workflow {workflow_id} with agent {agent.id}")
+        logger.info(f"   Agent skills: {len(agent.skills) if agent.skills else 0}")
+        logger.info(f"   Agent tools: {len(agent.tool_assignments) if agent.tool_assignments else 0}")
         
         # Create execution record
         execution = WorkflowExecution(
             workflow_id=workflow_id,
             agent_id=agent.id,
-            input_data=execution_data.get('input_data', {}),
+            input_data=input_data,
             status=ExecutionStatus.PENDING.value
         )
         
@@ -972,6 +1007,54 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         logger.error(f"Error getting execution status {execution_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting execution status: {str(e)}")
 
+
+@router.get("/executions/{execution_id}/stream")
+async def stream_execution_updates(execution_id: int, db: Session = Depends(get_db)):
+    """
+    SSE stream for real-time workflow execution updates (PRD-28).
+    
+    Replaces WebSocket + Redis + Polling architecture with direct SSE streaming.
+    < 500ms latency, no polling required, smooth progressive updates.
+    
+    Usage (Frontend):
+        const eventSource = new EventSource(`/api/workflows/executions/${id}/stream`);
+        eventSource.onmessage = (event) => {
+            const update = JSON.parse(event.data);
+            // Handle update...
+        };
+    
+    Event types:
+        - connected: Initial connection confirmation
+        - subtask_update: Subtask execution update with FULL details
+        - execution_log: Structured log event (not truncated)
+        - workflow_complete: Final workflow completion
+        - error: Error event
+    """
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    
+    logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
+    
+    try:
+        from services.workflow_streaming_service import stream_workflow_execution
+        
+        return StreamingResponse(
+            stream_workflow_execution(execution_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Access-Control-Allow-Origin": "*",  # CORS for SSE
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating SSE stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
 @router.get("/executions/{execution_id}/results")
 async def get_execution_results(execution_id: int, db: Session = Depends(get_db)):
     """Get workflow execution results"""
@@ -998,15 +1081,23 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
     from database.database import get_db_session
     from core.real_task_decomposer import RealTaskDecomposer
-    from core.intelligent_agent_selector import IntelligentAgentSelector
+    from core.llm.llm_agent_selector import LLMAgentSelector  # ALWAYS use LLM selector
     from core.context_engineering_integrator import ContextEngineeringIntegrator
     from core.agent_execution_manager import AgentExecutionManager
     from core.result_aggregator import ResultAggregator
     from core.learning_system_updater import LearningSystemUpdater
     from core.workflow_memory_integrator import WorkflowMemoryIntegrator
     from services.memory_knowledge_system import HierarchicalMemorySystem
+    from services.workspace_manager import WorkspaceManager  # Unique workspace per execution
     from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
     import os
+    
+    # Create unique workspace for this execution
+    workspace_manager = WorkspaceManager(execution_id)
+    workspace_path = workspace_manager.create_workspace()
+    
+    logger.info(f"📁 Execution {execution_id} workspace: {workspace_path}")
+    logger.info(f"💾 Results will be saved to: {workspace_manager.get_results_path()}")
     
     try:
         with get_db_session() as db:
@@ -1098,7 +1189,10 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
                     
                 except Exception as e:
-                    logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps")
+                    logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps", exc_info=True)
+                    logger.error(f"❌ DECOMPOSITION ERROR TRACEBACK:")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     # Fallback to simple steps if decomposition fails
                     steps = [
                         {"description": "Initialize workflow", "estimated_duration": "30 seconds", "agent_type": "orchestrator"},
@@ -1127,32 +1221,23 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
                 
                 if use_smart_selection and not has_agent_requirements:
-                    # Use LLM-based intelligent agent selection
-                    logger.info("🧠 Using LLM-based intelligent agent selection with task grouping")
+                    # Use BATCH LLM agent selection (NO LOOPS!)
+                    logger.info("⚡ Using BATCH LLM agent selection (semantic + LLM in one shot)")
                     logger.info(f"  📋 Number of steps to assign: {len(steps)}")
-                    task_desc_str = str(task_description)
-                    logger.info(f"  🎯 Task description: {task_desc_str[:100]}...")
                     
-                    try:
-                        from core.llm.enhanced_agent_selector import EnhancedLLMAgentSelector
-                        logger.info("  ✅ EnhancedLLMAgentSelector imported successfully")
-                    except ImportError as e:
-                        logger.error(f"  ❌ Failed to import EnhancedLLMAgentSelector: {e}")
-                        raise
+                    from core.llm.llm_agent_selector import LLMAgentSelector
                     
-                    logger.info("  🏗️ Creating LLM selector instance...")
-                    llm_selector = EnhancedLLMAgentSelector(db_session=db)
-                    logger.info("  ✅ LLM selector created")
+                    llm_selector = LLMAgentSelector(db_session=db)
                     
-                    logger.info("  📡 Calling select_agents_with_grouping...")
-                    agent_assignments = await llm_selector.select_agents_with_grouping(
+                    # Select agents for ALL subtasks in ONE BATCH (no loops!)
+                    agent_assignments = await llm_selector.select_agents_for_subtasks(
                         steps,
                         workflow_context={
                             "description": task_description,
                             "workflow_id": execution.workflow_id
                         }
                     )
-                    logger.info(f"  ✅ Agent selection returned: {len(agent_assignments)} assignments")
+                    logger.info(f"  ✅ BATCH selection complete: {len(agent_assignments)} assignments")
                     
                     # Create selection summary
                     unique_agents = set()
@@ -1183,7 +1268,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     agent_assignments = {}
                     
                     for idx, task in enumerate(steps):
-                        subtask_id = f"subtask_{idx}"
+                        # Use the subtask_id from the step, not a generated one!
+                        subtask_id = task.get("subtask_id", f"subtask_{idx}")
                         required_agent_id = task.get("required_agent_id")
                         
                         if required_agent_id:
@@ -1209,9 +1295,18 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             else:
                                 logger.warning(f"⚠️ Task {idx}: Specified agent {required_agent_id} not found")
                 else:
-                    # Normal intelligent agent selection
-                    agent_selector = IntelligentAgentSelector(db_session=db)
-                    agent_assignments = await agent_selector.select_agents_for_subtasks(steps, max_agents_per_task=1)
+                    # Fallback: Use batch LLM selector
+                    logger.info("⚡ Fallback: Using BATCH LLM agent selection")
+                    from core.llm.llm_agent_selector import LLMAgentSelector
+                    
+                    llm_selector = LLMAgentSelector(db_session=db)
+                    agent_assignments = await llm_selector.select_agents_for_subtasks(
+                        steps,
+                        workflow_context={
+                            "description": task_description,
+                            "workflow_id": execution.workflow_id
+                        }
+                    )
                 
                 # Store agent selection results
                 if has_agent_requirements:
@@ -1221,12 +1316,27 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         "unique_agents": len(set(matches[0].agent_id for matches in agent_assignments.values() if matches)),
                         "avg_match_score": 1.0  # All explicit matches are perfect
                     }
-                elif use_smart_selection:
-                    # Summary already created above for LLM selection
-                    logger.info(f"  Using LLM selection summary: {selection_summary}")
                 else:
-                    # Get summary from regular agent selector
-                    selection_summary = agent_selector.get_selection_summary(agent_assignments)
+                    # Summary for LLM selection (both smart and fallback)
+                    unique_agents = set()
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            unique_agents.add(match.agent_id)
+                    
+                    total_score = 0
+                    count = 0
+                    for matches in agent_assignments.values():
+                        for match in matches:
+                            total_score += match.match_score
+                            count += 1
+                    avg_score = total_score / count if count > 0 else 0.9
+                    
+                    selection_summary = {
+                        "total_assignments": len(agent_assignments),
+                        "unique_agents": len(unique_agents),
+                        "avg_match_score": avg_score
+                    }
+                    logger.info(f"  Using LLM selection summary: {selection_summary}")
                 execution.input_data["agent_selection"] = {
                     "is_real": True,
                     "summary": selection_summary,
@@ -1250,7 +1360,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
                 # Enhance steps with selected agents
                 for idx, step in enumerate(steps):
-                    subtask_id = f"subtask_{idx}"
+                    # Use the subtask_id from the step, not a generated one!
+                    subtask_id = step.get("subtask_id", f"subtask_{idx}")
                     if subtask_id in agent_assignments and agent_assignments[subtask_id]:
                         best_match = agent_assignments[subtask_id][0]
                         step["selected_agent"] = {
@@ -1428,9 +1539,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 execution_manager = AgentExecutionManager(
                     db_session=db,
                     max_parallel_executions=3,
-                    max_retries=2
+                    max_retries=2,
+                    workspace_dir=workspace_path  # Pass unique workspace
                 )
                 logger.info(f"🔍 DEBUG: AgentExecutionManager created successfully")
+                logger.info(f"📁 Using workspace: {workspace_path}")
                 execution_manager.websocket_manager = manager
                 
                 logger.info(f"🔍 DEBUG: About to call execute_workflow_subtasks...")
@@ -1454,6 +1567,15 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         execution_strategy = workflow_context.get("execution_mode", "parallel")
                 
                 logger.info(f"📊 Using execution strategy: {execution_strategy}")
+                
+                # Debug: Log agent_assignments structure
+                logger.info(f"🔍 DEBUG: agent_assignments type: {type(agent_assignments)}")
+                logger.info(f"🔍 DEBUG: agent_assignments keys: {list(agent_assignments.keys()) if agent_assignments else 'None'}")
+                if agent_assignments:
+                    for k, v in list(agent_assignments.items())[:2]:  # Log first 2
+                        logger.info(f"🔍 DEBUG: {k} -> type: {type(v)}, value: {v}")
+                        if isinstance(v, list) and v:
+                            logger.info(f"🔍 DEBUG:   First item type: {type(v[0])}, hasattr agent_id: {hasattr(v[0], 'agent_id') if v else False}")
                 
                 # Execute all subtasks with real agents
                 subtask_results = await execution_manager.execute_workflow_subtasks(
@@ -1517,7 +1639,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
                 # Update steps with real execution results
                 for idx, step in enumerate(steps):
-                    subtask_id = f"subtask_{idx}"
+                    # Use the subtask_id from the step, not a generated one!
+                    subtask_id = step.get("subtask_id", f"subtask_{idx}")
                     if subtask_id in subtask_results:
                         result = subtask_results[subtask_id]
                         step["execution_result"] = {
@@ -1776,43 +1899,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             if execution.input_data.get("memory_consolidation"):
                 stages_completed.append("Memory Consolidation")
             
-            # Extract the final report - AGGREGATE ALL SUBTASK RESULTS for comprehensive output
-            final_report = None
-            if subtask_results:
-                # Strategy: Combine ALL subtask results into a comprehensive report
-                # This ensures code examples, analysis, and summaries are all included
-                report_sections = []
-                
-                # Sort subtasks by ID to maintain logical order
-                sorted_subtasks = sorted(
-                    subtask_results.items(), 
-                    key=lambda x: int(x[0].split('_')[-1]) if '_' in x[0] and x[0].split('_')[-1].isdigit() else 0
-                )
-                
-                for subtask_id, subtask in sorted_subtasks:
-                    if subtask and hasattr(subtask, 'llm_response') and subtask.llm_response:
-                        # Get subtask description for context
-                        description = subtask.subtask_description if hasattr(subtask, 'subtask_description') else subtask_id
-                        
-                        # Add section header and content
-                        section = f"\n\n{'='*80}\n"
-                        section += f"## {description}\n"
-                        section += f"{'='*80}\n\n"
-                        section += subtask.llm_response
-                        report_sections.append(section)
-                        
-                        logger.info(f"  📄 Added section from {subtask_id}: {len(subtask.llm_response)} chars")
-                
-                # Combine all sections into final report
-                if report_sections:
-                    final_report = "\n".join(report_sections)
-                    logger.info(f"📄 Aggregated final report from {len(report_sections)} subtasks: {len(final_report)} chars total")
-                else:
-                    logger.warning(f"⚠️ No subtask results had content to aggregate")
-                
             execution.output_data = {
                 "result": f"Workflow completed with {len(stages_completed)} stages: {', '.join(stages_completed)}",
-                "final_report": final_report,  # The actual report content!
                 "is_real_decomposition": execution.input_data.get("decomposition", {}).get("is_real", False),
                 "is_real_agent_selection": execution.input_data.get("agent_selection", {}).get("is_real", False),
                 "is_real_memory_retrieval": execution.input_data.get("memory_retrieval", {}).get("is_real", False),
@@ -1903,6 +1991,36 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             
             db.commit()
             
+            # Save results and cleanup workspace
+            try:
+                logger.info(f"💾 Saving workflow results to permanent storage...")
+                
+                # Auto-save all result files from workspace
+                saved_files = workspace_manager.save_all_results(
+                    file_patterns=['*.pdf', '*.docx', '*.xlsx', '*.pptx', '*.md', '*.txt', '*.json', '*.html']
+                )
+                
+                # Create manifest with execution metadata
+                manifest_path = workspace_manager.create_result_manifest({
+                    "status": "completed",
+                    "execution_time": f"{total_duration:.1f}s",
+                    "total_tokens": usage_summary.get("total_tokens", 0),
+                    "total_cost": usage_summary.get("total_cost", 0),
+                    "quality_scores": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}),
+                    "stages_completed": stages_completed
+                })
+                
+                logger.info(f"✅ Saved {len(saved_files)} result file(s) to {workspace_manager.get_results_path()}")
+                
+                # Cleanup workspace (keeps results directory)
+                if workspace_manager.cleanup_workspace():
+                    logger.info(f"🧹 Workspace cleaned up: {workspace_path}")
+                else:
+                    logger.warning(f"⚠️  Workspace cleanup skipped (no results saved)")
+                    
+            except Exception as cleanup_err:
+                logger.error(f"❌ Failed to save results or cleanup workspace: {cleanup_err}")
+            
             # Publish execution completion to Redis
             from core.redis_client import get_redis_client
             redis_client = get_redis_client()
@@ -1927,6 +2045,26 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
         logger.error(f"❌ FATAL ERROR in workflow execution {execution_id}: {e}")
         logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         
+        # Save any partial results and cleanup
+        try:
+            logger.info(f"💾 Attempting to save partial results before cleanup...")
+            saved_files = workspace_manager.save_all_results()
+            if saved_files:
+                logger.info(f"✅ Saved {len(saved_files)} partial result file(s)")
+            
+            # Create error manifest
+            workspace_manager.create_result_manifest({
+                "status": "failed",
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            })
+            
+            # Force cleanup (even if no results)
+            workspace_manager.cleanup_workspace(force=True)
+            logger.info(f"🧹 Workspace cleaned up after error")
+        except Exception as cleanup_err:
+            logger.error(f"❌ Failed to cleanup after error: {cleanup_err}")
+        
         try:
             with get_db_session() as db:
                 execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
@@ -1949,6 +2087,81 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     })
         except Exception as inner_e:
             logger.error(f"Error updating failed execution {execution_id}: {inner_e}")
+
+@router.get("/executions/{execution_id}/results")
+async def get_execution_results_files(execution_id: int, db: Session = Depends(get_db)):
+    """
+    Get list of result files for a workflow execution.
+    
+    Returns metadata about all files created during execution that are available for download.
+    """
+    try:
+        from services.workspace_manager import WorkspaceManager
+        
+        # Verify execution exists
+        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Get result files
+        workspace_manager = WorkspaceManager(execution_id)
+        result_files = workspace_manager.get_result_files()
+        
+        return {
+            "execution_id": execution_id,
+            "status": execution.status,
+            "files": result_files,
+            "results_directory": workspace_manager.get_results_path()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting execution results {execution_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting execution results: {str(e)}")
+
+@router.get("/executions/{execution_id}/results/{file_path:path}")
+async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
+    """
+    Download a specific result file from a workflow execution.
+    
+    Args:
+        execution_id: The workflow execution ID
+        file_path: Relative path to the file within the results directory
+    """
+    try:
+        # Verify execution exists
+        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Get results directory
+        workspace_manager = WorkspaceManager(execution_id)
+        results_dir = Path(workspace_manager.get_results_dir()).resolve()
+        
+        # Build full file path
+        full_path = (results_dir / file_path).resolve()
+        
+        # Security check: ensure path is within results directory using Path API
+        if not full_path.is_relative_to(results_dir):
+            raise HTTPException(status_code=403, detail="Access denied: path outside results directory")
+        
+        # Check if file exists
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+        
+        # Return file for download
+        return FileResponse(
+            path=str(full_path),
+            filename=full_path.name,
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file {file_path} from execution {execution_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
 
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):

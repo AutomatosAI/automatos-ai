@@ -116,7 +116,7 @@ export default function BackendAPIKeysSettingsTab({
                 id="api_url"
                 value={formData.api_url || ''}
                 onChange={(e) => handleInputChange('api_url', e.target.value)}
-                placeholder="api.automatos.app"
+                placeholder="your-api-url.com"
               />
               {getSetting('api_url')?.is_required && (
                 <Badge variant="destructive" className="text-xs">Required</Badge>

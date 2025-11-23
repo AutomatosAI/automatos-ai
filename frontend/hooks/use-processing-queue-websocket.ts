@@ -79,7 +79,7 @@ export function useProcessingQueueWebSocket() {
  *   const [isConnected, setIsConnected] = useState(false)
  *   
  *   useEffect(() => {
- *     const ws = new WebSocket('wss://api.automatos.app/ws/documents/processing')
+ *     const ws = new WebSocket(`wss://${process.env.NEXT_PUBLIC_API_URL?.replace('https://', '') || 'your-api-url.com'}/ws/documents/processing`)
  *     
  *     ws.onopen = () => {
  *       setIsConnected(true)

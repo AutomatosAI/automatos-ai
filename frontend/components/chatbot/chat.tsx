@@ -1,0 +1,572 @@
+'use client'
+
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Bot, ArrowDown } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useChat } from '@/lib/chat/hooks'
+import { Message } from './message'
+import { MultimodalInput } from './multimodal-input'
+import { ArtifactViewer } from './artifact-viewer'
+import { generateTitle } from '@/lib/utils'
+import { updateChatTitle } from '@/lib/chat/api'
+import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult } from '@/types'
+import { apiClient } from '@/lib/api-client'
+import { toast } from 'sonner'
+
+export interface ChatProps {
+  id: string
+  initialMessages?: ChatMessage[]
+  initialChatModel?: string
+  initialVisibilityType?: VisibilityType
+  isReadonly?: boolean
+  autoResume?: boolean
+  initialLastContext?: AppUsage
+}
+
+export function Chat({
+  id,
+  initialMessages = [],
+  initialChatModel = 'gpt-4',
+  initialVisibilityType = 'private',
+  isReadonly = false,
+  autoResume = false,
+  initialLastContext,
+}: ChatProps) {
+  const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
+  const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
+  const [currentModelId, setCurrentModelId] = useState(initialChatModel)
+  const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
+  const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
+  const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
+
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [isAtBottom, setIsAtBottom] = useState(true)
+  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1920)
+
+  // Track window width
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
+    id,
+    initialMessages,
+    onData: (dataPart) => {
+      if (dataPart.type === 'data-usage') {
+        setUsage(dataPart.data)
+      }
+    },
+  })
+
+  const regenerate = () => reload()
+
+  // Track scroll - ensure listener is always attached to the current container
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const checkScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container
+      setIsAtBottom(scrollHeight - scrollTop - clientHeight < 50)
+    }
+
+    container.addEventListener('scroll', checkScroll)
+    // Run once to initialize state
+    checkScroll()
+
+    return () => {
+      container.removeEventListener('scroll', checkScroll)
+    }
+    // Re-attach when the artifact viewer visibility toggles, since the DOM node can change
+  }, [isArtifactViewerVisible])
+
+  // Auto-scroll
+  useEffect(() => {
+    if (status === 'streaming') {
+      requestAnimationFrame(() => {
+        messagesContainerRef.current?.scrollTo({
+          top: messagesContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        })
+      })
+    }
+  }, [status])
+
+  // Generate title
+  useEffect(() => {
+    if (!hasGeneratedTitle && messages.length >= 2) {
+      const firstUserMessage = messages.find(m => m.role === 'user')
+      if (firstUserMessage && firstUserMessage.parts) {
+        const textPart = firstUserMessage.parts.find(p => p.type === 'text')
+        if (textPart && 'text' in textPart) {
+          const title = generateTitle(textPart.text)
+          updateChatTitle(id, title).catch(console.error)
+          setHasGeneratedTitle(true)
+        }
+      }
+    }
+  }, [messages, id, hasGeneratedTitle])
+
+  // Handle selections
+  const handleArtifactSelect = useCallback((artifact: Artifact) => {
+    setSelectedArtifact(artifact)
+    setIsArtifactViewerVisible(true)
+  }, [])
+  
+  const handleCodeSelect = useCallback((code: CodeSnippet) => {
+    setSelectedArtifact({
+      id: `code-${Date.now()}`,
+      kind: 'code',
+      title: code.symbol_name || 'Code Snippet',
+      content: code.code,
+      language: code.language,
+      metadata: code,
+    })
+    setIsArtifactViewerVisible(true)
+  }, [])
+  
+  const handleDocumentSelect = useCallback((doc: DocumentReference) => {
+    const artifactId = `doc-${Date.now()}`
+    const initialContent = doc.excerpt || doc.preview || doc.content || 'Loading document...'
+
+    const curatedMetadata: Record<string, any> = {
+      document_id: doc.id,
+      filename: doc.filename,
+      similarity: doc.similarity,
+      chunk_count: doc.chunk_count ?? undefined,
+      preview_chunk_start: doc.preview_chunk_start ?? undefined,
+      preview_chunk_end: doc.preview_chunk_end ?? undefined,
+      has_full_content: doc.has_full_content ?? false,
+      preview_excerpt: doc.excerpt,
+      is_loading_full_content: !doc.has_full_content,
+    }
+
+    setSelectedArtifact({
+      id: artifactId,
+      kind: 'text',
+      title: doc.filename,
+      content: initialContent,
+      metadata: curatedMetadata,
+    })
+    setIsArtifactViewerVisible(true)
+
+    if (!doc.id) {
+      return
+    }
+
+    apiClient.request(`/api/documents/${doc.id}/content`)
+      .then((data: any) => {
+        const fullContent = Array.isArray(data?.chunks)
+          ? data.chunks.map((chunk: any) => chunk?.content ?? '').filter(Boolean).join('\n\n')
+          : initialContent
+
+        setSelectedArtifact((current) => {
+          if (!current || current.id !== artifactId) {
+            return current
+          }
+          return {
+            ...current,
+            content: fullContent || initialContent,
+            metadata: {
+              ...(current.metadata || {}),
+              chunk_count: data?.chunk_count ?? current.metadata?.chunk_count,
+              document_id: data?.document_id ?? current.metadata?.document_id ?? doc.id,
+              is_loading_full_content: false,
+            },
+          }
+        })
+      })
+      .catch((error) => {
+        console.error('Failed to load document content', error)
+        toast.error('Failed to load full document content')
+        setSelectedArtifact((current) => {
+          if (!current || current.id !== artifactId) {
+            return current
+          }
+          return {
+            ...current,
+            metadata: {
+              ...(current.metadata || {}),
+              is_loading_full_content: false,
+              load_error: 'Unable to load full document',
+            },
+          }
+        })
+      })
+  }, [])
+  
+  const handleDatabaseSelect = useCallback((db: DatabaseResult) => {
+    const idBase = `db-${Date.now()}`
+    const columns = db.columns && db.columns.length > 0
+      ? db.columns
+      : (db.data && db.data.length > 0 ? Object.keys(db.data[0]) : [])
+
+    const summaryContentLines = [
+      `# ${db.database} Insight`,
+      `**Rows returned:** ${db.row_count}`,
+      `**Execution time:** ${db.execution_time_ms?.toFixed(0)} ms`,
+    ]
+ 
+    if (db.pandas_ai?.summary) {
+      summaryContentLines.push('', db.pandas_ai.summary)
+    }
+ 
+    if (db.data && db.data.length > 0) {
+      const numericColumns = columns.filter((col) =>
+        db.data!.some((row) => typeof row[col] === 'number' && !Number.isNaN(row[col]))
+      )
+
+      if (numericColumns.length > 0) {
+        summaryContentLines.push('', '## Key Metrics')
+        numericColumns.slice(0, 3).forEach((col) => {
+          const values = db.data!
+            .map((row) => (typeof row[col] === 'number' ? (row[col] as number) : null))
+            .filter((value): value is number => value !== null && !Number.isNaN(value))
+
+          if (values.length > 0) {
+            const max = Math.max(...values)
+            const min = Math.min(...values)
+            const avg = values.reduce((acc, val) => acc + val, 0) / values.length
+
+            summaryContentLines.push(
+              `- **${col}** → peak ${max.toFixed(2)}, low ${min.toFixed(2)}, avg ${avg.toFixed(2)}`
+            )
+          }
+        })
+      }
+    }
+
+    if (columns.length > 0 && db.data && db.data.length > 0) {
+      summaryContentLines.push('', '## Sample Data (first 5 rows)', '')
+      const headerRow = `| ${columns.join(' | ')} |`
+      const separatorRow = `| ${columns.map(() => '---').join(' | ')} |`
+      summaryContentLines.push(headerRow, separatorRow)
+      db.data.slice(0, 5).forEach((row) => {
+        const rowValues = columns.map((col) => {
+          const value = row[col]
+          if (value === null || value === undefined) return '-'
+          const str = String(value)
+          return str.length > 60 ? `${str.slice(0, 57)}…` : str
+        })
+        summaryContentLines.push(`| ${rowValues.join(' | ')} |`)
+      })
+    }
+
+    summaryContentLines.push('', '<details><summary>View SQL query</summary>', '', '```sql', db.sql, '```', '', '</details>')
+
+    const artifact = {
+      id: idBase,
+      kind: 'text' as const,
+      title: `${db.database} Insight`,
+      content: summaryContentLines.join('\n'),
+      metadata: {
+        database: db.database,
+        sql: db.sql,
+        row_count: db.row_count,
+        execution_time_ms: db.execution_time_ms,
+        pandas_ai: db.pandas_ai,
+      },
+    }
+
+    setSelectedArtifact(artifact)
+    setIsArtifactViewerVisible(true)
+  }, [])
+
+  const isTyping = status === 'streaming'
+  const hasSentMessage = messages.length > 0
+
+  const suggestedActions = [
+    "Using the workflow_executions table, break down workflow completions and failures by day over the last 14 days and plot the trend",
+    "From the document_usage table, summarize daily document search volume and average response time for the past 7 days with a chart",
+    "Plot hourly CPU and memory utilization over the last 24 hours using the system_metrics table",
+    "Highlight the most frequent CodeGraph queries this week by counting entries in codegraph_query_logs and visualize their counts",
+  ]
+
+  return (
+    <>
+      {/* Full-screen artifact overlay - like ai-chatbot */}
+      <AnimatePresence>
+        {isArtifactViewerVisible && selectedArtifact && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { delay: 0.4 } }}
+            className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-transparent"
+          >
+            {/* Background */}
+            <motion.div
+              initial={{ width: '100%', right: 0 }}
+              animate={{ width: '100%', right: 0 }}
+              exit={{ width: '100%', right: 0 }}
+              className="fixed h-screen bg-background"
+            />
+
+            {/* Chat Column - LEFT 400px */}
+            <motion.div
+              initial={{ opacity: 0, x: 10, scale: 1 }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                scale: 1,
+                transition: {
+                  delay: 0.1,
+                  type: 'spring',
+                  stiffness: 300,
+                  damping: 30,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                x: 0,
+                scale: 1,
+                transition: { duration: 0 },
+              }}
+              className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background"
+            >
+              <div className="flex h-full flex-col items-center justify-between">
+                {/* Messages */}
+                <div
+                  ref={messagesContainerRef}
+                  className="flex-1 w-full overflow-y-scroll overscroll-contain"
+                  style={{ overflowAnchor: 'none' }}
+                >
+                  <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
+                    <AnimatePresence>
+                      {messages.map((message, index) => (
+                        <Message
+                          key={message.id}
+                          chatId={id}
+                          message={message}
+                          isLoading={isTyping && index === messages.length - 1}
+                          setMessages={setMessages}
+                          regenerate={regenerate}
+                          isReadonly={isReadonly}
+                          onArtifactSelect={handleArtifactSelect}
+                          onCodeSelect={handleCodeSelect}
+                          onDocumentSelect={handleDocumentSelect}
+                          onDatabaseSelect={handleDatabaseSelect}
+                        />
+                      ))}
+                    </AnimatePresence>
+                    <div ref={messagesEndRef} />
+                  </div>
+                </div>
+
+                {/* Input at bottom of chat column */}
+                {!isReadonly && (
+                  <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                    <MultimodalInput
+                      chatId={id}
+                      status={status}
+                      stop={stop}
+                      sendMessage={sendMessage}
+                      selectedModelId={currentModelId}
+                      onModelChange={setCurrentModelId}
+                      selectedVisibilityType={visibilityType}
+                      usage={usage}
+                    />
+                  </div>
+                )}
+              </div>
+            </motion.div>
+
+            {/* Artifact Viewer - RIGHT side, rest of space */}
+            <motion.div
+              initial={{ opacity: 0, x: windowWidth, scale: 0.98 }}
+              animate={{
+                opacity: 1,
+                x: 0,
+                scale: 1,
+                transition: {
+                  delay: 0.2,
+                  type: 'spring',
+                  stiffness: 400,
+                  damping: 40,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                x: 400,
+                scale: 0.98,
+                transition: {
+                  delay: 0,
+                  type: 'spring',
+                  stiffness: 400,
+                  damping: 40,
+                },
+              }}
+              className="relative z-10 flex h-full flex-1 flex-col overflow-y-scroll bg-background"
+            >
+              <ArtifactViewer
+                artifact={selectedArtifact}
+                onClose={() => {
+                  setIsArtifactViewerVisible(false)
+                  setSelectedArtifact(null)
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Normal chat view - NO artifact */}
+      {!isArtifactViewerVisible && (
+        <div className="relative flex h-full w-full flex-col bg-transparent">
+          {/* Messages */}
+          <div
+            ref={messagesContainerRef}
+            className="flex-1 overflow-y-scroll overscroll-contain"
+            style={{ overflowAnchor: 'none' }}
+          >
+            <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
+              {/* Greeting */}
+              {!hasSentMessage && (
+                <div className="mx-auto mt-4 flex size-full max-w-3xl flex-col justify-center md:mt-16">
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="font-semibold text-xl md:text-2xl"
+                  >
+                    Hello <span className="text-orange-500">there!</span>
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.6 }}
+                    className="text-xl text-muted-foreground md:text-2xl"
+                  >
+                    How can I help you today?
+                  </motion.div>
+                </div>
+              )}
+
+            {/* Suggested Actions - will be positioned above input */}
+
+              {/* Messages */}
+              <AnimatePresence>
+                {messages.map((message, index) => (
+                  <Message
+                    key={message.id}
+                    chatId={id}
+                    message={message}
+                    isLoading={isTyping && index === messages.length - 1}
+                    setMessages={setMessages}
+                    regenerate={regenerate}
+                    isReadonly={isReadonly}
+                    onArtifactSelect={handleArtifactSelect}
+                    onCodeSelect={handleCodeSelect}
+                    onDocumentSelect={handleDocumentSelect}
+                    onDatabaseSelect={handleDatabaseSelect}
+                  />
+                ))}
+              </AnimatePresence>
+
+              {/* Typing Indicator */}
+              {isTyping && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="flex items-start gap-3"
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-500">
+                    <Bot className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="rounded-lg bg-muted/50 px-4 py-3">
+                    <div className="flex space-x-1">
+                      {[0, 1, 2].map((i) => (
+                        <motion.div
+                          key={i}
+                          className="h-2 w-2 rounded-full bg-muted-foreground/50"
+                          animate={{ y: [0, -8, 0] }}
+                          transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.2 }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          </div>
+
+          {/* Scroll to Bottom */}
+          {!isAtBottom && hasSentMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10"
+            >
+              <Button
+                variant="outline"
+                size="icon"
+                className="rounded-full shadow-lg"
+                onClick={() => {
+                  messagesContainerRef.current?.scrollTo({
+                    top: messagesContainerRef.current.scrollHeight,
+                    behavior: 'smooth',
+                  })
+                }}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </Button>
+            </motion.div>
+          )}
+
+          {/* Input Area */}
+          {!isReadonly && (
+            <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
+              <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
+                {/* Suggested Actions - above input */}
+                {!hasSentMessage && (
+                  <div className="grid w-full gap-2 sm:grid-cols-2">
+                    {suggestedActions.map((suggestion, index) => (
+                      <motion.div
+                        key={suggestion}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        transition={{ delay: 0.05 * index }}
+                      >
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl border-orange-500/30 bg-transparent px-4 py-3 text-left text-sm font-medium leading-snug hover:border-orange-500/50 hover:bg-orange-500/5"
+                          onClick={() => {
+                            sendMessage(suggestion)
+                          }}
+                          title={suggestion}
+                        >
+                          <span className="block line-clamp-2 text-left text-sm text-foreground/90">
+                            {suggestion}
+                          </span>
+                        </Button>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+                
+                <MultimodalInput
+                  chatId={id}
+                  status={status}
+                  stop={stop}
+                  sendMessage={sendMessage}
+                  selectedModelId={currentModelId}
+                  onModelChange={setCurrentModelId}
+                  selectedVisibilityType={visibilityType}
+                  usage={usage}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}

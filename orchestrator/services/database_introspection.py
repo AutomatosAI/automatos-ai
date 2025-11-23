@@ -1,9 +1,14 @@
+import logging
 import time
 from typing import Dict, Any, List
+from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, date
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+
+logger = logging.getLogger(__name__)
 
 
 def make_json_serializable(obj):
@@ -14,6 +19,8 @@ def make_json_serializable(obj):
         return obj.isoformat()
     elif isinstance(obj, bytes):
         return obj.decode('utf-8', errors='ignore')
+    elif isinstance(obj, UUID):
+        return str(obj)
     elif isinstance(obj, dict):
         return {k: make_json_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
@@ -90,19 +97,37 @@ class DatabaseIntrospectionService:
                             "default": column_default
                         }
                         if include_samples:
+                            data_type_lower = (data_type or "").lower()
+                            if "json" in data_type_lower or "array" in data_type_lower:
+                                col["samples"] = []
+                                columns.append(col)
+                                continue
                             try:
-                                sample_sql = text(f"SELECT DISTINCT {col_name} FROM {schema}.\"{table}\" WHERE {col_name} IS NOT NULL LIMIT :lim")
+                                sample_sql = text(f'SELECT DISTINCT "{col_name}" FROM "{schema}"."{table}" WHERE "{col_name}" IS NOT NULL LIMIT :lim')
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
-                            except Exception:
-                                col["samples"] = []
-                        columns.append(col)
-
+                            except SQLAlchemyError:
+                                logger.warning(
+                                    f"Failed to sample column {col_name} in {table}",
+                                    exc_info=True
+                                )
+                                try:
+                                    conn.rollback()
+                                except SQLAlchemyError:
+                                    logger.debug("Rollback failed or unnecessary", exc_info=True)
                     # Row count
                     try:
-                        cnt = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.\"{table}\""))
+                        cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"'))
                         row_count = cnt.scalar() or 0
-                    except Exception:
+                    except SQLAlchemyError:
+                        logger.warning(
+                            f"Failed to count rows in {schema}.{table}",
+                            exc_info=True
+                        )
+                        try:
+                            conn.rollback()
+                        except SQLAlchemyError:
+                            logger.debug("Rollback failed or unnecessary", exc_info=True)
                         row_count = 0
 
                     metadata["tables"].append({
@@ -168,18 +193,31 @@ class DatabaseIntrospectionService:
                             "default": column_default
                         }
                         if include_samples:
+                            data_type_lower = (data_type or "").lower()
+                            if "json" in data_type_lower or "array" in data_type_lower:
+                                col["samples"] = []
+                                columns.append(col)
+                                continue
                             try:
                                 sample_sql = text(f"SELECT DISTINCT `{col_name}` FROM `{table}` WHERE `{col_name}` IS NOT NULL LIMIT :lim")
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
-                            except Exception:
+                            except SQLAlchemyError:
+                                try:
+                                    conn.rollback()
+                                except SQLAlchemyError:
+                                    pass
                                 col["samples"] = []
                         columns.append(col)
 
                     try:
                         cnt = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`"))
                         row_count = cnt.scalar() or 0
-                    except Exception:
+                    except SQLAlchemyError:
+                        try:
+                            conn.rollback()
+                        except SQLAlchemyError:
+                            pass
                         row_count = 0
 
                     metadata["tables"].append({

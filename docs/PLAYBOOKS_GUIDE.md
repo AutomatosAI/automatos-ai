@@ -563,7 +563,7 @@ Response:
   "execution_id": 890,
   "status": "running",
   "estimated_duration": 245,
-  "websocket_url": "wss://api.automatos.app/ws/executions/890"
+  "websocket_url": "wss://${API_URL#https://}/ws/executions/890"
 }
 ```
 

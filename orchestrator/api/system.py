@@ -22,7 +22,7 @@ def require_api_key(x_api_key: str = Header(None)):
     if required and x_api_key != required:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True
-from database.models import (
+from models import (
     SystemConfiguration, RAGConfiguration,
     SystemConfigCreate, SystemConfigResponse,
     RAGConfigCreate, RAGConfigResponse,
@@ -651,7 +651,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
         from sqlalchemy import func
-        from database.models import Agent, AgentType
+        from models import Agent, AgentType
         
         total_agents = db.query(func.count(Agent.id)).scalar() or 0
         active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active").scalar() or 0
@@ -682,7 +682,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
-        from database.models import Agent
+        from models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
@@ -711,7 +711,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
     """Execute an agent with given parameters"""
     import time
     try:
-        from database.models import Agent
+        from models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:

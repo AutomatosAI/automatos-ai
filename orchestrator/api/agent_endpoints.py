@@ -12,7 +12,7 @@ import logging
 
 from sqlalchemy.orm import Session
 from database.database import get_db
-from database.models import (
+from models import (
     Agent, AgentCreate, AgentResponse,
     AgentType, AgentStatus
 )
@@ -328,7 +328,7 @@ async def get_agent_logs(
     Returns recent execution logs for the agent.
     """
     try:
-        from database.models import WorkflowExecution
+        from models import WorkflowExecution
         from sqlalchemy import desc
         
         # Verify agent exists

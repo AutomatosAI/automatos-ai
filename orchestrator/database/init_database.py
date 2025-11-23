@@ -278,7 +278,7 @@ def init_database():
             print("\n💡 Next steps:")
             print("  1. Start the backend: cd orchestrator && uvicorn main:app --host 0.0.0.0 --port 8000")
             print("  2. Start the frontend: cd frontend && npm start")
-            print("  3. Access dashboard: https://ui.automatos.app")
+            print("  3. Access dashboard: http://localhost:3000 (or your configured frontend URL)")
             return True
         elif error_count > 0:
             print(f"⚠️  DATABASE INITIALIZATION COMPLETED WITH {error_count} ERRORS")

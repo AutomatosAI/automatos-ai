@@ -11,7 +11,6 @@
 #
 # Profiles:
 #   - Default: Core services (postgres, redis, backend, frontend)
-#   - Monitoring: Add --profile monitoring (prometheus, grafana)
 #   - All: Add --profile all (includes admin tools)
 # =============================================================================
 
@@ -149,48 +148,6 @@ services:
       - automatos
 
   # ===========================================================================
-  # MONITORING PROFILE - Add with: --profile monitoring
-  # ===========================================================================
-  
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: automatos_prometheus
-    restart: unless-stopped
-    profiles: ["monitoring", "all"]
-    ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
-    volumes:
-      - ./orchestrator/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=7d'
-      - '--web.enable-lifecycle'
-    networks:
-      - automatos
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: automatos_grafana
-    restart: unless-stopped
-    profiles: ["monitoring", "all"]
-    depends_on:
-      - prometheus
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-piechart-panel
-      GF_SERVER_ROOT_URL: http://localhost:3001
-    ports:
-      - "${GRAFANA_PORT:-3001}:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    networks:
-      - automatos
-
-  # ===========================================================================
   # ADMIN TOOLS PROFILE - Add with: --profile all
   # ===========================================================================
   
@@ -222,12 +179,6 @@ volumes:
   backend_logs:
     driver: local
     name: automatos_backend_logs
-  prometheus_data:
-    driver: local
-    name: automatos_prometheus_data
-  grafana_data:
-    driver: local
-    name: automatos_grafana_data
 
 # =============================================================================
 # Networks

@@ -18,12 +18,16 @@ from pydantic import BaseModel
 import httpx
 
 from database.database import get_db
+from services.llm_provider import create_llm_manager
+from services.pandas_ai_service import get_pandasai_service
+from config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
 
 # Lazy initialization of LLM Manager
 _llm_manager = None
+
 
 def get_llm_manager():
     """
@@ -35,7 +39,6 @@ def get_llm_manager():
     global _llm_manager
     if _llm_manager is None:
         try:
-            from services.llm_provider import create_llm_manager
             # Use orchestrator settings (default for chatbot)
             _llm_manager = create_llm_manager(service_name="orchestrator")
         except Exception as e:
@@ -79,9 +82,10 @@ async def search_code_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[CodeGraph] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
-                "http://127.0.0.1:8000/api/code-graph/search/semantic",
+                f"{base_url}/api/code-graph/search/semantic",
                 params={
                     "project": "Automatos-ai",
                     "q": query,
@@ -123,9 +127,10 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
     try:
         logger.info(f"[Documents] Searching for: {query}")
         
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                "http://127.0.0.1:8000/api/documents/search",
+                f"{base_url}/api/documents/search",
                 params={
                     "query": query,
                     "limit": 8,
@@ -141,10 +146,17 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 results = []
                 for doc in data.get('results', [])[:8]:
                     results.append({
-                        "id": doc.get('id'),
-                        "filename": doc.get('filename'),
+                        "id": doc.get('document_id'),
+                        "filename": (doc.get('source', {}) or {}).get('filename') if isinstance(doc.get('source'), dict) else doc.get('filename'),
                         "excerpt": doc.get('excerpt', ''),
-                        "similarity": doc.get('similarity', 0.0)
+                        "content": doc.get('preview', ''),
+                        "preview": doc.get('preview', ''),
+                        "chunk_count": doc.get('chunk_count'),
+                        "chunk_index": doc.get('chunk_index'),
+                        "preview_chunk_start": doc.get('preview_chunk_start'),
+                        "preview_chunk_end": doc.get('preview_chunk_end'),
+                        "similarity": doc.get('similarity', 0.0),
+                        "has_full_content": doc.get('full_content_available', False)
                     })
                 
                 return {
@@ -160,27 +172,62 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-async def query_database_tool(query: str, database_name: Optional[str] = None) -> Dict[str, Any]:
-    """Query database using natural language"""
+async def query_database_tool(
+    query: str,
+    database_name: Optional[str] = None,
+    analysis_prompt: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Query database using natural language via knowledge source endpoints."""
     try:
         logger.info(f"[Database] Querying: {query}, DB: {database_name}")
-        
+
+        base_url = config.KNOWLEDGE_API_BASE_URL
         async with httpx.AsyncClient(timeout=30.0) as client:
+            # Resolve database source
+            selected_source: Optional[Dict[str, Any]] = None
+            sources: List[Dict[str, Any]] = []
+
+            try:
+                sources_response = await client.get(
+                    f"{base_url}/api/knowledge/sources/database/",
+                    params={"active_only": True}
+                )
+                if sources_response.status_code == 200:
+                    sources = sources_response.json() or []
+            except Exception as source_err:
+                logger.warning(f"[Database] Failed to list database sources: {source_err}")
+
+            if database_name and sources:
+                lowered = database_name.lower()
+                selected_source = next(
+                    (src for src in sources if str(src.get("name", "")).lower() == lowered),
+                    None
+                )
+
+            if not selected_source and sources:
+                selected_source = sources[0]
+
+            if not selected_source:
+                return {"success": False, "error": "No active database sources available"}
+
+            source_id = selected_source.get("id")
             response = await client.post(
-                "http://127.0.0.1:8000/api/database-knowledge/nl-query",
+                f"{base_url}/api/knowledge/sources/database/{source_id}/query",
                 json={
                     "query": query,
-                    "database_name": database_name
+                    "source_id": source_id,
+                    "use_cache": True,
+                    "include_explanation": True
                 }
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"[Database] Query successful")
-                
+                logger.info(f"[Database] Query successful (source={selected_source.get('name')})")
+
                 return {
                     "success": True,
-                    "database": data.get('database', ''),
+                    "database": data.get('database') or selected_source.get('name', ''),
                     "sql": data.get('sql', ''),
                     "row_count": data.get('row_count', 0),
                     "data": data.get('data', []),
@@ -189,7 +236,7 @@ async def query_database_tool(query: str, database_name: Optional[str] = None) -
                 }
             else:
                 return {"success": False, "error": f"API returned {response.status_code}"}
-                
+
     except Exception as e:
         logger.error(f"[Database] Query error: {e}")
         return {"success": False, "error": str(e)}
@@ -449,11 +496,23 @@ Then provide a helpful, technical response based on the search results."""
                             if tool_result.get("success"):
                                 document_results.extend(tool_result.get("results", []))
                         elif tool_name == "query_database":
+                            # Define analysis_prompt with explicit fallback to prevent NameError
+                            analysis_prompt = chat_query.query or tool_input.get("query", "")
                             tool_result = await query_database_tool(
                                 tool_input.get("query", ""),
-                                tool_input.get("database_name")
+                                tool_input.get("database_name"),
+                                analysis_prompt=analysis_prompt,
                             )
                             if tool_result.get("success"):
+                                pandasai = get_pandasai_service()
+                                if pandasai:
+                                    insight = pandasai.generate_insight(
+                                        analysis_prompt,
+                                        tool_result.get("data", []),
+                                        tool_result.get("columns", []),
+                                    )
+                                    if insight:
+                                        tool_result["pandas_ai"] = insight
                                 database_results.append(tool_result)
                         else:
                             tool_result = {"error": f"Unknown tool: {tool_name}"}

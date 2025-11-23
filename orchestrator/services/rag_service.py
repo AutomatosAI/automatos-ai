@@ -26,7 +26,7 @@ import pickle
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from database.models import RAGConfiguration
+from models import RAGConfiguration
 
 logger = logging.getLogger(__name__)
 

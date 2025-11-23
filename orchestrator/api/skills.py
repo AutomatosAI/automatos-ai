@@ -24,7 +24,7 @@ import zipfile
 
 # Adjust imports to match your project structure
 from database.database import get_db
-from database.models import (
+from models import (
     Skill, Agent, SkillSource, SkillFile, SkillVersion, SkillAuditLog,
     agent_skills
 )

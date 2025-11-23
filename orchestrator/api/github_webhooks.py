@@ -47,7 +47,7 @@ async def github_webhook(
     
     Configure in GitHub:
     1. Go to repo Settings → Webhooks → Add webhook
-    2. Payload URL: https://api.automatos.app/api/github/webhook
+    2. Payload URL: {API_URL}/api/github/webhook (replace {API_URL} with your API server URL)
     3. Content type: application/json
     4. Secret: (set GITHUB_WEBHOOK_SECRET env var)
     5. Events: Pull requests
@@ -86,7 +86,7 @@ async def github_webhook(
             logger.info(f"🔍 PR #{pr_number} {action}: {pr_title}")
             
             # Find the PR Review workflow by name
-            from database.models import Workflow
+            from models import Workflow
             import os
             pr_workflow_name = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
             pr_workflow = db.query(Workflow).filter(

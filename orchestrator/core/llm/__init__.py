@@ -13,7 +13,7 @@ This module implements the core LLM infrastructure for:
 """
 
 from .orchestrator_llm import OrchestratorLLM, LLMResponse
-from .function_registry import FunctionRegistry, FunctionSpec
+from .function_registry import FunctionRegistry, FunctionSpec, FunctionParameter, FunctionCategory
 from .function_executor import FunctionExecutor, FunctionResult
 from .response_parser import ResponseParser, ParsedResponse
 
@@ -22,6 +22,8 @@ __all__ = [
     'LLMResponse',
     'FunctionRegistry',
     'FunctionSpec',
+    'FunctionParameter',  # Required by LLMAgentSelector
+    'FunctionCategory',   # Required by LLMAgentSelector
     'FunctionExecutor',
     'FunctionResult',
     'ResponseParser',

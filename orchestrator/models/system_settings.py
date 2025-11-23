@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
 
-from models import Base
+from .core import Base
 
 
 class SettingCategory(str, Enum):

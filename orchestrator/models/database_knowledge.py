@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from models import Base
+from .core import Base
 
 
 # ============================================================================
@@ -33,7 +33,7 @@ class DatabaseKnowledgeSource(Base):
     __tablename__ = 'database_knowledge_sources'
     __table_args__ = (
         Index('idx_dks_tenant_name', 'tenant_id', 'name'),
-        Index('idx_dks_credential', 'credential_name'),
+        Index('idx_dks_credential', 'credential_id'),
         {'extend_existing': True}
     )
     
@@ -42,9 +42,8 @@ class DatabaseKnowledgeSource(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     
-    # Credential reference (uses existing credential system by name)
-    credential_name = Column(String(255), nullable=False)
-    credential_environment = Column(String(50), default='production')
+    # Credential reference (points at entries in credentials table)
+    credential_id = Column(Integer, nullable=False)
     
     # Database configuration
     dialect = Column(String(50), nullable=False)  # postgresql, mysql, snowflake, etc.

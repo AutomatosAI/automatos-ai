@@ -377,3 +377,23 @@ class VectorSimilarityResponse(BaseModel):
                 "computation_time": 0.001
             }
         }
+
+class AgentStatistics(BaseModel):
+    """Agent statistics for dashboard"""
+    total_agents: int = Field(..., description="Total number of agents")
+    active_agents: int = Field(..., description="Number of active agents")
+    inactive_agents: int = Field(..., description="Number of inactive agents")
+    agents_by_type: Dict[str, int] = Field(..., description="Agent counts by type")
+    average_performance: float = Field(..., description="Average performance percentage")
+    total_executions: int = Field(..., description="Total workflow executions")
+    successful_executions: int = Field(..., description="Successful executions")
+    failed_executions: int = Field(..., description="Failed executions")
+
+class SystemMetrics(BaseModel):
+    """System performance metrics"""
+    uptime: str = Field(..., description="System uptime")
+    cpu_usage: float = Field(..., description="CPU usage percentage")
+    memory_usage: float = Field(..., description="Memory usage percentage")
+    active_connections: int = Field(..., description="Active connections")
+    total_requests: int = Field(..., description="Total requests")
+    error_rate: float = Field(..., description="Error rate percentage")

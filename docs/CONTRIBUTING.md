@@ -765,9 +765,9 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.automatos.ai/v2
+  - url: ${API_URL}/v2  # Replace ${API_URL} with your API server URL
     description: Production server
-  - url: https://staging-api.automatos.ai/v2
+  - url: ${STAGING_API_URL}/v2  # Replace ${STAGING_API_URL} with your staging API URL
     description: Staging server
   - url: http://localhost:8002/v2
     description: Development server
@@ -1060,7 +1060,7 @@ automatos workflow create \
   --environment production
 
 # Using API
-curl -X POST https://api.automatos.ai/v2/workflows \
+curl -X POST ${API_URL}/v2/workflows \
   -H "X-API-Key: your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1093,7 +1093,7 @@ Deploy a microservices architecture with:
 - Python FastAPI user service with PostgreSQL database
 - Redis cache for session management
 - RabbitMQ for async messaging
-- Prometheus monitoring with Grafana dashboards
+- Built-in monitoring service for system metrics
 - Deploy to Kubernetes with Helm charts
 - Enable horizontal pod autoscaling
 - Set up ingress with SSL termination

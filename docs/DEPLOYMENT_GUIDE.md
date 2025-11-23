@@ -81,9 +81,9 @@ This guide focuses on **single server Docker deployment** - the most common prod
 │     ┌─────┴─────┬────────────┬──────────┐                       │
 │     │           │            │          │                        │
 │     ▼           ▼            ▼          ▼                        │
-│  ┌──────┐  ┌────────┐  ┌────────┐  ┌────────┐                  │
-│  │ API  │  │Frontend│  │Grafana │  │ Adminer│                  │
-│  │ :8000│  │ :3000  │  │ :3001  │  │ :8080  │                  │
+│  ┌──────┐  ┌────────┐  ┌────────┐                               │
+│  │ API  │  │Frontend│  │ Adminer│                               │
+│  │ :8000│  │ :3000  │  │ :8080  │                               │
 │  └──┬───┘  └────────┘  └────────┘  └────────┘                  │
 │     │                                                             │
 │     │  Docker Network (172.20.0.0/16)                           │
@@ -175,11 +175,11 @@ docker-compose --version
 # Install Certbot
 apt install -y certbot python3-certbot-nginx
 
-# Generate certificate
-certbot certonly --standalone -d api.automatos.app -d app.automatos.app
+# Generate certificate (replace with your domains)
+certbot certonly --standalone -d api.your-domain.com -d app.your-domain.com
 
 # Verify
-ls -la /etc/letsencrypt/live/api.automatos.app/
+ls -la /etc/letsencrypt/live/api.your-domain.com/
 ```
 
 ---
@@ -284,14 +284,14 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
-        NEXT_PUBLIC_API_URL: https://api.automatos.app
+        NEXT_PUBLIC_API_URL: ${API_URL:-https://your-api-url.com}
     container_name: Automatos_frontend
     restart: always
     depends_on:
       - backend_api
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: https://api.automatos.app
+      NEXT_PUBLIC_API_URL: ${API_URL:-https://your-api-url.com}
     ports:
       - "3000:3000"
     healthcheck:
@@ -362,18 +362,18 @@ http {
     # Redirect HTTP to HTTPS
     server {
         listen 80;
-        server_name api.automatos.app app.automatos.app;
+        server_name api.your-domain.com app.your-domain.com;  # Replace with your domains
         return 301 https://$server_name$request_uri;
     }
     
     # API Server
     server {
         listen 443 ssl http2;
-        server_name api.automatos.app;
+        server_name api.your-domain.com;  # Replace with your API domain
         
         # SSL Configuration
-        ssl_certificate /etc/letsencrypt/live/api.automatos.app/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/api.automatos.app/privkey.pem;
+        ssl_certificate /etc/letsencrypt/live/api.your-domain.com/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/api.your-domain.com/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
@@ -420,11 +420,11 @@ http {
     # Frontend Server
     server {
         listen 443 ssl http2;
-        server_name app.automatos.app;
+        server_name app.your-domain.com;  # Replace with your app domain
         
         # SSL Configuration
-        ssl_certificate /etc/letsencrypt/live/app.automatos.app/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/app.automatos.app/privkey.pem;
+        ssl_certificate /etc/letsencrypt/live/app.your-domain.com/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/app.your-domain.com/privkey.pem;
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
         
@@ -580,44 +580,6 @@ docker-compose -f docker-compose.prod.yml restart
 ---
 
 ## Monitoring & Logging
-
-### Setup Grafana & Prometheus
-
-Add to `docker-compose.prod.yml`:
-
-```yaml
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: Automatos_prometheus
-    restart: always
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    ports:
-      - "9090:9090"
-    networks:
-      - automatos_network
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: Automatos_grafana
-    restart: always
-    depends_on:
-      - prometheus
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_INSTALL_PLUGINS: grafana-clock-panel
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-    ports:
-      - "3001:3000"
-    networks:
-      - automatos_network
-```
 
 ### Log Aggregation
 
@@ -798,8 +760,8 @@ deploy:
 ### Health Checks
 
 ```bash
-# API health
-curl https://api.automatos.app/health
+# API health (replace $API_URL with your API server URL)
+curl ${API_URL}/health
 
 # Database health
 docker exec Automatos_postgres pg_isready -U postgres

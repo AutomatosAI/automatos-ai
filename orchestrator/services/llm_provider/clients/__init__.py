@@ -11,6 +11,7 @@ from .anthropic_client import AnthropicProvider
 from .google_client import GoogleProvider
 from .azure_client import AzureProvider
 from .huggingface_client import HuggingFaceProvider
+from .bedrock_client import BedrockProvider
 
 __all__ = [
     'BaseLLMProvider',
@@ -22,5 +23,6 @@ __all__ = [
     'GoogleProvider',
     'AzureProvider',
     'HuggingFaceProvider',
+    'BedrockProvider',
 ]
 

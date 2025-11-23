@@ -96,6 +96,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     name: '',
     type: '',
     description: '',
+    tags: '',
     skills: [] as string[],
     specializations: [] as string[],
     maxConcurrentTasks: 3,
@@ -146,6 +147,11 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     console.log('✅ Validation passed, creating agent...')
     try {
       // Prepare agent payload matching backend API expectations
+      const tags = agentData.tags
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean)
+
       const agentPayload = {
         name: agentData.name,
         agent_type: agentData.type,
@@ -154,8 +160,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         priority_level: agentData.priority || 'medium', // Backend expects priority_level
         max_concurrent_tasks: agentData.maxConcurrentTasks || 3, // Backend expects snake_case
         auto_start: agentData.autoStart !== undefined ? agentData.autoStart : true, // Backend expects snake_case
+        tags,
         configuration: {
-          specializations: agentData.specializations || []
+          specializations: agentData.specializations || [],
+          tags
         }
       }
       
@@ -194,6 +202,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         name: '',
         type: '',
         description: '',
+        tags: '',
         skills: [],
         specializations: [],
         maxConcurrentTasks: 3,
@@ -356,6 +365,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             className="bg-secondary/50 min-h-[100px]"
                           />
                         </div>
+                    
+                    <div>
+                      <Label htmlFor="agent-tags">Tags (comma separated)</Label>
+                      <Input
+                        id="agent-tags"
+                        placeholder="e.g. writing, pdf, research"
+                        value={agentData.tags}
+                        onChange={(e) => setAgentData(prev => ({ ...prev, tags: e.target.value }))}
+                        className="bg-secondary/50"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Lightweight keywords used for semantic matching (e.g., writing, pdf, research).
+                      </p>
+                    </div>
                       </div>
                       
                       <div className="space-y-4">

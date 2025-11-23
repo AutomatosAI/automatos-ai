@@ -17,7 +17,7 @@ import json
 import uuid
 
 from database.database import get_db
-from database.models import Workflow, WorkflowExecution, Agent
+from models import Workflow, WorkflowExecution, Agent
 # from services.orchestrator_service import EnhancedOrchestratorService  # Temporarily disabled
 from services.websocket_manager import manager
 

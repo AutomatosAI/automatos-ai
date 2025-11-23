@@ -27,7 +27,7 @@ from memory.augmentation import AugmentationStrategy
 from memory.consolidation import ConsolidationStrategy
 
 # Import models
-from database.models import (
+from models import (
     MemoryItemCreate, MemoryItemResponse, 
     ExternalKnowledgeCreate, ExternalKnowledgeResponse
 )
