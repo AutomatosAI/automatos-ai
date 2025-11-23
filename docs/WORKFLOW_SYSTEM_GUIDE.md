@@ -1158,10 +1158,9 @@ with zero downtime and comprehensive monitoring.
 ✅ Rollback script generated
 
 ## Monitoring
-✅ Prometheus metrics enabled
-✅ Grafana dashboards configured
-✅ Alert rules activated
+✅ Built-in monitoring service active
 ✅ Health checks: All services passing
+✅ System metrics available via API
 
 ## Performance
 - Deployment Duration: 8 min 23s
@@ -1304,7 +1303,7 @@ Response: 202 Accepted
   "status": "running",
   "estimated_duration": 315,
   "subtasks_count": 6,
-  "websocket_url": "wss://api.automatos.app/ws/executions/157"
+  "websocket_url": "wss://${API_URL#https://}/ws/executions/157"
 }
 ```
 
@@ -1654,7 +1653,7 @@ Agents use memories from past executions:
 
 ```javascript
 // Connect to execution updates
-const ws = new WebSocket('wss://api.automatos.app/ws/executions/157')
+const ws = new WebSocket(`wss://${API_URL.replace('https://', '')}/ws/executions/157`)
 
 ws.onmessage = (event) => {
   const update = JSON.parse(event.data)
@@ -1698,7 +1697,7 @@ ws.onmessage = (event) => {
 **Diagnosis**:
 ```bash
 # Check execution logs
-curl https://api.automatos.app/api/workflows/executions/157/logs
+curl ${API_URL}/api/workflows/executions/157/logs
 
 # Check database
 SELECT id, status, started_at, updated_at 
@@ -1731,10 +1730,10 @@ POST /api/workflows/42/execute
 **Diagnosis**:
 ```bash
 # Check agent health
-curl https://api.automatos.app/api/agents/stats
+curl ${API_URL}/api/agents/stats
 
 # Check LLM API connectivity
-curl https://api.automatos.app/api/system/health
+curl ${API_URL}/api/system/health
 ```
 
 **Common Causes**:
@@ -1750,10 +1749,10 @@ echo $OPENAI_API_KEY
 echo $ANTHROPIC_API_KEY
 
 # Or check credential system
-curl https://api.automatos.app/api/credentials?type=openai_api
+curl ${API_URL}/api/credentials?type=openai_api
 
 # Test LLM connection
-curl -X POST https://api.automatos.app/api/agents/{agent_id}/test-capabilities
+curl -X POST ${API_URL}/api/agents/{agent_id}/test-capabilities
 ```
 
 #### Issue: Low quality scores

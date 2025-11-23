@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 import logging
 
-from database.models import MCPTool, Credential
+from models import MCPTool, Credential
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm.attributes import flag_modified
 

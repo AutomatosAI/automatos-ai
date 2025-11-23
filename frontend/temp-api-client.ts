@@ -1,6 +1,6 @@
 /**
  * API Client - Only calls endpoints that actually exist based on test results
- * Base URL: http://206.81.0.227:8000
+ * Base URL: Configured via NEXT_PUBLIC_API_URL environment variable (set by Docker Compose or .env.local)
  */
 
 interface ApiResponse<T = any> {
@@ -21,7 +21,7 @@ class ApiClient {
   private defaultHeaders: Record<string, string>
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://206.81.0.227:8000'
+    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
     const apiKey = process.env.NEXT_PUBLIC_API_KEY || 'test_api_key_for_backend_validation_2025'
     this.defaultHeaders = {
       'Content-Type': 'application/json',

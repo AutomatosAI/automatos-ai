@@ -270,7 +270,7 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": "https://api.automatos.ai",
+            "url": os.getenv("API_URL", "http://localhost:8000"),
             "description": "Production server"
         }
     ],
@@ -300,7 +300,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://ui.automatos.app").split(","),
+    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

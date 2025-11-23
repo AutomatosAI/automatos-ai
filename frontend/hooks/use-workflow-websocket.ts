@@ -50,7 +50,7 @@ export function useWorkflowWebSocket({
 
     try {
       // Determine WebSocket URL based on environment
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.automatos.app'
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
       const url = new URL(apiUrl)
       
       // Use ws:// for http and wss:// for https

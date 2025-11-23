@@ -14,8 +14,8 @@ import psutil
 import redis
 
 from database.database import get_db
-from database.models import (
-    Agent, Workflow, WorkflowExecution, CollaborationSession,
+from models import (
+    Agent, Workflow, WorkflowExecution,
     SystemMetrics
 )
 

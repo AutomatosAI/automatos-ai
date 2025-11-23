@@ -115,7 +115,7 @@ NEXTAUTH_SECRET=automatos_nextauth_secret_2024_local_dev
 ## Docker Compose Issues Fixed
 
 ### Main Issues Resolved:
-1. **Port Conflicts**: Fixed Grafana port conflict (3000 → 3002)
+1. **Port Conflicts**: Ensure ports 3000, 8000, 5432, 6379 are available
 2. **Environment Files**: Added proper env_file references to all services
 3. **API URL Consistency**: Aligned frontend API URL to point to backend on port 8000
 4. **Database Initialization**: Ensured proper PostgreSQL setup with required extensions

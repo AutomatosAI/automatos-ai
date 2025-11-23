@@ -6,6 +6,7 @@ from decimal import Decimal
 from datetime import datetime, date
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -102,30 +103,30 @@ class DatabaseIntrospectionService:
                                 columns.append(col)
                                 continue
                             try:
-                                sample_sql = text(f"SELECT DISTINCT {col_name} FROM {schema}.\"{table}\" WHERE {col_name} IS NOT NULL LIMIT :lim")
+                                sample_sql = text(f'SELECT DISTINCT "{col_name}" FROM "{schema}"."{table}" WHERE "{col_name}" IS NOT NULL LIMIT :lim')
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
-                            except Exception:
+                            except SQLAlchemyError:
                                 logger.warning(
                                     f"Failed to sample column {col_name} in {table}",
                                     exc_info=True
                                 )
                                 try:
                                     conn.rollback()
-                                except Exception:
+                                except SQLAlchemyError:
                                     logger.debug("Rollback failed or unnecessary", exc_info=True)
                     # Row count
                     try:
-                        cnt = conn.execute(text(f"SELECT COUNT(*) FROM {schema}.\"{table}\""))
+                        cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"'))
                         row_count = cnt.scalar() or 0
-                    except Exception:
+                    except SQLAlchemyError:
                         logger.warning(
                             f"Failed to count rows in {schema}.{table}",
                             exc_info=True
                         )
                         try:
                             conn.rollback()
-                        except Exception:
+                        except SQLAlchemyError:
                             logger.debug("Rollback failed or unnecessary", exc_info=True)
                         row_count = 0
 
@@ -201,10 +202,10 @@ class DatabaseIntrospectionService:
                                 sample_sql = text(f"SELECT DISTINCT `{col_name}` FROM `{table}` WHERE `{col_name}` IS NOT NULL LIMIT :lim")
                                 samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
                                 col["samples"] = [r[0] for r in samples]
-                            except Exception:
+                            except SQLAlchemyError:
                                 try:
                                     conn.rollback()
-                                except Exception:
+                                except SQLAlchemyError:
                                     pass
                                 col["samples"] = []
                         columns.append(col)
@@ -212,10 +213,10 @@ class DatabaseIntrospectionService:
                     try:
                         cnt = conn.execute(text(f"SELECT COUNT(*) FROM `{table}`"))
                         row_count = cnt.scalar() or 0
-                    except Exception:
+                    except SQLAlchemyError:
                         try:
                             conn.rollback()
-                        except Exception:
+                        except SQLAlchemyError:
                             pass
                         row_count = 0
 

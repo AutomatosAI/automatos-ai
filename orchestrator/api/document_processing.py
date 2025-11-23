@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from database.database import get_db
-from database.models import Document as DocumentModel
+from models import Document as DocumentModel
 from utils.document_manager import DocumentManager
 from context_engineering.manager import EnhancedContextManager
 

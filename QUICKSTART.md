@@ -57,14 +57,7 @@ The platform uses these defaults (no configuration needed):
 
 ⚠️ **Production**: Change these defaults via Settings UI or environment variables.
 
-## 🎯 Optional: Monitoring & Admin Tools
-
-### Start with Monitoring (Prometheus + Grafana)
-```bash
-docker-compose --profile monitoring up
-```
-- **Grafana**: http://localhost:3001 (admin/admin)
-- **Prometheus**: http://localhost:9090
+## 🎯 Optional: Admin Tools
 
 ### Start with Admin Tools (Adminer)
 ```bash

@@ -207,10 +207,9 @@ Comprehensive monitoring and business intelligence.
 - **Digital Ocean**: Droplets and Kubernetes
 
 ### **Monitoring & Observability**
-- **Prometheus**: Metrics collection and alerting
-- **Grafana**: Custom dashboards and visualization
-- **Jaeger**: Distributed tracing
-- **ELK Stack**: Centralized logging
+- **Built-in Monitoring Service**: System metrics and health checks
+- **Jaeger**: Distributed tracing (optional)
+- **ELK Stack**: Centralized logging (optional)
 
 ---
 

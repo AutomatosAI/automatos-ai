@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import type { ChatMessage, AppUsage } from '@/types'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 export function useChat({
   id,
@@ -21,8 +21,8 @@ export function useChat({
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const stop = useCallback(() => {
-    if (abortController) {
-      abortController.abort()
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
       setIsLoading(false)
       setStatus('idle')
     }
@@ -70,7 +70,7 @@ export function useChat({
       setMessages(prev => [...prev, assistantMessage])
 
       try {
-        abortController = new AbortController()
+        abortControllerRef.current = new AbortController()
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
@@ -85,7 +85,7 @@ export function useChat({
             selectedChatModel: 'gpt-4',
             selectedVisibilityType: 'private',
           }),
-          signal: abortController.signal,
+          signal: abortControllerRef.current.signal,
         })
 
         if (!response.ok) {

@@ -33,7 +33,7 @@ from sqlalchemy.orm import sessionmaker
 
 from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata
 from services.llm_provider import LLMManager
-from database.models import Agent, Base
+from models import Agent, Base
 
 # Load environment variables
 load_dotenv()

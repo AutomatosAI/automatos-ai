@@ -8,7 +8,8 @@ Extended workflow API with live progress tracking, real-time updates, and advanc
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from pathlib import Path
 from sqlalchemy.orm import Session, joinedload, attributes
 from sqlalchemy import and_, or_, func, desc, String
 from datetime import datetime, timedelta
@@ -17,13 +18,14 @@ import logging
 import json
 
 from database.database import get_db
-from database.models import (
+from models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
 from services.websocket_manager import manager
+from services.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -272,8 +274,9 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from database.models import WorkflowAgent
-            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id == workflow_id).delete()
+            from models import workflow_agents
+            from sqlalchemy import delete
+            db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id == workflow_id))
         except Exception as e:
             logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
         
@@ -327,8 +330,9 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from database.models import WorkflowAgent
-            db.query(WorkflowAgent).filter(WorkflowAgent.workflow_id.in_(workflow_ids)).delete(synchronize_session=False)
+            from models import workflow_agents
+            from sqlalchemy import delete
+            db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id.in_(workflow_ids)))
         except Exception as e:
             logger.warning(f"Could not delete workflow_agents (table may not exist): {e}")
         
@@ -2126,26 +2130,20 @@ async def download_execution_result_file(execution_id: int, file_path: str, db: 
         file_path: Relative path to the file within the results directory
     """
     try:
-        from services.workspace_manager import WorkspaceManager
-        from fastapi.responses import FileResponse
-        import os
-        
         # Verify execution exists
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
         if not execution:
             raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
         
-        # Get full file path
+        # Get results directory
         workspace_manager = WorkspaceManager(execution_id)
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
-from fastapi.responses import StreamingResponse
-from pathlib import Path
-from sqlalchemy.orm import Session, joinedload, attributes
+        results_dir = Path(workspace_manager.get_results_dir()).resolve()
+        
+        # Build full file path
         full_path = (results_dir / file_path).resolve()
         
-        # Security check: ensure path is within results directory
-        if not str(full_path).startswith(str(results_dir)):
+        # Security check: ensure path is within results directory using Path API
+        if not full_path.is_relative_to(results_dir):
             raise HTTPException(status_code=403, detail="Access denied: path outside results directory")
         
         # Check if file exists

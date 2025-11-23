@@ -49,7 +49,7 @@ class Config:
     # =============================================================================
     # CORS (Frontend origins)
     # =============================================================================
-    CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://ui.automatos.app")
+    CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
     
     # =============================================================================
     # LLM KEYS (Optional - LLM Manager handles these)

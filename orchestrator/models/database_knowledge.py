@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 
-from models import Base
+from .core import Base
 
 
 # ============================================================================

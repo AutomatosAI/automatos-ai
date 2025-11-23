@@ -313,7 +313,7 @@ Example: Entire platform learning and adapting
 | **Containerization** | Docker | Service isolation |
 | **Orchestration** | Docker Compose | Multi-container apps |
 | **Reverse Proxy** | Nginx | Load balancing, SSL |
-| **Monitoring** | Grafana, Prometheus | Observability |
+| **Monitoring** | Built-in monitoring service | Observability |
 | **Logging** | Structured logging | Debugging |
 
 ---
@@ -620,7 +620,7 @@ Production Server(s)
 │   ├── Frontend (static + SSR)
 │   ├── PostgreSQL (with backups)
 │   ├── Redis (with persistence)
-│   └── Monitoring (Grafana, Prometheus)
+│   └── Monitoring (Built-in service)
 ├── Let's Encrypt (SSL certificates)
 └── Cloud LLM APIs
 ```

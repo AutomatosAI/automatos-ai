@@ -201,20 +201,6 @@ automatos_frontend    Up                  0.0.0.0:3000->3000/tcp
 
 ### Optional Services
 
-#### Monitoring (Prometheus + Grafana)
-
-```bash
-# Stop current services
-docker-compose down
-
-# Start with monitoring
-docker-compose --profile monitoring up -d
-```
-
-**Access:**
-- **Grafana**: http://localhost:3001 (admin/admin)
-- **Prometheus**: http://localhost:9090
-
 #### Admin Tools (Database Management)
 
 ```bash

@@ -61,25 +61,35 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
       )
     : chats
 
-  // Group chats by date
+  // Group chats by date (date-only comparisons for mutual exclusivity)
   const today = new Date()
+  const todayDateString = today.toDateString()
+  
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayDateString = yesterday.toDateString()
+  
+  // Normalize to start of yesterday (midnight) for olderChats comparison
+  const startOfYesterday = new Date(yesterday)
+  startOfYesterday.setHours(0, 0, 0, 0)
+
   const todayChats = filteredChats.filter(c => {
     const chatDate = new Date(c.createdAt)
-    return chatDate.toDateString() === today.toDateString()
+    return chatDate.toDateString() === todayDateString
   })
 
   const yesterdayChats = filteredChats.filter(c => {
     const chatDate = new Date(c.createdAt)
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
-    return chatDate.toDateString() === yesterday.toDateString()
+    return chatDate.toDateString() === yesterdayDateString
   })
 
   const olderChats = filteredChats.filter(c => {
     const chatDate = new Date(c.createdAt)
-    const yesterday = new Date(today)
-    yesterday.setDate(yesterday.getDate() - 1)
-    return chatDate < yesterday
+    const chatDateString = chatDate.toDateString()
+    // Exclude chats from today or yesterday, only include older ones
+    return chatDateString !== todayDateString && 
+           chatDateString !== yesterdayDateString &&
+           chatDate < startOfYesterday
   })
 
   return (

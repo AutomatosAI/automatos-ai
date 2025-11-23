@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
 import { MessageSquare, Trash2, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,8 +22,6 @@ export interface SidebarHistoryItemProps {
 }
 
 export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false }: SidebarHistoryItemProps) {
-  const router = useRouter()
-  const pathname = usePathname()
   const [isDeleting, setIsDeleting] = useState(false)
 
   const handleClick = async () => {
@@ -66,7 +63,7 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
       onClick={handleClick}
       disabled={isDeleting}
       className={`
-        w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-all
+        group w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-all
         ${isActive 
           ? 'bg-orange-500/10 border border-orange-500/40 text-white' 
           : 'text-gray-400 hover:bg-orange-500/5 hover:border hover:border-orange-500/20 hover:text-white'

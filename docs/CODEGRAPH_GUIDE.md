@@ -260,7 +260,7 @@ GET /api/code-graph/projects
   "total_symbols": 12847,
   "last_indexed": "2025-10-02T14:30:00Z",
   "auto_reindex": true,
-  "webhook_url": "https://automatos.ai/webhooks/code-changed"
+  "webhook_url": "${API_URL}/webhooks/code-changed"  # Replace ${API_URL} with your API server URL
 }
 ```
 
@@ -1146,7 +1146,7 @@ security-review:
   stage: test
   script:
     - |
-      curl -X POST https://automatos.ai/api/workflows \
+      curl -X POST ${API_URL}/api/workflows \
         -H "Authorization: Bearer $AUTOMATOS_API_KEY" \
         -d '{
           "name": "Security Review - MR !'"$CI_MERGE_REQUEST_IID"'",
@@ -1449,7 +1449,7 @@ Content-Type: application/json
 
 {
   "enabled": true,
-  "webhook_url": "https://automatos.ai/webhooks/code-changed",
+  "webhook_url": "${API_URL}/webhooks/code-changed"  # Replace ${API_URL} with your API server URL,
   "auto_reindex": true,
   "events": ["push", "pull_request"]
 }
@@ -1484,7 +1484,7 @@ jobs:
       
       - name: Trigger Automatos Security Review
         run: |
-          WORKFLOW_ID=$(curl -X POST https://automatos.ai/api/workflows \
+          WORKFLOW_ID=$(curl -X POST ${API_URL}/api/workflows \
             -H "Authorization: Bearer ${{ secrets.AUTOMATOS_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d '{
@@ -1504,7 +1504,7 @@ jobs:
         run: |
           # Poll workflow status
           while true; do
-            STATUS=$(curl -s https://automatos.ai/api/workflows/$WORKFLOW_ID \
+            STATUS=$(curl -s ${API_URL}/api/workflows/$WORKFLOW_ID \
               -H "Authorization: Bearer ${{ secrets.AUTOMATOS_API_KEY }}" \
               | jq -r '.status')
             
@@ -1519,7 +1519,7 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const report = await fetch(`https://automatos.ai/api/workflows/${process.env.WORKFLOW_ID}/report`, {
+            const report = await fetch(`${API_URL}/api/workflows/${process.env.WORKFLOW_ID}/report`, {
               headers: { 'Authorization': `Bearer ${{ secrets.AUTOMATOS_API_KEY }}` }
             }).then(r => r.json())
             
@@ -1540,7 +1540,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 import requests
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
-AUTOMATOS_API = "https://automatos.ai/api"
+AUTOMATOS_API = "${API_URL}/api"  # Replace ${API_URL} with your API server URL
 AUTOMATOS_TOKEN = os.environ["AUTOMATOS_API_KEY"]
 
 @app.command("/code-search")
@@ -1620,7 +1620,7 @@ if __name__ == "__main__":
 import * as vscode from 'vscode'
 import axios from 'axios'
 
-const AUTOMATOS_API = 'https://automatos.ai/api'
+const AUTOMATOS_API = process.env.API_URL ? `${process.env.API_URL}/api` : 'http://localhost:8000/api'
 const AUTOMATOS_TOKEN = process.env.AUTOMATOS_API_KEY
 
 export function activate(context: vscode.ExtensionContext) {

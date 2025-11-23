@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from database.database import get_db
-from database.models import AgentTemplate, AgentType, PriorityLevel, SkillCategory
+from models import AgentTemplate, AgentType, PriorityLevel, SkillCategory
 import logging
 
 logger = logging.getLogger(__name__)
@@ -178,7 +178,7 @@ async def get_skill_suggestions(
 ):
     """Get skill suggestions based on agent type"""
     try:
-        from database.models import Skill
+        from models import Skill
         
         # Map agent types to skill categories
         type_to_categories = {

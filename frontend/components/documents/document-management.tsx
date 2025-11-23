@@ -245,8 +245,9 @@ export function DocumentManagement() {
 
   const handleDownload = async (documentId: number, filename: string) => {
     try {
-      // Create download link
-      const downloadUrl = `https://api.automatos.app/api/documents/${documentId}/download`
+      // Create download link using environment API URL
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+      const downloadUrl = `${apiUrl}/api/documents/${documentId}/download`
       const link = document.createElement('a')
       link.href = downloadUrl
       link.download = filename

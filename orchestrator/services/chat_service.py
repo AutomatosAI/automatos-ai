@@ -18,21 +18,8 @@ import httpx
 from services.pandas_ai_service import get_pandasai_service
 from config import config
 
-# Import models - handle both models.py and models/ package
-import sys
-import importlib.util
-from pathlib import Path
-
-# Load models.py directly to get Chat models
-models_path = Path(__file__).parent.parent / "models.py"
-spec = importlib.util.spec_from_file_location("chat_models", models_path)
-chat_models = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(chat_models)
-
-Chat = chat_models.Chat
-Message = chat_models.Message  
-Vote = chat_models.Vote
-Artifact = chat_models.Artifact
+# Import models from models package
+from models import Chat, Message, Vote, Artifact
 
 logger = logging.getLogger(__name__)
 

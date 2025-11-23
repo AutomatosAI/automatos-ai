@@ -178,7 +178,7 @@ Response: "Creating deployment workflow...
   ✓ Assigned agents: InfrastructureManager, SecurityChecker
   ✓ Executing...
   
-  Results available at: https://app.automatos.app/workflows/123
+  Results available at: {APP_URL}/workflows/123  # Replace {APP_URL} with your frontend URL
 "
 ```
 

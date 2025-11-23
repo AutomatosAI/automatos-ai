@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
 from database.database import get_db
-from database.models import WorkflowExecution, Workflow, Agent
+from models import WorkflowExecution, Workflow, Agent
 from services.workflow_analytics_service import WorkflowAnalyticsService
 
 logger = logging.getLogger(__name__)

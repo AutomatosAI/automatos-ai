@@ -102,7 +102,7 @@ export function useWorkflowStream({
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
       const url = `${apiUrl}/api/workflows/executions/${executionId}/stream`;
       
       console.log(`🚀 [useWorkflowStream] Connecting to SSE: ${url}`);

@@ -12,7 +12,7 @@ from sqlalchemy import func, and_
 from typing import Dict, Any
 from datetime import datetime, timedelta
 from database.database import get_db
-from database.models import (
+from models import (
     Agent, Skill, Pattern, Workflow, WorkflowExecution, 
     AgentStatistics, SystemMetrics
 )

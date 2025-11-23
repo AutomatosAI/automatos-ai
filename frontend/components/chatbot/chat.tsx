@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bot, ArrowDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useChat } from '@/lib/chat/hooks-simple'
+import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
 import { MultimodalInput } from './multimodal-input'
 import { ArtifactViewer } from './artifact-viewer'
@@ -55,14 +55,9 @@ export function Chat({
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id,
     initialMessages,
-    initialChatModel,
-    initialVisibilityType,
     onData: (dataPart) => {
-      if (dataPart.type === 'usage') {
+      if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
-      } else if (dataPart.type === 'artifact') {
-        setSelectedArtifact(dataPart.data)
-        setIsArtifactViewerVisible(true)
       }
     },
   })
@@ -91,7 +86,7 @@ export function Chat({
 
   // Auto-scroll
   useEffect(() => {
-    if (status === 'submitted') {
+    if (status === 'streaming') {
       requestAnimationFrame(() => {
         messagesContainerRef.current?.scrollTo({
           top: messagesContainerRef.current.scrollHeight,
@@ -147,7 +142,7 @@ export function Chat({
       preview_chunk_end: doc.preview_chunk_end ?? undefined,
       has_full_content: doc.has_full_content ?? false,
       preview_excerpt: doc.excerpt,
-      is_loading_full_content: doc.has_full_content ?? false,
+      is_loading_full_content: !doc.has_full_content,
     }
 
     setSelectedArtifact({
@@ -281,7 +276,7 @@ export function Chat({
     setIsArtifactViewerVisible(true)
   }, [])
 
-  const isTyping = status === 'streaming' || status === 'awaiting_message'
+  const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
   const suggestedActions = [
@@ -362,18 +357,20 @@ export function Chat({
                 </div>
 
                 {/* Input at bottom of chat column */}
-                <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
-                  <MultimodalInput
-                    chatId={id}
-                    status={status}
-                    stop={stop}
-                    sendMessage={sendMessage}
-                    selectedModelId={currentModelId}
-                    onModelChange={setCurrentModelId}
-                    selectedVisibilityType={visibilityType}
-                    usage={usage}
-                  />
-                </div>
+                {!isReadonly && (
+                  <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                    <MultimodalInput
+                      chatId={id}
+                      status={status}
+                      stop={stop}
+                      sendMessage={sendMessage}
+                      selectedModelId={currentModelId}
+                      onModelChange={setCurrentModelId}
+                      selectedVisibilityType={visibilityType}
+                      usage={usage}
+                    />
+                  </div>
+                )}
               </div>
             </motion.div>
 

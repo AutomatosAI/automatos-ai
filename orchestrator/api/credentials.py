@@ -92,7 +92,7 @@ async def list_credential_categories(
     set_request_id(str(uuid.uuid4()))
     
     try:
-        from credential_types.all_credential_types import get_all_categories
+        from credentials.types import get_all_categories
         return get_all_categories()
     
     except Exception as e:

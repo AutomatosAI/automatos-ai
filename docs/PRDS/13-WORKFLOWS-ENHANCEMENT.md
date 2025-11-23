@@ -33,7 +33,7 @@ disown
 exit
 
 # Check API health
-curl -s https://api.automatos.app/api/v1/memory/stats/real | python3 -m json.tool
+curl -s ${API_URL}/api/v1/memory/stats/real | python3 -m json.tool
 ```
 
 ### 0.3 Access Database
@@ -89,7 +89,7 @@ REDIS_HOST=127.0.0.1
 ```env
 API_PORT=8000
 API_KEY=test_api_key_for_backend_validation_2025
-API_URL=api.automatos.app
+API_URL=your-api-url.com  # Replace with your API server URL
 ```
 
 ### 0.6 Check Backend Logs

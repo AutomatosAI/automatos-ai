@@ -12,7 +12,6 @@ A **unified, simple Docker Compose setup** that allows anyone to clone the repo 
    - Unified orchestration of all services
    - **Profiles** for optional services:
      - Default: Core services (postgres, redis, backend, frontend)
-     - `monitoring`: Adds Prometheus + Grafana
      - `all`: Includes admin tools (Adminer)
    - Auto-initialization with seed data
    - Health checks for all services
@@ -58,11 +57,6 @@ A **unified, simple Docker Compose setup** that allows anyone to clone the repo 
    - Next steps guidance
    - Useful commands reference
 
-### 8. **`orchestrator/monitoring/prometheus.yml`**
-   - Basic Prometheus configuration
-   - Backend metrics scraping
-   - Ready for additional exporters
-
 ---
 
 ## 🚀 How to Use
@@ -79,15 +73,6 @@ docker-compose up
 - Frontend: http://localhost:3000
 - API Docs: http://localhost:8000/docs
 - Health: http://localhost:8000/health
-
-### With Monitoring
-```bash
-docker-compose --profile monitoring up
-```
-
-**Additional Access:**
-- Grafana: http://localhost:3001 (admin/admin)
-- Prometheus: http://localhost:9090
 
 ### Everything (Including Admin Tools)
 ```bash
@@ -125,8 +110,7 @@ docker-compose --profile all up
 
 ### ✅ Profiles for Optional Services
 - Clean default setup
-- Add monitoring when needed
-- Full admin tools available
+- Full admin tools available via `--profile all`
 
 ---
 
@@ -154,12 +138,6 @@ docker-compose --profile all up
 │                    │   Redis Cache     │   │
 │                    │   :6379           │   │
 │                    └───────────────────┘   │
-│                                             │
-│  [Optional: --profile monitoring]          │
-│  ┌────────────┐         ┌────────────┐    │
-│  │ Prometheus │◄───────►│  Grafana   │    │
-│  │   :9090    │         │   :3001    │    │
-│  └────────────┘         └────────────┘    │
 │                                             │
 │  [Optional: --profile all]                 │
 │  ┌────────────┐                            │
@@ -246,7 +224,7 @@ docker-compose restart backend
 - Create your first agent
 - Upload documents for RAG
 - Build a workflow
-- Monitor with Grafana (if using monitoring profile)
+- Monitor system health via built-in monitoring service
 
 ---
 

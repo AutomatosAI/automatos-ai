@@ -258,7 +258,7 @@ export default function GeneralSettingsTab({
                 id="deploy_host"
                 value={formData.deploy_host || ''}
                 onChange={(e) => handleInputChange('deploy_host', e.target.value)}
-                placeholder="mcp.automatos.app"
+                placeholder="your-deploy-host.com"
               />
             </div>
 
@@ -289,7 +289,7 @@ export default function GeneralSettingsTab({
                 id="deploy_key_path"
                 value={formData.deploy_key_path || ''}
                 onChange={(e) => handleInputChange('deploy_key_path', e.target.value)}
-                placeholder="/aRpp/keys/deploy_key"
+                placeholder="/path/to/your/deploy_key"
               />
             </div>
 
@@ -340,7 +340,7 @@ export default function GeneralSettingsTab({
                 id="nextauth_url"
                 value={formData.nextauth_url || ''}
                 onChange={(e) => handleInputChange('nextauth_url', e.target.value)}
-                placeholder="https://8018adcb5.preview.abacusai.app"
+                placeholder="https://your-frontend-url.com"
               />
             </div>
 
@@ -350,7 +350,7 @@ export default function GeneralSettingsTab({
                 id="next_public_api_url"
                 value={formData.next_public_api_url || ''}
                 onChange={(e) => handleInputChange('next_public_api_url', e.target.value)}
-                placeholder="https://api.automatos.app"
+                placeholder="https://your-api-url.com"
               />
             </div>
           </div>

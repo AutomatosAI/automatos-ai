@@ -25,7 +25,7 @@ from services.llm_provider import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
 )
-from database.models import (
+from models import (
     Agent, Skill, PriorityLevel, Base,
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
@@ -583,7 +583,7 @@ class AgentFactory:
             
             # Get context window from LLM models registry
             try:
-                from database.models import LLMModel
+                from models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
                 if llm_model:
                     context_window = llm_model.context_window

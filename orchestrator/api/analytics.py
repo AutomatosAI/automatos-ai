@@ -117,7 +117,7 @@ async def get_dashboard_summary(
     """Get summary statistics for dashboard"""
     
     try:
-        from database.models import WorkflowExecution, Agent, Workflow, ExecutionStatus
+        from models import WorkflowExecution, Agent, Workflow, ExecutionStatus
         from sqlalchemy import and_, func
         
         since_date = datetime.now() - timedelta(days=days)
@@ -215,7 +215,7 @@ async def analyze_agent_selection(
     """Analyze agent selection patterns and effectiveness"""
     
     try:
-        from database.models import WorkflowExecution, ExecutionStatus
+        from models import WorkflowExecution, ExecutionStatus
         from sqlalchemy import and_
         
         since_date = datetime.now() - timedelta(days=days)

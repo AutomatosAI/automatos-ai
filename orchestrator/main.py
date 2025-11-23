@@ -276,7 +276,7 @@ app = FastAPI(
             "description": "Development server"
         },
         {
-            "url": "https://api.automatos.ai",
+            "url": os.getenv("API_URL", "http://localhost:8000"),
             "description": "Production server"
         }
     ],

@@ -64,8 +64,8 @@ docker-compose up
 
 ### Optional: Monitoring & Admin Tools
 ```bash
-# Add monitoring (Prometheus + Grafana)
-docker-compose --profile monitoring up
+# Add admin tools (Adminer for database management)
+docker-compose --profile all up
 
 # Add everything (includes Adminer for database management)
 docker-compose --profile all up

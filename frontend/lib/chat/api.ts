@@ -4,7 +4,7 @@
 
 import type { Chat, ChatMessage, Vote } from '@/types'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || ''
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 /**
  * Get auth headers

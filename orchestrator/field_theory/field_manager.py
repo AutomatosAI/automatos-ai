@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 # Import models
-from database.models import WorkflowExecution, Agent
+from models import WorkflowExecution, Agent
 from database.database import get_db
 
 logger = logging.getLogger(__name__)

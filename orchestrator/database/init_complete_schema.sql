@@ -24,6 +24,61 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- ================================================================
+-- CHAT TABLES (PRD-27)
+-- ================================================================
+
+-- Chat sessions table
+CREATE TABLE IF NOT EXISTS chats (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    visibility VARCHAR(20) DEFAULT 'private' CHECK (visibility IN ('private', 'public')),
+    last_context JSONB DEFAULT '{}'::jsonb,
+    CONSTRAINT unique_user_title UNIQUE(user_id, title)
+);
+
+-- Messages table with parts support
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    parts JSONB NOT NULL DEFAULT '[]'::jsonb,
+    attachments JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Message voting table
+CREATE TABLE IF NOT EXISTS votes (
+    chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    is_upvoted BOOLEAN NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, message_id)
+);
+
+-- Artifacts table (for code snippets, documents, images)
+CREATE TABLE IF NOT EXISTS artifacts (
+    id UUID NOT NULL DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('code', 'text', 'image', 'sheet')),
+    artifact_metadata JSONB DEFAULT '{}'::jsonb,
+    PRIMARY KEY (id, created_at)
+);
+
+-- Indexes for chat tables
+CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id);
+CREATE INDEX IF NOT EXISTS idx_chats_created_at ON chats(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(chat_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_votes_chat_message ON votes(chat_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_user_id ON artifacts(user_id);
+
 -- Agents table
 CREATE TABLE IF NOT EXISTS agents (
     id SERIAL PRIMARY KEY,
@@ -33,6 +88,7 @@ CREATE TABLE IF NOT EXISTS agents (
     status VARCHAR(50) DEFAULT 'active',
     configuration JSON,
     performance_metrics JSON,
+    tags JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     created_by VARCHAR(255),
@@ -81,7 +137,9 @@ CREATE TABLE IF NOT EXISTS skills (
     filesystem_path TEXT,
     tags JSONB,
     skill_metadata JSONB,
-    last_sync_at TIMESTAMP WITH TIME ZONE
+    last_sync_at TIMESTAMP WITH TIME ZONE,
+    -- PRD-22: Tools schema for executable tool definitions
+    tools_schema JSONB DEFAULT NULL
 );
 
 -- Agent-Skills many-to-many
@@ -174,6 +232,7 @@ CREATE INDEX IF NOT EXISTS idx_skill_audit_source ON skill_audit_log(source_id);
 -- Additional indexes for skills
 CREATE INDEX IF NOT EXISTS idx_skills_source_active ON skills(skill_source, is_active);
 CREATE INDEX IF NOT EXISTS idx_skills_tags_gin ON skills USING GIN (tags jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_skills_tools_schema ON skills USING GIN (tools_schema);
 
 -- Patterns table
 CREATE TABLE IF NOT EXISTS patterns (
@@ -199,11 +258,14 @@ CREATE TABLE IF NOT EXISTS workflows (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    goal TEXT,
+    context TEXT,
     workflow_definition JSON,
     status VARCHAR(50) DEFAULT 'draft',
     owner VARCHAR(255),
     tags JSONB DEFAULT '[]'::jsonb,
     default_policy_id VARCHAR(128),
+    last_execution JSONB,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     created_by VARCHAR(255),
@@ -728,6 +790,7 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
 
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_status ON mcp_tools(status);
 CREATE INDEX IF NOT EXISTS idx_mcp_tools_category ON mcp_tools(category);
+CREATE INDEX IF NOT EXISTS idx_mcp_tools_provider ON mcp_tools(provider);
 
 -- System Settings table (database-backed configuration management)
 CREATE TABLE IF NOT EXISTS system_settings (
@@ -813,6 +876,11 @@ CREATE TABLE IF NOT EXISTS agent_tool_assignments (
     UNIQUE(agent_id, tool_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_agent_tools_agent ON agent_tool_assignments(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tools_tool ON agent_tool_assignments(tool_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tools_enabled ON agent_tool_assignments(enabled);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_credential ON agent_tool_assignments(credential_id);
+
 -- Tool Credentials table
 CREATE TABLE IF NOT EXISTS tool_credentials (
     id SERIAL PRIMARY KEY,
@@ -824,6 +892,10 @@ CREATE TABLE IF NOT EXISTS tool_credentials (
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(tool_id, agent_id, environment)
 );
+
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_tool ON tool_credentials(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_agent ON tool_credentials(agent_id);
+CREATE INDEX IF NOT EXISTS idx_tool_credentials_env ON tool_credentials(environment);
 
 -- Tool Usage Logs table
 CREATE TABLE IF NOT EXISTS tool_usage_logs (
@@ -842,6 +914,8 @@ CREATE TABLE IF NOT EXISTS tool_usage_logs (
 
 CREATE INDEX IF NOT EXISTS idx_tool_usage_agent ON tool_usage_logs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_tool_usage_tool ON tool_usage_logs(tool_id);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_execution ON tool_usage_logs(execution_id);
+CREATE INDEX IF NOT EXISTS idx_tool_usage_success ON tool_usage_logs(success);
 
 -- Tools table (UI registry)
 CREATE TABLE IF NOT EXISTS tools (
@@ -891,17 +965,23 @@ CREATE TABLE IF NOT EXISTS agent_tool_permissions (
 -- Credential Audit Logs table
 CREATE TABLE IF NOT EXISTS credential_audit_logs (
     id SERIAL PRIMARY KEY,
-    credential_id VARCHAR,
-    tool_id VARCHAR,
-    action VARCHAR,
-    user_id VARCHAR,
-    timestamp TIMESTAMP DEFAULT NOW(),
+    credential_id INTEGER REFERENCES credentials(id) ON DELETE CASCADE,
+    tool_id INTEGER,
+    action VARCHAR(100) NOT NULL,
+    user_id VARCHAR(255),
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     details JSON,
-    ip_address VARCHAR,
+    metadata JSON,
+    ip_address VARCHAR(45),
     user_agent VARCHAR,
     success BOOLEAN,
     error_message TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit_logs(credential_id);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_action ON credential_audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_created ON credential_audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_user ON credential_audit_logs(user_id);
 
 -- Permission Audit Logs table
 CREATE TABLE IF NOT EXISTS permission_audit_logs (
@@ -1033,14 +1113,6 @@ CREATE TABLE IF NOT EXISTS context_optimizations (
     parameters JSON,
     results JSON,
     created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Context Optimization Metrics table
-CREATE TABLE IF NOT EXISTS context_optimization_metrics (
-    id SERIAL PRIMARY KEY,
-    metric_name VARCHAR(100),
-    metric_value FLOAT,
-    timestamp TIMESTAMP DEFAULT NOW()
 );
 
 -- Context Patterns table
@@ -1300,10 +1372,29 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
 CREATE TABLE IF NOT EXISTS system_metrics (
     id SERIAL PRIMARY KEY,
     metric_type VARCHAR(100),
+    metric_name VARCHAR(255),
     metric_value FLOAT,
+    metric_unit VARCHAR(50),
     metric_data JSON,
-    timestamp TIMESTAMP DEFAULT NOW()
+    timestamp TIMESTAMP DEFAULT NOW(),
+    recorded_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_system_metrics_metric_name ON system_metrics(metric_name);
+CREATE INDEX IF NOT EXISTS idx_system_metrics_recorded_at ON system_metrics(recorded_at);
+
+-- Context Optimization Metrics table
+CREATE TABLE IF NOT EXISTS context_optimization_metrics (
+    id SERIAL PRIMARY KEY,
+    tokens_saved INTEGER DEFAULT 0,
+    compression_ratio FLOAT DEFAULT 1.0,
+    optimization_type VARCHAR(100),
+    context_size_before INTEGER,
+    context_size_after INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_optimization_created_at ON context_optimization_metrics(created_at);
 
 -- Custom Metrics table
 CREATE TABLE IF NOT EXISTS custom_metrics (

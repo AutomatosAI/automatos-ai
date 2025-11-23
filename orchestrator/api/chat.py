@@ -151,7 +151,6 @@ async def get_chat_history(
     limit: int = 20,
     db: Session = Depends(get_db)
 ):
-):
     """Get chat history for the current user"""
     chat_service = ChatService(db)
     user_id = get_user_id(db)
