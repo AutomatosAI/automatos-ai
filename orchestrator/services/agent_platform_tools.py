@@ -29,7 +29,7 @@ class AgentPlatformTools:
     def __init__(self, db_session: Session):
         self.db = db_session
         self.rag_service = RAGService()
-        # CodeGraphService needs openai_api_key - get from credential resolver
+        # CodeGraphService uses centralized embedding manager
         from services.credential_resolver import get_credential_resolver
         resolver = get_credential_resolver()
         openai_key = resolver.get_credential_field("development_openai", "api_key")

@@ -138,59 +138,32 @@ class RAGService:
     Main RAG service for context retrieval and enhancement
     """
     
-    def __init__(self, openai_api_key: Optional[str] = None):
-        # Get API key from centralized config
-        if not openai_api_key:
-            from config import config
-            openai_api_key = config.OPENAI_API_KEY
-            if openai_api_key:
-                logger.info("Using OpenAI key from centralized config")
-            else:
-                logger.warning("No OpenAI API key configured")
-                openai_api_key = None
+    def __init__(self):
+        # Use centralized embedding manager
+        from services.llm_provider import create_embedding_manager
+        self.embedding_manager = create_embedding_manager()
+        provider_info = self.embedding_manager.get_provider_info()
         
-        self.api_key = openai_api_key
-        
-        # Initialize OpenAI client with new API (>= 1.0.0)
-        if self.api_key:
-            self.openai_client = OpenAI(api_key=self.api_key)
-            logger.info("✅ OpenAI client initialized with API key")
-        else:
-            self.openai_client = None
-            logger.warning("⚠️  No OpenAI API key found - RAG service will work without embeddings")
+        logger.info(f"RAG Service using {provider_info['provider']} embeddings (model: {provider_info.get('model', 'N/A')})")
         
         self.vector_store = VectorStore()
         self.cache = {}  # Simple query cache
         self.cache_ttl = 300  # 5 minutes
-        logger.info("RAG Service initialized - using database documents only")
+        logger.info("RAG Service initialized")
     
     def _generate_embedding(self, text: str) -> np.ndarray:
-        """Generate embedding for text using OpenAI or fallback to simple method"""
-        if self.openai_client:
-            try:
-                logger.debug(f"🔍 Generating OpenAI embedding for text ({len(text)} chars)")
-                response = self.openai_client.embeddings.create(
-                    model="text-embedding-ada-002",
-                    input=text
-                )
-                embedding = np.array(response.data[0].embedding)
-                logger.debug(f"✅ Generated embedding: shape={embedding.shape}, norm={np.linalg.norm(embedding):.3f}")
-                return embedding
-            except Exception as e:
-                logger.error(f"❌ Failed to generate OpenAI embedding: {e}, using fallback")
-        
-        # Fallback: Simple hash-based pseudo-embedding
-        # This is just for testing - real embeddings are much better
-        text_hash = hashlib.sha256(text.encode()).hexdigest()
-        # Convert hash to 384-dimensional vector (simplified)
-        embedding = []
-        for i in range(0, len(text_hash), 2):
-            val = int(text_hash[i:i+2], 16) / 255.0
-            embedding.extend([val] * 12)  # Expand to match ada-002 dimension (1536/128)
-        
-        # Pad or truncate to 1536 dimensions
-        embedding = embedding[:1536] if len(embedding) > 1536 else embedding + [0] * (1536 - len(embedding))
-        return np.array(embedding)
+        """Generate embedding using centralized embedding manager"""
+        import asyncio
+        try:
+            # Use centralized embedding manager
+            loop = asyncio.get_event_loop()
+            embedding = loop.run_until_complete(self.embedding_manager.generate_embedding(text))
+            return np.array(embedding)
+        except Exception as e:
+            logger.error(f"Failed to generate embedding: {e}")
+            # Return zero vector as last resort
+            dimension = self.embedding_manager.get_dimension()
+            return np.zeros(dimension)
     
     def add_document(self, content: str, metadata: Dict[str, Any] = None, source: str = "user") -> str:
         """Add a new document to the RAG system"""

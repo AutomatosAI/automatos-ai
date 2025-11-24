@@ -37,10 +37,9 @@ db_config = {
     "host": config.POSTGRES_HOST,
     "port": config.POSTGRES_PORT
 }
-openai_api_key = config.OPENAI_API_KEY
 
-# Initialize real services
-document_manager = DocumentManager(db_config, openai_api_key)
+# Initialize document manager (uses centralized embedding manager)
+document_manager = DocumentManager(db_config)
 context_manager = None  # Will initialize on first use
 
 async def get_context_manager():

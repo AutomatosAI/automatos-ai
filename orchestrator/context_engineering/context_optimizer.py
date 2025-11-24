@@ -170,12 +170,9 @@ class ContextOptimizer:
             "resource_utilization": optimal_agents / denom if denom > 0 else 1.0
         }
 
-    def __init__(self, openai_api_key: Optional[str] = None):
+    def __init__(self):
         """
-        Initialize the context optimizer with real services.
-        
-        Args:
-            openai_api_key: OpenAI API key for embeddings (uses env var if not provided)
+        Initialize the context optimizer with centralized embedding manager.
         """
         # Use centralized embedding manager (reads from General Settings)
         from services.llm_provider import create_embedding_manager
@@ -860,17 +857,15 @@ class ContextOptimizer:
 
 # ============= Factory Functions =============
 
-def create_context_optimizer(api_key: Optional[str] = None) -> ContextOptimizer:
+def create_context_optimizer() -> ContextOptimizer:
     """
-    Factory function to create a context optimizer.
+    Factory function to create context optimizer.
+    Uses centralized embedding manager from General Settings.
     
-    Args:
-        api_key: Optional OpenAI API key
-        
     Returns:
-        Configured ContextOptimizer instance
+        Initialized context optimizer
     """
-    return ContextOptimizer(openai_api_key=api_key)
+    return ContextOptimizer()
 
 async def optimize_prompt_context(
     task: str,

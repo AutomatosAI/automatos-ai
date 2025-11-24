@@ -1387,18 +1387,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             memory_integrator = None
             memory_retrieval_results = {}
             try:
-                # Initialize memory system using centralized clients
-                from services.credential_resolver import get_credential_resolver
-                from config import config
+                # Initialize memory system using centralized embedding manager
+                from services.memory_knowledge_system import HierarchicalMemorySystem
+                from core.workflow_memory_integrator import WorkflowMemoryIntegrator
                 
-                resolver = get_credential_resolver()
-                openai_key = resolver.get_credential_field("development_openai", "api_key")
-                
-                # Use centralized Redis and Postgres clients (no hardcoded values!)
-                memory_system = HierarchicalMemorySystem(
-                    openai_api_key=openai_key
-                    # redis_client and postgres_url will use centralized defaults
-                )
+                # Memory system uses centralized embedding manager internally
+                memory_system = HierarchicalMemorySystem()
                 
                 memory_integrator = WorkflowMemoryIntegrator(memory_system)
                 logger.info(f"✅ Memory system initialized")

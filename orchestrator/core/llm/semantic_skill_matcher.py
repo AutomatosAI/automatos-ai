@@ -194,14 +194,10 @@ class SemanticSkillMatcher:
         return coverage, matches
 
 
-# Singleton instance
-_matcher: SemanticSkillMatcher = None
-
-
-def get_skill_matcher(openai_api_key: str) -> SemanticSkillMatcher:
-    """Get or create the global skill matcher"""
-    global _matcher
-    if _matcher is None:
-        _matcher = SemanticSkillMatcher(openai_api_key)
-    return _matcher
-
+# Factory function - uses centralized embedding manager
+def get_skill_matcher() -> SemanticSkillMatcher:
+    """
+    Get or create the global skill matcher.
+    Uses centralized embedding manager (no API key needed).
+    """
+    return SemanticSkillMatcher()

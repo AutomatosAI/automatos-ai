@@ -40,7 +40,8 @@ logger = logging.getLogger("MathVerification")
 async def verify_math():
     logger.info("🧮 Starting Mathematical Verification...")
     
-    optimizer = ContextOptimizer(openai_api_key="mock_key")
+    # Uses centralized embedding manager
+    optimizer = ContextOptimizer()
     
     # 1. Verify Restored Resource Optimization Logic
     logger.info("\n--- 1. Verifying Resource Optimization (Restored Logic) ---")

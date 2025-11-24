@@ -714,20 +714,14 @@ class MultimodalDocumentProcessor:
 
 
 # Convenience function for easy importing
-def create_multimodal_processor(openai_api_key: Optional[str] = None):
+def create_multimodal_processor():
     """
-    Factory function to create multimodal processor.
-    
-    Args:
-        openai_api_key: OpenAI API key for AI features
+    Factory function to create multimodal processor
     
     Returns:
-        Configured MultimodalDocumentProcessor
+        Multi modal processor instance
     """
-    openai_client = None
-    if openai_api_key:
-        from openai import OpenAI
-        openai_client = OpenAI(api_key=openai_api_key)
+    # Uses centralized LLM manager - no API key needed
+    from services.llm_provider import create_llm_manager
     
-    return MultimodalDocumentProcessor(openai_client)
-
+    return MultimodalDocumentProcessor()

@@ -33,7 +33,7 @@ from langchain_text_splitters import (
     PythonCodeTextSplitter
 )
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
+# OpenAI embeddings handled by centralized manager
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import numpy as np
@@ -218,10 +218,15 @@ class DocumentProcessor:
 class DocumentManager:
     """Main document management class"""
     
-    def __init__(self, db_config: Dict[str, str], openai_api_key: str):
+    def __init__(self, db_config: Dict[str, str]):
         self.db_config = db_config
         self.processor = DocumentProcessor()
-        self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        
+        # Use centralized embedding manager
+        from services.llm_provider import create_embedding_manager
+        self.embedding_manager = create_embedding_manager()
+        logger.info(f"DocumentManager using {self.embedding_manager.get_provider_info()['provider']} embeddings")
+        
         self._init_database()
     
     def _init_database(self):

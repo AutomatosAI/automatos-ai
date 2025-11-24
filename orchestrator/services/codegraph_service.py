@@ -65,9 +65,13 @@ class CodeGraphService:
     CodeGraph service for indexing and searching code repositories
     """
     
-    def __init__(self, db: Session, openai_api_key: str):
+    def __init__(self, db: Session):
         self.db = db
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        
+        # Use centralized embedding manager (reads from General Settings)
+        from services.llm_provider import create_embedding_manager
+        self.embedding_manager = create_embedding_manager()
+        logger.info(f"CodeGraphService using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
         # Supported file extensions
         self.language_extensions = {
@@ -629,15 +633,15 @@ class CodeGraphService:
                 texts.append("\n".join(text_parts))
             
             try:
-                # Generate embeddings using OpenAI
-                response = self.openai_client.embeddings.create(
-                    model="text-embedding-ada-002",
-                    input=texts
-                )
+                # Generate embeddings using centralized manager
+                embeddings =  []  # We need to process one by one for now
+                for text in texts:
+                    embedding = await self.embedding_manager.generate_embedding(text)
+                    embeddings.append(embedding)
                 
                 # Store symbols with embeddings
                 for j, symbol in enumerate(batch):
-                    embedding = response.data[j].embedding
+                    embedding = embeddings[j]
                     embedding_str = '[' + ','.join(map(str, embedding)) + ']'
                     
                     self.db.execute(
