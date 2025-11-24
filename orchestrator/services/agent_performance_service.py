@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 
 from models import Agent, WorkflowExecution
-from database.session import get_db
+from database.database import get_db
 
 logger = logging.getLogger(__name__)
 

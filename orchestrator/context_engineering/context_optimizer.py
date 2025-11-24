@@ -177,25 +177,34 @@ class ContextOptimizer:
         Args:
             openai_api_key: OpenAI API key for embeddings (uses env var if not provided)
         """
-        # Initialize OpenAI client for embeddings
+        # Initialize OpenAI client for embeddings (optional for OSS users)
         if not openai_api_key:
-            from services.credential_resolver import get_credential_resolver
-            resolver = get_credential_resolver()
-            openai_api_key = resolver.get_credential_field("development_openai", "api_key")
+            try:
+                from services.credential_resolver import get_credential_resolver, CredentialNotFoundError
+                resolver = get_credential_resolver()
+                openai_api_key = resolver.get_credential_field("development_openai", "api_key")
+            except CredentialNotFoundError:
+                openai_api_key = None
+            except Exception as exc:
+                logger.warning(f"Could not resolve OpenAI credential: {exc}")
+                openai_api_key = None
         
-        if not openai_api_key:
-            raise ValueError("OpenAI API key required for embeddings. Configure 'development_openai' credential.")
-        
-        self.openai_client = AsyncOpenAI(api_key=openai_api_key)
-        
-        # Initialize embedding generator with OpenAI
         self.embedding_config = EmbeddingConfig(
             model_name="text-embedding-3-small",  # Fast and efficient
             model_type="openai",
             dimension=1536,
             normalize=True
         )
-        self.embedding_generator = EmbeddingGenerator(self.embedding_config)
+        
+        self.use_embeddings = bool(openai_api_key)
+        if self.use_embeddings:
+            self.openai_client = AsyncOpenAI(api_key=openai_api_key)
+            self.embedding_generator = EmbeddingGenerator(self.embedding_config)
+            logger.info("Context Optimizer initialized with real OpenAI embeddings")
+        else:
+            self.openai_client = None
+            self.embedding_generator = None
+            logger.warning("No OpenAI API key configured - using deterministic fallback embeddings")
         
         # Initialize mathematical foundations
         self.info_theory = InformationTheory()
@@ -204,8 +213,6 @@ class ContextOptimizer:
         
         # Cache for embeddings
         self._embedding_cache = {}
-        
-        logger.info("Context Optimizer initialized with real OpenAI embeddings")
     
     async def optimize_context(
         self,
@@ -859,24 +866,26 @@ class ContextOptimizer:
         if text_hash in self._embedding_cache:
             return self._embedding_cache[text_hash]
         
+        if not self.use_embeddings or not self.openai_client:
+            rng = np.random.default_rng(abs(text_hash) % (2**32))
+            embedding = rng.standard_normal(self.embedding_config.dimension).tolist()
+            self._embedding_cache[text_hash] = embedding
+            return embedding
+        
         try:
-            # Use OpenAI embeddings
             response = await self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
+                model=self.embedding_config.model_name,
                 input=text[:8000]  # Limit input size
             )
-            
             embedding = response.data[0].embedding
-            
-            # Cache the result
             self._embedding_cache[text_hash] = embedding
-            
             return embedding
-            
         except Exception as e:
             logger.error(f"Error getting embedding: {str(e)}")
-            # Return random embedding as fallback
-            return np.random.randn(1536).tolist()
+            rng = np.random.default_rng(abs(text_hash) % (2**32))
+            embedding = rng.standard_normal(self.embedding_config.dimension).tolist()
+            self._embedding_cache[text_hash] = embedding
+            return embedding
 
 # ============= Factory Functions =============
 

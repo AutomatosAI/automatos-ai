@@ -1,8 +1,9 @@
 /**
- * Orchestrator LLM Settings Tab Component
- * ======================================
+ * System LLM Settings Tab Component
+ * ==================================
  * 
- * Manages LLM configuration for the orchestrator system.
+ * Manages the base LLM configuration for the entire system
+ * (orchestrator, workflows, agents, etc.)
  */
 
 import React, { useState, useMemo } from 'react'
@@ -16,27 +17,27 @@ import { Save, RotateCcw, Brain, Zap, Settings } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
 import { useModels } from '@/hooks/use-model-api'
 
-interface OrchestratorLLMSettingsTabProps {
+interface SystemLLMSettingsTabProps {
   settings: SystemSetting[]
   onSave: (updates: Record<string, string>) => void
   saving: boolean
   onReset: () => void
 }
 
-export default function OrchestratorLLMSettingsTab({ 
-  settings, 
-  onSave, 
-  saving, 
-  onReset 
-}: OrchestratorLLMSettingsTabProps) {
+export default function SystemLLMSettingsTab({
+  settings,
+  onSave,
+  saving,
+  onReset
+}: SystemLLMSettingsTabProps) {
   const [formData, setFormData] = useState<Record<string, string>>({})
-  
+
   // Load models from API
   const { data: allModels = [], isLoading: modelsLoading } = useModels(undefined, 'active')
-  
+
   // Get selected provider to filter models
   const selectedProvider = formData.llm_provider || ''
-  
+
   // Filter models by selected provider
   const availableModels = useMemo(() => {
     if (!Array.isArray(allModels)) return []
@@ -49,8 +50,8 @@ export default function OrchestratorLLMSettingsTab({
     const initialData: Record<string, string> = {}
     settings.forEach(setting => {
       // Use saved value if it exists, otherwise use default, but don't treat empty string as falsy
-      initialData[setting.key] = setting.value !== null && setting.value !== undefined 
-        ? setting.value 
+      initialData[setting.key] = setting.value !== null && setting.value !== undefined
+        ? setting.value
         : (setting.default_value || '')
     })
     setFormData(initialData)
@@ -77,23 +78,23 @@ export default function OrchestratorLLMSettingsTab({
 
   return (
     <div className="space-y-6">
-      {/* LLM Provider Configuration */}
+      {/* System LLM Provider Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Brain className="h-5 w-5" />
-            LLM Provider Configuration
+            System LLM Provider Configuration
           </CardTitle>
           <CardDescription>
-            Configure the default LLM provider and model for orchestrator operations
+            Configure the default LLM provider and model for workflows, orchestration, and agent operations
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="llm_provider">LLM Provider</Label>
-              <Select 
-                value={formData.llm_provider || ''} 
+              <Select
+                value={formData.llm_provider || ''}
                 onValueChange={(value) => handleInputChange('llm_provider', value)}
               >
                 <SelectTrigger>
@@ -114,17 +115,17 @@ export default function OrchestratorLLMSettingsTab({
 
             <div className="space-y-2">
               <Label htmlFor="llm_model">LLM Model</Label>
-              <Select 
-                value={formData.llm_model || ''} 
+              <Select
+                value={formData.llm_model || ''}
                 onValueChange={(value) => handleInputChange('llm_model', value)}
                 disabled={modelsLoading || !selectedProvider}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={
-                    modelsLoading 
-                      ? "Loading models..." 
-                      : !selectedProvider 
-                        ? "Select provider first" 
+                    modelsLoading
+                      ? "Loading models..."
+                      : !selectedProvider
+                        ? "Select provider first"
                         : "Select model"
                   } />
                 </SelectTrigger>

@@ -19,6 +19,7 @@ from uuid import uuid4
 from enum import Enum
 
 import numpy as np
+from sentence_transformers import SentenceTransformer
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, ForeignKey, Text, Boolean, select, func, text
@@ -148,11 +149,17 @@ class HierarchicalMemorySystem:
         )
         logger.info("Using centralized database connection")
         
-        # OpenAI for embeddings
+        # OpenAI for embeddings (optional for OSS)
+        self.embedding_model = None
+        self.openai_client = None
         if openai_api_key:
             self.openai_client = AsyncOpenAI(api_key=openai_api_key)
+            self.embedding_dim = 384
+            logger.info("HierarchicalMemorySystem using OpenAI embeddings")
         else:
-            raise ValueError("OpenAI API key required for embeddings")
+            logger.warning("No OpenAI API key configured - using local SentenceTransformer embeddings")
+            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+            self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
         
         # Memory constraints based on cognitive science
         self.WORKING_MEMORY_CAPACITY = 7  # Miller's Law
@@ -172,17 +179,22 @@ class HierarchicalMemorySystem:
     
     async def generate_embedding(self, text: str) -> np.ndarray:
         """Generate real embeddings using OpenAI text-embedding-3-small"""
-        try:
-            response = await self.openai_client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text,
-                dimensions=384  # Explicitly request 384 dimensions
-            )
-            embedding = response.data[0].embedding
-            return np.array(embedding, dtype=np.float32)
-        except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
-            raise
+        if self.openai_client:
+            try:
+                response = await self.openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=text,
+                    dimensions=self.embedding_dim
+                )
+                embedding = response.data[0].embedding
+                return np.array(embedding, dtype=np.float32)
+            except Exception as e:
+                logger.error(f"Error generating OpenAI embedding: {e}")
+        if self.embedding_model:
+            vec = self.embedding_model.encode([text], normalize_embeddings=True)[0]
+            return np.array(vec, dtype=np.float32)
+        # fallback zero vector
+        return np.zeros(self.embedding_dim, dtype=np.float32)
     
     def calculate_importance(self, experience: Dict[str, Any]) -> float:
         """

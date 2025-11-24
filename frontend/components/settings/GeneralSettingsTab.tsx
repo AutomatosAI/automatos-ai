@@ -24,11 +24,11 @@ interface GeneralSettingsTabProps {
   onReset: () => void
 }
 
-export default function GeneralSettingsTab({ 
-  settings, 
-  onSave, 
-  saving, 
-  onReset 
+export default function GeneralSettingsTab({
+  settings,
+  onSave,
+  saving,
+  onReset
 }: GeneralSettingsTabProps) {
   const [formData, setFormData] = useState<Record<string, string>>({})
 
@@ -37,8 +37,8 @@ export default function GeneralSettingsTab({
     const initialData: Record<string, string> = {}
     settings.forEach(setting => {
       // Use saved value if it exists, otherwise use default, but don't treat empty string as falsy
-      initialData[setting.key] = setting.value !== null && setting.value !== undefined 
-        ? setting.value 
+      initialData[setting.key] = setting.value !== null && setting.value !== undefined
+        ? setting.value
         : (setting.default_value || '')
     })
     setFormData(initialData)
@@ -80,8 +80,8 @@ export default function GeneralSettingsTab({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="environment">Environment</Label>
-              <Select 
-                value={formData.environment || ''} 
+              <Select
+                value={formData.environment || ''}
                 onValueChange={(value) => handleInputChange('environment', value)}
               >
                 <SelectTrigger>
@@ -100,8 +100,8 @@ export default function GeneralSettingsTab({
 
             <div className="space-y-2">
               <Label htmlFor="log_level">Log Level</Label>
-              <Select 
-                value={formData.log_level || ''} 
+              <Select
+                value={formData.log_level || ''}
                 onValueChange={(value) => handleInputChange('log_level', value)}
               >
                 <SelectTrigger>
@@ -128,21 +128,95 @@ export default function GeneralSettingsTab({
             ML/AI Model Configuration
           </CardTitle>
           <CardDescription>
-            Embedding models and vector store settings
+            Global embedding configuration (used across all features: RAG, memory, search)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Embedding Provider Selector */}
             <div className="space-y-2">
-              <Label htmlFor="embedding_model">Embedding Model</Label>
-              <Input
-                id="embedding_model"
-                value={formData.embedding_model || ''}
-                onChange={(e) => handleInputChange('embedding_model', e.target.value)}
-                placeholder="e.g., disabled, openai, local"
-              />
+              <Label htmlFor="embedding_provider">Embedding Provider</Label>
+              <Select
+                value={formData.embedding_provider || ''}
+                onValueChange={(value) => handleInputChange('embedding_provider', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select embedding provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="google">Google</SelectItem>
+                  <SelectItem value="cohere">Cohere</SelectItem>
+                  <SelectItem value="huggingface_local">HuggingFace Local (FREE) ⭐</SelectItem>
+                  <SelectItem value="huggingface_api">HuggingFace API</SelectItem>
+                  <SelectItem value="disabled">Disabled (Deterministic Fallback)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Choose your embedding provider. HuggingFace Local runs models on your server (no API costs).
+              </p>
             </div>
 
+            {/* Dynamic Embedding Model Selector */}
+            <div className="space-y-2">
+              <Label htmlFor="embedding_model">Embedding Model</Label>
+              <Select
+                value={formData.embedding_model || ''}
+                onValueChange={(value) => handleInputChange('embedding_model', value)}
+                disabled={!formData.embedding_provider || formData.embedding_provider === 'disabled'}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={
+                    !formData.embedding_provider
+                      ? "Select provider first"
+                      : "Select embedding model"
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {formData.embedding_provider === 'openai' && (
+                    <>
+                      <SelectItem value="text-embedding-3-small">text-embedding-3-small (384 dims, fast)</SelectItem>
+                      <SelectItem value="text-embedding-3-large">text-embedding-3-large (1536 dims, quality)</SelectItem>
+                      <SelectItem value="text-embedding-ada-002">text-embedding-ada-002 (1536 dims, legacy)</SelectItem>
+                    </>
+                  )}
+                  {formData.embedding_provider === 'google' && (
+                    <>
+                      <SelectItem value="text-embedding-004">text-embedding-004 (768 dims)</SelectItem>
+                      <SelectItem value="textembedding-gecko">textembedding-gecko (768 dims, legacy)</SelectItem>
+                    </>
+                  )}
+                  {formData.embedding_provider === 'cohere' && (
+                    <>
+                      <SelectItem value="embed-english-v3.0">embed-english-v3.0 (1024 dims)</SelectItem>
+                      <SelectItem value="embed-multilingual-v3.0">embed-multilingual-v3.0 (1024 dims)</SelectItem>
+                    </>
+                  )}
+                  {formData.embedding_provider === 'huggingface_local' && (
+                    <>
+                      <SelectItem value="all-MiniLM-L6-v2">all-MiniLM-L6-v2 (384 dims, fast)</SelectItem>
+                      <SelectItem value="all-mpnet-base-v2">all-mpnet-base-v2 (768 dims, balanced)</SelectItem>
+                      <SelectItem value="bge-large-en-v1.5">bge-large-en-v1.5 (1024 dims, best quality)</SelectItem>
+                      <SelectItem value="e5-large-v2">e5-large-v2 (1024 dims, multilingual)</SelectItem>
+                    </>
+                  )}
+                  {formData.embedding_provider === 'huggingface_api' && (
+                    <>
+                      <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">all-MiniLM-L6-v2 (384 dims)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-mpnet-base-v2">all-mpnet-base-v2 (768 dims)</SelectItem>
+                      <SelectItem value="sentence-transformers/bge-large-en-v1.5">bge-large-en-v1.5 (1024 dims)</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+              {formData.embedding_provider === 'disabled' && (
+                <p className="text-xs text-amber-600">
+                  ⚠️ Using deterministic fallback (hash-based, no semantic meaning). Configure a provider for real embeddings.
+                </p>
+              )}
+            </div>
+
+            {/* Cache Directory (for local models) */}
             <div className="space-y-2">
               <Label htmlFor="embedding_cache_dir">Cache Directory</Label>
               <Input
@@ -150,9 +224,53 @@ export default function GeneralSettingsTab({
                 value={formData.embedding_cache_dir || ''}
                 onChange={(e) => handleInputChange('embedding_cache_dir', e.target.value)}
                 placeholder="./model_cache"
+                disabled={formData.embedding_provider !== 'huggingface_local'}
               />
+              <p className="text-xs text-muted-foreground">
+                {formData.embedding_provider === 'huggingface_local'
+                  ? 'Local directory to cache downloaded models'
+                  : 'Only used for local models'
+                }
+              </p>
             </div>
 
+            {/* Vector Dimensions (auto-populated based on model) */}
+            <div className="space-y-2">
+              <Label htmlFor="vector_store_dimensions">Vector Dimensions (auto)</Label>
+              <Input
+                id="vector_store_dimensions"
+                type="number"
+                value={formData.vector_store_dimensions || ''}
+                onChange={(e) => handleInputChange('vector_store_dimensions', e.target.value)}
+                placeholder="384"
+                className="bg-muted"
+              />
+              <p className="text-xs text-muted-foreground">
+                Automatically set based on your embedding model choice
+              </p>
+            </div>
+
+            {/* Vector Store Type */}
+            <div className="space-y-2">
+              <Label htmlFor="vector_store_type">Vector Store Type</Label>
+              <Select
+                value={formData.vector_store_type || ''}
+                onValueChange={(value) => handleInputChange('vector_store_type', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select vector store type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pgvector">PgVector (Recommended)</SelectItem>
+                  <SelectItem value="faiss">FAISS</SelectItem>
+                  <SelectItem value="chroma">Chroma</SelectItem>
+                  <SelectItem value="pinecone">Pinecone</SelectItem>
+                  <SelectItem value="weaviate">Weaviate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Max Sequence Length */}
             <div className="space-y-2">
               <Label htmlFor="embedding_max_seq_length">Max Sequence Length</Label>
               <Input
@@ -164,45 +282,7 @@ export default function GeneralSettingsTab({
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="openai_embedding_model">OpenAI Embedding Model</Label>
-              <Input
-                id="openai_embedding_model"
-                value={formData.openai_embedding_model || ''}
-                onChange={(e) => handleInputChange('openai_embedding_model', e.target.value)}
-                placeholder="text-embedding-3-small"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="vector_store_type">Vector Store Type</Label>
-              <Select 
-                value={formData.vector_store_type || ''} 
-                onValueChange={(value) => handleInputChange('vector_store_type', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select vector store type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="faiss">FAISS</SelectItem>
-                  <SelectItem value="chroma">Chroma</SelectItem>
-                  <SelectItem value="pinecone">Pinecone</SelectItem>
-                  <SelectItem value="weaviate">Weaviate</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="vector_store_dimensions">Vector Dimensions</Label>
-              <Input
-                id="vector_store_dimensions"
-                type="number"
-                value={formData.vector_store_dimensions || ''}
-                onChange={(e) => handleInputChange('vector_store_dimensions', e.target.value)}
-                placeholder="384"
-              />
-            </div>
-
+            {/* Chunk Size */}
             <div className="space-y-2">
               <Label htmlFor="chunk_size">Chunk Size</Label>
               <Input
@@ -214,6 +294,7 @@ export default function GeneralSettingsTab({
               />
             </div>
 
+            {/* Chunk Overlap */}
             <div className="space-y-2">
               <Label htmlFor="chunk_overlap">Chunk Overlap</Label>
               <Input
@@ -225,6 +306,7 @@ export default function GeneralSettingsTab({
               />
             </div>
 
+            {/* Max Context Length */}
             <div className="space-y-2">
               <Label htmlFor="max_context_length">Max Context Length</Label>
               <Input

@@ -36,7 +36,7 @@ from core.workflow_memory_integrator import WorkflowMemoryIntegrator
 from core.llm.semantic_skill_matcher import SemanticSkillMatcher
 
 # Services (Assumed available based on imports)
-from services.llm_provider import LLMProvider
+from services.llm_provider import create_llm_manager
 from services.rag_service import RAGService
 from services.agent_factory import AgentFactory
 from services.agent_performance_service import get_performance_service
@@ -53,17 +53,17 @@ class EnhancedOrchestratorService:
         self.db = db_session
         
         # Initialize services
-        self.llm_provider = LLMProvider()
+        self.llm_provider = create_llm_manager(service_name="orchestrator")
         self.rag_service = RAGService()
-        self.agent_factory = AgentFactory(db=self.db)
+        self.agent_factory = AgentFactory(db_session=self.db)
         self.performance_service = get_performance_service(self.db)
         
         # Initialize Stage Components
         self.task_decomposer = RealTaskDecomposer(self.llm_provider)
         self.skill_matcher = SemanticSkillMatcher(self.llm_provider)
         self.agent_selector = IntelligentAgentSelector(self.skill_matcher)
-        self.context_integrator = ContextEngineeringIntegrator(self.rag_service, self.llm_provider)
-        self.execution_manager = AgentExecutionManager()
+        self.context_integrator = ContextEngineeringIntegrator(db_session=self.db)
+        self.execution_manager = AgentExecutionManager(db_session=self.db)
         self.result_aggregator = ResultAggregator()
         self.quality_assessor = OutputQualityAssessor(self.llm_provider)
         
