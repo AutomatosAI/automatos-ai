@@ -60,7 +60,9 @@ class EnhancedOrchestratorService:
         
         # Initialize Stage Components
         self.task_decomposer = RealTaskDecomposer(self.llm_provider)
-        self.skill_matcher = SemanticSkillMatcher(self.llm_provider)
+        
+        # SemanticSkillMatcher uses global embedding provider from General Settings
+        self.skill_matcher = SemanticSkillMatcher()
         self.agent_selector = IntelligentAgentSelector(self.skill_matcher)
         self.context_integrator = ContextEngineeringIntegrator(db_session=self.db)
         self.execution_manager = AgentExecutionManager(db_session=self.db)

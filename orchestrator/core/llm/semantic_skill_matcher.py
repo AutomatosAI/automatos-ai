@@ -1,20 +1,63 @@
 """
 Semantic Skill Matching for Agent Selection
 Uses embeddings to intelligently match skills instead of dumb string matching
+
+Uses the global embedding provider configured in General Settings.
 """
 
 import asyncio
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import numpy as np
-from openai import AsyncOpenAI
 import logging
 
 logger = logging.getLogger(__name__)
 
 
+def get_embedding_provider():
+    """Get the global embedding provider from system settings"""
+    try:
+        # Import here to avoid circular dependencies
+        from services.system_settings import get_system_setting
+        from services.credential_resolver import get_credential_resolver, CredentialNotFoundError
+        from openai import AsyncOpenAI
+        
+        # Get embedding provider settings (from General Settings)
+        provider_type = get_system_setting("embedding_provider")
+        model = get_system_setting("embedding_model")
+        
+        if not provider_type or provider_type == "disabled":
+            logger.info("Embedding provider disabled - using deterministic fallback")
+            return None, None, None, 384
+        
+        # Get API key for the configured provider
+        resolver = get_credential_resolver()
+        
+        if provider_type == "openai":
+            api_key = resolver.get_credential_field("development_openai", "api_key")
+            client = AsyncOpenAI(api_key=api_key)
+            dimension = 384 if "3-small" in model else 1536
+            return client, model, provider_type, dimension
+        elif provider_type in ["google", "cohere", "huggingface_api"]:
+            # TODO: Add support for other providers
+            logger.warning(f"Provider {provider_type} not yet implemented for skill matching. Using fallback.")
+            return None, None, None, 384
+        elif provider_type == "huggingface_local":
+            # TODO: Load local model
+            logger.warning("HuggingFace local not yet implemented for skill matching. Using fallback.")
+            return None, None, None, 384
+        else:
+            return None, None, None, 384
+            
+    except Exception as e:
+        logger.warning(f"Could not initialize embedding provider: {e}. Using fallback.")
+        return None, None, None, 384
+
+
 class SemanticSkillMatcher:
     """
-    Matches skills using semantic similarity instead of substring matching
+    Matches skills using semantic similarity instead of substring matching.
+    
+    Uses the system-wide embedding configuration from General Settings.
     
     Examples:
     - "writing" matches "writer", "author", "documentation", "technical_writing"
@@ -22,18 +65,34 @@ class SemanticSkillMatcher:
     - "analysis" matches "analyst", "analytical", "data_analysis"
     """
     
-    def __init__(self, openai_api_key: str, similarity_threshold: float = 0.65):
+    def __init__(self, similarity_threshold: float = 0.65):
         """
+        Initialize with system-wide embedding provider.
+        
         Args:
-            openai_api_key: OpenAI API key for embeddings
             similarity_threshold: Minimum cosine similarity for a match (0-1)
         """
-        self.client = AsyncOpenAI(api_key=openai_api_key)
         self.similarity_threshold = similarity_threshold
         self.embedding_cache: Dict[str, List[float]] = {}
         
+        # Get embedding provider from system settings
+        self.client, self.model, self.provider, self.dimension = get_embedding_provider()
+        self.use_real_embeddings = self.client is not None
+        
+        if self.use_real_embeddings:
+            logger.info(
+                f"SemanticSkillMatcher: Using {self.provider} embeddings "
+                f"(model: {self.model}, dimension: {self.dimension})"
+            )
+        else:
+            logger.warning(
+                "SemanticSkillMatcher: No embedding provider configured. "
+                "Using deterministic fallback (hash-based). "
+                "Configure in Settings > General > Embedding Provider for semantic matching."
+            )
+        
     async def get_embedding(self, text: str) -> List[float]:
-        """Get embedding for text (with caching)"""
+        """Get embedding for text using configured provider (with caching)"""
         # Normalize text
         text = text.lower().strip()
         
@@ -41,19 +100,27 @@ class SemanticSkillMatcher:
         if text in self.embedding_cache:
             return self.embedding_cache[text]
         
-        # Get embedding from OpenAI
-        try:
-            response = await self.client.embeddings.create(
-                model="text-embedding-3-small",  # Fast and cheap
-                input=text
-            )
-            embedding = response.data[0].embedding
-            self.embedding_cache[text] = embedding
-            return embedding
-        except Exception as e:
-            logger.error(f"Failed to get embedding for '{text}': {e}")
-            # Return zero vector as fallback
-            return [0.0] * 1536
+        # Use real embeddings if available
+        if self.use_real_embeddings and self.client:
+            try:
+                response = await self.client.embeddings.create(
+                    model=self.model,  # Use configured model from settings
+                    input=text
+                )
+                embedding = response.data[0].embedding
+                self.embedding_cache[text] = embedding
+                return embedding
+            except Exception as e:
+                logger.error(f"Failed to get embedding for '{text}': {e}")
+                # Fall through to deterministic fallback
+        
+        # Deterministic fallback (hash-based)
+        logger.debug(f"Using deterministic embedding for: {text}")
+        text_hash = hash(text)
+        rng = np.random.default_rng(abs(text_hash) % (2**32))
+        embedding = rng.standard_normal(self.dimension).tolist()
+        self.embedding_cache[text] = embedding
+        return embedding
     
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Compute cosine similarity between two vectors"""
