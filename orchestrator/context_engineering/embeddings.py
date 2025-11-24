@@ -51,6 +51,14 @@ class EmbeddingGenerator:
                 logger.info(f"Initialized SentenceTransformer: {self.config.model_name}")
                 
             elif self.config.model_type == "openai":
+                # DEPRECATED: Use centralized embedding manager instead
+                # This path kept for backwards compatibility only
+                # Use: from services.llm_provider import create_embedding_manager
+                logger.warning(
+                    "Direct OpenAI embedding usage is deprecated. "
+                    "Use centralized embedding manager via create_embedding_manager()"
+                )
+                
                 # Get API key from environment or credential resolver
                 openai_key = os.getenv("OPENAI_API_KEY")
                 if not openai_key:
@@ -65,7 +73,7 @@ class EmbeddingGenerator:
                     self.openai_client = AsyncOpenAI(api_key=openai_key)
                     # OpenAI text-embedding-ada-002 has 1536 dimensions
                     self.config.dimension = 1536
-                    logger.info("Initialized OpenAI embeddings")
+                    logger.info("Initialized OpenAI embeddings (DEPRECATED - use centralized manager)")
                 else:
                     raise ValueError("OPENAI_API_KEY not found in environment or credential resolver")
                 

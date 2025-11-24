@@ -25,7 +25,7 @@ import logging
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-# Initialize document manager with credentials from credential resolver
+# Initialize credential resolver
 from services.credential_resolver import get_credential_resolver
 import os
 
@@ -44,11 +44,6 @@ except Exception:
         'port': os.getenv('POSTGRES_PORT', '5432')
     }
 
-try:
-    openai_key = resolver.get_credential_field("development_openai", "api_key")
-except Exception:
-    # Fallback to environment variable
-    openai_key = os.getenv('OPENAI_API_KEY')
 
 db_config = {
     "database": postgres_creds.get('database', 'orchestrator_db'),
@@ -57,7 +52,9 @@ db_config = {
     "host": postgres_creds.get('host', 'localhost'),
     "port": postgres_creds.get('port', 5432)
 }
-doc_manager = DocumentManager(db_config, openai_key)
+
+# Document manager uses centralized embedding manager
+doc_manager = DocumentManager(db_config)
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
@@ -565,17 +562,15 @@ async def semantic_search(
         import time
         start_time = time.time()
         
-        # Generate query embedding using OpenAI (matches DB - 1536-dim)
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        # Generate query embedding using centralized embedding manager
+        from services.llm_provider import create_embedding_manager
+        import asyncio
         
+        embedding_manager = create_embedding_manager()
         logger.info(f"Generating embedding for query: {query[:50]}...")
         
-        response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        query_embedding = response.data[0].embedding
+        # Generate embedding asynchronously
+        query_embedding = await embedding_manager.generate_embedding(query)
         
         logger.info(f"Embedding generated, performing vector search...")
         
@@ -975,15 +970,11 @@ async def rag_retrieve(
         # Step 1: Get more candidates than needed for diversity selection
         candidate_limit = max_chunks * 3
         
-        # Generate query embedding using OpenAI (matches DB - 1536-dim)
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        # Generate query embedding using centralized embedding manager
+        from services.llm_provider import create_embedding_manager
         
-        query_response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        query_embedding = query_response.data[0].embedding
+        embedding_manager = create_embedding_manager()
+        query_embedding = await embedding_manager.generate_embedding(query)
         
         # Step 2: Semantic search for candidates
         from sqlalchemy import text
