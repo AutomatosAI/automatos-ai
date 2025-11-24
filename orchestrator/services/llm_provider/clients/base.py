@@ -3,6 +3,7 @@ Base LLM Provider Interface
 ===========================
 
 Abstract base class for all LLM provider implementations.
+Now also includes embedding provider support.
 """
 
 import logging
@@ -24,6 +25,16 @@ class LLMProvider(Enum):
     AWS_BEDROCK = "aws_bedrock"  # Cost-effective gateway to multiple models
 
 
+class EmbeddingProvider(Enum):
+    """Supported embedding providers"""
+    OPENAI = "openai"
+    GOOGLE = "google"
+    COHERE = "cohere"
+    HUGGINGFACE_LOCAL = "huggingface_local"
+    HUGGINGFACE_API = "huggingface_api"
+    DISABLED = "disabled"  # Deterministic fallback
+
+
 @dataclass
 class LLMConfig:
     """Configuration for LLM provider"""
@@ -35,6 +46,17 @@ class LLMConfig:
     base_url: Optional[str] = None  # For custom endpoints
     organization_id: Optional[str] = None  # For OpenAI
     secret_key: Optional[str] = None  # For AWS Bedrock IAM auth
+
+
+@dataclass
+class EmbeddingConfig:
+    """Configuration for embedding provider"""
+    provider: EmbeddingProvider
+    model: str
+    dimension: int = 384  # Default dimension
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    cache_dir: Optional[str] = "./model_cache"  # For local models
 
 
 @dataclass
@@ -72,3 +94,67 @@ class BaseLLMProvider(ABC):
         """Generate response from the LLM (synchronous)"""
         pass
 
+
+class BaseEmbeddingProvider(ABC):
+    """Abstract base class for embedding providers"""
+    
+    def __init__(self, config: EmbeddingConfig):
+        self.config = config
+        self.client = None
+        self._initialize_client()
+    
+    @abstractmethod
+    def _initialize_client(self):
+        """Initialize the provider-specific client"""
+        pass
+    
+    @abstractmethod
+    async def generate_embedding(self, text: str) -> List[float]:
+        """Generate embedding vector for text (async)"""
+        pass
+    
+    def generate_embedding_sync(self, text: str) -> List[float]:
+        """Generate embedding vector for text (synchronous)"""
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(self.generate_embedding(text))
+    
+    @abstractmethod
+    def get_dimension(self) -> int:
+        """Return embedding dimension"""
+        pass
+
+
+class DeterministicEmbeddingProvider(BaseEmbeddingProvider):
+    """Fallback provider using deterministic hash-based embeddings"""
+    
+    def __init__(self, dimension: int = 384):
+        import numpy as np
+        self.dimension = dimension
+        self.config = EmbeddingConfig(
+            provider=EmbeddingProvider.DISABLED,
+            model="deterministic",
+            dimension=dimension
+        )
+        self.client = None
+        logger.warning(
+            f"Using DeterministicEmbeddingProvider ({dimension}d). "
+            "No semantic meaning - configure real provider in Settings > General > Embedding Provider"
+        )
+    
+    def _initialize_client(self):
+        pass  # No client needed
+    
+    async def generate_embedding(self, text: str) -> List[float]:
+        """Generate deterministic embedding based on text hash"""
+        import numpy as np
+        text_hash = hash(text)
+        rng = np.random.default_rng(abs(text_hash) % (2**32))
+        return rng.standard_normal(self.dimension).tolist()
+    
+    def get_dimension(self) -> int:
+        return self.dimension

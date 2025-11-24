@@ -29,7 +29,7 @@ import math
 import tiktoken
 
 # OpenAI for embeddings
-from openai import AsyncOpenAI
+from openai import OpenAI  # For sync LLM calls only (not embeddings)
 
 # Import existing mathematical foundations
 from .mathematical_foundations.information_theory import InformationTheory
@@ -177,34 +177,16 @@ class ContextOptimizer:
         Args:
             openai_api_key: OpenAI API key for embeddings (uses env var if not provided)
         """
-        # Initialize OpenAI client for embeddings (optional for OSS users)
-        if not openai_api_key:
-            try:
-                from services.credential_resolver import get_credential_resolver, CredentialNotFoundError
-                resolver = get_credential_resolver()
-                openai_api_key = resolver.get_credential_field("development_openai", "api_key")
-            except CredentialNotFoundError:
-                openai_api_key = None
-            except Exception as exc:
-                logger.warning(f"Could not resolve OpenAI credential: {exc}")
-                openai_api_key = None
+        # Use centralized embedding manager (reads from General Settings)
+        from services.llm_provider import create_embedding_manager
+        self.embedding_manager = create_embedding_manager()
+        self.embedding_dim = self.embedding_manager.get_dimension()
+        provider_info = self.embedding_manager.get_provider_info()
         
-        self.embedding_config = EmbeddingConfig(
-            model_name="text-embedding-3-small",  # Fast and efficient
-            model_type="openai",
-            dimension=1536,
-            normalize=True
+        logger.info(
+            f"Context Optimizer using {provider_info['provider']} embeddings "
+            f"(model: {provider_info.get('model', 'N/A')}, dimension: {self.embedding_dim})"
         )
-        
-        self.use_embeddings = bool(openai_api_key)
-        if self.use_embeddings:
-            self.openai_client = AsyncOpenAI(api_key=openai_api_key)
-            self.embedding_generator = EmbeddingGenerator(self.embedding_config)
-            logger.info("Context Optimizer initialized with real OpenAI embeddings")
-        else:
-            self.openai_client = None
-            self.embedding_generator = None
-            logger.warning("No OpenAI API key configured - using deterministic fallback embeddings")
         
         # Initialize mathematical foundations
         self.info_theory = InformationTheory()
@@ -861,31 +843,20 @@ class ContextOptimizer:
         Returns:
             Embedding vector
         """
-        # Check cache first
+        # Check cache
         text_hash = hash(text)
         if text_hash in self._embedding_cache:
             return self._embedding_cache[text_hash]
         
-        if not self.use_embeddings or not self.openai_client:
-            rng = np.random.default_rng(abs(text_hash) % (2**32))
-            embedding = rng.standard_normal(self.embedding_config.dimension).tolist()
-            self._embedding_cache[text_hash] = embedding
-            return embedding
-        
+        # Use centralized embedding manager
         try:
-            response = await self.openai_client.embeddings.create(
-                model=self.embedding_config.model_name,
-                input=text[:8000]  # Limit input size
-            )
-            embedding = response.data[0].embedding
+            embedding = await self.embedding_manager.generate_embedding(text[:8000])
             self._embedding_cache[text_hash] = embedding
             return embedding
         except Exception as e:
             logger.error(f"Error getting embedding: {str(e)}")
-            rng = np.random.default_rng(abs(text_hash) % (2**32))
-            embedding = rng.standard_normal(self.embedding_config.dimension).tolist()
-            self._embedding_cache[text_hash] = embedding
-            return embedding
+            # Fallback handled by embedding manager
+            return await self.embedding_manager.generate_embedding(text[:8000])
 
 # ============= Factory Functions =============
 

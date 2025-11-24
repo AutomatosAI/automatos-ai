@@ -27,7 +27,6 @@ from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
 from pgvector.sqlalchemy import Vector
 
-from openai import AsyncOpenAI
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ class MemoryItem(Base):
     memory_type = Column(String(50), nullable=False)
     memory_level = Column(String(50), nullable=False, default=MemoryLevel.SHORT_TERM)
     importance = Column(Float, default=0.5)
-    embedding = Column(Vector(384))  # OpenAI text-embedding-3-small dimension
+    embedding = Column(Vector(384))  # Configurable via General Settings embedding provider
     access_count = Column(Integer, default=0)
     last_access = Column(DateTime, default=datetime.now)
     decay_rate = Column(Float, default=0.1)
@@ -127,10 +126,11 @@ class HierarchicalMemorySystem:
     Uses Redis for working memory, PostgreSQL for persistence, and OpenAI for embeddings.
     """
     
-    def __init__(self, openai_api_key: str = None):
+    def __init__(self):
         # ALWAYS use centralized clients - NO PARAMETERS, NO FALLBACKS
         from core.redis_client import get_redis_client
         from database.database import get_database_url
+        from services.llm_provider import create_embedding_manager
         
         redis_from_central = get_redis_client()
         if not redis_from_central:
@@ -149,17 +149,14 @@ class HierarchicalMemorySystem:
         )
         logger.info("Using centralized database connection")
         
-        # OpenAI for embeddings (optional for OSS)
-        self.embedding_model = None
-        self.openai_client = None
-        if openai_api_key:
-            self.openai_client = AsyncOpenAI(api_key=openai_api_key)
-            self.embedding_dim = 384
-            logger.info("HierarchicalMemorySystem using OpenAI embeddings")
-        else:
-            logger.warning("No OpenAI API key configured - using local SentenceTransformer embeddings")
-            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-            self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
+        # Use centralized embedding manager (reads from General Settings)
+        self.embedding_manager = create_embedding_manager()
+        self.embedding_dim = self.embedding_manager.get_dimension()
+        provider_info = self.embedding_manager.get_provider_info()
+        logger.info(
+            f"HierarchicalMemorySystem using {provider_info['provider']} embeddings "
+            f"(model: {provider_info.get('model', 'N/A')}, dimension: {self.embedding_dim})"
+        )
         
         # Memory constraints based on cognitive science
         self.WORKING_MEMORY_CAPACITY = 7  # Miller's Law
@@ -178,23 +175,14 @@ class HierarchicalMemorySystem:
             logger.info("Database initialized with pgvector support")
     
     async def generate_embedding(self, text: str) -> np.ndarray:
-        """Generate real embeddings using OpenAI text-embedding-3-small"""
-        if self.openai_client:
-            try:
-                response = await self.openai_client.embeddings.create(
-                    model="text-embedding-3-small",
-                    input=text,
-                    dimensions=self.embedding_dim
-                )
-                embedding = response.data[0].embedding
-                return np.array(embedding, dtype=np.float32)
-            except Exception as e:
-                logger.error(f"Error generating OpenAI embedding: {e}")
-        if self.embedding_model:
-            vec = self.embedding_model.encode([text], normalize_embeddings=True)[0]
-            return np.array(vec, dtype=np.float32)
-        # fallback zero vector
-        return np.zeros(self.embedding_dim, dtype=np.float32)
+        """Generate embeddings using centralized embedding manager"""
+        try:
+            embedding = await self.embedding_manager.generate_embedding(text)
+            return np.array(embedding, dtype=np.float32)
+        except Exception as e:
+            logger.error(f"Error generating embedding: {e}")
+            # Fallback zero vector
+            return np.zeros(self.embedding_dim, dtype=np.float32)
     
     def calculate_importance(self, experience: Dict[str, Any]) -> float:
         """
