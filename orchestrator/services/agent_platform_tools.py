@@ -30,10 +30,7 @@ class AgentPlatformTools:
         self.db = db_session
         self.rag_service = RAGService()
         # CodeGraphService uses centralized embedding manager
-        from services.credential_resolver import get_credential_resolver
-        resolver = get_credential_resolver()
-        openai_key = resolver.get_credential_field("development_openai", "api_key")
-        self.code_graph = CodeGraphService(db_session, openai_key) if openai_key else None
+        self.code_graph = CodeGraphService(db_session)
         self.logger = logger
     
     def get_available_tools(self) -> List[Dict[str, Any]]:

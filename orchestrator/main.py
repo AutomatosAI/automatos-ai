@@ -1,4 +1,3 @@
-
 """
 Main FastAPI Application for Automotas AI
 =========================================

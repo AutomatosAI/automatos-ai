@@ -340,33 +340,59 @@ async def get_system_health(db: Session = Depends(get_db)):
         except Exception:
             db_status = "unhealthy"
         
-        # Check services status
-        services = {
-            "database": db_status,
-            "redis": "healthy",  # Add Redis status that dashboard is expecting
-            "api": "healthy",
-            "document_processor": "healthy",  # TODO: Check actual status
-            "rag_system": "healthy"  # TODO: Check actual status
-        }
+        # Check services status - convert to ComponentHealth format
+        from models import ComponentHealth
+        components = [
+            ComponentHealth(
+                name="database",
+                status=db_status,
+                last_check=datetime.now(),
+                metrics={"connection": "active" if db_status == "healthy" else "failed"}
+            ),
+            ComponentHealth(
+                name="redis",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="api",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="document_processor",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="rag_system",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            )
+        ]
         
         # Overall system status
-        overall_status = "healthy" if all(status == "healthy" for status in services.values()) else "degraded"
+        overall_status = "healthy" if all(c.status == "healthy" for c in components) else "degraded"
         
-        metrics = {
+        system_metrics = {
             "cpu_usage": f"{cpu_percent}%",
             "memory_usage": f"{memory.percent}%",
             "memory_available": f"{memory.available / (1024**3):.1f}GB",
             "disk_usage": f"{disk.percent}%",
-            "disk_free": f"{disk.free / (1024**3):.1f}GB",
-            "uptime": "N/A"  # TODO: Track actual uptime
+            "disk_free": f"{disk.free / (1024**3):.1f}GB"
         }
         
         return SystemHealthResponse(
-            status=overall_status,
-            timestamp=datetime.now(),
-            services=services,
-            metrics=metrics,
-            version="1.0.0"  # TODO: Get from actual version
+            overall_status=overall_status,
+            components=components,
+            system_metrics=system_metrics,
+            uptime="N/A",  # TODO: Track actual uptime
+            version="1.0.0",  # TODO: Get from actual version
+            timestamp=datetime.now()
         )
         
     except Exception as e:

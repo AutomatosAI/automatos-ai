@@ -100,13 +100,7 @@ def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
     Uses LLM service settings to determine API key source.
     Future: Will support multiple embedding providers based on codegraph.provider setting.
     """
-    api_key = get_openai_key()
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="LLM API key not configured. Add it to Settings > Credentials or configure in CodeGraph Settings."
-        )
-    return CodeGraphService(db, api_key)
+    return CodeGraphService(db)
 
 
 # Endpoints
@@ -376,7 +370,7 @@ async def get_call_graph_api(
     Example: /api/code-graph/call-graph?project=Automatos-ai&symbol=AgentFactory&depth=2
     """
     try:
-        codegraph_service = CodeGraphService(db, get_openai_key())
+        codegraph_service = CodeGraphService(db)
         call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction)
         return call_graph
     except ValueError as e:

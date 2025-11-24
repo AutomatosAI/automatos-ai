@@ -467,7 +467,7 @@ async def list_skills(
                 name=skill.name,
                 description=skill.description,
                 skill_type=skill.skill_type,
-                category=skill.category,
+                category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
                 skill_version=skill.skill_version,
                 skill_source=skill.skill_source,
                 git_repo_url=skill.git_repo_url,
@@ -736,7 +736,7 @@ async def get_agent_skills(
                 name=skill.name,
                 description=skill.description,
                 skill_type=skill.skill_type,
-                category=skill.category,
+                category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
                 skill_version=skill.skill_version,
                 skill_source=skill.skill_source,
                 git_repo_url=skill.git_repo_url,

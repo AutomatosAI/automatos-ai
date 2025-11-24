@@ -16,7 +16,7 @@ from sqlalchemy import text
 from pydantic import BaseModel
 
 from database.database import get_db
-from services.chat_service import ChatService, StreamingChatService
+from services.chat_service import ChatService, StreamingChatService, CHAT_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +131,12 @@ async def stream_chat(
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
     
-    # Stream response
+    # Stream response with tools enabled
     return StreamingResponse(
         streaming_service.stream_response(
             chat_id=chat_id,
-            messages=message_history
+            messages=message_history,
+            tools=CHAT_TOOLS  # Enable database query, code search, and document search tools
         ),
         media_type="text/event-stream",
         headers={

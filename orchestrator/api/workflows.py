@@ -409,6 +409,12 @@ async def create_workflow(
             "agents": agents,
             "version": "1.0"
         }
+        
+        # Store goal and context in workflow_definition (9-stage workflow fields)
+        if goal:
+            workflow_definition["goal"] = goal
+        if context:
+            workflow_definition["context"] = context
 
         # Create workflow record
         import json as json_lib
@@ -419,8 +425,6 @@ async def create_workflow(
         workflow = Workflow(
             name=name,
             description=description,
-            goal=goal,
-            context=json_lib.dumps(context) if context else None,  # Convert dict to JSON string
             tags=tags,
             workflow_definition=workflow_definition,
             status=status,
@@ -828,7 +832,6 @@ async def execute_workflow_advanced(
 async def execute_workflow(
     workflow_id: int,
     execution_data: Dict[str, Any],
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """Execute workflow (simplified version for journey tests)"""
@@ -1152,12 +1155,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 decomposer = RealTaskDecomposer()
                 
                 # Get task description from workflow (prioritize goal > description > name)
-                task_description = workflow.goal or workflow.description or workflow.name
+                # goal and context are stored in workflow_definition for 9-stage workflows
+                goal = workflow_def.get("goal")
+                task_description = goal or workflow.description or workflow.name
                 task_type = workflow_def.get("category", "general")
                 complexity = workflow_def.get("priority", "medium")
                 
                 # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
-                workflow_context = workflow.context or {}
+                workflow_context = workflow_def.get("context", {})
                 
                 logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
                 
@@ -1205,9 +1210,10 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             
             # Check if we should use smart grouping
             use_smart_selection = True  # Enable smart selection by default
-            if workflow and workflow.context:
+            workflow_ctx = workflow_def.get("context")
+            if workflow_ctx:
                 try:
-                    ctx = json.loads(workflow.context) if isinstance(workflow.context, str) else workflow.context
+                    ctx = json.loads(workflow_ctx) if isinstance(workflow_ctx, str) else workflow_ctx
                     use_smart_selection = ctx.get("use_smart_selection", True)
                 except:
                     pass
@@ -1458,7 +1464,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     
                     # Get workflow tags and context for CodeGraph project selection
                     workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
-                    workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
+                    workflow_ctx = workflow_def.get("context")
                     
                     # If context is a JSON string, parse it
                     if isinstance(workflow_ctx, str):
@@ -1547,7 +1553,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
                 # Get workflow definition and context
                 workflow_def = workflow.workflow_definition or {}
-                workflow_context = workflow.context
+                workflow_context = workflow_def.get("context")
                 
                 # Check workflow definition first
                 if workflow_def.get("execution_strategy"):
@@ -1561,15 +1567,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         execution_strategy = workflow_context.get("execution_mode", "parallel")
                 
                 logger.info(f"📊 Using execution strategy: {execution_strategy}")
-                
-                # Debug: Log agent_assignments structure
-                logger.info(f"🔍 DEBUG: agent_assignments type: {type(agent_assignments)}")
-                logger.info(f"🔍 DEBUG: agent_assignments keys: {list(agent_assignments.keys()) if agent_assignments else 'None'}")
-                if agent_assignments:
-                    for k, v in list(agent_assignments.items())[:2]:  # Log first 2
-                        logger.info(f"🔍 DEBUG: {k} -> type: {type(v)}, value: {v}")
-                        if isinstance(v, list) and v:
-                            logger.info(f"🔍 DEBUG:   First item type: {type(v[0])}, hasattr agent_id: {hasattr(v[0], 'agent_id') if v else False}")
                 
                 # Execute all subtasks with real agents
                 subtask_results = await execution_manager.execute_workflow_subtasks(

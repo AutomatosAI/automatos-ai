@@ -141,6 +141,7 @@ class Skill(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     skill_type = Column(String(100), nullable=False)  # 'cognitive', 'technical', 'communication'
+    category = Column(String(100), nullable=True)  # Skill category from schema
     implementation = Column(Text)  # Code or configuration
     parameters = Column(JSON)  # Skill parameters
     performance_data = Column(JSON)  # Usage statistics
@@ -365,14 +366,21 @@ class Workflow(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     description = Column(Text)
+    goal = Column(Text, nullable=True)  # High-level objective (9-stage enhancement)
+    context = Column(Text, nullable=True)  # Additional context (9-stage enhancement)
     workflow_definition = Column(JSON)  # Workflow steps and logic
     status = Column(String(50), default='draft')  # 'draft', 'active', 'archived'
     owner = Column(String(255), nullable=True)
     tags = Column(JSON, nullable=True)
     default_policy_id = Column(String(128), nullable=True)
+    last_execution = Column(JSON, nullable=True)  # Latest execution summary (9-stage enhancement)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    priority = Column(String(50), nullable=True)  # Workflow priority (9-stage enhancement)
+    expected_duration = Column(Integer, nullable=True)  # Expected duration in seconds (9-stage enhancement)
+    complexity_score = Column(Float, nullable=True)  # Workflow complexity (9-stage enhancement)
+    success_rate = Column(Float, nullable=True)  # Success rate (9-stage enhancement)
     
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
@@ -394,6 +402,9 @@ class WorkflowExecution(Base):
     
     # PRD-15: Track models used in workflow execution
     models_used = Column(JSON, default=list)  # [{"agent_id": 5, "model_id": "gpt-4", "input_tokens": 1500, "output_tokens": 800, "cost": 0.051}]
+    
+    # 9-Stage enhancement: Execution metadata for analytics
+    execution_metadata = Column(JSON, default=dict, nullable=True)
     
     # Relationships
     workflow = relationship("Workflow", back_populates="executions")

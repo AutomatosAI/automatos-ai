@@ -137,10 +137,8 @@ class LLMAgentSelector:
         self.cache_ttl = cache_ttl_seconds
         
         # Initialize semantic skill matcher for intelligent matching
-        # Get OpenAI API key from config
-        from config import Config
-        config = Config()
-        self.skill_matcher = get_skill_matcher(config.OPENAI_API_KEY)
+        # Initialize semantic skill matcher for intelligent matching
+        self.skill_matcher = get_skill_matcher()
         logger.info("✅ Semantic skill matcher initialized (using embeddings for fuzzy matching)")
         
         # Initialize function registry and executor

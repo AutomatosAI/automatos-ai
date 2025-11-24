@@ -130,6 +130,21 @@ export function useChat({
                       : m
                   )
                 )
+              } else if (parsed.type === 'tool-data' && parsed.data) {
+                // Handle tool-data (database_results, code_snippets, documents, etc.)
+                setMessages(prev => 
+                  prev.map(m => 
+                    m.id === assistantMessageId
+                      ? {
+                          ...m,
+                          database_results: parsed.data.database_results || m.database_results,
+                          documents: parsed.data.documents || m.documents,
+                          code_snippets: parsed.data.code_snippets || m.code_snippets,
+                        }
+                      : m
+                  )
+                )
+                if (onData) onData(parsed)
               } else if (parsed.type === 'data-usage') {
                 setUsage(parsed.data)
                 if (onData) onData(parsed)

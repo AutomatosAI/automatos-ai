@@ -92,7 +92,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
             name=skill.name,
             description=skill.description,
             skill_type=skill.skill_type,
-            category=skill.category,
+            category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
             is_active=skill.is_active,
             created_at=skill.created_at,
             updated_at=skill.updated_at
