@@ -18,6 +18,9 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from services.llm_provider import create_llm_manager, LLMConfig, LLMProvider
 
+# PHASE 4A: Import graph theory for dependency validation
+from context_engineering.mathematical_foundations.graph_theory import GraphTheory
+
 logger = logging.getLogger(__name__)
 
 class RealTaskDecomposer:
@@ -215,9 +218,35 @@ REMEMBER:
                 result["tokens_used"] = response.usage["total_tokens"] if response.usage else None
                 result["decomposition_time"] = elapsed
                 result["is_real_decomposition"] = True  # Proof this is NOT mock data
+            
+                subtasks = result.get("subtasks", [])
                 
-                # Enhanced debug logging
-                subtasks = result.get('subtasks', [])
+                # PHASE 4A: Validate dependencies with graph theory
+                logger.info(f"📊 STAGE 1: Validating dependencies with graph theory")
+                validation_result = GraphTheory.validate_dependencies(subtasks)
+                
+                if not validation_result['valid']:
+                    # Dependency error detected - fix it
+                    logger.warning(f"⚠️  Dependency validation failed: {validation_result.get('message')}")
+                    if validation_result.get('error') == 'circular_dependency':
+                        # Remove circular dependencies
+                        logger.info("🔧 Fixing circular dependencies...")
+                        for subtask in subtasks:
+                            subtask['dependencies'] = []
+                        # Revalidate
+                        validation_result = GraphTheory.validate_dependencies(subtasks)
+                
+                # Use graph-optimized execution order and parallel groups
+                execution_order = validation_result.get('execution_order', [])
+                parallel_groups = validation_result.get('parallel_groups', [])
+                max_parallelism = validation_result.get('max_parallelism', 1)
+                
+                logger.info(f"✅ STAGE 1: Dependencies validated")
+                logger.info(f"   Execution Order: {execution_order}")
+                logger.info(f"   Parallel Groups: {len(parallel_groups)} levels")
+                logger.info(f"   Max Parallelism: {max_parallelism} concurrent tasks")
+                
+                # Enhanced debug logging for subtasks after graph validation
                 logger.info(f"🎯 STAGE 1 COMPLETE: Decomposed into {len(subtasks)} subtasks")
                 logger.info(f"  📊 Strategy: {result.get('execution_strategy', 'N/A')}")
                 logger.info(f"  ⏱️  Total estimated time: {result.get('total_estimated_time', 'N/A')}")
@@ -243,6 +272,18 @@ REMEMBER:
                     if tags:
                         logger.info(f"      🏷️ Tags: {tags}")
                     logger.info(f"      🔗 Dependencies: {subtask.get('dependencies', [])}")
+                
+                # PHASE 4A: Use graph-optimized execution strategy
+                execution_strategy = "parallel" if len(parallel_groups) > 1 and max_parallelism > 1 else result.get("execution_strategy", "sequential")
+                result["execution_strategy"] = execution_strategy
+                
+                # PHASE 4A: Add graph analysis metadata
+                result["graph_analysis"] = {
+                    "execution_order": execution_order,
+                    "parallel_groups": parallel_groups,
+                    "max_parallelism": max_parallelism,
+                    "dependency_levels": len(parallel_groups)
+                }
                 
                 return result
                 

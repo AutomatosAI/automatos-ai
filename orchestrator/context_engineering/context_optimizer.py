@@ -136,6 +136,40 @@ class ContextOptimizer:
     Implements real information theory and optimization algorithms.
     """
     
+    def optimize_agent_resources(self, num_agents: int, resource_limit: float) -> Dict[str, float]:
+        """
+        Calculates optimal agent allocation and efficiency gains.
+        Restored logic from original implementation.
+        
+        Args:
+            num_agents: Number of available agents
+            resource_limit: Resource constraint factor (0.0 - 1.0)
+            
+        Returns:
+            Dictionary with optimization metrics
+        """
+        # Ensure inputs are safe
+        num_agents = max(1, num_agents)
+        resource_limit = max(0.1, resource_limit)
+        
+        optimal_agents = min(num_agents + 2, int(resource_limit * 10))
+        
+        if num_agents > 0:
+            performance_boost = (optimal_agents / num_agents) * 0.2
+        else:
+            performance_boost = 0.3
+            
+        # Avoid division by zero in efficiency gain
+        denom = resource_limit * 10
+        efficiency_gain = 1.0 - (optimal_agents / denom) if denom > 0 else 0.0
+        
+        return {
+            "optimal_agents": optimal_agents,
+            "performance_boost": performance_boost,
+            "efficiency_gain": efficiency_gain,
+            "resource_utilization": optimal_agents / denom if denom > 0 else 1.0
+        }
+
     def __init__(self, openai_api_key: Optional[str] = None):
         """
         Initialize the context optimizer with real services.

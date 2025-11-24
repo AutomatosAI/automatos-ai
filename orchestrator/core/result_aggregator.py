@@ -15,11 +15,21 @@ Week 3 Part 2 - PRD-10 Implementation
 """
 
 import logging
-from typing import List, Dict, Any
-from dataclasses import dataclass
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+
+# PHASE 4B: Import probability theory for confidence intervals
+try:
+    from context_engineering.mathematical_foundations.probability_theory import (
+        ProbabilityTheory,
+        ConfidenceInterval
+    )
+    PROBABILITY_AVAILABLE = True
+except ImportError:
+    PROBABILITY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +43,9 @@ class QualityScores:
     reliability: float
     coherence: float
     overall: float  # Weighted average
+    
+    # PHASE 4B: Add confidence intervals for uncertainty quantification
+    overall_confidence_interval: Optional[Dict[str, float]] = None
     
     def to_dict(self) -> Dict[str, float]:
         return {
@@ -204,13 +217,34 @@ class ResultAggregator:
             coherence * self.weights["coherence"]
         )
         
+        # PHASE 4B: Calculate confidence interval for overall score
+        confidence_interval = None
+        if PROBABILITY_AVAILABLE and len(subtask_executions) >= 2:
+            try:
+                # Collect individual scores as samples
+                scores = [completeness, accuracy, efficiency, reliability, coherence]
+                ci = ProbabilityTheory.calculate_confidence_interval(scores, confidence_level=0.95)
+                confidence_interval = {
+                    "mean": ci.mean,
+                    "lower_bound": ci.lower_bound,
+                    "upper_bound": ci.upper_bound,
+                    "confidence_level": ci.confidence_level
+                }
+                self.logger.debug(
+                    f"📊 Quality Score Confidence Interval: "
+                    f"{ci.mean:.2f} [{ci.lower_bound:.2f}, {ci.upper_bound:.2f}] @ {ci.confidence_level:.0%}"
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not calculate confidence interval: {e}")
+        
         return QualityScores(
             completeness=completeness,
             accuracy=accuracy,
             efficiency=efficiency,
             reliability=reliability,
             coherence=coherence,
-            overall=overall
+            overall=overall,
+            overall_confidence_interval=confidence_interval
         )
     
     def _calculate_completeness_score(

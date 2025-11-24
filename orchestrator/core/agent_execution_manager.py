@@ -335,6 +335,7 @@ class AgentExecutionManager:
     def _create_execution_plan(self, subtasks: List[Dict[str, Any]], execution_strategy: str = "parallel") -> ExecutionPlan:
         """
         Create execution plan based on execution strategy.
+        PHASE 4A: Enhanced with graph-based scheduling using dependency analysis.
         
         Args:
             subtasks: List of subtasks to execute
@@ -342,6 +343,17 @@ class AgentExecutionManager:
         """
         
         parallel_groups = []
+        dependencies = {}
+        
+        # PHASE 4A: Check if decomposition included graph analysis
+        graph_analysis = None
+        if subtasks and isinstance(subtasks, list) and len(subtasks) > 0:
+            # Look for graph_analysis in the parent decomposition metadata
+            # (This would be passed from orchestrator_service)
+            for subtask in subtasks:
+                if 'graph_metadata' in subtask:
+                    graph_analysis = subtask['graph_metadata']
+                    break
         
         if execution_strategy == "sequential":
             # Sequential: each task in its own group
@@ -351,8 +363,29 @@ class AgentExecutionManager:
                 if idx < len(subtasks):
                     task_desc = subtasks[idx].get('description', '')[:50] if idx < len(subtasks) else ''
                     self.logger.info(f"📝 Task {idx + 1} will execute sequentially: {task_desc}")
+        elif graph_analysis and 'parallel_groups' in graph_analysis:
+            # PHASE 4A: Use graph-optimized parallel groups from decomposition
+            self.logger.info("📊 Using graph-based execution scheduling")
+            parallel_groups = graph_analysis['parallel_groups']
+            
+            # Build dependency map
+            for i, subtask in enumerate(subtasks):
+                subtask_id = f"subtask_{i}"
+                deps = subtask.get('dependencies', [])
+                if deps:
+                    # Map dependency IDs to indices
+                    dep_indices = []
+                    for dep in deps:
+                        for j, st in enumerate(subtasks):
+                            if st.get('subtask_id') == dep or st.get('id') == dep:
+                                dep_indices.append(f"subtask_{j}")
+                    dependencies[subtask_id] = dep_indices
+            
+            self.logger.info(f"  📈 Parallel Levels: {len(parallel_groups)}")
+            self.logger.info(f"  ⚡ Max Parallelism: {graph_analysis.get('max_parallelism', 1)}")
+            
         else:
-            # Parallel: group tasks up to max_parallel_executions
+            # Fallback: Simple parallel grouping
             current_group = []
             
             for idx in range(len(subtasks)):
@@ -375,7 +408,7 @@ class AgentExecutionManager:
         return ExecutionPlan(
             total_subtasks=len(subtasks),
             parallel_groups=parallel_groups,
-            dependencies={},  # No dependencies for now
+            dependencies=dependencies,
             estimated_duration_seconds=total_duration
         )
     

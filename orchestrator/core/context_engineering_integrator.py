@@ -28,20 +28,26 @@ from sqlalchemy.orm import Session
 
 # PHASE 1: Import ContextOptimizer components
 try:
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent.parent))
-    from context_engineering.context_optimizer import (
-        ContextOptimizer,
-        AtomicPrompt,
-        EnhancedPrompt,
-        ContextItem,
-        Example
-    )
+    from context_engineering.context_optimizer import ContextOptimizer, ContextItem
     CONTEXT_OPTIMIZER_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"ContextOptimizer not available: {e}. Falling back to basic RAG.")
     CONTEXT_OPTIMIZER_AVAILABLE = False
+    # Define dummies for type hints
+    @dataclass
+    class ContextItem: pass
+    class ContextOptimizer: pass
+
+# PHASE 3: Import PgVectorStore for direct semantic search
+try:
+    from context_engineering.vector_store import PgVectorStore, VectorSearchResult
+    from context_engineering.embeddings import EmbeddingGenerator, EmbeddingConfig
+    VECTOR_STORE_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"PgVectorStore not available: {e}. Using HTTP API fallback.")
+    VECTOR_STORE_AVAILABLE = False
+    class PgVectorStore: pass
+    class VectorSearchResult: pass
 
 logger = logging.getLogger(__name__)
 
@@ -127,18 +133,39 @@ class ContextEngineeringIntegrator:
             "project_id": None  # Will use default project if None
         }
         
-        # PHASE 1: Initialize ContextOptimizer
+        # PHASE 1: Initialize Context Optimizer
         if self.use_optimization:
             try:
-                self.context_optimizer = ContextOptimizer(db_session=db_session)
-                self.logger.info("✅ ContextOptimizer initialized - mathematical optimization ENABLED")
+                self.context_optimizer = ContextOptimizer()
+                logger.info("✅ Context Optimizer initialized")
             except Exception as e:
-                self.logger.warning(f"Failed to initialize ContextOptimizer: {e}. Using basic RAG only.")
-                self.use_optimization = False
+                logger.warning(f"Failed to initialize ContextOptimizer: {e}")
                 self.context_optimizer = None
+                self.use_optimization = False
         else:
             self.context_optimizer = None
-            self.logger.info("ℹ️ Mathematical optimization DISABLED - using basic RAG only")
+            
+        # PHASE 3: Initialize Vector Store for direct semantic search
+        self.vector_store = None
+        self.embedding_generator = None
+        self.use_vector_store = VECTOR_STORE_AVAILABLE
+        
+        if self.use_vector_store:
+            try:
+                # Initialize embedding generator for query vectorization
+                embedding_config = EmbeddingConfig(
+                    model_name="text-embedding-3-small",
+                    model_type="openai",
+                    dimension=1536,
+                    normalize=True
+                )
+                self.embedding_generator = EmbeddingGenerator(embedding_config)
+                logger.info("✅ Vector Store integration ready (will initialize on first use)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize embedding generator: {e}")
+                self.use_vector_store = False
+        
+        self.logger.info("ℹ️ Mathematical optimization DISABLED - using basic RAG only")
     
     async def enhance_subtasks_with_context(
         self,
@@ -550,26 +577,100 @@ class ContextEngineeringIntegrator:
         return " ".join(key_terms[:5])  # Top 5 key terms
     
     async def _retrieve_semantic_results(self, query: str) -> List[Dict[str, Any]]:
-        """Call semantic search endpoint for targeted results"""
+        """
+        Retrieve semantic search results using PgVectorStore (PHASE 3) or fallback to HTTP API.
+        """
+        # PHASE 3: Try direct vector store first
+        if self.use_vector_store:
+            try:
+                return await self._retrieve_from_vector_store(query)
+            except Exception as e:
+                self.logger.warning(f"Vector store query failed, falling back to HTTP: {e}")
         
+        # Fallback to HTTP API
         try:
             url = f"{self.api_base_url}/api/documents/search"
             
             params = {
-                "query": query,
-                "limit": self.semantic_settings["limit"],
-                "min_similarity": self.semantic_settings["min_similarity"]
+                "q": query,
+                "limit": self.semantic_settings["limit"]
             }
             
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.post(url, params=params)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url, params=params)
                 response.raise_for_status()
-                data = response.json()
-                return data.get("results", [])
-                
+                results = response.json()
+            
+            self.logger.debug(f"Semantic search (HTTP fallback) returned {len(results)} results")
+            return results
+            
         except Exception as e:
-            self.logger.error(f"Semantic search failed: {e}")
+            self.logger.warning(f"Semantic search (HTTP) failed: {e}")
             return []
+    
+    async def _retrieve_from_vector_store(
+        self,
+        query: str,
+        limit: int = None,
+        similarity_threshold: float = None
+    ) -> List[Dict[str, Any]]:
+        """
+        PHASE 3: Retrieve context from PgVectorStore using semantic search.
+        
+        Args:
+            query: Search query  
+            limit: Maximum chunks to retrieve (uses self.semantic_settings if None)
+            similarity_threshold: Minimum similarity score (uses self.semantic_settings if None)
+            
+        Returns:
+            List of context chunks
+        """
+        if not self.use_vector_store:
+            return []
+            
+        limit = limit or self.semantic_settings.get("limit", 5)
+        similarity_threshold = similarity_threshold or self.semantic_settings.get("min_similarity", 0.7)
+            
+        try:
+            # Lazy initialization of vector store
+            if not self.vector_store:
+                from database.session import get_db_session_string
+                db_string = get_db_session_string()
+                self.vector_store = PgVectorStore(connection_string=db_string)
+                await self.vector_store.initialize(dimension=1536)
+                self.logger.info("✅ PgVectorStore initialized for semantic search")
+                
+            # Generate query embedding
+            query_embedding = await self.embedding_generator.generate_embedding(query)
+            
+            # Perform semantic search
+            results = await self.vector_store.similarity_search(
+                query_embedding=query_embedding.tolist() if hasattr(query_embedding, 'tolist') else query_embedding,
+                limit=limit,
+                similarity_threshold=similarity_threshold
+            )
+            
+            # Convert VectorSearchResult to dict format (compatible with existing code)
+            chunks = []
+            for result in results:
+                chunks.append({
+                    "content": result.content,
+                    "source_file": result.source_file,
+                    "chunk_id": result.id,
+                    "similarity_score": result.similarity_score,
+                    "similarity": result.similarity_score, # Alias for compatibility
+                    "metadata": result.metadata,
+                    "chunk_index": result.chunk_index,
+                    "content_type": result.content_type,
+                    "document_id": result.id  # Alias
+                })
+                
+            self.logger.info(f"📊 PgVectorStore returned {len(chunks)} chunks (threshold={similarity_threshold})")
+            return chunks
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving from vector store: {e}")
+            raise  # Re-raise so fallback can catch it
     
     def _build_enhanced_prompt(
         self,
@@ -791,84 +892,62 @@ class ContextEngineeringIntegrator:
             
             # Step 4: Optimize context with knapsack algorithm
             if context_items:
-                optimized_context = await self.context_optimizer.optimize_context(
+                # Use the existing optimize_context method
+                optimized_result = await self.context_optimizer.optimize_context(
                     available_context=context_items,
-                    max_tokens=4000,
+                    max_tokens=2000,  # Limit context window
                     objective="maximize_information"
                 )
+                
+                optimized_items = optimized_result.contexts
+                
+                # Construct optimized prompt
+                optimized_context_str = "\n\n".join([f"### {item.source} (Relevance: {item.relevance_score:.2f})\n{item.content}" for item in optimized_items])
+                
+                enhanced_prompt = f"""# Task: {description}
+Agent Type: {agent_type} | Priority: {priority}
+
+## Optimized Context (Knapsack Selected):
+{optimized_context_str}
+
+## Instructions:
+{description}
+"""
+                metrics = {
+                    "information_density": optimized_result.information_gain, # Use gain as proxy for density metric in this view
+                    "optimization_score": optimized_result.diversity_score,
+                    "atomic_instruction": description,
+                    "examples_used": 0
+                }
+                return enhanced_prompt, metrics
             else:
                 # No context to optimize
-                optimized_context = type('obj', (object,), {
-                    'contexts': [],
-                    'expected_information_gain': 0.0
-                })()
-            
-            # Step 5: Build MolecularContext (Atomic + Examples + Context)
-            molecular_context = await self.context_optimizer.build_molecular_context(
-                atomic_prompt=atomic_prompt,
-                examples=examples,
-                context_items=optimized_context.contexts if hasattr(optimized_context, 'contexts') else [],
-                max_tokens=4000
-            )
-            
-            # Step 6: Calculate information density
-            information_density = self.context_optimizer.calculate_information_density(
-                molecular_context.full_prompt
-            )
-            
-            # Step 7: Build optimization metrics
-            metrics = {
-                "information_density": information_density,
-                "optimization_score": optimized_context.expected_information_gain if hasattr(optimized_context, 'expected_information_gain') else 0.0,
-                "atomic_instruction": atomic_prompt.instruction,
-                "examples_used": len(examples),
-                "total_tokens": molecular_context.total_tokens,
-                "context_items_used": len(optimized_context.contexts) if hasattr(optimized_context, 'contexts') else 0
-            }
-            
-            self.logger.info(
-                f"✅ Optimization applied: {information_density:.2f} density, "
-                f"{molecular_context.total_tokens} tokens, "
-                f"{len(optimized_context.contexts) if hasattr(optimized_context, 'contexts') else 0} context items"
-            )
-            
-            return molecular_context.full_prompt, metrics
-            
+                return self._build_enhanced_prompt(description, agent_type, priority, rag_context, semantic_results, code_results), {}
+
         except Exception as e:
-            self.logger.error(f"❌ Optimization failed: {e}, falling back to basic prompt")
-            # Fallback to basic prompt
-            basic_prompt = self._build_enhanced_prompt(
-                description, agent_type, priority, rag_context, semantic_results, code_results  # PHASE 2
-            )
-            return basic_prompt, {
-                "information_density": 0.0,
-                "optimization_score": 0.0,
-                "atomic_instruction": description,
-                "examples_used": 0
-            }
-    
+            self.logger.error(f"Optimization failed: {e}")
+            return self._build_enhanced_prompt(description, agent_type, priority, rag_context, semantic_results, code_results), {}
+
     def _convert_rag_to_context_items(self, rag_context: Dict[str, Any]) -> List[ContextItem]:
-        """Convert RAG results to ContextItem objects for optimizer"""
-        context_items = []
-        
-        for chunk in rag_context.get("chunks", []):
-            try:
-                item = ContextItem(
-                    text=chunk.get("content", ""),
-                    source=chunk.get("source_file", chunk.get("filename", "Unknown")),
-                    relevance_score=chunk.get("similarity_score", chunk.get("similarity", 0.0)),
-                    metadata={
-                        "chunk_id": chunk.get("chunk_id"),
-                        "document_id": chunk.get("document_id"),
-                        "section": chunk.get("section", "")
-                    }
-                )
-                context_items.append(item)
-            except Exception as e:
-                self.logger.warning(f"Failed to convert chunk to ContextItem: {e}")
-                continue
-        
-        return context_items
+        """Convert RAG chunks to ContextItem objects"""
+        items = []
+        chunks = rag_context.get("chunks", [])
+        for i, chunk in enumerate(chunks):
+            content = chunk.get("content", "")
+            # Estimate tokens if not provided (approx 4 chars per token)
+            tokens = chunk.get("tokens", len(content) // 4)
+            relevance = chunk.get("similarity_score", chunk.get("similarity", 0.5))
+            source = chunk.get("source_file", f"chunk_{i}")
+            
+            items.append(ContextItem(
+                content=content,
+                tokens=tokens,
+                relevance=relevance,
+                source=source,
+                id=f"rag_{i}"
+            ))
+        return items
+
     
     def get_enhancement_summary(
         self,
