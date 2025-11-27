@@ -637,7 +637,7 @@ class DocumentManager:
     async def _generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for text"""
         try:
-            embedding = await self.embeddings.aembed_query(text)
+            embedding = await self.embedding_manager.generate_embedding(text)
             return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")

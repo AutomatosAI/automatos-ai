@@ -14,8 +14,9 @@ import hashlib
 import logging
 import tempfile
 import shutil
+import builtins
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
 import time
@@ -114,20 +115,66 @@ class CodeGraphService:
         
         # Check if project already exists
         existing = self.db.execute(
-            text("SELECT id, status FROM codegraph_projects WHERE name = :name"),
+            text("SELECT id, status, updated_at FROM codegraph_projects WHERE name = :name"),
             {"name": project_name}
         ).fetchone()
         
         if existing and existing.status == 'indexing':
-            raise ValueError(f"Project '{project_name}' is already being indexed")
+            # If project is stuck in indexing, reset it to allow re-indexing
+            # This handles cases where previous indexing failed or was interrupted
+            logger.warning(f"Project '{project_name}' is stuck in 'indexing' state. Resetting to allow re-indexing.")
+            self.db.execute(
+                text("UPDATE codegraph_projects SET status = 'pending' WHERE id = :id"),
+                {"id": existing.id}
+            )
+            self.db.commit()
         
         # Create or update project record
         if existing:
             project_id = existing.id
+            # Delete old symbols and relationships before re-indexing (to handle dimension changes)
+            logger.info(f"Deleting old symbols and embeddings for project {project_name} before re-indexing...")
+            
+            # Count records before deletion
+            rel_count = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_relationships WHERE project_id = :id"),
+                {"id": project_id}
+            ).scalar()
+            sym_count = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_symbols WHERE project_id = :id"),
+                {"id": project_id}
+            ).scalar()
+            file_count = self.db.execute(
+                text("SELECT COUNT(*) FROM codegraph_files WHERE project_id = :id"),
+                {"id": project_id}
+            ).scalar()
+            
+            logger.info(f"Found {rel_count} relationships, {sym_count} symbols, {file_count} files to delete")
+            
+            # Delete old data
+            self.db.execute(
+                text("DELETE FROM codegraph_relationships WHERE project_id = :id"),
+                {"id": project_id}
+            )
+            self.db.execute(
+                text("DELETE FROM codegraph_symbols WHERE project_id = :id"),
+                {"id": project_id}
+            )
+            self.db.execute(
+                text("DELETE FROM codegraph_files WHERE project_id = :id"),
+                {"id": project_id}
+            )
             self.db.execute(
                 text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
                 {"id": project_id}
             )
+            
+            # Commit deletion immediately
+            self.db.commit()
+            logger.info(f"✅ Deleted {rel_count} relationships, {sym_count} symbols, {file_count} files")
+            
+            # Ensure embedding column dimension matches current embedding model
+            self._ensure_embedding_dimension()
         else:
             result = self.db.execute(
                 text("""
@@ -143,6 +190,9 @@ class CodeGraphService:
                 }
             )
             project_id = result.fetchone()[0]
+            
+            # Ensure embedding column dimension matches current embedding model
+            self._ensure_embedding_dimension()
         
         self.db.commit()
         
@@ -611,6 +661,72 @@ class CodeGraphService:
         
         return symbols, relationships
     
+    def _ensure_embedding_dimension(self):
+        """Ensure the embedding column dimension matches the current embedding model from database settings"""
+        try:
+            # Read dimension directly from database settings (no hardcoding)
+            from services.llm_provider.embedding_manager import get_system_setting
+            dimension_str = get_system_setting("vector_store_dimensions")
+            
+            if not dimension_str:
+                # Fallback to embedding manager if settings not found
+                current_dim = self.embedding_manager.get_dimension()
+                logger.warning(f"vector_store_dimensions not found in settings, using embedding_manager dimension: {current_dim}")
+            else:
+                current_dim = int(dimension_str)
+                logger.info(f"Read embedding dimension from database settings: {current_dim}")
+            
+            # Check current column dimension
+            result = self.db.execute(
+                text("""
+                    SELECT atttypmod 
+                    FROM pg_attribute 
+                    WHERE attrelid = 'codegraph_symbols'::regclass 
+                    AND attname = 'embedding'
+                """)
+            ).fetchone()
+            
+            if result and result[0]:
+                # atttypmod format: -1 means no dimension, positive means dimension
+                # For vector types, atttypmod = dimension + 4
+                current_col_dim = result[0] - 4 if result[0] > 0 else None
+            else:
+                current_col_dim = None
+            
+            if current_col_dim != current_dim:
+                logger.info(f"Altering embedding column dimension from {current_col_dim} to {current_dim}")
+                
+                # Drop the index if it exists
+                try:
+                    self.db.execute(text("DROP INDEX IF EXISTS idx_codegraph_symbols_embedding"))
+                except Exception as e:
+                    logger.warning(f"Could not drop index: {e}")
+                
+                # Alter the column
+                self.db.execute(
+                    text(f"ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector({current_dim})")
+                )
+                
+                # Recreate the index
+                try:
+                    self.db.execute(
+                        text(f"""
+                            CREATE INDEX idx_codegraph_symbols_embedding 
+                            ON codegraph_symbols 
+                            USING ivfflat (embedding vector_cosine_ops) 
+                            WITH (lists = 100)
+                        """)
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not recreate index: {e}")
+                
+                self.db.commit()
+                logger.info(f"✅ Updated embedding column dimension to {current_dim} and recreated index")
+            else:
+                logger.debug(f"Embedding column dimension already correct: {current_dim}")
+        except Exception as e:
+            logger.warning(f"Could not verify/update embedding dimension: {e}. Continuing anyway...")
+    
     async def _store_symbols_with_embeddings(self, symbols_data: List[Dict[str, Any]]):
         """Store symbols in database with embeddings"""
         # Batch generate embeddings
@@ -634,33 +750,105 @@ class CodeGraphService:
             
             try:
                 # Generate embeddings using centralized manager
-                embeddings =  []  # We need to process one by one for now
-                for text in texts:
-                    embedding = await self.embedding_manager.generate_embedding(text)
+                embeddings = []
+                
+                # Debug: Check embedding_manager type
+                if not self.embedding_manager:
+                    raise ValueError("embedding_manager is None")
+                
+                logger.error(f"🔍 DEBUG: embedding_manager type: {type(self.embedding_manager)}")
+                logger.error(f"🔍 DEBUG: embedding_manager has generate_embedding: {hasattr(self.embedding_manager, 'generate_embedding')}")
+                
+                if not hasattr(self.embedding_manager, 'generate_embedding'):
+                    raise ValueError(f"embedding_manager has no generate_embedding method. Type: {type(self.embedding_manager)}")
+                
+                # Check if generate_embedding is callable
+                gen_method = getattr(self.embedding_manager, 'generate_embedding', None)
+                logger.error(f"🔍 DEBUG: generate_embedding type: {type(gen_method)}, callable: {callable(gen_method)}")
+                logger.error(f"🔍 DEBUG: generate_embedding value (first 200 chars): {repr(gen_method)[:200]}")
+                
+                if not callable(gen_method):
+                    raise ValueError(
+                        f"embedding_manager.generate_embedding is not callable. "
+                        f"Type: {type(gen_method)}, Value: {repr(gen_method)[:200]}"
+                    )
+                
+                logger.error(f"🔍 DEBUG: About to call generate_embedding for {len(texts)} texts")
+                for idx, text_content in enumerate(texts):
+                    logger.error(f"🔍 DEBUG: Calling generate_embedding for text {idx+1}/{len(texts)}")
+                    embedding = await gen_method(text_content)
+                    # Ensure embedding is a list/array, not a string
+                    if isinstance(embedding, str):
+                        raise ValueError(f"Embedding returned as string instead of array for text {idx+1}")
+                    # Convert numpy array to list if needed
+                    try:
+                        import numpy as np
+                        if isinstance(embedding, np.ndarray):
+                            embedding = embedding.tolist()
+                    except ImportError:
+                        pass  # numpy not available, assume it's already a list
+                    if not isinstance(embedding, (list, tuple)):
+                        raise ValueError(f"Embedding is not a list/array: {type(embedding)}")
                     embeddings.append(embedding)
+                    logger.error(f"🔍 DEBUG: Got embedding of length {len(embedding)}, type: {type(embedding)}")
+                
+                logger.error(f"🔍 DEBUG: Successfully generated {len(embeddings)} embeddings, now storing...")
                 
                 # Store symbols with embeddings
                 for j, symbol in enumerate(batch):
-                    embedding = embeddings[j]
-                    embedding_str = '[' + ','.join(map(str, embedding)) + ']'
-                    
-                    self.db.execute(
-                        text("""
-                            INSERT INTO codegraph_symbols
-                            (project_id, symbol_type, name, qualified_name, file_path, line_number,
-                             signature, docstring, code_snippet, embedding, metadata)
-                            VALUES (:project_id, :symbol_type, :name, :qualified_name, :file_path,
-                                    :line_number, :signature, :docstring, :code_snippet,
-                                    CAST(:embedding AS vector), :metadata)
-                        """),
-                        {
-                            **symbol,
+                    try:
+                        embedding = embeddings[j]
+                        # Double-check embedding type before conversion
+                        if isinstance(embedding, str):
+                            raise ValueError(f"Embedding {j} is a string, not an array")
+                        # Convert numpy array to list if needed
+                        try:
+                            import numpy as np
+                            if isinstance(embedding, np.ndarray):
+                                embedding = embedding.tolist()
+                        except ImportError:
+                            pass  # numpy not available, assume it's already a list
+                        
+                        # Use builtin str to avoid shadowing issues from **symbol unpacking
+                        # Create embedding_str BEFORE unpacking symbol to avoid any shadowing
+                        embedding_str = '[' + ','.join([builtins.str(x) for x in embedding]) + ']'
+                        
+                        # Prepare params dict BEFORE unpacking symbol to isolate str shadowing
+                        params = {
+                            "project_id": symbol.get('project_id'),
+                            "symbol_type": symbol.get('symbol_type'),
+                            "name": symbol.get('name'),
+                            "qualified_name": symbol.get('qualified_name'),
+                            "file_path": symbol.get('file_path'),
+                            "line_number": symbol.get('line_number'),
+                            "signature": symbol.get('signature'),
+                            "docstring": symbol.get('docstring'),
+                            "code_snippet": symbol.get('code_snippet'),
                             "embedding": embedding_str,
                             "metadata": json.dumps(symbol.get('metadata', {}))
                         }
-                    )
+                        
+                        self.db.execute(
+                            text("""
+                                INSERT INTO codegraph_symbols
+                                (project_id, symbol_type, name, qualified_name, file_path, line_number,
+                                 signature, docstring, code_snippet, embedding, metadata)
+                                VALUES (:project_id, :symbol_type, :name, :qualified_name, :file_path,
+                                        :line_number, :signature, :docstring, :code_snippet,
+                                        CAST(:embedding AS vector), :metadata)
+                            """),
+                            params
+                        )
+                        logger.error(f"🔍 DEBUG: Stored symbol {j+1}/{len(batch)}")
+                    except Exception as e:
+                        import traceback
+                        logger.error(f"🔍 DEBUG: Failed to store symbol {j}: {e}")
+                        logger.error(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
+                        logger.error(f"🔍 DEBUG: Symbol keys: {list(symbol.keys()) if isinstance(symbol, dict) else 'N/A'}")
+                        raise
                 
                 self.db.commit()
+                logger.error(f"🔍 DEBUG: Successfully committed batch of {len(batch)} symbols")
                 
             except Exception as e:
                 logger.error(f"Failed to generate embeddings for batch: {e}")
@@ -902,11 +1090,7 @@ class CodeGraphService:
         project_id = project.id
         
         # Generate query embedding
-        response = self.openai_client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        query_embedding = response.data[0].embedding
+        query_embedding = await self.embedding_manager.generate_embedding(query)
         embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
         
         # Semantic search

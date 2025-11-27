@@ -123,7 +123,7 @@ class AgentPlatformTools:
                 self.logger.info(f"  🔍 Searching knowledge base: '{query}' (limit: {limit})")
                 
                 # Call RAG service retrieve_context method
-                search_results = self.rag_service.retrieve_context(
+                search_results = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
                     min_similarity=0.3  # Lower threshold to get more results
@@ -160,7 +160,7 @@ class AgentPlatformTools:
                 limit = parameters.get("limit", 5)
                 
                 self.logger.info(f"  🔍 Semantic search via RAG: '{query}'")
-                search_results = self.rag_service.retrieve_context(
+                search_results = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
                     min_similarity=0.3

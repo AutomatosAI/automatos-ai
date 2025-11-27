@@ -149,7 +149,7 @@ def init_redis_client(host: str = '127.0.0.1', port: int = 6379, password: Optio
 def get_redis_client() -> Optional[RedisClient]:
     """
     Get the global Redis client instance with lazy initialization.
-    Uses centralized config - NO direct os.getenv() calls.
+    Uses centralized config - password from config.REDIS_PASSWORD.
     Returns None if Redis is not configured (optional service).
     """
     global _redis_client

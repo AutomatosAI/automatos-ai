@@ -133,12 +133,9 @@ class ComplexityAnalyzer:
             try:
                 from config import orchestrator_config
                 if orchestrator_config.ENABLE_COMPLEXITY_ANALYSIS:
-                    from services.llm_provider import create_llm_manager
-                    from config import config
-                    self.llm = create_llm_manager(
-                        provider=config.LLM_PROVIDER,
-                        model=config.LLM_MODEL
-                    )
+                from services.llm_provider import create_llm_manager
+                # Use service_name to get settings from database (NO hardcoded defaults)
+                self.llm = create_llm_manager(service_name="orchestrator")
                     logger.info("ComplexityAnalyzer initialized with LLM")
                 else:
                     self.use_llm = False

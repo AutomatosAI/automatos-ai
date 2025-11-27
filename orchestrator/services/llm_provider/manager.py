@@ -38,12 +38,6 @@ def get_system_setting(
         Setting value or default
     """
     try:
-        # Lazy import to avoid circular dependency during startup
-        import sys
-        if 'database.database' not in sys.modules or not hasattr(sys.modules.get('database.database'), 'SessionLocal'):
-            # Database not initialized yet - return default
-            return default_value
-        
         from database.database import SessionLocal
         from models.system_settings import SystemSetting
         
@@ -59,7 +53,12 @@ def get_system_setting(
             return default_value
         finally:
             db.close()
+    except ImportError:
+        # Database module not available yet - return default during startup
+        logger.debug(f"Database module not available yet for {category}.{key}")
+        return default_value
     except Exception as e:
+        # Database might not be ready - log but don't fail
         logger.debug(f"Failed to get system setting {category}.{key}: {e}")
         return default_value
 
@@ -88,20 +87,24 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     
     category = category_map.get(service_name, "orchestrator_llm")
     
-    # Get provider and model from settings
-    provider_str = get_system_setting(category, "provider", "openai")
-    model_str = get_system_setting(category, "model")
+    # Get provider and model from settings (NO hardcoded defaults)
+    # Note: Settings use 'llm_provider' and 'llm_model' keys, not 'provider' and 'model'
+    provider_str = get_system_setting(category, "llm_provider") or get_system_setting(category, "provider")
+    model_str = get_system_setting(category, "llm_model") or get_system_setting(category, "model")
     
-    # Default models if not set in settings
+    # Require provider to be set - no fallback
+    if not provider_str:
+        raise ValueError(
+            f"LLM provider not configured for service '{service_name}'. "
+            f"Please set {category}.provider in system settings."
+        )
+    
+    # Require model to be set - no fallback
     if not model_str:
-        default_models = {
-            "openai": "gpt-4o",  # GPT-4o has 128K context vs gpt-4 8K
-            "anthropic": "claude-3-5-sonnet-20241022",
-            "google": "gemini-pro",
-            "azure": "gpt-4o",
-            "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
-        }
-        model_str = default_models.get(provider_str, "gpt-4o")
+        raise ValueError(
+            f"LLM model not configured for service '{service_name}' with provider '{provider_str}'. "
+            f"Please set {category}.model in system settings."
+        )
     
     return provider_str, model_str
 
@@ -334,12 +337,14 @@ class LLMManager:
         else:
             provider_str, _ = get_provider_and_model_from_settings(service_name)
         
-        # Validate provider
+        # Validate provider (NO fallback - must be valid)
         try:
             provider = LLMProvider(provider_str)
         except ValueError:
-            logger.warning(f"Unknown LLM provider: {provider_str}, defaulting to OpenAI")
-            provider = LLMProvider.OPENAI
+            raise ValueError(
+                f"Unknown LLM provider: '{provider_str}'. "
+                f"Supported providers: {[p.value for p in LLMProvider]}"
+            )
         
         # Get model from settings or use override
         if model_override:

@@ -105,6 +105,7 @@ export default function SystemLLMSettingsTab({
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="google">Google</SelectItem>
                   <SelectItem value="cohere">Cohere</SelectItem>
+                  <SelectItem value="huggingface">HuggingFace (Free/Testing)</SelectItem>
                   <SelectItem value="local">Local Model</SelectItem>
                 </SelectContent>
               </Select>

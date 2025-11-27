@@ -1443,6 +1443,17 @@
       return this.request(`/api/documents/${id}/content`)
     }
   
+    async semanticSearch(query: string, options: { limit?: number; min_similarity?: number } = {}) {
+      const params = new URLSearchParams({
+        query,
+        limit: String(options.limit || 10),
+        min_similarity: String(options.min_similarity || 0.7)
+      })
+      return this.request(`/api/documents/search?${params}`, {
+        method: 'POST'
+      })
+    }
+  
     // ===== SKILLS ENDPOINTS =====
     async getSkills() {
       const skills = await this.request('/api/v1/skills') as any[]

@@ -31,15 +31,9 @@ class RealTaskDecomposer:
     def __init__(self, llm_manager=None):
         """Initialize with LLM connection"""
         if not llm_manager:
-            # Use config from centralized configuration to create LLM manager
-            from config import config
-            
-            # Create the LLM manager with proper provider and model
-            self.llm = create_llm_manager(
-                provider=config.LLM_PROVIDER,
-                model=config.LLM_MODEL
-            )
-            logger.info(f"RealTaskDecomposer initialized with {config.LLM_PROVIDER}/{config.LLM_MODEL}")
+            # Use service_name to get settings from database (NO hardcoded defaults)
+            self.llm = create_llm_manager(service_name="orchestrator")
+            logger.info(f"RealTaskDecomposer initialized with LLM from system settings (orchestrator_llm)")
         else:
             self.llm = llm_manager
             logger.info("RealTaskDecomposer initialized with provided LLM manager")

@@ -567,9 +567,27 @@ class AgentFactory:
         try:
             from services.llm_provider.manager import get_system_setting
             
-            # Get provider and model from settings
-            provider = get_system_setting("orchestrator_llm", "provider", "openai")
-            model = get_system_setting("orchestrator_llm", "model")
+            # Get provider and model from settings - check both key formats
+            provider = get_system_setting("orchestrator_llm", "llm_provider")
+            if not provider:
+                provider = get_system_setting("orchestrator_llm", "provider")  # Fallback to old key
+            
+            model = get_system_setting("orchestrator_llm", "llm_model")
+            if not model:
+                model = get_system_setting("orchestrator_llm", "model")  # Fallback to old key
+            
+            # If still not found, try environment variables (for backward compatibility)
+            if not provider:
+                import os
+                provider = os.getenv("LLM_PROVIDER")
+            if not model:
+                import os
+                model = os.getenv("LLM_MODEL")
+            
+            # If provider/model not found, fall back to DEFAULT_LLM_CONFIG
+            if not provider or not model:
+                self.logger.warning("LLM provider/model not found in system settings, falling back to DEFAULT_LLM_CONFIG")
+                return DEFAULT_LLM_CONFIG.copy()
             
             # If no model in settings, use provider-specific defaults
             if not model:
@@ -577,7 +595,8 @@ class AgentFactory:
                     "openai": "gpt-4o",  # Modern model with large context
                     "anthropic": "claude-3-5-sonnet-20241022",
                     "google": "gemini-pro",
-                    "azure": "gpt-4o"
+                    "azure": "gpt-4o",
+                    "huggingface": "mistralai/Mistral-7B-Instruct-v0.2"
                 }
                 model = provider_defaults.get(provider, "gpt-4")
             
@@ -930,14 +949,24 @@ Available Shell Tools:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
             
-            # Get LLM config from agent configuration
+            # Get LLM config - PRIORITIZE system settings over agent's stored config
+            # This ensures agents use the LLM provider selected in Settings UI (e.g., HuggingFace for testing)
             config = db_agent.configuration or {}
-            llm_config_dict = config.get("llm_config")
+            agent_llm_config = config.get("llm_config") or {}
             
-            if not llm_config_dict:
-                # Get from system settings (respects Settings UI)
-                self.logger.info(f"Agent {agent_id} has no llm_config, getting from system settings")
-                llm_config_dict = self._get_default_llm_config_from_settings()
+            # Always get system settings first (respects Settings UI selection)
+            system_llm_config = self._get_default_llm_config_from_settings()
+            
+            # Merge: system settings for provider/model, agent config for temperature/max_tokens (if set)
+            # This allows system-wide LLM changes while preserving agent-specific generation parameters
+            llm_config_dict = {
+                "provider": system_llm_config.get("provider"),  # Use system provider (e.g., HuggingFace)
+                "model": system_llm_config.get("model"),  # Use system model
+                "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
+                "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
+            }
+            
+            self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings)")
             
             # Create LLM manager
             provider = LLMProvider(llm_config_dict.get("provider", "openai"))

@@ -14,10 +14,13 @@ This demonstrates how the Database Knowledge Source integrates with:
 import asyncio
 import hashlib
 import json
+import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import sqlparse
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
@@ -132,12 +135,38 @@ class DatabaseKnowledgeService:
         # Step 2: Create database source record
         from models.database_knowledge import DatabaseKnowledgeSource
         from database.database import SessionLocal
+        from sqlalchemy.exc import IntegrityError
         
         db_session = SessionLocal()
         try:
+            # Check if source already exists (trim whitespace for comparison)
+            name_trimmed = name.strip()
+            existing = db_session.query(DatabaseKnowledgeSource).filter(
+                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.name == name_trimmed
+            ).first()
+            
+            # Also check for name with trailing/leading spaces (case-insensitive)
+            if not existing:
+                existing = db_session.query(DatabaseKnowledgeSource).filter(
+                    DatabaseKnowledgeSource.tenant_id == tenant_id,
+                    DatabaseKnowledgeSource.name.ilike(name_trimmed)
+                ).first()
+            
+            if existing:
+                # Update existing source instead of creating duplicate
+                existing.name = name_trimmed  # Normalize name (remove trailing spaces)
+                existing.description = description
+                existing.credential_id = credential_id
+                existing.is_active = True
+                db_session.commit()
+                db_session.refresh(existing)
+                logger.info(f"Updated existing database source '{name_trimmed}' (ID: {existing.id})")
+                return existing
+            
             db_source = DatabaseKnowledgeSource(
                 tenant_id=tenant_id,
-                name=name,
+                name=name_trimmed,  # Use trimmed name
                 description=description,
                 credential_id=credential_id,  # Use credential_id (as per current schema)
                 dialect='postgresql',  # TODO: detect from credentials
@@ -150,6 +179,24 @@ class DatabaseKnowledgeService:
             db_session.refresh(db_source)
             
             result = db_source
+        except IntegrityError as e:
+            db_session.rollback()
+            # Check again in case of race condition (with trimmed name)
+            existing = db_session.query(DatabaseKnowledgeSource).filter(
+                DatabaseKnowledgeSource.tenant_id == tenant_id,
+                DatabaseKnowledgeSource.name.ilike(name_trimmed)
+            ).first()
+            if existing:
+                # Update and activate the existing source
+                existing.name = name_trimmed
+                existing.description = description
+                existing.credential_id = credential_id
+                existing.is_active = True
+                db_session.commit()
+                db_session.refresh(existing)
+                logger.info(f"Database source '{name_trimmed}' already exists, updated and activated (ID: {existing.id})")
+                return existing
+            raise
         finally:
             db_session.close()
         

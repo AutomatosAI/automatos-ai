@@ -26,7 +26,10 @@ import pickle
 from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from psycopg2.extras import RealDictCursor
+import psycopg2
 from models import RAGConfiguration
+from database.database import get_database_url
 
 logger = logging.getLogger(__name__)
 
@@ -147,17 +150,19 @@ class RAGService:
         logger.info(f"RAG Service using {provider_info['provider']} embeddings (model: {provider_info.get('model', 'N/A')})")
         
         self.vector_store = VectorStore()
+        self.last_hydration: Optional[datetime] = None
         self.cache = {}  # Simple query cache
         self.cache_ttl = 300  # 5 minutes
+        # If the persisted cache is empty, hydrate from PostgreSQL knowledge base
+        if not self.vector_store.documents:
+            self._hydrate_vector_store_from_db(initial_load=True)
         logger.info("RAG Service initialized")
     
-    def _generate_embedding(self, text: str) -> np.ndarray:
+    async def _generate_embedding(self, text: str) -> np.ndarray:
         """Generate embedding using centralized embedding manager"""
-        import asyncio
         try:
             # Use centralized embedding manager
-            loop = asyncio.get_event_loop()
-            embedding = loop.run_until_complete(self.embedding_manager.generate_embedding(text))
+            embedding = await self.embedding_manager.generate_embedding(text)
             return np.array(embedding)
         except Exception as e:
             logger.error(f"Failed to generate embedding: {e}")
@@ -165,7 +170,7 @@ class RAGService:
             dimension = self.embedding_manager.get_dimension()
             return np.zeros(dimension)
     
-    def add_document(self, content: str, metadata: Dict[str, Any] = None, source: str = "user") -> str:
+    async def add_document(self, content: str, metadata: Dict[str, Any] = None, source: str = "user") -> str:
         """Add a new document to the RAG system"""
         doc_id = hashlib.md5(content.encode()).hexdigest()
         
@@ -176,14 +181,149 @@ class RAGService:
             source=source
         )
         
-        doc.embedding = self._generate_embedding(content)
+        doc.embedding = await self._generate_embedding(content)
         self.vector_store.add_document(doc)
         self.vector_store.save_to_disk()
         
         logger.info(f"Added document {doc_id} to RAG system")
         return doc_id
+
+    def _get_db_connection_string(self) -> Optional[str]:
+        """Resolve database connection string via credential resolver fallback."""
+        try:
+            return get_database_url()
+        except Exception as exc:
+            logger.warning(f"Credential resolver database lookup failed, falling back to env: {exc}")
+            return os.getenv("DATABASE_URL")
+
+    def _hydrate_vector_store_from_db(self, initial_load: bool = False, force: bool = False):
+        """
+        Populate in-memory vector store with chunks stored in document_chunks table.
+        Runs on startup and periodically so RAG always has data even if /tmp cache is wiped.
+        
+        FLEXIBLE: Auto-detects stored embedding dimensions and adapts embedding_manager if needed.
+        """
+        # Skip if we recently hydrated and already have vectors
+        if not force and not initial_load:
+            if self.vector_store.embeddings and self.last_hydration:
+                if datetime.now() - self.last_hydration < timedelta(minutes=5):
+                    return
+        
+        conn_str = self._get_db_connection_string()
+        if not conn_str:
+            logger.warning("RAG hydration skipped: database URL unavailable")
+            return
+        
+        conn = None
+        cursor = None
+        try:
+            conn = psycopg2.connect(conn_str)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                """
+                SELECT 
+                    dc.id AS chunk_id,
+                    dc.document_id,
+                    dc.content,
+                    dc.embedding,
+                    dc.metadata,
+                    d.filename,
+                    d.description
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE dc.embedding IS NOT NULL
+                ORDER BY dc.id
+                """
+            )
+            rows = cursor.fetchall()
+        except Exception as exc:
+            logger.error(f"Failed to hydrate RAG vector cache from Postgres: {exc}")
+            return
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        
+        if not rows:
+            logger.warning("No document chunks found in database; RAG context store remains empty")
+            return
+        
+        # FLEXIBLE DIMENSION DETECTION: Check first embedding's dimension
+        detected_dimension = None
+        if rows:
+            first_embedding = rows[0].get("embedding")
+            if first_embedding:
+                try:
+                    if isinstance(first_embedding, str):
+                        embedding_values = json.loads(first_embedding)
+                    else:
+                        embedding_values = first_embedding
+                    detected_dimension = len(embedding_values)
+                    logger.info(f"🔍 Detected stored embedding dimension: {detected_dimension}d")
+                except Exception as e:
+                    logger.warning(f"Could not detect embedding dimension: {e}")
+        
+        # AUTO-ADAPT: If dimension mismatch detected, reload embedding_manager from settings
+        current_dimension = self.embedding_manager.get_dimension()
+        if detected_dimension and detected_dimension != current_dimension:
+            logger.warning(
+                f"⚠️  DIMENSION MISMATCH: Stored embeddings are {detected_dimension}d "
+                f"but embedding_manager is configured for {current_dimension}d"
+            )
+            logger.warning(
+                f"💡 FIX: Update 'vector_store_dimensions' in system_settings to {detected_dimension}, "
+                f"then restart the backend to match your stored embeddings"
+            )
+            logger.info(
+                f"🔧 For now, RAG will skip retrieval to avoid matrix errors. "
+                f"Please configure correct embedding model in Settings UI."
+            )
+        
+        # Reset store before repopulating so we don't carry stale embeddings
+        self.vector_store.documents.clear()
+        self.vector_store.embeddings.clear()
+        
+        loaded = 0
+        for row in rows:
+            embedding_raw = row.get("embedding")
+            if not embedding_raw:
+                continue
+            try:
+                if isinstance(embedding_raw, str):
+                    embedding_values = json.loads(embedding_raw)
+                else:
+                    embedding_values = embedding_raw
+                vector = np.array(embedding_values, dtype=np.float32)
+            except Exception as exc:
+                logger.warning(f"Skipping chunk {row.get('chunk_id')} due to invalid embedding: {exc}")
+                continue
+            
+            metadata = row.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {"raw_metadata": metadata}
+            metadata.setdefault("document_id", row.get("document_id"))
+            if row.get("filename"):
+                metadata.setdefault("source_file", row["filename"])
+            
+            doc = Document(
+                id=f"chunk_{row['chunk_id']}",
+                content=row["content"],
+                metadata=metadata,
+                source=row.get("filename") or metadata.get("source_file") or "knowledge-base"
+            )
+            doc.embedding = vector
+            self.vector_store.add_document(doc)
+            loaded += 1
+        
+        self.vector_store.save_to_disk()
+        self.last_hydration = datetime.now()
+        logger.info(f"Hydrated RAG vector cache with {loaded} chunks from database")
     
-    def retrieve_context(
+    async def retrieve_context(
         self, 
         query: str, 
         top_k: int = 5,
@@ -203,6 +343,9 @@ class RAGService:
             List of SearchResult objects
         """
         
+        # Ensure our in-memory cache is hydrated with the latest knowledge base
+        self._hydrate_vector_store_from_db()
+        
         logger.info(f"🔍 RAG retrieve_context called: query='{query[:100]}', top_k={top_k}, min_similarity={min_similarity}")
         
         # Check cache
@@ -214,7 +357,7 @@ class RAGService:
                 return cached_results
         
         # Generate query embedding
-        query_embedding = self._generate_embedding(query)
+        query_embedding = await self._generate_embedding(query)
         logger.debug(f"📊 Query embedding generated: shape={query_embedding.shape}")
         
         # Search vector store
@@ -269,7 +412,7 @@ class RAGService:
         
         return results
     
-    def enhance_prompt_with_context(
+    async def enhance_prompt_with_context(
         self,
         original_prompt: str,
         task_type: Optional[str] = None,
@@ -288,7 +431,7 @@ class RAGService:
         """
         
         # Retrieve relevant context
-        results = self.retrieve_context(
+        results = await self.retrieve_context(
             query=original_prompt,
             top_k=5,
             category_filter=task_type

@@ -32,6 +32,33 @@ export default function GeneralSettingsTab({
 }: GeneralSettingsTabProps) {
   const [formData, setFormData] = useState<Record<string, string>>({})
 
+  const MODEL_DIMENSIONS: Record<string, Record<string, number>> = {
+    openai: {
+      'text-embedding-3-small': 1536,
+      'text-embedding-3-large': 3072,
+      'text-embedding-ada-002': 1536
+    },
+    google: {
+      'text-embedding-004': 768,
+      'textembedding-gecko': 768
+    },
+    cohere: {
+      'embed-english-v3.0': 1024,
+      'embed-multilingual-v3.0': 1024
+    },
+    huggingface_local: {
+      'all-MiniLM-L6-v2': 384,
+      'all-mpnet-base-v2': 768,
+      'bge-large-en-v1.5': 1024,
+      'e5-large-v2': 1024
+    },
+    huggingface_api: {
+      'sentence-transformers/all-MiniLM-L6-v2': 384,
+      'sentence-transformers/all-mpnet-base-v2': 768,
+      'sentence-transformers/bge-large-en-v1.5': 1024
+    }
+  }
+
   // Initialize form data from settings
   React.useEffect(() => {
     const initialData: Record<string, string> = {}
@@ -44,8 +71,26 @@ export default function GeneralSettingsTab({
     setFormData(initialData)
   }, [settings])
 
+  React.useEffect(() => {
+    const provider = formData.embedding_provider
+    const model = formData.embedding_model
+    if (!provider || !model) return
+    const mappedDimension = MODEL_DIMENSIONS[provider]?.[model]
+    if (!mappedDimension) return
+    if (formData.vector_store_dimensions !== mappedDimension.toString()) {
+      setFormData(prev => ({ ...prev, vector_store_dimensions: mappedDimension.toString() }))
+    }
+  }, [formData.embedding_provider, formData.embedding_model])
+
   const handleInputChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
+  }
+
+  const applyModelSelection = (provider: string, model: string) => {
+    handleInputChange('embedding_model', model)
+    if (provider === 'openai') handleInputChange('openai_embedding_model', model)
+    const mappedDimension = MODEL_DIMENSIONS[provider]?.[model]
+    if (mappedDimension) handleInputChange('vector_store_dimensions', mappedDimension.toString())
   }
 
   const handleSave = () => {
@@ -138,7 +183,11 @@ export default function GeneralSettingsTab({
               <Label htmlFor="embedding_provider">Embedding Provider</Label>
               <Select
                 value={formData.embedding_provider || ''}
-                onValueChange={(value) => handleInputChange('embedding_provider', value)}
+                onValueChange={(value) => {
+                  handleInputChange('embedding_provider', value)
+                  const defaultModel = Object.keys(MODEL_DIMENSIONS[value] || {})[0]
+                  if (defaultModel) applyModelSelection(value, defaultModel)
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select embedding provider" />
@@ -162,7 +211,11 @@ export default function GeneralSettingsTab({
               <Label htmlFor="embedding_model">Embedding Model</Label>
               <Select
                 value={formData.embedding_model || ''}
-                onValueChange={(value) => handleInputChange('embedding_model', value)}
+                onValueChange={(value) => {
+                  const provider = formData.embedding_provider
+                  if (provider) applyModelSelection(provider, value)
+                  else handleInputChange('embedding_model', value)
+                }}
                 disabled={!formData.embedding_provider || formData.embedding_provider === 'disabled'}
               >
                 <SelectTrigger>

@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 # PHASE 1: Import ContextOptimizer components
 try:
-    from context_engineering.context_optimizer import ContextOptimizer, ContextItem
+    from context_engineering.context_optimizer import ContextOptimizer, ContextItem, AtomicPrompt
     CONTEXT_OPTIMIZER_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"ContextOptimizer not available: {e}. Falling back to basic RAG.")
@@ -76,6 +76,12 @@ class ContextEnhancement:
     code_results: List[Dict[str, Any]] = field(default_factory=list)
     num_code_symbols: int = 0
     used_code_context: bool = False
+    
+    @property
+    def context_quality(self) -> float:
+        """Alias for context_quality_score for frontend compatibility"""
+        return self.context_quality_score
+
 
 
 class ContextEngineeringIntegrator:
@@ -235,7 +241,7 @@ class ContextEngineeringIntegrator:
         agent_type = subtask.get("agent_type", "worker")
         priority = subtask.get("priority", "medium")
         
-        self.logger.info(f"🔍 STAGE 2 START: Enhancing {subtask_id}")
+        self.logger.info(f"🔍 STAGE 3 START: Enhancing {subtask_id}")
         self.logger.info(f"  📝 Description: {description[:100]}...")
         self.logger.info(f"  🤖 Agent Type: {agent_type}")
         self.logger.info(f"  ⚡ Priority: {priority}")
@@ -309,7 +315,7 @@ class ContextEngineeringIntegrator:
         
         retrieval_time = int((datetime.now() - start_time).total_seconds() * 1000)
         
-        self.logger.info(f"🎯 STAGE 2 COMPLETE: {subtask_id}")
+        self.logger.info(f"🎯 STAGE 3 COMPLETE: {subtask_id}")
         self.logger.info(f"  📊 Quality={context_quality:.2%}, Sources={num_sources}, Tokens={total_tokens}, Time={retrieval_time}ms")
         self.logger.info(f"  ✅ Optimization={'YES' if used_optimization else 'NO'}, Prompt_length={len(enhanced_prompt)} chars")
         
@@ -376,7 +382,7 @@ class ContextEngineeringIntegrator:
             rag_service = get_rag_service()
             
             # Get enhanced prompt with context
-            enhanced_prompt, metadata = rag_service.enhance_prompt_with_context(
+            enhanced_prompt, metadata = await rag_service.enhance_prompt_with_context(
                 original_prompt=query,
                 max_context_tokens=2000
             )
@@ -634,7 +640,7 @@ class ContextEngineeringIntegrator:
         try:
             # Lazy initialization of vector store
             if not self.vector_store:
-                from database.session import get_db_session_string
+                from database.database import get_database_url as get_db_session_string
                 db_string = get_db_session_string()
                 self.vector_store = PgVectorStore(connection_string=db_string)
                 await self.vector_store.initialize(dimension=1536)

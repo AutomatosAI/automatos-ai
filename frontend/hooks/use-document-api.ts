@@ -181,7 +181,25 @@ export function useDocumentSearch(query: string, filters: any = {}, enabled: boo
 export function useSemanticSearch(query: string, options: any = {}, enabled: boolean = true) {
   return useQuery({
     queryKey: [...documentQueryKeys.semanticSearch(query), options],
-    queryFn: () => apiClient.getDocuments(), // Use regular API until semantic endpoint exists
+    queryFn: async () => {
+      const response = await apiClient.semanticSearch(query, options)
+      // Transform API response to match component expectations
+      if (response && response.results) {
+        return response.results.map((result: any) => ({
+          document_id: result.document_id,
+          document_name: result.source?.filename || 'Untitled Document',
+          document_type: result.source?.file_type || 'Document',
+          relevance_score: result.similarity,
+          matched_content: result.excerpt,
+          preview: result.preview,
+          chunk_index: result.chunk_index,
+          page_number: result.metadata?.page_number,
+          section: result.metadata?.section,
+          last_updated: result.source?.upload_date
+        }))
+      }
+      return []
+    },
     enabled: enabled && query.length > 2,
     retry: 1,
     staleTime: 30000,

@@ -974,8 +974,11 @@ class SkillLoader:
             self.core_content_cache[skill_name] = core_content
             
             # Log token estimate
-            tokens = estimate_tokens(core_content)
-            logger.info(f"Loaded core content for {skill_name}: ~{tokens} tokens")
+            if core_content:
+                tokens = estimate_tokens(core_content)
+                logger.info(f"Loaded core content for {skill_name}: ~{tokens} tokens")
+            else:
+                logger.warning(f"No core content found for {skill_name}")
             
             return core_content
             

@@ -24,6 +24,17 @@
     --border: 0 0% 15%;
     --input: 0 0% 15%;
     --ring: 16 100% 60%;
+    
+    /* Stage colors for 9-stage pipeline */
+    --stage-1: 187 100% 42%;
+    --stage-2: 330 81% 71%;
+    --stage-3: 43 96% 56%;
+    --stage-4: 271 91% 65%;
+    --stage-5: 160 84% 39%;
+    --stage-6: 24 95% 53%;
+    --stage-7: 217 91% 60%;
+    --stage-8: 330 81% 60%;
+    --stage-9: 160 84% 39%;
   }
 }
 
@@ -59,6 +70,162 @@
   .card-glow:hover {
     box-shadow: 0 0 40px rgba(255, 107, 53, 0.2);
   }
+
+  /* Glass Mission Control - Execution Theater */
+  
+  .glass-panel {
+    background: hsla(var(--card) / 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid hsla(var(--border) / 0.7);
+    box-shadow: 
+      0 18px 45px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  
+  .glass-panel-light {
+    background: hsla(var(--card) / 0.85);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid hsla(var(--border) / 0.5);
+  }
+
+  .theater-bg {
+    background: transparent;
+  }
+
+  .stage-completed {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+  }
+  
+  .stage-active {
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.2) 0%, rgba(255, 107, 53, 0.08) 100%);
+    border-color: rgba(255, 107, 53, 0.6);
+    box-shadow: 
+      0 0 30px rgba(255, 107, 53, 0.3),
+      0 0 60px rgba(255, 107, 53, 0.15);
+    animation: stage-pulse 2s ease-in-out infinite;
+  }
+  
+  .stage-pending {
+    background: rgba(20, 20, 25, 0.4);
+    border-color: rgba(60, 60, 70, 0.3);
+  }
+
+  @keyframes stage-pulse {
+    0%, 100% {
+      box-shadow: 
+        0 0 30px rgba(255, 107, 53, 0.3),
+        0 0 60px rgba(255, 107, 53, 0.15);
+    }
+    50% {
+      box-shadow: 
+        0 0 40px rgba(255, 107, 53, 0.5),
+        0 0 80px rgba(255, 107, 53, 0.25);
+    }
+  }
+
+  .glow-orange { box-shadow: 0 0 20px rgba(255, 107, 53, 0.4); }
+  .glow-primary { box-shadow: 0 0 25px rgba(255, 107, 53, 0.4); }
+  .glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); }
+  .glow-blue { box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
+
+  .log-entry {
+    background: hsla(var(--card) / 0.85);
+    border: 1px solid hsla(var(--border) / 0.5);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+  }
+  
+  .log-entry:hover {
+    background: hsla(var(--card) / 0.95);
+    border-color: hsla(var(--border) / 0.8);
+  }
+  
+  .log-entry-success { border-left: 3px solid rgba(16, 185, 129, 0.8); }
+  .log-entry-error { border-left: 3px solid rgba(239, 68, 68, 0.8); }
+  .log-entry-info { border-left: 3px solid rgba(59, 130, 246, 0.8); }
+  .log-entry-warning { border-left: 3px solid rgba(245, 158, 11, 0.8); }
+  .log-entry-agent { border-left: 3px solid rgba(168, 85, 247, 0.8); }
+
+  @keyframes log-slide-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  .log-entry-new { animation: log-slide-in 0.3s ease-out; }
+
+  .progress-shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite linear;
+  }
+  
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  .circular-progress { transform: rotate(-90deg); }
+  .circular-progress-bg { stroke: rgba(255, 255, 255, 0.1); }
+  .circular-progress-fill {
+    stroke: hsl(var(--primary));
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.5s ease;
+  }
+
+  .metrics-card {
+    background: hsla(var(--card) / 0.85);
+    border: 1px solid hsla(var(--border) / 0.5);
+    border-radius: 16px;
+    padding: 1rem;
+  }
+
+  .stage-connector {
+    height: 2px;
+    background: linear-gradient(90deg, rgba(60, 60, 70, 0.3) 0%, rgba(60, 60, 70, 0.5) 50%, rgba(60, 60, 70, 0.3) 100%);
+  }
+  
+  .stage-connector-active {
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.6) 0%, rgba(255, 107, 53, 0.8) 100%);
+  }
+  
+  .stage-connector-completed {
+    background: rgba(16, 185, 129, 0.5);
+  }
+
+  @keyframes flow-right {
+    from { transform: translateX(-100%); opacity: 0; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+  }
+  
+  .flow-particle { animation: flow-right 1.5s ease-in-out infinite; }
+
+  .theater-scrollbar::-webkit-scrollbar { width: 6px; }
+  .theater-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 3px; }
+  .theater-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+  .theater-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+
+  .agent-avatar {
+    background: linear-gradient(135deg, rgba(255, 107, 53, 0.3) 0%, rgba(249, 115, 22, 0.3) 100%);
+    border: 2px solid rgba(255, 107, 53, 0.4);
+  }
+  
+  .agent-avatar-active { animation: avatar-pulse 2s ease-in-out infinite; }
+  
+  @keyframes avatar-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 107, 53, 0); }
+  }
+
+  .font-mono-logs {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Monaco, monospace;
+    font-feature-settings: 'liga' 1, 'calt' 1;
+  }
 }
 
 html {
@@ -73,7 +240,7 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .parallax-bg {
-    background-attachment: scroll;
-  }
+  .parallax-bg { background-attachment: scroll; }
+  .stage-active, .progress-shimmer, .flow-particle, .agent-avatar-active { animation: none; }
 }
+

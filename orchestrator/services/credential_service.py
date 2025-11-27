@@ -129,7 +129,8 @@ class CredentialStore:
         existing = self.db.query(Credential).filter(
             and_(
                 Credential.name == credential_data.name,
-                Credential.environment == credential_data.environment
+                Credential.environment == credential_data.environment,
+                Credential.is_active == True  # Only block duplicates for active creds
             )
         ).first()
         

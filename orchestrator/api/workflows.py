@@ -30,6 +30,109 @@ from services.workspace_manager import WorkspaceManager
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
 
+
+class WorkflowStageTracker:
+    """Track 9-stage workflow execution with SSE events"""
+    STAGES = {
+        1: "Task Decomposition",
+        2: "Agent Selection",
+        3: "Context Engineering",
+        4: "Agent Execution",
+        5: "Result Aggregation",
+        6: "Learning Update",
+        7: "Quality Assessment",
+        8: "Memory Storage",
+        9: "Response Generation"
+    }
+    
+    def __init__(self, execution_id: int, redis_client=None, stream_manager=None):
+        self.execution_id = execution_id
+        self.redis = redis_client
+        self.stream_manager = stream_manager
+        self.current_stage = 0
+        self.stage_start_times = {}
+    
+    async def start_stage(self, stage_num: int):
+        """Mark stage as started, emit SSE event"""
+        self.current_stage = stage_num
+        self.stage_start_times[stage_num] = datetime.now()
+        
+        logger.info(f"🎯 STAGE {stage_num} START: {self.STAGES[stage_num]}")
+        
+        # Emit SSE event DIRECTLY to stream manager for instant UI updates
+        if self.stream_manager:
+            try:
+                await self.stream_manager.broadcast_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_start",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to broadcast stage_start event: {e}")
+        
+        # Also publish to Redis for logging/monitoring (optional)
+        if self.redis:
+            try:
+                self.redis.publish_workflow_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_start",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to publish stage_start to Redis: {e}")
+    
+    async def complete_stage(self, stage_num: int, result: dict = None):
+        """Mark stage as complete, emit SSE event"""
+        duration_ms = 0
+        if stage_num in self.stage_start_times:
+            duration_ms = int((datetime.now() - self.stage_start_times[stage_num]).total_seconds() * 1000)
+        
+        logger.info(f"✅ STAGE {stage_num} COMPLETE: {self.STAGES[stage_num]} ({duration_ms}ms)")
+        
+        # Emit SSE event DIRECTLY to stream manager for instant UI updates
+        if self.stream_manager:
+            try:
+                await self.stream_manager.broadcast_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_complete",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "result": result or {},
+                        "duration_ms": duration_ms,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to broadcast stage_complete event: {e}")
+        
+        # Also publish to Redis for logging/monitoring (optional)
+        if self.redis:
+            try:
+                self.redis.publish_workflow_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_complete",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "result": result or {},
+                        "duration_ms": duration_ms,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to publish stage_complete to Redis: {e}")
+
+
+
 @router.get("")
 async def list_workflows(
     skip: int = Query(0, ge=0),
@@ -1133,9 +1236,20 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             else:
                 logger.warning("Redis client not initialized for execution_started event")
             
+            # Initialize SSE stream manager for instant UI updates
+            from services.workflow_streaming_service import get_stream_manager
+            stream_manager = get_stream_manager()
+            
+            # Initialize stage tracker for 9-stage workflow with stream manager
+            stage_tracker = WorkflowStageTracker(execution_id, redis_client, stream_manager=stream_manager)
+
+            
             # Check if workflow already has explicit tasks defined
             workflow_def = workflow.workflow_definition or {}
             predefined_tasks = workflow_def.get("tasks", [])
+            
+            # ========== STAGE 1: TASK DECOMPOSITION ==========
+            await stage_tracker.start_stage(1)
             
             if predefined_tasks and len(predefined_tasks) > 0:
                 # Use predefined tasks instead of decomposing
@@ -1205,7 +1319,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         {"description": "Finalize results", "estimated_duration": "20 seconds", "agent_type": "orchestrator"}
                     ]
             
+            await stage_tracker.complete_stage(1, {"subtasks": len(steps)})
+            
+            # ========== STAGE 2: AGENT SELECTION ==========
+            await stage_tracker.start_stage(2)
             # INTELLIGENT AGENT SELECTION
+
             logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
             
             # Check if we should use smart grouping
@@ -1223,6 +1342,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 task.get("required_agent_id") for task in steps
             ) if isinstance(steps, list) else False
             
+            agent_assignments = {}
             try:
                 logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
                 
@@ -1376,6 +1496,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             "match_score": best_match.match_score
                         }
                 
+                await stage_tracker.complete_stage(2, {
+                    "agents_assigned": len(agent_assignments),
+                    "avg_match_score": selection_summary.get('avg_match_score', 0)
+                })
+            
             except Exception as e:
                 logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
                 logger.error(f"❌ Full traceback:", exc_info=True)
@@ -1383,10 +1508,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                # Initialize empty assignments to prevent error
-                agent_assignments = {}
+                
+                await stage_tracker.complete_stage(2, {"agents_assigned": len(agent_assignments)})
             
             # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
             logger.info(f"🧠 Initializing memory system...")
@@ -1453,9 +1576,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 # Ensure memory_integrator is None so we know it's not available
                 memory_integrator = None
             
-            # CONTEXT ENGINEERING INTEGRATION (LLM-Decided)
-            # PRD-17: Only run context engineering if LLM determined it's needed
-            subtasks_needing_context = [s for s in steps if s.get("requires_context", False)]
+            # ========== STAGE 3: CONTEXT ENGINEERING ==========
+            await stage_tracker.start_stage(3)
+            
+            # CONTEXT ENGINEERING INTEGRATION (FORCED FOR ALL SUBTASKS)
+            # FIX: Force all subtasks to get context engineering (was being skipped by LLM)
+            subtasks_needing_context = steps  # All subtasks get context
             
             try:
                 if subtasks_needing_context:
@@ -1509,7 +1635,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     # Merge enhanced subtasks back into steps (preserve order)
                     for i, step in enumerate(steps):
                         if step.get("subtask_id") in context_enhancements:
-                            steps[i]["context_enhancement"] = context_enhancements[step["subtask_id"]]
+                            enh = context_enhancements[step["subtask_id"]]
+                            # Convert to dict and add context_quality alias for frontend compatibility
+                            from dataclasses import asdict
+                            enh_dict = asdict(enh)
+                            enh_dict["context_quality"] = enh.context_quality_score  # Add alias
+                            steps[i]["context_enhancement"] = enh_dict
                 else:
                     logger.info(f"⚡ Skipping context engineering - LLM determined no subtasks need external context (token savings!)")
                     context_enhancements = {}
@@ -1524,6 +1655,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 db.commit()
                 # Initialize empty context_enhancements if error occurred
                 context_enhancements = {}
+            
+            await stage_tracker.complete_stage(3, {
+                "enhanced_subtasks": len(context_enhancements),
+                "avg_context_quality": execution.input_data.get("context_engineering", {}).get("summary", {}).get("avg_context_quality", 0)
+            })
+            
+            # ========== STAGE 4: AGENT EXECUTION ==========
+            await stage_tracker.start_stage(4)
             
             # DEBUG: Check what we have before agent execution
             logger.info(f"🔍 DEBUG: About to start agent execution")
@@ -1663,6 +1802,15 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     }
                     await asyncio.sleep(3)
             
+            await stage_tracker.complete_stage(4, {
+                "subtasks_executed": len(subtask_results) if 'subtask_results' in locals() else 0,
+                "success_rate": execution_summary.get("success_rate", 0) if 'execution_summary' in locals() else 0,
+                "total_tokens": execution_summary.get("total_tokens_used", 0) if 'execution_summary' in locals() else 0
+            })
+            
+            # ========== STAGE 5: RESULT AGGREGATION ==========
+            await stage_tracker.start_stage(5)
+            
             # RESULT AGGREGATION & QUALITY SCORING
             logger.info(f"📊 Aggregating results and calculating quality scores...")
             try:
@@ -1723,6 +1871,127 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
+            await stage_tracker.complete_stage(5, {
+                "overall_quality": aggregated_results.quality_scores.overall if 'aggregated_results' in locals() else 0,
+                "total_tokens": aggregated_results.total_tokens_used if 'aggregated_results' in locals() else 0
+            })
+            
+            # ========== STAGE 6: LEARNING UPDATE ==========
+            await stage_tracker.start_stage(6)
+            
+            # LEARNING SYSTEM UPDATE
+            logger.info(f"🎓 Updating learning system...")
+            try:
+                learning_updater = LearningSystemUpdater(db_session=db)
+                learning_updates = await learning_updater.update_from_execution(
+                    workflow_id=execution.workflow_id,
+                    execution_id=execution_id,
+                    aggregated_results=aggregated_results if 'aggregated_results' in locals() else None,
+                    subtask_executions=subtask_results if execution.input_data.get("agent_execution", {}).get("is_real") else {},
+                    decomposition_metadata=execution.input_data.get("decomposition", {}),
+                    context_metadata=execution.input_data.get("context_engineering", {})
+                )
+                
+                # Store learning updates
+                execution.input_data["learning_system"] = {
+                    "is_real": True,
+                    "updates": learning_updates,
+                    "summary": learning_updater.get_learning_summary()
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                
+                logger.info(
+                    f"✅ Learning system updated: {learning_updates['total_updates']} updates, "
+                    f"{len(learning_updates['agent_performance_updates'])} agents improved"
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Learning system update failed: {e}")
+                execution.input_data["learning_system"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+            
+            await stage_tracker.complete_stage(6, {
+                "total_updates": learning_updates.get("total_updates", 0) if 'learning_updates' in locals() else 0
+            })
+            
+            # ========== STAGE 7: QUALITY ASSESSMENT ==========
+            await stage_tracker.start_stage(7)
+            
+            # QUALITY ASSESSMENT
+            logger.info(f"🎯 Assessing workflow output quality...")
+            try:
+                from core.output_quality_assessor import OutputQualityAssessor, OutputType
+                
+                quality_assessor = OutputQualityAssessor(
+                    llm_client=None,  # Will use heuristic assessment
+                    use_llm=False
+                )
+                
+                # Build output summary for assessment
+                output_summary = f"""Workflow Execution Summary:
+- Subtasks: {len(steps)}
+- Success Rate: {execution_summary.get('success_rate', 0):.0%} if 'execution_summary' in locals() else 'N/A'
+- Overall Quality: {aggregated_results.quality_scores.overall:.0%} if 'aggregated_results' in locals() else 'N/A'
+- Total Tokens: {aggregated_results.total_tokens_used if 'aggregated_results' in locals() else 0}
+
+Subtask Results:
+{chr(10).join([f"- {step.get('description', 'Unknown')}: {step.get('execution_result', {}).get('status', 'unknown')}" for step in steps[:10]])}
+"""
+                
+                # Assess quality
+                quality_assessment = await quality_assessor.assess_quality(
+                    output=output_summary,
+                    requirements=task_description,
+                    output_type=OutputType.GENERAL,
+                    quality_threshold=0.7
+                )
+                
+                # Store quality assessment
+                execution.input_data["quality_assessment"] = {
+                    "is_real": True,
+                    "overall_score": quality_assessment.overall_score,
+                    "passes_threshold": quality_assessment.passes_threshold,
+                    "dimensions": {
+                        name: {
+                            "score": dim.score,
+                            "feedback": dim.feedback
+                        }
+                        for name, dim in quality_assessment.dimensions.items()
+                    },
+                    "strengths": quality_assessment.strengths,
+                    "weaknesses": quality_assessment.weaknesses,
+                    "improvement_suggestions": quality_assessment.improvement_suggestions
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                
+                logger.info(
+                    f"✅ Quality assessment complete: {quality_assessment.overall_score:.0%} overall score "
+                    f"({'PASS' if quality_assessment.passes_threshold else 'FAIL'})"
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Quality assessment failed: {e}")
+                execution.input_data["quality_assessment"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+            
+            await stage_tracker.complete_stage(7, {
+                "quality_score": quality_assessment.overall_score if 'quality_assessment' in locals() else 0,
+                "passes_threshold": quality_assessment.passes_threshold if 'quality_assessment' in locals() else False
+            })
+            
+            # ========== STAGE 8: MEMORY STORAGE ==========
+            await stage_tracker.start_stage(8)
+            
             # MEMORY STORAGE (Store experiences in agent memory)
             logger.info(f"💾 Storing execution experiences...")
             memory_storage_results = {}
@@ -1758,41 +2027,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
-            # LEARNING SYSTEM UPDATE
-            logger.info(f"🎓 Updating learning system...")
-            try:
-                learning_updater = LearningSystemUpdater(db_session=db)
-                learning_updates = await learning_updater.update_from_execution(
-                    workflow_id=execution.workflow_id,
-                    execution_id=execution_id,
-                    aggregated_results=aggregated_results,
-                    subtask_executions=subtask_results if execution.input_data.get("agent_execution", {}).get("is_real") else {},
-                    decomposition_metadata=execution.input_data.get("decomposition", {}),
-                    context_metadata=execution.input_data.get("context_engineering", {})
-                )
-                
-                # Store learning updates
-                execution.input_data["learning_system"] = {
-                    "is_real": True,
-                    "updates": learning_updates,
-                    "summary": learning_updater.get_learning_summary()
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                
-                logger.info(
-                    f"✅ Learning system updated: {learning_updates['total_updates']} updates, "
-                    f"{len(learning_updates['agent_performance_updates'])} agents improved"
-                )
-                
-            except Exception as e:
-                logger.error(f"❌ Learning system update failed: {e}")
-                execution.input_data["learning_system"] = {
-                    "is_real": False,
-                    "error": str(e)
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
             
             # MEMORY CONSOLIDATION (Consolidate learnings to long-term memory)
             logger.info(f"🧠 Consolidating learnings to long-term memory...")
@@ -1840,6 +2074,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
+            await stage_tracker.complete_stage(8, {
+                "experiences_stored": memory_storage_results.get('total_experiences', 0) if 'memory_storage_results' in locals() else 0,
+                "patterns_extracted": memory_consolidation_results.get('patterns_extracted', 0) if 'memory_consolidation_results' in locals() else 0
+            })
+            
+            # ========== STAGE 9: RESPONSE GENERATION ==========
+            await stage_tracker.start_stage(9)
+            
             # PRD-15: Save model usage summary to execution
             usage_summary = model_tracker.get_usage_summary()
             execution.models_used = usage_summary.get("records", [])
@@ -1852,6 +2094,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # Complete execution with COMPLETE orchestration pipeline data
             execution.status = ExecutionStatus.COMPLETED.value
             execution.completed_at = datetime.now()
+            
+            await stage_tracker.complete_stage(9, {
+                "status": "completed",
+                "total_cost": usage_summary.get("total_cost", 0)
+            })
             
             # Update workflow status and last_execution
             workflow.status = "completed"

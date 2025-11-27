@@ -72,7 +72,7 @@ def _map_dialect_to_introspector(dialect_value: Optional[str]) -> str:
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_database_sources(
     db: Session = Depends(get_db),
-    active_only: bool = True
+    active_only: bool = False  # Show all sources by default
 ):
     """
     List all database knowledge sources for the current tenant.

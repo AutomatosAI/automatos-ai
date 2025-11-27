@@ -26,7 +26,7 @@ async def _retrieve_from_vector_store(
     try:
         # Lazy initialization of vector store
         if not self.vector_store:
-            from database.session import get_db_session_string
+            from database.database import get_database_url as get_db_session_string
             db_string = get_db_session_string()
             self.vector_store = PgVectorStore(connection_string=db_string)
             await self.vector_store.initialize(dimension=1536)

@@ -7,9 +7,11 @@ REST API for code indexing and intelligent search.
 
 import os
 import logging
+import asyncio
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel, Field
 
 from database.database import get_db
@@ -303,14 +305,14 @@ async def reindex_project(
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
-    Re-index an existing project
+    Re-index an existing project (runs in background)
     
     **Use cases:**
     - Code has been updated
     - Need to refresh embeddings
     - Fix indexing errors
     
-    **Note:** Existing data will be replaced.
+    **Note:** Existing data will be replaced. Returns immediately, indexing runs in background.
     """
     try:
         # Get project details
@@ -326,23 +328,68 @@ async def reindex_project(
                 detail="Re-indexing only supported for GitHub projects"
             )
         
-        # Re-index using existing settings
-        result = await service.index_github_project(
-            project_name=project["name"],
-            github_url=project["source_url"],
-            branch=project["branch"] or "main"
+        # Store project details for background task
+        project_name = project["name"]
+        github_url = project["source_url"]
+        branch = project["branch"] or "main"
+        
+        # Update status to indexing immediately
+        service.db.execute(
+            text("UPDATE codegraph_projects SET status = 'indexing', updated_at = NOW() WHERE id = :id"),
+            {"id": project_id}
         )
+        service.db.commit()
+        
+        # Run indexing in background using asyncio task
+        async def run_indexing():
+            db = None
+            try:
+                # Create new service instance with new DB session for background task
+                db = next(get_db())
+                bg_service = CodeGraphService(db)
+                await bg_service.index_github_project(
+                    project_name=project_name,
+                    github_url=github_url,
+                    branch=branch
+                )
+            except Exception as e:
+                logger.error(f"Background indexing failed for project {project_id}: {e}", exc_info=True)
+                # Update status to failed
+                try:
+                    if db:
+                        db.execute(
+                            text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                            {"id": project_id}
+                        )
+                        db.commit()
+                    else:
+                        # Get new session if db wasn't created
+                        db = next(get_db())
+                        db.execute(
+                            text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                            {"id": project_id}
+                        )
+                        db.commit()
+                except Exception as update_error:
+                    logger.error(f"Failed to update project status: {update_error}")
+            finally:
+                if db:
+                    db.close()
+        
+        # Use asyncio.create_task for proper async background execution
+        asyncio.create_task(run_indexing())
         
         return {
-            "message": "Project re-indexed successfully",
-            **result
+            "message": "Re-indexing started in background",
+            "project_id": project_id,
+            "status": "indexing"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error re-indexing project: {e}")
-        raise HTTPException(status_code=500, detail=f"Re-indexing failed: {str(e)}")
+        logger.error(f"Error starting re-indexing: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start re-indexing: {str(e)}")
 
 
 @router.get("/health")
