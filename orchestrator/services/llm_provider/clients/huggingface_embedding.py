@@ -66,11 +66,23 @@ class HuggingFaceLocalEmbeddingProvider(BaseEmbeddingProvider):
             # Get actual dimension from loaded model
             return self.client.get_sentence_embedding_dimension()
         
-        # Map common models to dimensions
+        # Map common models to dimensions (fallback when model not loaded)
         dimension_map = {
+            # Short names
             "all-MiniLM-L6-v2": 384,
             "all-mpnet-base-v2": 768,
             "bge-large-en-v1.5": 1024,
+            "bge-m3": 1024,
             "e5-large-v2": 1024,
+            "gte-large-en-v1.5": 1024,
+            "nomic-embed-text-v1.5": 768,
+            # Full HuggingFace paths
+            "BAAI/bge-large-en-v1.5": 1024,
+            "BAAI/bge-m3": 1024,
+            "intfloat/e5-large-v2": 1024,
+            "Alibaba-NLP/gte-large-en-v1.5": 1024,
+            "nomic-ai/nomic-embed-text-v1.5": 768,
+            "sentence-transformers/all-MiniLM-L6-v2": 384,
+            "sentence-transformers/all-mpnet-base-v2": 768,
         }
         return dimension_map.get(self.config.model, self.config.dimension)

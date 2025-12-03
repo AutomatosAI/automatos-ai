@@ -83,3 +83,7 @@ tree-sitter-python>=0.23.0
 tree-sitter-javascript>=0.20.3
 tree-sitter-typescript>=0.20.5
 GitPython==3.1.40
+
+# RAG v2.0 - Hybrid Search & Reranking
+rank-bm25>=0.2.2
+flashrank>=0.2.0

@@ -13,7 +13,7 @@ import json
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
@@ -107,7 +107,9 @@ async def upload_document(
         file_type = "unknown"
         if file_extension in ['.pdf']:
             file_type = "pdf"
-        elif file_extension in ['.txt', '.md']:
+        elif file_extension in ['.md', '.markdown']:
+            file_type = "markdown"  # FIXED: Use markdown type for SmartChunker
+        elif file_extension in ['.txt']:
             file_type = "text"
         elif file_extension in ['.doc', '.docx']:
             file_type = "document"
@@ -1437,3 +1439,122 @@ async def get_usage_analytics(
     except Exception as e:
         logger.error(f"Error getting usage analytics: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting usage analytics: {str(e)}")
+
+
+# =============================================================================
+# DOCUMENT RE-PROCESSING ENDPOINTS (Phase 4 - Better RAG)
+# =============================================================================
+
+@router.post("/{document_id}/reprocess")
+async def reprocess_document(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Re-process a document with semantic chunking.
+    
+    Use after changing embedding models or to improve chunk quality.
+    """
+    try:
+        from services.rag_service import get_rag_service
+        
+        rag_service = get_rag_service()
+        result = await rag_service.reprocess_document(document_id)
+        
+        if result.get("success"):
+            return {
+                "status": "success",
+                "message": f"Document {document_id} re-processed successfully",
+                "chunk_count": result.get("chunk_count", 0)
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Re-processing failed")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error re-processing document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reprocess-all")
+async def reprocess_all_documents(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Re-process ALL documents with semantic chunking.
+    
+    ⚠️ Use after:
+    - Changing embedding model/dimensions
+    - Updating chunking strategy
+    - Migrating to new vector store
+    
+    Runs in background - check status via /status endpoint.
+    """
+    try:
+        from services.rag_service import get_rag_service
+        
+        # Run in background
+        async def run_reprocessing():
+            rag_service = get_rag_service()
+            result = await rag_service.reprocess_all_documents()
+            logger.info(f"Batch re-processing complete: {result}")
+        
+        import asyncio
+        background_tasks.add_task(lambda: asyncio.run(run_reprocessing()))
+        
+        return {
+            "status": "started",
+            "message": "Re-processing started in background. This may take several minutes.",
+            "note": "Check document status via GET /api/documents/ to monitor progress"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting batch re-processing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reprocess-status")
+async def get_reprocess_status(db: Session = Depends(get_db)):
+    """
+    Get status of document re-processing.
+    
+    Shows how many documents are pending, processing, completed.
+    """
+    try:
+        from sqlalchemy import text
+        
+        status_query = text("""
+            SELECT 
+                status,
+                COUNT(*) as count
+            FROM documents
+            GROUP BY status
+        """)
+        
+        result = db.execute(status_query)
+        status_counts = {row.status: row.count for row in result}
+        
+        total = sum(status_counts.values())
+        completed = status_counts.get('completed', 0)
+        pending = status_counts.get('pending', 0) + status_counts.get('pending_reprocess', 0)
+        processing = status_counts.get('processing', 0)
+        
+        return {
+            "total_documents": total,
+            "status_breakdown": status_counts,
+            "summary": {
+                "completed": completed,
+                "pending": pending,
+                "processing": processing,
+                "progress_percent": round((completed / total * 100) if total > 0 else 0, 1)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting re-process status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

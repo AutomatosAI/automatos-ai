@@ -370,7 +370,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(1536),
+    embedding vector(1024),
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -431,7 +431,7 @@ CREATE TABLE IF NOT EXISTS knowledge_items (
     title VARCHAR(500),
     content TEXT NOT NULL,
     summary TEXT,
-    embedding vector(1536),
+    embedding vector(1024),
     metadata JSONB DEFAULT '{}',
     quality_score FLOAT DEFAULT 0.0,
     importance_score FLOAT DEFAULT 0.0,
@@ -687,7 +687,7 @@ CREATE TABLE IF NOT EXISTS kb_entities (
     entity_type VARCHAR(100) NOT NULL,
     canonical_name VARCHAR(255),
     description TEXT,
-    embedding vector(1536),
+    embedding vector(1024),
     mention_count INTEGER DEFAULT 0,
     importance_score FLOAT DEFAULT 0.0,
     metadata JSONB DEFAULT '{}',

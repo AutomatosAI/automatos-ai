@@ -8,6 +8,8 @@ Gives agents access to:
 3. CodeGraph - Query codebase structure
 
 NO web search - keep it within platform knowledge bases.
+
+Uses ToolResultFormatter for consistent result formatting across all tools.
 """
 
 import logging
@@ -16,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from services.rag_service import RAGService
 from services.codegraph_service import CodeGraphService
+from services.tool_result_formatter import ToolResultFormatter
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -126,22 +130,16 @@ class AgentPlatformTools:
                 search_results = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=0.3  # Lower threshold to get more results
+                    min_similarity=config.RAG_MIN_SIMILARITY
                 )
                 
                 self.logger.info(f"  📊 RAG returned {len(search_results)} results")
                 
-                # Extract query keywords for smart content extraction
-                query_lower = query.lower()
-                query_terms = [term.strip() for term in query_lower.split() if len(term) > 2]
-                
-                # Format results for agent consumption
-                formatted = []
+                # Convert SearchResult objects to raw dicts for formatter
+                raw_results = []
                 for r in search_results[:limit]:
-                    # SearchResult has 'document' and 'score' attributes
                     doc_content = r.document.content if hasattr(r, 'document') else str(r)
-                    
-                    # Get document source/title - check multiple possible keys
+                    doc_source = 'Unknown'
                     if hasattr(r, 'document') and r.document:
                         meta = r.document.metadata or {}
                         doc_source = (
@@ -151,54 +149,24 @@ class AgentPlatformTools:
                             r.document.source or 
                             'knowledge-base'
                         )
-                    else:
-                        doc_source = 'Unknown'
-                    
-                    # Clean filename: remove hash prefixes
-                    clean_filename = doc_source
-                    if '_' in doc_source:
-                        parts = doc_source.split('_', 1)
-                        if len(parts) > 1 and len(parts[0]) >= 32:
-                            clean_filename = parts[1]
-                    
-                    # CONTENT EXTRACTION: Chunks are already filtered, just format for display
-                    excerpt = doc_content.strip()
-                    
-                    # Smart truncation to 800 chars at sentence/paragraph boundary
-                    if len(excerpt) > 800:
-                        truncated = excerpt[:800]
-                        last_period = truncated.rfind('.')
-                        last_newline = truncated.rfind('\n\n')
-                        cut_point = max(last_period, last_newline)
-                        
-                        if cut_point > 400:
-                            excerpt = truncated[:cut_point + 1].strip()
-                            if not excerpt.endswith('.'):
-                                excerpt += '.'
-                        else:
-                            excerpt = truncated.strip()
-                        excerpt += '...'
-                    
-                    formatted.append({
-                        "content": excerpt,
-                        "source": clean_filename,
-                        "title": clean_filename,
-                        "filename": clean_filename,
-                        "relevance": float(r.score) if hasattr(r, 'score') else 0.0,
+                    raw_results.append({
+                        "content": doc_content,
+                        "source": doc_source,
                         "similarity": float(r.score) if hasattr(r, 'score') else 0.0
                     })
                 
+                # Use unified formatter - NO MORE DUPLICATE LOGIC
+                formatted = ToolResultFormatter.format_documents(raw_results)
+                
                 self.logger.info(f"  ✅ Returning {len(formatted)} formatted results")
                 if formatted:
-                    self.logger.info(f"  📄 Sample: {formatted[0]['content'][:100]}...")
+                    self.logger.info(f"  📄 Sample: {formatted[0].get('excerpt', '')[:100]}...")
                 
-                return {
-                    "action": tool_name,
-                    "success": True if formatted else False,
-                    "result": formatted,
-                    "count": len(formatted),
-                    "message": f"Found {len(formatted)} relevant knowledge chunks." if formatted else "No relevant knowledge found."
-                }
+                # Return standardized format
+                return ToolResultFormatter.standardize_result(
+                    {"success": bool(formatted), "results": formatted},
+                    tool_name
+                )
             
             elif tool_name == "semantic_search":
                 # Use RAG service for semantic search as well
@@ -209,28 +177,28 @@ class AgentPlatformTools:
                 search_results = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=0.3
+                    min_similarity=config.RAG_MIN_SIMILARITY
                 )
                 
-                # Format results
-                formatted = []
+                # Convert to raw format for formatter
+                raw_results = []
                 for r in search_results[:limit]:
-                    # SearchResult has 'document' and 'score' attributes
                     doc_content = r.document.content if hasattr(r, 'document') else str(r)
-                    formatted.append({
-                        "content": doc_content[:500] + '...' if len(doc_content) > 500 else doc_content,
-                        "source": r.document.metadata.get('source', 'Unknown') if hasattr(r, 'document') else 'Unknown',
+                    doc_source = r.document.metadata.get('source', 'Unknown') if hasattr(r, 'document') and r.document.metadata else 'Unknown'
+                    raw_results.append({
+                        "content": doc_content,
+                        "source": doc_source,
                         "similarity": float(r.score) if hasattr(r, 'score') else 0.0
                     })
                 
+                # Use unified formatter
+                formatted = ToolResultFormatter.format_documents(raw_results)
+                
                 self.logger.info(f"  ✅ Found {len(formatted)} semantic results")
-                return {
-                    "action": tool_name,
-                    "success": True if formatted else False,
-                    "result": formatted,
-                    "count": len(formatted),
-                    "message": f"Found {len(formatted)} results."
-                }
+                return ToolResultFormatter.standardize_result(
+                    {"success": bool(formatted), "results": formatted},
+                    tool_name
+                )
             
             elif tool_name == "search_codebase":
                 query = parameters.get("query", "")
@@ -239,13 +207,10 @@ class AgentPlatformTools:
                 
                 if not self.code_graph:
                     self.logger.warning(f"  ⚠️ CodeGraphService not available (missing API key)")
-                    return {
-                        "action": tool_name,
-                        "success": False,
-                        "result": [],
-                        "count": 0,
-                        "message": "Codebase search unavailable - missing API key"
-                    }
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": "Codebase search unavailable - missing API key"},
+                        tool_name
+                    )
                 
                 self.logger.info(f"  🔍 Searching codebase: '{query}' in project '{project_name}'")
                 try:
@@ -260,48 +225,44 @@ class AgentPlatformTools:
                 except Exception as e:
                     # Project might not exist or name mismatch - return helpful message
                     self.logger.warning(f"  ⚠️ CodeGraph search failed: {str(e)}")
-                    return {
-                        "action": tool_name,
-                        "success": False,
-                        "result": [],
-                        "count": 0,
-                        "message": f"Codebase search unavailable - project '{project_name}' not found. Please index the codebase first."
-                    }
+                    return ToolResultFormatter.standardize_result(
+                        {"success": False, "error": f"Codebase search unavailable - project '{project_name}' not found. Please index the codebase first."},
+                        tool_name
+                    )
                 
-                # Format results
-                formatted = []
+                # Convert to raw format for formatter
+                raw_results = []
                 for r in results[:5]:
-                    formatted.append({
-                        "symbol": r.get("name", "Unknown"),
-                        "file": r.get("file_path", "Unknown"),
-                        "type": r.get("symbol_type", "symbol"),  # Note: it's 'symbol_type' not 'type'
-                        "code": r.get("code_snippet", "")[:600],  # Note: it's 'code_snippet' not 'content'
-                        "relevance": r.get("score", 0.8)  # Default score since DB doesn't return one
+                    raw_results.append({
+                        "symbol_name": r.get("name", "Unknown"),
+                        "file_path": r.get("file_path", "Unknown"),
+                        "symbol_type": r.get("symbol_type", "symbol"),
+                        "code": r.get("code_snippet", "")[:600],
+                        "score": r.get("score", 0.8)
                     })
                 
+                # Use unified formatter
+                formatted = ToolResultFormatter.format_code(raw_results)
+                
                 self.logger.info(f"  ✅ Found {len(formatted)} code results")
-                return {
-                    "tool": tool_name,
-                    "status": "success",
-                    "results": formatted,
-                    "count": len(formatted)
-                }
+                return ToolResultFormatter.standardize_result(
+                    {"success": bool(formatted), "results": formatted},
+                    tool_name
+                )
             
             else:
                 self.logger.error(f"  ❌ Unknown tool: {tool_name}")
-                return {
-                    "tool": tool_name,
-                    "status": "error",
-                    "error": f"Unknown tool: {tool_name}"
-                }
+                return ToolResultFormatter.standardize_result(
+                    {"success": False, "error": f"Unknown tool: {tool_name}"},
+                    tool_name
+                )
                 
         except Exception as e:
             self.logger.error(f"  ❌ Tool execution failed: {e}")
-            return {
-                "tool": tool_name,
-                "status": "error",
-                "error": str(e)
-            }
+            return ToolResultFormatter.standardize_result(
+                {"success": False, "error": str(e)},
+                tool_name
+            )
     
     def format_tool_results_for_prompt(
         self,
@@ -309,6 +270,7 @@ class AgentPlatformTools:
     ) -> str:
         """
         Format tool results into a context section for agent prompt.
+        Uses ToolResultFormatter for consistent formatting.
         
         Args:
             tool_results: Results from tool executions
@@ -316,45 +278,25 @@ class AgentPlatformTools:
         Returns:
             Formatted context string
         """
-        
         if not tool_results:
             return ""
         
         context_parts = ["## Research Results from Your Tool Calls:", ""]
         
         for idx, result in enumerate(tool_results, 1):
-            if result.get("status") != "success":
-                context_parts.append(f"### Tool Call {idx}: {result.get('tool')} - FAILED")
+            tool_name = result.get("metadata", {}).get("tool") or result.get("tool", "Unknown")
+            
+            if not result.get("success"):
+                context_parts.append(f"### Tool Call {idx}: {tool_name} - FAILED")
                 context_parts.append(f"Error: {result.get('error', 'Unknown error')}")
                 context_parts.append("")
                 continue
             
-            tool_name = result.get("tool", "Unknown")
-            results = result.get("results", [])
-            
-            context_parts.append(f"### Tool Call {idx}: {tool_name}")
-            context_parts.append(f"Found {len(results)} results:")
+            # Use unified formatter for LLM context
+            llm_context = ToolResultFormatter.format_for_llm(result, tool_name, max_chars=1500)
+            context_parts.append(f"### Tool Call {idx}:")
+            context_parts.append(llm_context)
             context_parts.append("")
-            
-            for r_idx, r in enumerate(results[:3], 1):  # Show top 3
-                if tool_name == "search_knowledge":
-                    context_parts.append(f"**Result {r_idx}** (Source: {r.get('source', 'Unknown')}, Relevance: {r.get('relevance', 0):.0%})")
-                    context_parts.append(r.get('content', '')[:400])
-                
-                elif tool_name == "semantic_search":
-                    context_parts.append(f"**Result {r_idx}** ({r.get('source', 'Unknown')}, Similarity: {r.get('similarity', 0):.0%})")
-                    context_parts.append(r.get('content', '')[:400])
-                
-                elif tool_name == "search_codebase":
-                    context_parts.append(f"**Result {r_idx}** `{r.get('symbol', 'Unknown')}` ({r.get('type', 'symbol')})")
-                    context_parts.append(f"File: {r.get('file', 'Unknown')}")
-                    context_parts.append(f"```python\n{r.get('code', '')[:400]}\n```")
-                
-                context_parts.append("")
-            
-            if len(results) > 3:
-                context_parts.append(f"... and {len(results) - 3} more results")
-                context_parts.append("")
         
         context_parts.append("---")
         context_parts.append("")

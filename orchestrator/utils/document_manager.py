@@ -30,11 +30,19 @@ from docx import Document as DocxDocument
 from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
     MarkdownTextSplitter,
+    MarkdownHeaderTextSplitter,
     PythonCodeTextSplitter
 )
 from langchain_core.documents import Document
 # OpenAI embeddings handled by centralized manager
 import psycopg2
+
+# Use EXISTING SemanticChunker from context_engineering (NOT a duplicate!)
+try:
+    from context_engineering.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
+    SEMANTIC_CHUNKER_AVAILABLE = True
+except ImportError:
+    SEMANTIC_CHUNKER_AVAILABLE = False
 from psycopg2.extras import RealDictCursor
 import numpy as np
 
@@ -84,13 +92,17 @@ class DocumentChunk:
     content: str
     embedding: Optional[List[float]] = None
     metadata: Dict = None
+    parent_content: Optional[str] = None  # NEW: Parent section for context expansion
+    headers: Dict[str, str] = None  # NEW: Header hierarchy (h1, h2, h3)
     
     def to_dict(self) -> Dict:
         return {
             'document_id': self.document_id,
             'chunk_index': self.chunk_index,
             'content': self.content,
-            'metadata': self.metadata or {}
+            'metadata': self.metadata or {},
+            'parent_content': self.parent_content,
+            'headers': self.headers or {}
         }
 
 class DocumentProcessor:
@@ -190,36 +202,66 @@ class DocumentProcessor:
     
     def chunk_document(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
         """
-        Split document into chunks based on file type.
-        Uses intelligent chunking that prevents separator-only chunks.
+        Split document into chunks using EXISTING SemanticChunker.
+        
+        Uses context_engineering/chunking/semantic_chunker.py which has:
+        - SEMANTIC_SIMILARITY strategy
+        - INFORMATION_DENSITY strategy  
+        - TOPIC_COHERENCE strategy
+        - HIERARCHICAL strategy
+        - ADAPTIVE strategy
+        
+        Plus mathematical foundations (entropy, information theory).
         """
         chunks = []
         
-        # PRE-PROCESS: Clean markdown to avoid separator-only chunks
-        if file_type == DocumentType.MARKDOWN:
-            # Remove standalone separators (lines that are just "---" surrounded by newlines)
-            lines = text.split('\n')
-            cleaned_lines = []
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                # Skip standalone separators unless they're part of frontmatter or important structure
-                if stripped in ['---', '```']:
-                    # Check if it's closing a code block or frontmatter
-                    prev_line = cleaned_lines[-1].strip() if cleaned_lines else ''
-                    next_line = lines[i + 1].strip() if i + 1 < len(lines) else ''
-                    # Keep if it's part of code block or frontmatter delimiter
-                    if (prev_line.startswith('```') or next_line.startswith('```') or 
-                        (i > 0 and i < len(lines) - 1 and '---' in prev_line and '---' in next_line)):
-                        cleaned_lines.append(line)
-                    # Otherwise skip standalone separators
-                else:
-                    cleaned_lines.append(line)
-            text = '\n'.join(cleaned_lines)
+        # USE EXISTING SEMANTIC CHUNKER (NOT A DUPLICATE!)
+        if SEMANTIC_CHUNKER_AVAILABLE:
+            try:
+                # Use ADAPTIVE strategy for best results
+                semantic_chunker = SemanticChunker(
+                    strategy=ChunkingStrategy.ADAPTIVE,
+                    target_chunk_size=500,
+                    min_chunk_size=100,
+                    max_chunk_size=1500,
+                    overlap_ratio=0.1,
+                    similarity_threshold=0.7
+                )
+                
+                doc_id = metadata.get('document_id') if metadata else None
+                semantic_chunks = semantic_chunker.chunk_text(text, document_id=str(doc_id) if doc_id else None)
+                
+                for i, sc in enumerate(semantic_chunks):
+                    chunk_metadata = {
+                        'file_type': file_type.value,
+                        'chunk_size': len(sc.content),
+                        # Preserve mathematical metrics from SemanticChunker
+                        'entropy': sc.metadata.entropy,
+                        'topic_coherence': sc.metadata.topic_coherence,
+                        'semantic_density': sc.metadata.semantic_density,
+                        'importance_score': sc.metadata.importance_score,
+                        **(metadata or {})
+                    }
+                    
+                    chunks.append(DocumentChunk(
+                        document_id=0,
+                        chunk_index=i,
+                        content=sc.content,
+                        metadata=chunk_metadata,
+                        parent_content=None,  # SemanticChunker handles this differently
+                        headers={}
+                    ))
+                
+                logger.info(f"SemanticChunker (ADAPTIVE) created {len(chunks)} chunks with entropy/coherence metrics")
+                return chunks
+                
+            except Exception as e:
+                logger.warning(f"SemanticChunker failed, falling back to basic chunking: {e}")
+                import traceback
+                traceback.print_exc()
         
-        # Create chunks using appropriate splitter
-        if file_type == DocumentType.MARKDOWN:
-            docs = self.markdown_splitter.create_documents([text])
-        elif file_type == DocumentType.PYTHON:
+        # FALLBACK: Use basic splitters for non-markdown or if SmartChunker fails
+        if file_type == DocumentType.PYTHON:
             docs = self.code_splitter.create_documents([text])
         else:
             docs = self.text_splitter.create_documents([text])
@@ -232,7 +274,7 @@ class DocumentProcessor:
             content = doc.page_content.strip()
             
             # FILTER OUT BAD CHUNKS: separators, empty, too short
-            if not content or len(content) < 50:  # Minimum 50 chars for quality
+            if not content or len(content) < 50:
                 continue
             
             # Skip chunks that are just separators or code fences
@@ -241,7 +283,7 @@ class DocumentProcessor:
             
             # Skip chunks that are mostly separators/whitespace
             without_separators = content.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').replace('*', '').strip()
-            if len(without_separators) < 30:  # At least 30 chars of real content
+            if len(without_separators) < 30:
                 continue
             
             # Skip chunks that are just markdown headers with no content
@@ -250,7 +292,7 @@ class DocumentProcessor:
             
             # Check if chunk has meaningful content (not just formatting)
             words = without_separators.split()
-            if len(words) < 5:  # Need at least 5 words
+            if len(words) < 5:
                 continue
             
             chunk_metadata = {
@@ -260,7 +302,7 @@ class DocumentProcessor:
             }
             
             valid_chunks.append(DocumentChunk(
-                document_id=0,  # Will be set when saving
+                document_id=0,
                 chunk_index=chunk_index,
                 content=content,
                 metadata=chunk_metadata
@@ -657,13 +699,15 @@ class DocumentManager:
                 embedding = await self._generate_embedding(chunk.content)
                 chunk.embedding = embedding
                 
-                # Save chunk to database
+                # Save chunk to database (with parent_content and headers for smart chunking)
                 cursor.execute("""
-                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     chunk.document_id, chunk.chunk_index, chunk.content,
-                    embedding, json.dumps(chunk.metadata)
+                    embedding, json.dumps(chunk.metadata),
+                    chunk.parent_content,  # NEW: Store parent content
+                    json.dumps(chunk.headers) if chunk.headers else '{}'  # NEW: Store headers
                 ))
                 valid_chunks.append(chunk)
             

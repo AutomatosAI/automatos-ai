@@ -41,6 +41,11 @@ from services.rag_service import RAGService
 from services.agent_factory import AgentFactory
 from services.agent_performance_service import get_performance_service
 
+# Shared Components (Phase 3 alignment)
+from services.context_level_decision import get_context_decision_engine, ContextLevel
+from services.tool_result_formatter import ToolResultFormatter
+from services.schema_provider import get_schema_provider
+
 logger = logging.getLogger(__name__)
 
 class EnhancedOrchestratorService:
@@ -84,6 +89,10 @@ class EnhancedOrchestratorService:
         from services.memory_knowledge_system import HierarchicalMemorySystem
         self.memory_system = HierarchicalMemorySystem() # Placeholder instantiation
         self.memory_integrator = WorkflowMemoryIntegrator(self.memory_system)
+        
+        # Shared components for consistent decisions
+        self.context_decision_engine = get_context_decision_engine()
+        self.tool_formatter = ToolResultFormatter
 
         self.logger.info("✅ Enhanced Orchestrator Service initialized with 9-stage pipeline")
     
@@ -121,10 +130,19 @@ class EnhancedOrchestratorService:
             # Ensure LLM provider is initialized
             self._ensure_llm_provider()
             
+            # --- PRE-STAGE: Context Level Analysis ---
+            context_decision = self.context_decision_engine.analyze_prompt(user_prompt, context)
+            self.logger.info(f"📊 Context Level: {context_decision.level.name} (confidence: {context_decision.confidence:.2f})")
+            self.logger.info(f"   Reasoning: {context_decision.reasoning}")
+            self.logger.info(f"   Requires workflow: {context_decision.requires_workflow}")
+            
             # --- STAGE 1: Task Decomposition ---
             self.logger.info("--- STAGE 1: Task Decomposition ---")
             decomposition = await self.task_decomposer.decompose_task(user_prompt)
             subtasks = decomposition.get("subtasks", [])
+            # Add context level info to decomposition metadata
+            decomposition['context_level'] = context_decision.level.name
+            decomposition['recommended_tools'] = context_decision.recommended_tools
             self.logger.info(f"✅ Decomposed into {len(subtasks)} subtasks")
 
             # --- STAGE 2: Agent Selection ---
@@ -209,19 +227,26 @@ class EnhancedOrchestratorService:
 
             # --- STAGE 9: Response Generation ---
             self.logger.info("--- STAGE 9: Response Generation ---")
-            final_response = {
+            
+            # Use standardized result format
+            raw_response = {
                 "workflow_id": workflow_id,
                 "status": "completed",
                 "result": aggregated_results.final_summary,
                 "quality_score": quality_assessment.get("overall_score", 0.0),
                 "execution_time": time.time() - start_time,
                 "stages_completed": 9,
+                "context_level": context_decision.level.name,
                 "details": {
                     "subtasks": len(subtasks),
                     "agents_used": list(set(a["name"] for a in agent_assignments.values())),
-                    "memories_stored": memory_storage.get("total_experiences", 0)
+                    "memories_stored": memory_storage.get("total_experiences", 0),
+                    "tools_used": context_decision.recommended_tools
                 }
             }
+            
+            # Standardize for consistent output format
+            final_response = self.tool_formatter.standardize_result(raw_response, "workflow_execution")
             
             self.logger.info(f"🏁 WORKFLOW COMPLETED in {final_response['execution_time']:.2f}s")
             return final_response

@@ -1,836 +1,369 @@
 """
-RAG (Retrieval-Augmented Generation) Service
-=============================================
+RAG Service - Uses EXISTING ContextOptimizer and SemanticChunker
+================================================================
 
-Provides vector-based context retrieval for enhanced agent prompts.
-Uses in-memory vector store for simplicity, can be upgraded to Qdrant/Weaviate later.
+This service wraps the existing mathematical optimization components:
+- context_engineering/context_optimizer.py (Knapsack, MMR, Entropy)
+- context_engineering/chunking/semantic_chunker.py (5 strategies)
 
-Features:
-- Document chunking and embedding
-- Semantic search with similarity scoring
-- Context caching for performance
-- Multiple retrieval strategies
+NO DUPLICATE IMPLEMENTATIONS - uses what's already built.
 """
 
 import logging
-import json
-import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-import hashlib
-# from sklearn.metrics.pairwise import cosine_similarity  # Removed sklearn dependency
-from openai import OpenAI  # NEW API >= 1.0.0
-import os
-import pickle
-from pathlib import Path
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from psycopg2.extras import RealDictCursor
-import psycopg2
-from models import RAGConfiguration
-from database.database import get_database_url
 
 logger = logging.getLogger(__name__)
 
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """
-    Simple cosine similarity implementation to avoid sklearn dependency.
-    Works for 2D arrays where each row is a vector.
-    """
-    # Handle 1D to 2D conversion
-    if len(a.shape) == 1:
-        a = a.reshape(1, -1)
-    if len(b.shape) == 1:
-        b = b.reshape(1, -1)
-    
-    # Normalize vectors
-    a_norm = a / np.linalg.norm(a, axis=1, keepdims=True)
-    b_norm = b / np.linalg.norm(b, axis=1, keepdims=True)
-    
-    # Compute cosine similarity
-    return np.dot(a_norm, b_norm.T)
-
-
 @dataclass
-class Document:
-    """Represents a document in the vector store"""
-    id: str
-    content: str
-    embedding: Optional[np.ndarray] = None
-    metadata: Dict[str, Any] = None
-    source: str = "unknown"
-    created_at: datetime = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = datetime.now()
-        if self.metadata is None:
-            self.metadata = {}
-
-
-@dataclass
-class SearchResult:
-    """Represents a search result from the vector store"""
-    document: Document
-    score: float
-    relevance: str  # 'high', 'medium', 'low'
-
-
-class VectorStore:
-    """Simple in-memory vector store with persistence"""
-    
-    def __init__(self, persist_path: str = "/tmp/automatos_vectors.pkl"):
-        self.documents: Dict[str, Document] = {}
-        self.embeddings: Dict[str, np.ndarray] = {}
-        self.persist_path = persist_path
-        self.load_from_disk()
-    
-    def add_document(self, doc: Document):
-        """Add a document to the vector store"""
-        self.documents[doc.id] = doc
-        if doc.embedding is not None:
-            self.embeddings[doc.id] = doc.embedding
-    
-    def search(self, query_embedding: np.ndarray, top_k: int = 5) -> List[Tuple[str, float]]:
-        """Search for similar documents using cosine similarity"""
-        if not self.embeddings:
-            return []
-        
-        # Convert embeddings to matrix
-        doc_ids = list(self.embeddings.keys())
-        doc_embeddings = np.array([self.embeddings[doc_id] for doc_id in doc_ids])
-        
-        # Calculate similarities
-        similarities = cosine_similarity(query_embedding, doc_embeddings)[0]
-        
-        # Get top-k results
-        top_indices = np.argsort(similarities)[-top_k:][::-1]
-        results = [(doc_ids[i], float(similarities[i])) for i in top_indices]
-        
-        return results
-    
-    def save_to_disk(self):
-        """Persist vector store to disk"""
-        try:
-            with open(self.persist_path, 'wb') as f:
-                pickle.dump({
-                    'documents': self.documents,
-                    'embeddings': self.embeddings
-                }, f)
-            logger.info(f"Saved {len(self.documents)} documents to {self.persist_path}")
-        except Exception as e:
-            logger.error(f"Failed to save vector store: {e}")
-    
-    def load_from_disk(self):
-        """Load vector store from disk if exists"""
-        if os.path.exists(self.persist_path):
-            try:
-                with open(self.persist_path, 'rb') as f:
-                    data = pickle.load(f)
-                    self.documents = data.get('documents', {})
-                    self.embeddings = data.get('embeddings', {})
-                logger.info(f"Loaded {len(self.documents)} documents from {self.persist_path}")
-            except Exception as e:
-                logger.error(f"Failed to load vector store: {e}")
+class RAGResult:
+    """Result from RAG retrieval"""
+    chunks: List[Dict[str, Any]]
+    formatted_context: str
+    total_tokens: int
+    sources: List[str]
+    query: str
+    diversity_score: float = 0.0
+    information_gain: float = 0.0
 
 
 class RAGService:
     """
-    Main RAG service for context retrieval and enhancement
+    RAG Service that uses EXISTING ContextOptimizer.
+    
+    Wraps:
+    - context_engineering.context_optimizer.ContextOptimizer
+    - context_engineering.chunking.semantic_chunker.SemanticChunker
     """
     
     def __init__(self):
-        # Use centralized embedding manager
-        from services.llm_provider import create_embedding_manager
-        self.embedding_manager = create_embedding_manager()
-        provider_info = self.embedding_manager.get_provider_info()
+        self._context_optimizer = None
+        self._semantic_chunker = None
+        self._embedding_manager = None
+        self._initialized = False
         
-        logger.info(f"RAG Service using {provider_info['provider']} embeddings (model: {provider_info.get('model', 'N/A')})")
-        
-        self.vector_store = VectorStore()
-        self.last_hydration: Optional[datetime] = None
-        self.cache = {}  # Simple query cache
-        self.cache_ttl = 300  # 5 minutes
-        # If the persisted cache is empty, hydrate from PostgreSQL knowledge base
-        if not self.vector_store.documents:
-            self._hydrate_vector_store_from_db(initial_load=True)
-        logger.info("RAG Service initialized")
-    
-    async def _generate_embedding(self, text: str) -> np.ndarray:
-        """Generate embedding using centralized embedding manager"""
+    def _ensure_initialized(self):
+        """Lazy initialization of components"""
+        if self._initialized:
+            return
+            
+        # Import existing components
         try:
-            # Use centralized embedding manager
-            embedding = await self.embedding_manager.generate_embedding(text)
-            return np.array(embedding)
+            from context_engineering.context_optimizer import ContextOptimizer, ContextItem
+            self._context_optimizer = ContextOptimizer()
+            self._ContextItem = ContextItem
+            logger.info("✅ Using existing ContextOptimizer (Knapsack, MMR, Entropy)")
+        except ImportError as e:
+            logger.warning(f"ContextOptimizer not available: {e}")
+            self._context_optimizer = None
+            
+        try:
+            from context_engineering.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
+            self._semantic_chunker = SemanticChunker(
+                strategy=ChunkingStrategy.ADAPTIVE,
+                target_chunk_size=500,
+                min_chunk_size=100,
+                max_chunk_size=1500
+            )
+            logger.info("✅ Using existing SemanticChunker (5 strategies)")
+        except ImportError as e:
+            logger.warning(f"SemanticChunker not available: {e}")
+            self._semantic_chunker = None
+            
+        # Use centralized embedding manager
+        try:
+            from services.llm_provider import create_embedding_manager
+            self._embedding_manager = create_embedding_manager()
         except Exception as e:
-            logger.error(f"Failed to generate embedding: {e}")
-            # Return zero vector as last resort
-            dimension = self.embedding_manager.get_dimension()
-            return np.zeros(dimension)
-    
-    async def add_document(self, content: str, metadata: Dict[str, Any] = None, source: str = "user") -> str:
-        """Add a new document to the RAG system"""
-        doc_id = hashlib.md5(content.encode()).hexdigest()
+            logger.warning(f"Embedding manager not available: {e}")
+            
+        self._initialized = True
         
-        doc = Document(
-            id=doc_id,
-            content=content,
-            metadata=metadata or {},
-            source=source
+    async def retrieve(
+        self,
+        query: str,
+        max_chunks: int = 8,
+        max_tokens: int = 2000,
+        diversity: float = 0.3,
+        context_type: str = "chatbot"
+    ) -> RAGResult:
+        """
+        Retrieve optimized RAG context using existing ContextOptimizer.
+        
+        Uses:
+        - Knapsack optimization for token budget
+        - MMR for diversity
+        - Information theory for quality
+        """
+        self._ensure_initialized()
+        
+        # Get candidates from database
+        candidates = await self._get_candidates(query, limit=max_chunks * 3)
+        
+        if not candidates:
+            return RAGResult(
+                chunks=[],
+                formatted_context="No relevant context found.",
+                total_tokens=0,
+                sources=[],
+                query=query
+            )
+        
+        # Use existing ContextOptimizer if available
+        if self._context_optimizer:
+            return await self._optimize_with_context_optimizer(
+                query, candidates, max_tokens, diversity
+            )
+        else:
+            # Fallback to basic retrieval
+            return self._basic_retrieval(query, candidates, max_chunks, max_tokens)
+    
+    async def _optimize_with_context_optimizer(
+        self,
+        query: str,
+        candidates: List[Dict],
+        max_tokens: int,
+        diversity: float
+    ) -> RAGResult:
+        """Use existing ContextOptimizer for mathematical optimization"""
+        
+        # Convert to ContextItems
+        context_items = []
+        for c in candidates:
+            item = self._ContextItem(
+                content=c.get("content", ""),
+                source=c.get("source_file", c.get("filename", "unknown")),
+                context_type="documentation",
+                relevance_score=c.get("similarity", 0.5),
+                token_count=len(c.get("content", "")) // 4
+            )
+            context_items.append(item)
+        
+        # Use existing optimize_context method (has Knapsack + MMR)
+        objective = "maximize_diversity" if diversity > 0.5 else "maximize_information"
+        
+        optimized = await self._context_optimizer.optimize_context(
+            available_context=context_items,
+            max_tokens=max_tokens,
+            objective=objective
         )
         
-        doc.embedding = await self._generate_embedding(content)
-        self.vector_store.add_document(doc)
-        self.vector_store.save_to_disk()
+        # Format results
+        chunks = []
+        for ctx in optimized.contexts:
+            chunks.append({
+                "content": ctx.content,
+                "source_file": ctx.source,
+                "similarity": ctx.relevance_score,
+                "tokens": ctx.token_count
+            })
         
-        logger.info(f"Added document {doc_id} to RAG system")
-        return doc_id
-
-    def _get_db_connection_string(self) -> Optional[str]:
-        """Resolve database connection string via credential resolver fallback."""
+        formatted_context = self._format_context(chunks, query)
+        
+        return RAGResult(
+            chunks=chunks,
+            formatted_context=formatted_context,
+            total_tokens=optimized.total_tokens,
+            sources=list(set(c["source_file"] for c in chunks)),
+            query=query,
+            diversity_score=optimized.diversity_score,
+            information_gain=optimized.information_gain
+        )
+    
+    def _basic_retrieval(
+        self,
+        query: str,
+        candidates: List[Dict],
+        max_chunks: int,
+        max_tokens: int
+    ) -> RAGResult:
+        """Fallback when ContextOptimizer not available"""
+        
+        # Sort by similarity and take top chunks
+        sorted_candidates = sorted(
+            candidates, 
+            key=lambda x: x.get("similarity", 0), 
+            reverse=True
+        )[:max_chunks]
+        
+        chunks = []
+        total_tokens = 0
+        
+        for c in sorted_candidates:
+            chunk_tokens = len(c.get("content", "")) // 4
+            if total_tokens + chunk_tokens > max_tokens:
+                break
+            chunks.append({
+                "content": c.get("content", ""),
+                "source_file": c.get("source_file", c.get("filename", "unknown")),
+                "similarity": c.get("similarity", 0),
+                "tokens": chunk_tokens
+            })
+            total_tokens += chunk_tokens
+        
+        formatted_context = self._format_context(chunks, query)
+        
+        return RAGResult(
+            chunks=chunks,
+            formatted_context=formatted_context,
+            total_tokens=total_tokens,
+            sources=list(set(c["source_file"] for c in chunks)),
+            query=query
+        )
+    
+    async def _get_candidates(self, query: str, limit: int = 20) -> List[Dict]:
+        """Get candidate chunks from database"""
+        
+        if not self._embedding_manager:
+            return []
+            
         try:
-            return get_database_url()
-        except Exception as exc:
-            logger.warning(f"Credential resolver database lookup failed, falling back to env: {exc}")
-            return os.getenv("DATABASE_URL")
-
-    def _hydrate_vector_store_from_db(self, initial_load: bool = False, force: bool = False):
-        """
-        Populate in-memory vector store with chunks stored in document_chunks table.
-        Runs on startup and periodically so RAG always has data even if /tmp cache is wiped.
-        
-        FLEXIBLE: Auto-detects stored embedding dimensions and adapts embedding_manager if needed.
-        """
-        # Skip if we recently hydrated and already have vectors
-        if not force and not initial_load:
-            if self.vector_store.embeddings and self.last_hydration:
-                if datetime.now() - self.last_hydration < timedelta(minutes=5):
-                    return
-        
-        conn_str = self._get_db_connection_string()
-        if not conn_str:
-            logger.warning("RAG hydration skipped: database URL unavailable")
-            return
-        
-        conn = None
-        cursor = None
-        try:
-            conn = psycopg2.connect(conn_str)
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+            from database.database import get_database_url
+            
+            # Generate query embedding
+            query_embedding = await self._embedding_manager.generate_embedding(query)
+            embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+            
+            conn = psycopg2.connect(get_database_url())
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute(
-                """
+            
+            cursor.execute(f"""
                 SELECT 
-                    dc.id AS chunk_id,
-                    dc.document_id,
+                    dc.id,
                     dc.content,
-                    dc.embedding,
+                    dc.parent_content,
+                    dc.headers,
                     dc.metadata,
-                    COALESCE(d.original_filename, d.filename) AS filename,
-                    d.filename AS raw_filename,
-                    d.original_filename,
-                    d.description
+                    d.filename as source_file,
+                    d.id as document_id,
+                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                 WHERE dc.embedding IS NOT NULL
-                ORDER BY dc.id
-                """
-            )
-            rows = cursor.fetchall()
-        except Exception as exc:
-            logger.error(f"Failed to hydrate RAG vector cache from Postgres: {exc}")
-            return
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-        
-        if not rows:
-            logger.warning("No document chunks found in database; RAG context store remains empty")
-            return
-        
-        # FLEXIBLE DIMENSION DETECTION: Check first embedding's dimension
-        detected_dimension = None
-        if rows:
-            first_embedding = rows[0].get("embedding")
-            if first_embedding:
-                try:
-                    if isinstance(first_embedding, str):
-                        embedding_values = json.loads(first_embedding)
-                    else:
-                        embedding_values = first_embedding
-                    detected_dimension = len(embedding_values)
-                    logger.info(f"🔍 Detected stored embedding dimension: {detected_dimension}d")
-                except Exception as e:
-                    logger.warning(f"Could not detect embedding dimension: {e}")
-        
-        # AUTO-ADAPT: If dimension mismatch detected, reload embedding_manager from settings
-        current_dimension = self.embedding_manager.get_dimension()
-        if detected_dimension and detected_dimension != current_dimension:
-            logger.warning(
-                f"⚠️  DIMENSION MISMATCH: Stored embeddings are {detected_dimension}d "
-                f"but embedding_manager is configured for {current_dimension}d"
-            )
-            logger.warning(
-                f"💡 FIX: Update 'vector_store_dimensions' in system_settings to {detected_dimension}, "
-                f"then restart the backend to match your stored embeddings"
-            )
-            logger.info(
-                f"🔧 For now, RAG will skip retrieval to avoid matrix errors. "
-                f"Please configure correct embedding model in Settings UI."
-            )
-        
-        # Reset store before repopulating so we don't carry stale embeddings
-        self.vector_store.documents.clear()
-        self.vector_store.embeddings.clear()
-        
-        loaded = 0
-        for row in rows:
-            embedding_raw = row.get("embedding")
-            if not embedding_raw:
-                continue
-            try:
-                if isinstance(embedding_raw, str):
-                    embedding_values = json.loads(embedding_raw)
-                else:
-                    embedding_values = embedding_raw
-                vector = np.array(embedding_values, dtype=np.float32)
-            except Exception as exc:
-                logger.warning(f"Skipping chunk {row.get('chunk_id')} due to invalid embedding: {exc}")
-                continue
+                    AND d.status = 'completed'
+                ORDER BY dc.embedding <=> '{embedding_str}'::vector
+                LIMIT %s
+            """, (limit,))
             
-            metadata = row.get("metadata") or {}
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except json.JSONDecodeError:
-                    metadata = {"raw_metadata": metadata}
-            metadata.setdefault("document_id", row.get("document_id"))
-            # Use original_filename if available, otherwise use filename
-            doc_filename = row.get("original_filename") or row.get("filename")
-            if doc_filename:
-                metadata.setdefault("source_file", doc_filename)
-                # Clean filename for source (remove hash prefixes if present)
-                if '_' in doc_filename and len(doc_filename.split('_', 1)[0]) >= 32:
-                    clean_name = doc_filename.split('_', 1)[1]
-                else:
-                    clean_name = doc_filename
-            else:
-                clean_name = "knowledge-base"
+            results = cursor.fetchall()
+            cursor.close()
+            conn.close()
             
-            # FILTER OUT BAD CHUNKS: Skip separators, empty, or too short chunks
-            content = row["content"] or ""
-            content_stripped = content.strip()
+            return [dict(r) for r in results]
             
-            if not content_stripped or len(content_stripped) < 20:
-                continue
-            if content_stripped in ['---', '```', '```python', '```javascript', '```typescript', '```json']:
-                continue
-            # Skip chunks that are mostly separators
-            without_separators = content_stripped.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').strip()
-            if len(without_separators) < 10:
-                continue
-            
-            doc = Document(
-                id=f"chunk_{row['chunk_id']}",
-                content=content_stripped,
-                metadata=metadata,
-                source=clean_name
-            )
-            doc.embedding = vector
-            self.vector_store.add_document(doc)
-            loaded += 1
-        
-        self.vector_store.save_to_disk()
-        self.last_hydration = datetime.now()
-        logger.info(f"Hydrated RAG vector cache with {loaded} chunks from database")
+        except Exception as e:
+            logger.error(f"Error getting candidates: {e}")
+            return []
     
-    async def retrieve_context(
-        self, 
-        query: str, 
-        top_k: int = 5,
-        min_similarity: float = 0.5,
-        category_filter: Optional[str] = None
-    ) -> List[SearchResult]:
-        """
-        Retrieve relevant context for a query
+    def _format_context(self, chunks: List[Dict], query: str) -> str:
+        """Format chunks into context string"""
         
-        Args:
-            query: The search query
-            top_k: Number of results to return
-            min_similarity: Minimum similarity threshold
-            category_filter: Optional category to filter results
+        if not chunks:
+            return "No relevant context found."
         
-        Returns:
-            List of SearchResult objects
-        """
+        parts = [f"## Retrieved Context for: {query}\n"]
         
-        # Ensure our in-memory cache is hydrated with the latest knowledge base
-        self._hydrate_vector_store_from_db()
-        
-        logger.info(f"🔍 RAG retrieve_context called: query='{query[:100]}', top_k={top_k}, min_similarity={min_similarity}")
-        
-        # Check cache
-        cache_key = f"{query}_{top_k}_{min_similarity}_{category_filter}"
-        if cache_key in self.cache:
-            cached_time, cached_results = self.cache[cache_key]
-            if datetime.now() - cached_time < timedelta(seconds=self.cache_ttl):
-                logger.info(f"✅ Using cached results: {len(cached_results)} results")
-                return cached_results
-        
-        # Generate query embedding
-        query_embedding = await self._generate_embedding(query)
-        logger.debug(f"📊 Query embedding generated: shape={query_embedding.shape}")
-        
-        # Search vector store
-        logger.debug(f"🔍 Searching {len(self.vector_store.embeddings)} documents in vector store...")
-        search_results = self.vector_store.search(query_embedding, top_k * 2)  # Get extra for filtering
-        logger.info(f"📚 Vector search found {len(search_results)} raw results")
-        
-        # Extract query keywords for boosting and filtering
-        query_lower = query.lower()
-        query_words = [w for w in query_lower.split() if len(w) > 2]
-        
-        # Convert to SearchResult objects with smart ranking
-        results = []
-        filtered_out = {"low_similarity": 0, "no_doc": 0, "category": 0, "generic": 0}
-        
-        for doc_id, score in search_results:
-            logger.debug(f"  Candidate: doc_id={doc_id[:8]}..., score={score:.4f}")
+        for i, chunk in enumerate(chunks, 1):
+            source = chunk.get("source_file", "unknown")
+            similarity = chunk.get("similarity", 0)
+            content = chunk.get("content", "")
             
-            if score < min_similarity:
-                filtered_out["low_similarity"] += 1
-                logger.debug(f"    ❌ Filtered: score {score:.4f} < min_similarity {min_similarity}")
-                continue
-            
-            doc = self.vector_store.documents.get(doc_id)
-            if not doc:
-                filtered_out["no_doc"] += 1
-                logger.warning(f"    ⚠️  Document {doc_id} not found in store!")
-                continue
-            
-            # Apply category filter if specified
-            if category_filter and doc.metadata.get('category') != category_filter:
-                filtered_out["category"] += 1
-                logger.debug(f"    ❌ Filtered: category mismatch")
-                continue
-            
-            # FILTER OUT GENERIC INTRODUCTION CHUNKS
-            content_lower = doc.content.lower()
-            generic_patterns = [
-                'comprehensive guide', 'deep technical insights', 'every aspect of',
-                'complete reference', 'whether you\'re', 'this guide serves',
-                'this document provides', 'overview', 'introduction'
-            ]
-            
-            # Check if chunk is mostly generic introduction text
-            is_generic_intro = False
-            generic_count = sum(1 for pattern in generic_patterns if pattern in content_lower[:500])
-            if generic_count >= 2:  # Has 2+ generic patterns in first 500 chars
-                # Also check if it lacks query-specific content
-                has_query_terms = any(word in content_lower for word in query_words)
-                if not has_query_terms:
-                    filtered_out["generic"] += 1
-                    logger.debug(f"    ❌ Filtered: generic introduction chunk (patterns: {generic_count})")
-                    continue
-            
-            # BOOST SCORE if chunk contains query terms
-            boosted_score = score
-            if query_words:
-                term_matches = sum(1 for word in query_words if word in content_lower)
-                if term_matches > 0:
-                    # Boost by up to 0.15 points for query term matches
-                    boost = min(0.15, term_matches * 0.05)
-                    boosted_score = min(1.0, score + boost)
-                    logger.debug(f"    📈 Boosted score: {score:.4f} -> {boosted_score:.4f} (query terms: {term_matches})")
-            
-            # Determine relevance level
-            relevance = 'high' if boosted_score > 0.8 else 'medium' if boosted_score > 0.6 else 'low'
-            
-            results.append(SearchResult(
-                document=doc,
-                score=boosted_score,
-                relevance=relevance
-            ))
-            logger.debug(f"    ✅ Added: score={boosted_score:.4f}, relevance={relevance}, content_len={len(doc.content)}")
+            parts.append(f"\n### Source {i}: {source} (relevance: {similarity:.0%})")
+            parts.append(content)
         
-        # Re-sort by boosted score and take top_k
-        results.sort(key=lambda x: x.score, reverse=True)
-        results = results[:top_k]
-        
-        # Cache results
-        self.cache[cache_key] = (datetime.now(), results)
-        
-        logger.info(f"✅ RAG Retrieved {len(results)} results (filtered: {filtered_out})")
-        if results:
-            scores = [r.score for r in results]
-            logger.info(f"   Similarity scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f}")
-        
-        return results
+        return "\n".join(parts)
     
     async def enhance_prompt_with_context(
         self,
         original_prompt: str,
-        task_type: Optional[str] = None,
         max_context_tokens: int = 2000
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> Tuple[str, Dict]:
         """
-        Enhance a prompt with relevant context from the RAG system
-        
-        Args:
-            original_prompt: The original prompt
-            task_type: Optional task type for better context selection
-            max_context_tokens: Maximum tokens for context
-        
-        Returns:
-            Enhanced prompt and metadata about the enhancement
+        Enhance a prompt with RAG context.
+        Used by context_engineering_integrator.py
         """
-        
-        # Retrieve relevant context
-        results = await self.retrieve_context(
+        result = await self.retrieve(
             query=original_prompt,
-            top_k=5,
-            category_filter=task_type
+            max_tokens=max_context_tokens
         )
         
-        if not results:
-            return original_prompt, {"enhanced": False, "reason": "No relevant context found"}
-        
-        # Build context section
-        context_parts = []
-        total_tokens = 0
-        used_documents = []
-        
-        for result in results:
-            # Estimate tokens (rough approximation)
-            doc_tokens = len(result.document.content.split()) * 1.3
-            if total_tokens + doc_tokens > max_context_tokens:
-                break
-            
-            context_parts.append(f"[Context {result.relevance} relevance - {result.score:.2f}]:\n{result.document.content}")
-            total_tokens += doc_tokens
-            used_documents.append({
-                "id": result.document.id,
-                "source": result.document.source,
-                "relevance": result.relevance,
-                "score": result.score,
-                "similarity_score": result.score,  # Add this field for context_engineering_integrator
-                "similarity": result.score,  # Alias for compatibility
-                "content": result.document.content  # Include content for easier access
-            })
-        
-        if not context_parts:
-            return original_prompt, {"enhanced": False, "reason": "Context too large"}
-        
-        # Build enhanced prompt
-        enhanced_prompt = f"""## Relevant Context from Knowledge Base
-
-{chr(10).join(context_parts)}
+        enhanced_prompt = f"""## Relevant Context
+{result.formatted_context}
 
 ## Original Task
-
 {original_prompt}
-
-Please complete the task using the provided context as guidance where relevant."""
+"""
         
         metadata = {
-            "enhanced": True,
-            "documents_used": len(used_documents),
-            "total_context_tokens": int(total_tokens),
-            "sources": used_documents,
-            "enhancement_timestamp": datetime.now().isoformat()
+            "sources": result.sources,
+            "total_context_tokens": result.total_tokens,
+            "enhanced": len(result.chunks) > 0,
+            "documents_used": len(result.sources),
+            "diversity_score": result.diversity_score,
+            "information_gain": result.information_gain
         }
-        
-        if used_documents:
-            scores = [doc["score"] for doc in used_documents]
-            logger.info(
-                f"✅ Enhanced prompt with {len(used_documents)} documents "
-                f"(scores: min={min(scores):.3f}, max={max(scores):.3f}, avg={sum(scores)/len(scores):.3f})"
-            )
-        else:
-            logger.warning("⚠️  No documents used in prompt enhancement")
         
         return enhanced_prompt, metadata
     
-    def clear_cache(self):
-        """Clear the query cache"""
-        self.cache.clear()
-        logger.info("Cleared RAG cache")
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get statistics about the RAG system"""
-        return {
-            "total_documents": len(self.vector_store.documents),
-            "total_embeddings": len(self.vector_store.embeddings),
-            "cache_size": len(self.cache),
-            "persist_path": self.vector_store.persist_path,
-            "categories": list(set(
-                doc.metadata.get('category', 'uncategorized') 
-                for doc in self.vector_store.documents.values()
-            ))
-        }
-    
-    # Methods required by /api/context/* endpoints
-    def get_retrieval_stats(self, db) -> dict:
-        """Return RAG retrieval statistics for context API - REAL DATA from document_usage"""
-        try:
-            # Get real stats from document_usage table
-            stats_query = text("""
-                SELECT 
-                    COUNT(*) as total_queries,
-                    (COUNT(CASE WHEN results_count > 0 THEN 1 END)::float / NULLIF(COUNT(*), 0)::float * 100) as success_rate,
-                    AVG(execution_time_ms) / 1000.0 as avg_response_time,
-                    MAX(timestamp) as last_query_time
-                FROM document_usage
-                WHERE event_type IN ('document_searched', 'rag_query')
-            """)
-            
-            result = db.execute(stats_query).fetchone()
-            
-            if result and result.total_queries > 0:
-                return {
-                    'total_queries': result.total_queries,
-                    'success_rate': round(result.success_rate or 0, 1),
-                    'avg_response_time': round(result.avg_response_time or 0, 3),
-                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
-                    'system_status': 'operational',
-                    'last_query_time': result.last_query_time.isoformat() if result.last_query_time else None
-                }
-            else:
-                # No queries yet - return zeros
-                return {
-                    'total_queries': 0,
-                    'success_rate': 0.0,
-                    'avg_response_time': 0.0,
-                    'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
-                    'system_status': 'operational',
-                    'last_query_time': None
-                }
-        except Exception as e:
-            logger.error(f"Error getting retrieval stats: {e}")
-            # Fallback to safe defaults
-            return {
-                'total_queries': 0,
-                'success_rate': 0.0,
-                'avg_response_time': 0.0,
-                'vector_embeddings': len(self.vector_store.documents) if self.vector_store else 0,
-                'system_status': 'error',
-                'last_query_time': None
-            }
-    
-    def get_context_sources(self, db) -> dict:
-        """Return context sources distribution for context API"""
-        sources = []
-        if self.vector_store and self.vector_store.documents:
-            source_counts = {}
-            for doc in self.vector_store.documents.values():
-                source = doc.metadata.get('source', 'unknown')
-                source_counts[source] = source_counts.get(source, 0) + 1
-            
-            sources = [
-                {'name': source, 'count': count}
-                for source, count in source_counts.items()
-            ]
+    def chunk_document(self, content: str, metadata: Dict = None) -> List[Dict]:
+        """
+        Chunk a document using existing SemanticChunker.
         
-        return {
-            'sources': sources,
-            'total': len(self.vector_store.documents) if self.vector_store else 0
-        }
-    
-    def get_recent_queries(self, db, limit: int = 10) -> list:
-        """Return recent RAG queries for context API"""
-        try:
-            # Query recent RAG queries from document_usage table
-            from sqlalchemy import text
-            query = text("""
-                SELECT 
-                    query,
-                    event_type,
-                    results_count,
-                    execution_time_ms,
-                    timestamp,
-                    metadata
-                FROM document_usage
-                WHERE event_type IN ('document_searched', 'rag_query')
-                ORDER BY timestamp DESC
-                LIMIT :limit
-            """)
+        Uses context_engineering/chunking/semantic_chunker.py
+        NOT a duplicate implementation!
+        """
+        self._ensure_initialized()
+        
+        if self._semantic_chunker:
+            # Use existing SemanticChunker with mathematical foundations
+            chunks = self._semantic_chunker.chunk_text(
+                content, 
+                document_id=metadata.get("document_id") if metadata else None
+            )
             
-            result = db.execute(query, {"limit": limit}).fetchall()
-            
-            recent_queries = []
-            for row in result:
-                metadata = row.metadata or {}
-                results_count = row.results_count or 0
-                execution_time_ms = row.execution_time_ms or 0
-                
-                # Calculate confidence based on results (more results = higher confidence)
-                confidence = min(0.95, 0.5 + (results_count * 0.1)) if results_count > 0 else 0.3
-                
-                recent_queries.append({
-                    'query': row.query or 'N/A',
-                    'agent': metadata.get('agent') or metadata.get('user_id') or 'System',
-                    'confidence': round(confidence, 2),
-                    'sources': results_count,
-                    'responseTime': f"{execution_time_ms}ms",
-                    'timestamp': row.timestamp.isoformat() if row.timestamp else None,
-                    'category': metadata.get('category') or ('RAG Query' if row.event_type == 'rag_query' else 'Document Search'),
-                    # Include original fields for debugging
-                    'type': row.event_type,
-                    'metadata': metadata
-                })
-            
-            return recent_queries
-        except Exception as e:
-            logger.error(f"Error getting recent queries: {e}")
-            return []
-    
-    def get_performance_data(self, db: Session, time_range: str = "24h") -> List[Dict[str, Any]]:
-        """Get performance data for charts from database"""
-        try:
-            # Convert time_range to SQL interval and determine grouping
-            interval_map = {
-                "1h": ("1 hour", "minute", 5),      # Group by 5 minutes
-                "24h": ("24 hours", "hour", 1),      # Group by 1 hour
-                "7d": ("7 days", "hour", 6),         # Group by 6 hours
-                "30d": ("30 days", "day", 1)         # Group by 1 day
-            }
-            
-            interval, trunc_unit, step = interval_map.get(time_range, interval_map["24h"])
-            
-            # Build time format based on grouping
-            if trunc_unit == "minute":
-                time_format = "'HH24:MI'"
-                trunc_expr = f"DATE_TRUNC('minute', timestamp)"
-                step_trunc = f"(EXTRACT(minute FROM timestamp)::int / {step}) * {step}"
-                group_expr = f"DATE_TRUNC('hour', timestamp) + INTERVAL '1 minute' * {step_trunc}"
-            elif trunc_unit == "day":
-                time_format = "'Mon DD'"
-                group_expr = f"DATE_TRUNC('day', timestamp)"
-            else:  # hour
-                time_format = "'HH24:MI'"
-                if step > 1:
-                    step_trunc = f"(EXTRACT(hour FROM timestamp)::int / {step}) * {step}"
-                    group_expr = f"DATE_TRUNC('day', timestamp) + INTERVAL '1 hour' * {step_trunc}"
-                else:
-                    group_expr = f"DATE_TRUNC('hour', timestamp)"
-            
-            # Query time-series data aggregated by appropriate interval
-            perf_query = text(f"""
-                SELECT 
-                    TO_CHAR({group_expr}, {time_format}) as time_bucket,
-                    COUNT(*) as queries,
-                    (COUNT(CASE WHEN results_count > 0 THEN 1 END)::float / COUNT(*)::float) * 100 as success_rate,
-                    AVG(execution_time_ms) / 1000.0 as avg_latency
-                FROM document_usage
-                WHERE event_type IN ('document_searched', 'rag_query')
-                    AND timestamp >= NOW() - INTERVAL '{interval}'
-                GROUP BY {group_expr}
-                ORDER BY {group_expr}
-            """)
-            
-            result = db.execute(perf_query).fetchall()
-            
-            performance_data = []
-            for row in result:
-                performance_data.append({
-                    'time': row.time_bucket,
-                    'queries': row.queries,
-                    'success_rate': round(row.success_rate or 0, 1),
-                    'avg_latency': round(row.avg_latency or 0, 3)
-                })
-            
-            # If no data, return empty 24-hour structure
-            if not performance_data:
-                for hour in range(0, 24, 4):
-                    performance_data.append({
-                        'time': f"{hour:02d}:00",
-                        'queries': 0,
-                        'success_rate': 0.0,
-                        'avg_latency': 0.0
-                    })
-            
-            return performance_data
-            
-        except Exception as e:
-            logger.error(f"Error getting performance data from DB: {e}")
-            # Fallback to in-memory metrics
-            return self.performance_metrics.copy() if self.performance_metrics else []
-    
-    async def get_context_patterns(self, db: Session) -> List[Dict[str, Any]]:
-        """Get context patterns based on RAG configurations with real usage stats"""
-        try:
-            # Get RAG configs, filtering out test/junk data
-            configs = db.query(RAGConfiguration).filter(
-                RAGConfiguration.name.notlike('%test%'),
-                RAGConfiguration.name.notlike('%<script>%'),
-                RAGConfiguration.name != ''
-            ).all()
-            
-            patterns = []
-            
-            for config in configs:
-                # Get real usage stats from document_usage
-                usage_query = text("""
-                    SELECT 
-                        COUNT(*) as usage_count,
-                        AVG(CASE WHEN results_count > 0 THEN 100.0 ELSE 0.0 END) as accuracy,
-                        COALESCE(AVG(results_count), :default_sources) as avg_sources
-                    FROM document_usage
-                    WHERE event_type = 'rag_query'
-                        AND metadata->>'config_id' = :config_id
-                """)
-                
-                stats = db.execute(usage_query, {
-                    "config_id": str(config.id),
-                    "default_sources": config.top_k
-                }).fetchone()
-                
-                # Handle None values safely
-                accuracy_val = stats.accuracy if stats and stats.accuracy is not None else 0.0
-                avg_sources_val = stats.avg_sources if stats and stats.avg_sources is not None else config.top_k
-                
-                patterns.append({
-                    'id': f"pattern-{config.id}",
-                    'name': config.name,
-                    'description': f"Retrieval pattern using {config.embedding_model or 'default'} with {config.retrieval_strategy} strategy",
-                    'usage': stats.usage_count if stats else 0,
-                    'accuracy': round(float(accuracy_val), 1),
-                    'avgSources': int(float(avg_sources_val)),
-                    'category': 'RAG Configuration',
-                    'status': 'active' if config.is_active else 'inactive'
-                })
-            
-            # If no patterns found, return default patterns
-            if not patterns:
-                patterns = [
-                    {
-                        'id': 'pattern-semantic',
-                        'name': 'Semantic Search',
-                        'description': 'Pure vector similarity search for finding relevant context',
-                        'usage': 24,
-                        'accuracy': 91.7,
-                        'avgSources': 5,
-                        'category': 'Default',
-                        'status': 'active'
+            return [
+                {
+                    "content": chunk.content,
+                    "metadata": {
+                        "entropy": chunk.metadata.entropy,
+                        "topic_coherence": chunk.metadata.topic_coherence,
+                        "semantic_density": chunk.metadata.semantic_density,
+                        "importance_score": chunk.metadata.importance_score,
+                        **chunk.metadata.__dict__
                     }
-                ]
-            
-            return patterns
-            
-        except Exception as e:
-            logger.error(f"Error getting context patterns: {e}")
-            return []
+                }
+                for chunk in chunks
+            ]
+        else:
+            # Basic fallback
+            return self._basic_chunk(content)
+    
+    def _basic_chunk(self, content: str, chunk_size: int = 500) -> List[Dict]:
+        """Basic chunking fallback"""
+        chunks = []
+        for i in range(0, len(content), chunk_size):
+            chunk_content = content[i:i + chunk_size]
+            if len(chunk_content.strip()) > 50:
+                chunks.append({"content": chunk_content, "metadata": {}})
+        return chunks
 
 
-# Singleton instance
-_rag_service_instance = None
+# Singleton
+_rag_service: Optional[RAGService] = None
+
 
 def get_rag_service() -> RAGService:
-    """Get or create the RAG service singleton"""
-    global _rag_service_instance
-    if _rag_service_instance is None:
-        _rag_service_instance = RAGService()
-    return _rag_service_instance
+    """Get singleton RAG service"""
+    global _rag_service
+    if _rag_service is None:
+        _rag_service = RAGService()
+    return _rag_service
+
+
+# Backward compatibility aliases
+UniversalRAGService = RAGService
+get_universal_rag = get_rag_service
+

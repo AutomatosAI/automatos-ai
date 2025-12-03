@@ -132,6 +132,39 @@ class Config:
     # =============================================================================
     KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")
     
+    # =============================================================================
+    # RAG SETTINGS - Centralized similarity thresholds (loaded from system_settings)
+    # =============================================================================
+    @property
+    def RAG_MIN_SIMILARITY(self) -> float:
+        """Get min similarity threshold from system settings (default: 0.65)"""
+        try:
+            from services.llm_provider.manager import get_system_setting
+            val = get_system_setting("rag", "min_similarity", "0.65")
+            return float(val) if val else 0.65
+        except Exception:
+            return float(os.getenv("RAG_MIN_SIMILARITY", "0.65"))
+    
+    @property
+    def RAG_TOP_K(self) -> int:
+        """Get default top_k results from system settings (default: 5)"""
+        try:
+            from services.llm_provider.manager import get_system_setting
+            val = get_system_setting("rag", "top_k", "5")
+            return int(val) if val else 5
+        except Exception:
+            return int(os.getenv("RAG_TOP_K", "5"))
+    
+    @property
+    def RAG_RERANK_ENABLED(self) -> bool:
+        """Get rerank enabled from system settings (default: False)"""
+        try:
+            from services.llm_provider.manager import get_system_setting
+            val = get_system_setting("rag", "rerank_enabled", "false")
+            return str(val).lower() == "true" if val else False
+        except Exception:
+            return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
+    
     def validate(self) -> bool:
         """
         Validate required configuration

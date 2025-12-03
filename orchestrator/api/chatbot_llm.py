@@ -134,7 +134,7 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 params={
                     "query": query,
                     "limit": 8,
-                    "min_similarity": 0.65
+                    "min_similarity": config.RAG_MIN_SIMILARITY
                 }
             )
             

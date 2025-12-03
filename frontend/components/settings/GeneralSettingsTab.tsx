@@ -49,13 +49,19 @@ export default function GeneralSettingsTab({
     huggingface_local: {
       'all-MiniLM-L6-v2': 384,
       'all-mpnet-base-v2': 768,
-      'bge-large-en-v1.5': 1024,
-      'e5-large-v2': 1024
+      'BAAI/bge-large-en-v1.5': 1024,
+      'BAAI/bge-m3': 1024,
+      'nomic-ai/nomic-embed-text-v1.5': 768,
+      'intfloat/e5-large-v2': 1024,
+      'Alibaba-NLP/gte-large-en-v1.5': 1024
     },
     huggingface_api: {
       'sentence-transformers/all-MiniLM-L6-v2': 384,
       'sentence-transformers/all-mpnet-base-v2': 768,
-      'sentence-transformers/bge-large-en-v1.5': 1024
+      'BAAI/bge-large-en-v1.5': 1024,
+      'BAAI/bge-m3': 1024,
+      'nomic-ai/nomic-embed-text-v1.5': 768,
+      'intfloat/e5-large-v2': 1024
     }
   }
 
@@ -247,17 +253,23 @@ export default function GeneralSettingsTab({
                   )}
                   {formData.embedding_provider === 'huggingface_local' && (
                     <>
-                      <SelectItem value="all-MiniLM-L6-v2">all-MiniLM-L6-v2 (384 dims, fast)</SelectItem>
-                      <SelectItem value="all-mpnet-base-v2">all-mpnet-base-v2 (768 dims, balanced)</SelectItem>
-                      <SelectItem value="bge-large-en-v1.5">bge-large-en-v1.5 (1024 dims, best quality)</SelectItem>
-                      <SelectItem value="e5-large-v2">e5-large-v2 (1024 dims, multilingual)</SelectItem>
+                      <SelectItem value="BAAI/bge-large-en-v1.5">⭐ BGE-Large (1024d) - Best Quality</SelectItem>
+                      <SelectItem value="BAAI/bge-m3">⭐ BGE-M3 (1024d) - Best + Multilingual</SelectItem>
+                      <SelectItem value="nomic-ai/nomic-embed-text-v1.5">Nomic (768d) - 8K Context Length</SelectItem>
+                      <SelectItem value="intfloat/e5-large-v2">E5-Large (1024d) - Great Quality</SelectItem>
+                      <SelectItem value="Alibaba-NLP/gte-large-en-v1.5">GTE-Large (1024d) - Top MTEB</SelectItem>
+                      <SelectItem value="all-mpnet-base-v2">MPNet-Base (768d) - Balanced</SelectItem>
+                      <SelectItem value="all-MiniLM-L6-v2">MiniLM (384d) - Fast/Light</SelectItem>
                     </>
                   )}
                   {formData.embedding_provider === 'huggingface_api' && (
                     <>
-                      <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">all-MiniLM-L6-v2 (384 dims)</SelectItem>
-                      <SelectItem value="sentence-transformers/all-mpnet-base-v2">all-mpnet-base-v2 (768 dims)</SelectItem>
-                      <SelectItem value="sentence-transformers/bge-large-en-v1.5">bge-large-en-v1.5 (1024 dims)</SelectItem>
+                      <SelectItem value="BAAI/bge-large-en-v1.5">⭐ BGE-Large (1024d) - Best Quality</SelectItem>
+                      <SelectItem value="BAAI/bge-m3">⭐ BGE-M3 (1024d) - Best + Multilingual</SelectItem>
+                      <SelectItem value="nomic-ai/nomic-embed-text-v1.5">Nomic (768d) - 8K Context</SelectItem>
+                      <SelectItem value="intfloat/e5-large-v2">E5-Large (1024d) - Great Quality</SelectItem>
+                      <SelectItem value="sentence-transformers/all-mpnet-base-v2">MPNet-Base (768d)</SelectItem>
+                      <SelectItem value="sentence-transformers/all-MiniLM-L6-v2">MiniLM (384d) - Fast</SelectItem>
                     </>
                   )}
                 </SelectContent>
