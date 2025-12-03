@@ -191,7 +191,14 @@ def seed_models():
              '{"reasoning": "good", "speed": "fast", "cost": "free", "chat": "optimized"}',
              8192, 2048, 0.0, 0.0, false, false, true,
              '["chatbot", "free", "development", "testing"]',
-             'active', 'Free fine-tuned chat model optimized for conversations')
+             'active', 'Free fine-tuned chat model optimized for conversations'),
+            
+            -- Newton Insights Cannabis Extraction Science
+            ('huggingface', 'KellanF89/Newton-Insights-V1-cannabis-extraction-science', 'Newton Insights V1', 'custom',
+             '{"domain": "cannabis_extraction", "science": "excellent", "specialized": "true"}',
+             4096, 2048, 0.0, 0.0, false, false, true,
+             '["cannabis_science", "extraction", "specialized_domain", "research"]',
+             'active', 'Specialized model for cannabis extraction science and research')
             ON CONFLICT (model_id) DO NOTHING
         """))
         

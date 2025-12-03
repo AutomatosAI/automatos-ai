@@ -29,8 +29,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
-import { useWorkflowWebSocket } from '@/hooks/use-workflow-websocket'
-import { useWorkflowStream } from '@/hooks/useWorkflowStream'
+import { WorkflowStreamViewer } from './workflow-stream-viewer'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 interface ExecutionTheaterProps {
@@ -702,6 +703,10 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   const [completedStages, setCompletedStages] = useState<number[]>([])
   const [selectedStageFilter, setSelectedStageFilter] = useState<number | null>(null)
   const [logs, setLogs] = useState<LogEntry[]>([])
+  const [useAISDK, setUseAISDK] = useState(false)
+
+  // Refs for auto-scrolling
+  const logsEndRef = useRef<HTMLDivElement>(null)
   const execution = executionData?.execution
   const subtasksForInsights = execution?.output_data?.subtasks || []
   const [isStagePanelCollapsed, setIsStagePanelCollapsed] = useState(false)
@@ -1014,96 +1019,159 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     } catch (err) { console.error('Error loading execution:', err) }
   }, [generateLogsFromExecution])
 
-  const { isConnected: sseConnected } = useWorkflowStream({
-    executionId: currentExecutionId,
-    onSubtaskUpdate: useCallback((update) => {
-      const newLog: LogEntry = {
-        id: `sse-${Date.now()}`,
-        timestamp: new Date(),
-        stage: 4,
-        type: update.status === 'completed' ? 'task_complete' : 'task_progress',
-        message: `${update.status === 'completed' ? '✓' : '⏳'} ${update.subtask_description || 'Processing...'}`,
-        taskDescription: update.subtask_description,
-        agent: update.agent_name,
-        model: update.model,
-        tokens: update.tokens_used,
-        duration: update.execution_time_ms,
-        // Capture FULL response from SSE
-        fullResponse: update.llm_response || update.response || update.output
-      }
-      setLogs(prev => [...prev, newLog])
-      if (currentExecutionId) loadExecutionById(currentExecutionId)
-    }, [currentExecutionId, loadExecutionById]),
-    onWorkflowComplete: useCallback(() => {
-      setIsExecuting(false)
-      if (currentExecutionId) loadExecutionById(currentExecutionId) // Will update stages from execution data
-    }, [currentExecutionId, loadExecutionById]),
-    onLog: useCallback((log) => {
-      // Add real-time logs to the display
-      const newLog: LogEntry = {
-        id: `log-${Date.now()}`,
-        timestamp: new Date(),
-        stage: log.stage || 4,
-        type: 'info',
-        message: log.message,
-        details: log.details
-      }
-      setLogs(prev => [...prev, newLog])
-    }, []),
-    onError: useCallback((error) => {
-      const errorLog: LogEntry = {
-        id: `error-${Date.now()}`,
-        timestamp: new Date(),
-        stage: 4,
-        type: 'task_error',
-        message: `❌ Error: ${error.message || error}`,
-        details: error.stack || JSON.stringify(error)
-      }
-      setLogs(prev => [...prev, errorLog])
-    }, [])
-  })
+  // AISDK stream - direct connection to AISDK endpoint
+  const [aisdkConnected, setAisdkConnected] = useState(false)
+  const streamAbortRef = useRef<AbortController | null>(null)
 
-  const handleWebSocketMessage = useCallback((message: any) => {
-    switch (message.type) {
-      case 'execution_started':
-        if (message.data?.execution_id) {
-          setCurrentExecutionId(message.data.execution_id)
-          setIsExecuting(true)
-          setCurrentStage(1)
-          setCompletedStages([])
-          setLogs([{ id: 'start', timestamp: new Date(), stage: 1, type: 'stage_start', message: '🚀 Starting workflow execution...' }])
-          loadExecutionById(message.data.execution_id)
+  useEffect(() => {
+    if (!currentExecutionId) return
+
+    const connectAISDKStream = async () => {
+      try {
+        setAisdkConnected(true)
+        streamAbortRef.current = new AbortController()
+
+        // Use the same API URL as apiClient (from NEXT_PUBLIC_API_URL env var)
+        // This should be set to the remote backend URL (e.g., https://api.automatos.app)
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL ||
+          (typeof window !== 'undefined' ? window.location.origin : '')
+
+        if (!apiUrl) {
+          throw new Error('NEXT_PUBLIC_API_URL not configured. Cannot connect to AISDK stream.')
         }
-        break
-      case 'subtask_execution_update':
-        if (currentExecutionId) loadExecutionById(currentExecutionId)
-        break
-      case 'execution_completed':
-      case 'execution_failed':
-        setIsExecuting(false)
-        if (message.data?.execution_id) loadExecutionById(message.data.execution_id)
-        break
+
+        const url = `${apiUrl}/api/workflows/executions/${currentExecutionId}/stream/aisdk`
+
+        console.log('[AISDK] Connecting to stream:', url)
+
+        const response = await fetch(url, {
+          method: 'GET',
+          signal: streamAbortRef.current.signal
+        })
+
+        if (!response.ok) {
+          throw new Error(`Stream failed: ${response.statusText}`)
+        }
+
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+        if (!reader) throw new Error('No response body')
+
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+
+            // AISDK format: d:{"type":"..."} or 0:"text" or e:{"error":"..."}
+            if (line.startsWith('d:')) {
+              try {
+                const event = JSON.parse(line.slice(2))
+
+                if (event.type === 'subtask_update') {
+                  const update = event.data || event
+                  const newLog: LogEntry = {
+                    id: `subtask-${update.subtask_id || Date.now()}-${Math.random()}`,
+                    timestamp: new Date(update.timestamp || Date.now()),
+                    stage: 4,
+                    type: update.status === 'completed' ? 'task_complete' : update.status === 'failed' ? 'task_error' : 'task_progress',
+                    message: `${update.status === 'completed' ? '✓' : update.status === 'failed' ? '✗' : '⏳'} ${update.subtask_description || 'Processing...'}`,
+                    taskDescription: update.subtask_description,
+                    agent: update.agent_name,
+                    tokens: update.tokens_used,
+                    duration: update.execution_time_ms,
+                    fullResponse: update.llm_response || update.result_preview
+                  }
+                  setLogs((prev: LogEntry[]) => [...prev, newLog])
+                  if (currentExecutionId) loadExecutionById(currentExecutionId)
+                } else if (event.type === 'execution_log') {
+                  const logData = event.data || event
+                  const newLog: LogEntry = {
+                    id: `log-${Date.now()}-${Math.random()}`,
+                    timestamp: new Date(logData.timestamp || Date.now()),
+                    stage: logData.stage || 4,
+                    type: 'info',
+                    message: logData.message || logData.data?.message,
+                    details: logData.details || logData.data?.details
+                  }
+                  setLogs((prev: LogEntry[]) => [...prev, newLog])
+                } else if (event.type === 'workflow_complete') {
+                  setIsExecuting(false)
+                  if (currentExecutionId) loadExecutionById(currentExecutionId)
+                } else if (event.type === 'error') {
+                  const errorLog: LogEntry = {
+                    id: `error-${Date.now()}-${Math.random()}`,
+                    timestamp: new Date(),
+                    stage: 4,
+                    type: 'task_error',
+                    message: `❌ Error: ${event.message || event.data?.message || 'Unknown error'}`,
+                    details: event.details || JSON.stringify(event)
+                  }
+                  setLogs((prev: LogEntry[]) => [...prev, errorLog])
+                }
+              } catch (err) {
+                console.error('Error parsing AISDK data:', err, line)
+              }
+            } else if (line.startsWith('e:')) {
+              try {
+                const errorData = JSON.parse(line.slice(2))
+                const errorLog: LogEntry = {
+                  id: `error-${Date.now()}-${Math.random()}`,
+                  timestamp: new Date(),
+                  stage: 4,
+                  type: 'task_error',
+                  message: `❌ Stream Error: ${errorData.message || 'Unknown error'}`,
+                  details: JSON.stringify(errorData)
+                }
+                setLogs((prev: LogEntry[]) => [...prev, errorLog])
+              } catch (err) {
+                console.error('Error parsing AISDK error:', err)
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('AISDK stream error:', err)
+          setAisdkConnected(false)
+        }
+      } finally {
+        setAisdkConnected(false)
+      }
+    }
+
+    connectAISDKStream()
+
+    return () => {
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort()
+      }
     }
   }, [currentExecutionId, loadExecutionById])
-
-  const { isConnected } = useWorkflowWebSocket({ workflowId, executionId: currentExecutionId || undefined, onMessage: handleWebSocketMessage, autoConnect: true })
 
   useEffect(() => {
     const loadWorkflow = async () => {
       try {
         const workflow = await apiClient.getWorkflow(workflowId.toString())
-        const execResponse = await apiClient.getWorkflowExecutions(workflowId.toString())
-        const executions = execResponse?.items || execResponse || []
-        let executionDetails = null
+        const execResponse: any = await apiClient.getWorkflowExecutions(workflowId.toString())
+        const executions = (execResponse?.items || execResponse || []) as any[]
+        let executionDetails: any = null
         if (executions.length > 0) {
           const latest = executions.sort((a: any, b: any) => b.id - a.id)[0]
           executionDetails = await apiClient.getWorkflowExecution(latest.id.toString())
           setCurrentExecutionId(latest.id)
-          if (executionDetails.status === 'running') setIsExecuting(true)
+          if (executionDetails?.status === 'running') setIsExecuting(true)
           // generateLogsFromExecution will set currentStage and completedStages based on actual state
           generateLogsFromExecution(executionDetails)
         }
-        setExecutionData({ ...workflow, execution: executionDetails })
+        setExecutionData({ ...(workflow as any), execution: executionDetails })
       } catch (error) { console.error('Error loading workflow:', error) }
     }
     loadWorkflow()
@@ -1125,11 +1193,13 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         type: 'stage_start',
         message: '🚀 Starting workflow execution...'
       }])
-      const result = await apiClient.executeWorkflow(workflowId.toString(), {})
+
+      // Start stream FIRST before executing workflow
+      const result: any = await apiClient.executeWorkflow(workflowId.toString(), {})
       if (result?.execution_id || result?.id) {
         const execId = result.execution_id || result.id
         lastExecutionIdRef.current = execId
-        setCurrentExecutionId(execId)
+        setCurrentExecutionId(execId) // This will trigger the stream useEffect
         // Wait a bit before loading to ensure backend has started processing
         setTimeout(() => loadExecutionById(execId), 500)
       }
@@ -1163,9 +1233,9 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
               <h1 className="text-lg font-semibold"><span className="gradient-text">{executionData.name}</span></h1>
               <p className="text-xs text-muted-foreground line-clamp-1">{executionData.description}</p>
             </div>
-            <Badge variant="outline" className={cn("text-xs", (isConnected || sseConnected) ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-gray-500/10 text-gray-400 border-gray-500/30")}>
-              <div className={cn("w-2 h-2 rounded-full mr-2", (isConnected || sseConnected) ? "bg-emerald-400 animate-pulse" : "bg-gray-400")} />
-              {(isConnected || sseConnected) ? 'Live' : 'Offline'}
+            <Badge variant="outline" className={cn("text-xs", aisdkConnected ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-gray-500/10 text-gray-400 border-gray-500/30")}>
+              <div className={cn("w-2 h-2 rounded-full mr-2", aisdkConnected ? "bg-emerald-400 animate-pulse" : "bg-gray-400")} />
+              {aisdkConnected ? 'Live' : 'Offline'}
             </Badge>
           </div>
           <div className="flex items-center gap-2">
@@ -1201,8 +1271,62 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
       {/* Main Content: Log (75%) + Sidebar (25%) */}
       <div className="flex-1 flex gap-4 px-6 pb-6 min-h-0">
-        <div className="flex-1">
-          <StreamingLog logs={logs} selectedStage={selectedStageFilter} onClearFilter={() => setSelectedStageFilter(null)} />
+        <div className="flex-1 flex flex-col gap-3">
+          {/* Stream View Toggle */}
+          <div className="flex items-center justify-between glass-panel rounded-xl p-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="stream-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                Stream View:
+              </Label>
+              <div className="flex items-center gap-2 bg-black/20 rounded-lg p-1">
+                <button
+                  onClick={() => setUseAISDK(false)}
+                  className={cn(
+                    "px-3 py-1 text-xs rounded-md transition-all",
+                    !useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Detailed Logs
+                </button>
+                <button
+                  onClick={() => setUseAISDK(true)}
+                  className={cn(
+                    "px-3 py-1 text-xs rounded-md transition-all",
+                    useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  AI SDK Stream
+                </button>
+              </div>
+            </div>
+            {useAISDK && currentExecutionId && (
+              <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
+                <Sparkles className="w-3 h-3 mr-1" />
+                Real-time AI SDK
+              </Badge>
+            )}
+          </div>
+
+          {/* Conditional View */}
+          {useAISDK && currentExecutionId ? (
+            <WorkflowStreamViewer
+              executionId={currentExecutionId}
+              className="flex-1"
+              onStageUpdate={(stage, stageName) => {
+                setCurrentStage(stage);
+                if (!completedStages.includes(stage - 1) && stage > 1) {
+                  setCompletedStages(prev => [...prev, stage - 1]);
+                }
+              }}
+              onComplete={() => {
+                setIsExecuting(false);
+                setCompletedStages([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+                if (currentExecutionId) loadExecutionById(currentExecutionId);
+              }}
+            />
+          ) : (
+            <StreamingLog logs={logs} selectedStage={selectedStageFilter} onClearFilter={() => setSelectedStageFilter(null)} />
+          )}
         </div>
         <div className="w-[300px]">
           <MetricsSidebar currentStage={currentStage} executionData={executionData} isExecuting={isExecuting} />

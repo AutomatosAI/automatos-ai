@@ -83,8 +83,15 @@ class DashboardWebSocketManager:
             return
         
         try:
-            self.pubsub = self.redis_client.pubsub()
-            await self.pubsub.subscribe("dashboard_updates")
+            # Check if we have the wrapper or raw client
+            if hasattr(self.redis_client, 'get_async_pubsub'):
+                # It's our RedisClient wrapper
+                _, self.pubsub = await self.redis_client.get_async_pubsub("dashboard_updates")
+            else:
+                # It's a raw redis client
+                self.pubsub = self.redis_client.pubsub()
+                await self.pubsub.subscribe("dashboard_updates")
+                
             self.is_running = True
             
             logger.info("Started Redis listener for dashboard updates")

@@ -122,7 +122,7 @@ class PandasAIService:
         lowered_question = question.lower()
         if any(keyword in lowered_question for keyword in ("chart", "plot", "graph", "visual")):
             requested_plot = True
-        elif len(df.select_dtypes(include=["number", "float", "int", "UInt", "Float"]).columns) >= 1:
+        elif len(df.select_dtypes(include=["number"]).columns) >= 1:
             # Auto-request a visualization when numeric measures exist
             requested_plot = True
 

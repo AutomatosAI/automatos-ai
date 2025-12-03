@@ -222,6 +222,9 @@ class HierarchicalMemorySystem:
         """
         experience_id = str(uuid4())
         importance = self.calculate_importance(experience)
+        is_conversation = experience.get("type") == "conversation"
+        
+        logger.info(f"[Memory] store_experience called: type={experience.get('type')}, importance={importance:.2f}")
         
         # Step 1: Store in working memory (Redis with TTL)
         working_key = f"working:{agent_id}:{experience_id}"
@@ -243,39 +246,52 @@ class HierarchicalMemorySystem:
         # Enforce working memory capacity (remove least important if over limit)
         await self._enforce_working_memory_capacity(agent_id)
         
-        # Step 2: Store in PostgreSQL with appropriate memory level based on importance
-        if importance > 0.5:  # Threshold for persistent storage
-            embedding = await self.generate_embedding(str(experience))
-            
-            # Determine memory level based on importance (PRD-05 5-tier system)
-            # Adjusted thresholds based on actual importance distribution (0.6-0.8 typical)
-            if importance >= 0.78:
-                memory_level = MemoryLevel.LONG_TERM  # High-value, permanent
-            elif importance >= 0.72:
-                memory_level = MemoryLevel.SHORT_TERM  # Recent, valuable
-            else:  # 0.5 - 0.72
-                memory_level = MemoryLevel.WORKING  # Active session
-            
-            async with self.async_session() as session:
-                memory_item = MemoryItem(
-                    id=experience_id,
-                    agent_id=agent_id,
-                    content=json.dumps(experience),
-                    memory_type=MemoryType.EXPERIENCE,
-                    memory_level=memory_level,
-                    importance=importance,
-                    embedding=embedding.tolist(),
-                    metadata={
-                        "task_id": experience.get("task_id"),
-                        "success": experience.get("success"),
-                        "execution_time": experience.get("execution_time"),
-                        "tokens_used": experience.get("tokens_used")
-                    }
-                )
-                session.add(memory_item)
-                await session.commit()
+        # Step 2: Store in PostgreSQL
+        # Conversations ALWAYS stored (user context is critical)
+        # Other experiences need importance > 0.5
+        should_persist = is_conversation or importance > 0.5
+        
+        if should_persist:
+            try:
+                embedding = await self.generate_embedding(str(experience))
                 
-            logger.info(f"Stored experience {experience_id} with importance {importance:.2f}")
+                # Conversations go to LONG_TERM for cross-session memory
+                if is_conversation:
+                    memory_level = MemoryLevel.LONG_TERM
+                elif importance >= 0.78:
+                    memory_level = MemoryLevel.LONG_TERM
+                elif importance >= 0.72:
+                    memory_level = MemoryLevel.SHORT_TERM
+                else:
+                    memory_level = MemoryLevel.WORKING
+                
+                async with self.async_session() as session:
+                    memory_item = MemoryItem(
+                        id=experience_id,
+                        agent_id=agent_id,
+                        content=json.dumps(experience),
+                        memory_type=MemoryType.EXPERIENCE,
+                        memory_level=memory_level,
+                        importance=importance,
+                        embedding=embedding.tolist(),
+                        metadata={
+                            "task_id": experience.get("task_id"),
+                            "chat_id": experience.get("chat_id"),
+                            "success": experience.get("success"),
+                            "execution_time": experience.get("execution_time"),
+                            "tokens_used": experience.get("tokens_used")
+                        }
+                    )
+                    session.add(memory_item)
+                    await session.commit()
+                    
+                logger.info(f"[Memory] ✅ Stored {experience_id} (type={experience.get('type')}, level={memory_level.value}, importance={importance:.2f})")
+            except Exception as e:
+                logger.error(f"[Memory] ❌ PostgreSQL storage failed: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            logger.debug(f"[Memory] Skipped persistent storage (importance {importance:.2f} < 0.5)")
         
         # Step 3: Schedule consolidation for very important items
         if importance > 0.8:

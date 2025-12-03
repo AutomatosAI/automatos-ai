@@ -227,7 +227,9 @@ class RAGService:
                     dc.content,
                     dc.embedding,
                     dc.metadata,
-                    d.filename,
+                    COALESCE(d.original_filename, d.filename) AS filename,
+                    d.filename AS raw_filename,
+                    d.original_filename,
                     d.description
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
@@ -306,14 +308,36 @@ class RAGService:
                 except json.JSONDecodeError:
                     metadata = {"raw_metadata": metadata}
             metadata.setdefault("document_id", row.get("document_id"))
-            if row.get("filename"):
-                metadata.setdefault("source_file", row["filename"])
+            # Use original_filename if available, otherwise use filename
+            doc_filename = row.get("original_filename") or row.get("filename")
+            if doc_filename:
+                metadata.setdefault("source_file", doc_filename)
+                # Clean filename for source (remove hash prefixes if present)
+                if '_' in doc_filename and len(doc_filename.split('_', 1)[0]) >= 32:
+                    clean_name = doc_filename.split('_', 1)[1]
+                else:
+                    clean_name = doc_filename
+            else:
+                clean_name = "knowledge-base"
+            
+            # FILTER OUT BAD CHUNKS: Skip separators, empty, or too short chunks
+            content = row["content"] or ""
+            content_stripped = content.strip()
+            
+            if not content_stripped or len(content_stripped) < 20:
+                continue
+            if content_stripped in ['---', '```', '```python', '```javascript', '```typescript', '```json']:
+                continue
+            # Skip chunks that are mostly separators
+            without_separators = content_stripped.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').strip()
+            if len(without_separators) < 10:
+                continue
             
             doc = Document(
                 id=f"chunk_{row['chunk_id']}",
-                content=row["content"],
+                content=content_stripped,
                 metadata=metadata,
-                source=row.get("filename") or metadata.get("source_file") or "knowledge-base"
+                source=clean_name
             )
             doc.embedding = vector
             self.vector_store.add_document(doc)
@@ -365,9 +389,13 @@ class RAGService:
         search_results = self.vector_store.search(query_embedding, top_k * 2)  # Get extra for filtering
         logger.info(f"📚 Vector search found {len(search_results)} raw results")
         
-        # Convert to SearchResult objects
+        # Extract query keywords for boosting and filtering
+        query_lower = query.lower()
+        query_words = [w for w in query_lower.split() if len(w) > 2]
+        
+        # Convert to SearchResult objects with smart ranking
         results = []
-        filtered_out = {"low_similarity": 0, "no_doc": 0, "category": 0}
+        filtered_out = {"low_similarity": 0, "no_doc": 0, "category": 0, "generic": 0}
         
         for doc_id, score in search_results:
             logger.debug(f"  Candidate: doc_id={doc_id[:8]}..., score={score:.4f}")
@@ -389,18 +417,48 @@ class RAGService:
                 logger.debug(f"    ❌ Filtered: category mismatch")
                 continue
             
+            # FILTER OUT GENERIC INTRODUCTION CHUNKS
+            content_lower = doc.content.lower()
+            generic_patterns = [
+                'comprehensive guide', 'deep technical insights', 'every aspect of',
+                'complete reference', 'whether you\'re', 'this guide serves',
+                'this document provides', 'overview', 'introduction'
+            ]
+            
+            # Check if chunk is mostly generic introduction text
+            is_generic_intro = False
+            generic_count = sum(1 for pattern in generic_patterns if pattern in content_lower[:500])
+            if generic_count >= 2:  # Has 2+ generic patterns in first 500 chars
+                # Also check if it lacks query-specific content
+                has_query_terms = any(word in content_lower for word in query_words)
+                if not has_query_terms:
+                    filtered_out["generic"] += 1
+                    logger.debug(f"    ❌ Filtered: generic introduction chunk (patterns: {generic_count})")
+                    continue
+            
+            # BOOST SCORE if chunk contains query terms
+            boosted_score = score
+            if query_words:
+                term_matches = sum(1 for word in query_words if word in content_lower)
+                if term_matches > 0:
+                    # Boost by up to 0.15 points for query term matches
+                    boost = min(0.15, term_matches * 0.05)
+                    boosted_score = min(1.0, score + boost)
+                    logger.debug(f"    📈 Boosted score: {score:.4f} -> {boosted_score:.4f} (query terms: {term_matches})")
+            
             # Determine relevance level
-            relevance = 'high' if score > 0.8 else 'medium' if score > 0.6 else 'low'
+            relevance = 'high' if boosted_score > 0.8 else 'medium' if boosted_score > 0.6 else 'low'
             
             results.append(SearchResult(
                 document=doc,
-                score=score,
+                score=boosted_score,
                 relevance=relevance
             ))
-            logger.debug(f"    ✅ Added: score={score:.4f}, relevance={relevance}, content_len={len(doc.content)}")
-            
-            if len(results) >= top_k:
-                break
+            logger.debug(f"    ✅ Added: score={boosted_score:.4f}, relevance={relevance}, content_len={len(doc.content)}")
+        
+        # Re-sort by boosted score and take top_k
+        results.sort(key=lambda x: x.score, reverse=True)
+        results = results[:top_k]
         
         # Cache results
         self.cache[cache_key] = (datetime.now(), results)

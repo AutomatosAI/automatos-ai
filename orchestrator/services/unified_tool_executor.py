@@ -53,6 +53,17 @@ class UnifiedToolExecutor:
             'search_knowledge': self._execute_platform_tool,
             'semantic_search': self._execute_platform_tool,
             'search_codebase': self._execute_platform_tool,
+            'search_documents': self._execute_platform_tool,  # Alias
+            'search_code': self._execute_platform_tool,  # Alias
+            
+            # Database tools (natural language SQL)
+            'query_database': self._execute_database_tool,
+            
+            # Multimodal search
+            'search_multimodal': self._execute_multimodal_tool,
+            'search_tables': self._execute_multimodal_tool,
+            'search_images': self._execute_multimodal_tool,
+            'search_formulas': self._execute_multimodal_tool,
             
             # File operations
             'read_file': self._execute_file_op,
@@ -230,11 +241,212 @@ class UnifiedToolExecutor:
         agent_id: int
     ) -> Dict[str, Any]:
         """Execute research tools via AgentPlatformTools"""
+        # Map aliases to canonical names
+        name_map = {'search_documents': 'search_knowledge', 'search_code': 'search_codebase'}
+        canonical_name = name_map.get(tool_name, tool_name)
         return await self.platform_tools.execute_tool(
-            tool_name=tool_name,
+            tool_name=canonical_name,
             parameters=parameters,
             agent_id=agent_id
         )
+    
+    async def _execute_database_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Execute database query using natural language.
+        Routes to knowledge sources or main database fallback.
+        """
+        import httpx
+        from config import config
+        from services.pandas_ai_service import get_pandasai_service
+        
+        query = parameters.get('query', '')
+        database_name = parameters.get('database_name')
+        analysis_prompt = parameters.get('analysis_prompt', query)
+        
+        logger.info(f"🔧 Agent {agent_id} querying database: {query[:50]}...")
+        
+        try:
+            base_url = config.KNOWLEDGE_API_BASE_URL
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Get available database sources
+                sources = []
+                try:
+                    resp = await client.get(f"{base_url}/api/knowledge/sources/database/", params={"active_only": True})
+                    if resp.status_code == 200:
+                        sources = resp.json() or []
+                except Exception as e:
+                    logger.warning(f"Failed to list database sources: {e}")
+                
+                # Select source
+                selected = None
+                if database_name and sources:
+                    selected = next((s for s in sources if str(s.get("name", "")).lower() == database_name.lower()), None)
+                if not selected and sources:
+                    selected = sources[0]
+                
+                # Fallback to direct main DB query if no sources
+                if not selected:
+                    logger.info("No knowledge sources - using direct DB fallback")
+                    return await self._query_main_database(query, analysis_prompt)
+                
+                # Query via knowledge API
+                source_id = int(selected.get("id"))
+                resp = await client.post(
+                    f"{base_url}/api/knowledge/sources/database/{source_id}/query",
+                    json={"query": query, "source_id": source_id, "use_cache": True, "include_explanation": True}
+                )
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    result = {
+                        "success": True,
+                        "database": data.get('database') or selected.get('name', ''),
+                        "sql": data.get('sql', ''),
+                        "row_count": data.get('row_count', 0),
+                        "data": data.get('data', []),
+                        "columns": data.get('columns', []),
+                        "execution_time_ms": data.get('execution_time_ms', 0)
+                    }
+                    
+                    # Add PandasAI insight if available
+                    pandasai = get_pandasai_service()
+                    if pandasai and result.get('data'):
+                        insight = pandasai.generate_insight(analysis_prompt, result['data'], result['columns'])
+                        if insight:
+                            result["pandas_ai"] = insight
+                    
+                    return result
+                else:
+                    # Knowledge API failed - fallback to direct main database query
+                    logger.warning(f"Knowledge API returned {resp.status_code}, falling back to direct DB")
+                    return await self._query_main_database(query, analysis_prompt)
+                    
+        except Exception as e:
+            logger.error(f"Database tool error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _query_main_database(self, query: str, analysis_prompt: str = None) -> Dict[str, Any]:
+        """Direct query to main Automatos database using NL-to-SQL"""
+        from services.llm_provider import create_llm_manager
+        from services.pandas_ai_service import get_pandasai_service
+        from database.database import get_db_session
+        from sqlalchemy import text
+        import time
+        
+        try:
+            start_time = time.time()
+            
+            # Get schema from centralized provider
+            from services.schema_provider import get_schema_provider
+            schema_provider = get_schema_provider(self.db)
+            schema = schema_provider.get_database_schema_overview()
+
+            # Add query guidance
+            schema += "\n\nUse DATE_TRUNC('day', col) for daily grouping. Use NOW() - INTERVAL 'N days' for date ranges.\nAlways use explicit JOIN syntax. Aggregate by date for time-based queries."
+            
+            # Get LLM to generate SQL
+            llm_manager = await create_llm_manager(provider="openai", model="gpt-4")
+            
+            response = await llm_manager.generate_response([
+                {"role": "system", "content": f"You are a PostgreSQL expert. Generate ONLY the SQL query, nothing else. Only SELECT allowed. Always include proper date handling and grouping.\n\n{schema}"},
+                {"role": "user", "content": f"Generate SQL for: {query}"}
+            ])
+            
+            sql = response.content.strip()
+            # Clean markdown code blocks
+            if "```" in sql:
+                parts = sql.split("```")
+                for part in parts:
+                    if "SELECT" in part.upper():
+                        sql = part.strip()
+                        break
+                sql = sql.replace("sql", "").strip()
+            
+            sql = sql.strip()
+            
+            if not sql.upper().startswith("SELECT"):
+                return {"success": False, "error": "Only SELECT queries allowed"}
+            
+            logger.info(f"[Database Tool] Generated SQL: {sql[:200]}...")
+            
+            # Execute SQL
+            with get_db_session() as session:
+                result = session.execute(text(sql))
+                columns = list(result.keys())
+                rows = result.fetchall()
+                
+                data = []
+                for row in rows[:1000]:  # Limit to 1000 rows
+                    row_dict = {}
+                    for i, col in enumerate(columns):
+                        val = row[i]
+                        # Handle datetime serialization
+                        if hasattr(val, 'isoformat'):
+                            val = val.isoformat()
+                        # Handle Decimal
+                        elif hasattr(val, '__float__'):
+                            val = float(val)
+                        # Handle JSON/dict
+                        elif isinstance(val, dict):
+                            val = val
+                        row_dict[col] = val
+                    data.append(row_dict)
+            
+            tool_result = {
+                "success": True,
+                "database": "automatos_main",
+                "sql": sql,
+                "row_count": len(data),
+                "data": data,
+                "columns": columns,
+                "execution_time_ms": int((time.time() - start_time) * 1000)
+            }
+            
+            # Generate insight if analysis prompt provided
+            if analysis_prompt and data:
+                pandasai = get_pandasai_service()
+                if pandasai:
+                    insight = pandasai.generate_insight(analysis_prompt, data, columns)
+                    if insight:
+                        tool_result["pandas_ai"] = insight
+            
+            return tool_result
+        except Exception as e:
+            logger.error(f"Direct DB query error: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_multimodal_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """Execute multimodal search (tables, images, formulas, combined)"""
+        from services.multimodal_knowledge_tools import MultimodalKnowledgeTools
+        
+        logger.info(f"🔧 Agent {agent_id} executing multimodal tool: {tool_name}")
+        
+        try:
+            tools = MultimodalKnowledgeTools()
+            
+            if tool_name == 'search_multimodal':
+                return await tools.search_multimodal(**parameters)
+            elif tool_name == 'search_tables':
+                return await tools.search_tables(**parameters)
+            elif tool_name == 'search_images':
+                return await tools.search_images(**parameters)
+            elif tool_name == 'search_formulas':
+                return await tools.search_formulas(**parameters)
+            else:
+                return {"success": False, "error": f"Unknown multimodal tool: {tool_name}"}
+        except Exception as e:
+            logger.error(f"Multimodal tool error: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _execute_file_op(
         self,

@@ -3,21 +3,24 @@
 import { useState, useCallback, useRef } from 'react'
 import type { ChatMessage, AppUsage } from '@/types'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || ''
-
 export function useChat({
   id,
   initialMessages = [],
+  selectedModelId = 'gpt-4',
   onData,
+  onChatIdUpdate,
 }: {
   id: string
   initialMessages?: ChatMessage[]
+  selectedModelId?: string
   onData?: (data: any) => void
+  onChatIdUpdate?: (chatId: string) => void
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [usage, setUsage] = useState<AppUsage | undefined>()
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState<'idle' | 'streaming' | 'error'>('idle')
+  const [chatId, setChatId] = useState(id)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const stop = useCallback(() => {
@@ -29,7 +32,6 @@ export function useChat({
   }, [])
 
   const reload = useCallback(() => {
-    // Remove last assistant message and resend last user message
     const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user')
     if (lastUserMessageIndex >= 0) {
       const lastUserMessage = messages[lastUserMessageIndex]
@@ -53,12 +55,10 @@ export function useChat({
         parts: messageObj.parts || [{ type: 'text', text: messageObj.content || '' }],
       }
 
-      // Add user message immediately
       setMessages(prev => [...prev, userMessage])
       setIsLoading(true)
       setStatus('streaming')
 
-      // Create empty assistant message that we'll update
       const assistantMessageId = crypto.randomUUID()
       const assistantMessage: ChatMessage = {
         id: assistantMessageId,
@@ -73,16 +73,19 @@ export function useChat({
         abortControllerRef.current = new AbortController()
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        const response = await fetch('/api/chat', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
-            id: id || '',
-            message: userMessage,
-            selectedChatModel: 'gpt-4',
+            id: chatId || '',
+            message: {
+              role: 'user',
+              parts: [{ type: 'text', text: messageObj.content || '' }],
+            },
+            selectedChatModel: selectedModelId,
             selectedVisibilityType: 'private',
           }),
           signal: abortControllerRef.current.signal,
@@ -106,19 +109,15 @@ export function useChat({
           buffer = lines.pop() || ''
 
           for (const line of lines) {
-            if (!line.trim() || !line.startsWith('data: ')) continue
+            if (!line.trim()) continue
 
-            const data = line.slice(6).trim()
-            if (data === '[DONE]') continue
-
+            // AI SDK Data Stream format
+            if (line.startsWith('0:')) {
+              // Text chunk
             try {
-              const parsed = JSON.parse(data)
-              console.log('[Chat] SSE chunk:', parsed)
-
-              if (parsed.type === 'text-delta' && parsed.delta) {
-                accumulatedContent += parsed.delta
+                const text = JSON.parse(line.slice(2))
+                accumulatedContent += text
                 
-                // Update the assistant message with accumulated content
                 setMessages(prev => 
                   prev.map(m => 
                     m.id === assistantMessageId
@@ -130,27 +129,48 @@ export function useChat({
                       : m
                   )
                 )
-              } else if (parsed.type === 'tool-data' && parsed.data) {
-                // Handle tool-data (database_results, code_snippets, documents, etc.)
+              } catch (e) {
+                // Skip parse errors
+              }
+            } else if (line.startsWith('d:')) {
+              // Data event
+              try {
+                const data = JSON.parse(line.slice(2))
+                
+                // Handle chat-id event - critical for conversation continuity
+                if (data.type === 'chat-id' && data.chatId) {
+                  setChatId(data.chatId)
+                  if (onChatIdUpdate) onChatIdUpdate(data.chatId)
+                } else if (data.type === 'tool-data' && data.data) {
                 setMessages(prev => 
                   prev.map(m => 
                     m.id === assistantMessageId
                       ? {
                           ...m,
-                          database_results: parsed.data.database_results || m.database_results,
-                          documents: parsed.data.documents || m.documents,
-                          code_snippets: parsed.data.code_snippets || m.code_snippets,
+                            database_results: data.data.database_results || m.database_results,
+                            documents: data.data.documents || m.documents,
+                            // Convert snake_case from backend to camelCase for frontend
+                            codeSnippets: data.data.code_snippets || m.codeSnippets,
                         }
                       : m
                   )
                 )
-                if (onData) onData(parsed)
-              } else if (parsed.type === 'data-usage') {
-                setUsage(parsed.data)
-                if (onData) onData(parsed)
+                  if (onData) onData({ type: 'tool-data', data: data.data })
+                } else if (data.type === 'usage' && data.data) {
+                  setUsage({
+                    promptTokens: data.data.promptTokens || 0,
+                    completionTokens: data.data.completionTokens || 0,
+                    totalTokens: data.data.totalTokens || 0,
+                  })
+                  if (onData) onData({ type: 'data-usage', data: data.data })
               }
             } catch (e) {
-              console.warn('[Chat] Failed to parse SSE line:', line, e)
+                // Skip parse errors
+              }
+            } else if (line.startsWith('e:')) {
+              // Error
+              console.error('[Chat] Error:', line.slice(2))
+              setStatus('error')
             }
           }
         }
@@ -159,13 +179,13 @@ export function useChat({
         setStatus('idle')
       } catch (error: any) {
         if (error.name !== 'AbortError') {
-          console.error('[Chat] Stream error:', error)
+          console.error('[Chat] Error:', error)
           setStatus('error')
         }
         setIsLoading(false)
       }
     },
-    [id, isLoading, onData]
+    [chatId, isLoading, selectedModelId, onData, onChatIdUpdate]
   )
 
   return {

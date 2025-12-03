@@ -646,8 +646,11 @@ class ContextEngineeringIntegrator:
                 await self.vector_store.initialize(dimension=1536)
                 self.logger.info("✅ PgVectorStore initialized for semantic search")
                 
-            # Generate query embedding
-            query_embedding = await self.embedding_generator.generate_embedding(query)
+            # Generate query embedding (generate_embeddings returns list of dicts with 'embedding' key)
+            embedding_results = await self.embedding_generator.generate_embeddings([query])
+            if not embedding_results:
+                raise ValueError("Failed to generate query embedding")
+            query_embedding = embedding_results[0].get("embedding", embedding_results[0])
             
             # Perform semantic search
             results = await self.vector_store.similarity_search(
@@ -947,10 +950,10 @@ Agent Type: {agent_type} | Priority: {priority}
             
             items.append(ContextItem(
                 content=content,
-                tokens=tokens,
-                relevance=relevance,
                 source=source,
-                id=f"rag_{i}"
+                context_type="documentation",
+                relevance_score=relevance,
+                token_count=tokens
             ))
         return items
 

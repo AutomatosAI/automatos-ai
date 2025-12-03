@@ -85,14 +85,9 @@ class CredentialResolver:
         
         # Try to resolve from database
         # CRITICAL: Only try database AFTER import phase completes
-        # During module initialization (database.py loading), SessionLocal doesn't exist yet
         try:
-            # Lazy import to avoid circular dependency during startup
-            import sys
-            if 'database.database' not in sys.modules or not hasattr(sys.modules.get('database.database'), 'SessionLocal'):
-                # Database module not fully loaded yet - skip database lookup during bootstrap
-                raise CredentialNotFoundError(f"Database not initialized yet (bootstrap phase)")
-            
+            # Actually try importing instead of checking sys.modules
+            # This handles both bootstrap phase AND module availability correctly
             from database.database import SessionLocal
             from services.credential_service import CredentialStore
             
@@ -122,8 +117,10 @@ class CredentialResolver:
             finally:
                 db.close()
         
+        except ImportError as e:
+            logger.debug(f"Database import failed during credential lookup: {e}")
         except Exception as e:
-            logger.debug(f"Database credential lookup skipped (using .env): {e}")
+            logger.debug(f"Database credential lookup skipped: {e}")
         
         # Fallback to environment variable
         if fallback_env:
@@ -175,12 +172,7 @@ class CredentialResolver:
             return json.loads(cached_value)
         
         try:
-            # Lazy import to avoid circular dependency during startup
-            import sys
-            if 'database.database' not in sys.modules or not hasattr(sys.modules.get('database.database'), 'SessionLocal'):
-                # Database module not fully loaded yet - skip database lookup during bootstrap
-                raise CredentialNotFoundError(f"Database not initialized yet (bootstrap phase)")
-            
+            # Actually try importing instead of checking sys.modules
             from database.database import SessionLocal
             from services.credential_service import CredentialStore
             
@@ -203,14 +195,11 @@ class CredentialResolver:
             finally:
                 db.close()
         
+        except ImportError as e:
+            logger.debug(f"Database import failed during credential lookup: {e}")
         except CredentialNotFoundError as e:
-            # Bootstrap phase or credential not found - expected during startup
-            if "bootstrap phase" in str(e):
-                logger.debug(f"Bootstrap phase - credential '{credential_name}' not yet available from database")
-            else:
                 logger.warning(f"Credential '{credential_name}' not found in database: {e}")
         except Exception as e:
-            # Unexpected error - log as warning (not error) to reduce noise
             logger.warning(f"Could not load credential '{credential_name}' from database: {e}")
         
         # Fallback to environment variables if prefix provided

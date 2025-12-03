@@ -131,15 +131,61 @@ class AgentPlatformTools:
                 
                 self.logger.info(f"  📊 RAG returned {len(search_results)} results")
                 
+                # Extract query keywords for smart content extraction
+                query_lower = query.lower()
+                query_terms = [term.strip() for term in query_lower.split() if len(term) > 2]
+                
                 # Format results for agent consumption
                 formatted = []
                 for r in search_results[:limit]:
                     # SearchResult has 'document' and 'score' attributes
                     doc_content = r.document.content if hasattr(r, 'document') else str(r)
+                    
+                    # Get document source/title - check multiple possible keys
+                    if hasattr(r, 'document') and r.document:
+                        meta = r.document.metadata or {}
+                        doc_source = (
+                            meta.get('source_file') or 
+                            meta.get('source') or 
+                            meta.get('filename') or 
+                            r.document.source or 
+                            'knowledge-base'
+                        )
+                    else:
+                        doc_source = 'Unknown'
+                    
+                    # Clean filename: remove hash prefixes
+                    clean_filename = doc_source
+                    if '_' in doc_source:
+                        parts = doc_source.split('_', 1)
+                        if len(parts) > 1 and len(parts[0]) >= 32:
+                            clean_filename = parts[1]
+                    
+                    # CONTENT EXTRACTION: Chunks are already filtered, just format for display
+                    excerpt = doc_content.strip()
+                    
+                    # Smart truncation to 800 chars at sentence/paragraph boundary
+                    if len(excerpt) > 800:
+                        truncated = excerpt[:800]
+                        last_period = truncated.rfind('.')
+                        last_newline = truncated.rfind('\n\n')
+                        cut_point = max(last_period, last_newline)
+                        
+                        if cut_point > 400:
+                            excerpt = truncated[:cut_point + 1].strip()
+                            if not excerpt.endswith('.'):
+                                excerpt += '.'
+                        else:
+                            excerpt = truncated.strip()
+                        excerpt += '...'
+                    
                     formatted.append({
-                        "content": doc_content[:500] + '...' if len(doc_content) > 500 else doc_content,
-                        "source": r.document.metadata.get('source', 'Unknown') if hasattr(r, 'document') else 'Unknown',
-                        "relevance": float(r.score) if hasattr(r, 'score') else 0.0
+                        "content": excerpt,
+                        "source": clean_filename,
+                        "title": clean_filename,
+                        "filename": clean_filename,
+                        "relevance": float(r.score) if hasattr(r, 'score') else 0.0,
+                        "similarity": float(r.score) if hasattr(r, 'score') else 0.0
                     })
                 
                 self.logger.info(f"  ✅ Returning {len(formatted)} formatted results")

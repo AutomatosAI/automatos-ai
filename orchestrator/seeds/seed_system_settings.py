@@ -454,6 +454,80 @@ def seed_system_settings(db: Session):
         },
         
         # ========================================
+        # CHATBOT SETTINGS
+        # ========================================
+        
+        # LLM Provider Configuration for Chatbot
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "provider",
+            "default_value": "huggingface",
+            "value_type": "string",
+            "description": "LLM provider for chatbot",
+            "is_required": True,
+            "validation_rules": {
+                "options": ["openai", "anthropic", "google", "azure", "huggingface", "grok"]
+            }
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "model",
+            "default_value": "meta-llama/Llama-3.2-3B-Instruct",
+            "value_type": "string",
+            "description": "LLM model for chatbot",
+            "is_required": True
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "temperature",
+            "default_value": "0.7",
+            "value_type": "number",
+            "description": "Temperature for chatbot responses (0.0-2.0)",
+            "is_required": False,
+            "validation_rules": {
+                "min": 0.0,
+                "max": 2.0,
+                "step": 0.1
+            }
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "max_tokens",
+            "default_value": "2000",
+            "value_type": "number",
+            "description": "Maximum tokens in chatbot response",
+            "is_required": False,
+            "validation_rules": {
+                "min": 1,
+                "max": 32000
+            }
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "credential_name_huggingface",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Explicit credential name for HuggingFace. Leave empty for automatic resolution.",
+            "is_required": False
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "credential_name_openai",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Explicit credential name for OpenAI. Leave empty for automatic resolution.",
+            "is_required": False
+        },
+        {
+            "category": SettingCategory.CHATBOT.value,
+            "key": "credential_name_grok",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Explicit credential name for xAI/Grok. Leave empty for automatic resolution.",
+            "is_required": False
+        },
+        
+        # ========================================
         # CODEGRAPH SETTINGS
         # ========================================
         

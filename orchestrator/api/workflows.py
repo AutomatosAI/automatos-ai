@@ -1161,6 +1161,106 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
 
 
+@router.get("/executions/{execution_id}/stream/aisdk")
+async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
+    """
+    AI SDK stream for real-time workflow execution updates.
+    
+    Uses Vercel AI SDK Data Stream Protocol:
+    - 0:"text" -> Text delta
+    - d:{"key":"val"} -> Data payload
+    - e:{"err":"msg"} -> Error
+    
+    Usage (Frontend with @ai-sdk/react):
+        const { messages, data } = useChat({
+            api: '/api/workflow/stream',
+            body: { executionId }
+        })
+    """
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    
+    logger.info(f"🚀 Starting AI SDK stream for execution {execution_id}")
+    
+    try:
+        from services.workflow_streaming_service import stream_workflow_as_aisdk
+        
+        return StreamingResponse(
+            stream_workflow_as_aisdk(execution_id),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Transfer-Encoding": "chunked",  # Force chunked transfer
+                "x-vercel-ai-data-stream": "v1",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating AI SDK stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
+@router.post("/stream")
+async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    """
+    AI SDK compatible streaming endpoint for useChat hook.
+    
+    This endpoint is designed to work with Vercel AI SDK's useChat hook:
+    
+    Frontend Usage:
+        const { messages, data } = useChat({
+            api: '/api/workflows/stream',
+            body: { executionId: 123 }
+        })
+    
+    Accepts:
+        { executionId: number }
+    
+    Returns:
+        AI SDK Data Stream Protocol (text/plain with x-vercel-ai-data-stream header)
+        - 0:"text" -> Text deltas for stage updates
+        - d:{...}  -> Data payloads for structured info
+        - e:{...}  -> Error events
+    """
+    # Extract execution ID from request body
+    execution_id = request.get("executionId")
+    if not execution_id:
+        raise HTTPException(status_code=400, detail="executionId is required in request body")
+    
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id}")
+    
+    try:
+        from services.workflow_streaming_service import stream_workflow_as_aisdk
+        
+        return StreamingResponse(
+            stream_workflow_as_aisdk(execution_id),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Transfer-Encoding": "chunked",  # Force chunked transfer
+                "x-vercel-ai-data-stream": "v1",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating AI SDK chat stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
+
 @router.get("/executions/{execution_id}/results")
 async def get_execution_results(execution_id: int, db: Session = Depends(get_db)):
     """Get workflow execution results"""
@@ -2277,6 +2377,26 @@ Subtask Results:
                 )
             else:
                 logger.warning("Redis client not initialized for execution_completed event")
+            
+            # CRITICAL: Broadcast workflow_complete to SSE stream for UI
+            if stream_manager:
+                try:
+                    await stream_manager.broadcast_event(
+                        execution_id=execution_id,
+                        event_type="workflow_complete",
+                        data={
+                            "status": "completed",
+                            "execution_time": f"{total_duration:.1f}s",
+                            "quality_score": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}).get("overall", 0),
+                            "stages_completed": len(stages_completed),
+                            "total_tokens": usage_summary.get("total_tokens", 0),
+                            "total_cost": usage_summary.get("total_cost", 0),
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    )
+                    logger.info(f"✅ Broadcast workflow_complete to SSE stream for execution {execution_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast workflow_complete: {e}")
             
     except Exception as e:
         import traceback

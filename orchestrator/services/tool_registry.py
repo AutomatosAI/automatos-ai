@@ -60,6 +60,7 @@ class ToolParameter:
     required: bool = True
     default: Any = None
     enum: Optional[List[Any]] = None
+    items: Optional[Dict[str, str]] = None  # For array types: {"type": "string"}
     
     def to_openai_format(self) -> Dict[str, Any]:
         """Convert to OpenAI function parameter format"""
@@ -72,6 +73,9 @@ class ToolParameter:
             prop["enum"] = self.enum
         if self.default is not None:
             prop["default"] = self.default
+        # OpenAI requires 'items' for array types
+        if self.type == "array":
+            prop["items"] = self.items or {"type": "string"}
         
         return prop
 
@@ -593,6 +597,45 @@ class ToolRegistry:
                 {"action": "search_multimodal", "params": {"query": "authentication system", "kb_types": ["document", "codegraph", "image"], "limit": 10}}
             ],
             metadata={"kb_types": ["document", "table", "image", "formula", "codegraph"], "added_in": "PRD-19"}
+        ))
+        
+        # ==========================================
+        # DATABASE TOOLS (NL-to-SQL)
+        # ==========================================
+        
+        self.register_tool(ToolSpec(
+            name="query_database",
+            category=ToolCategory.DATABASE_TOOLS,
+            description="Query databases using natural language. Converts your question to SQL and executes it against knowledge sources or the main Automatos database. Can also generate charts and insights via PandasAI.",
+            executor_class="UnifiedToolExecutor",
+            executor_method="_execute_database_tool",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Natural language query (e.g., 'Show failed workflows in the last 7 days', 'Count agents by type')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="database_name",
+                    type="string",
+                    description="Specific database/knowledge source to query (optional - uses default if not specified)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="analysis_prompt",
+                    type="string",
+                    description="Optional prompt for PandasAI to generate insights or charts from results",
+                    required=False
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "query_database", "params": {"query": "Show failed workflows in the last 14 days"}},
+                {"action": "query_database", "params": {"query": "How many agents are active?", "analysis_prompt": "Create a bar chart of agent types"}}
+            ],
+            metadata={"supports_pandas_ai": True, "added_in": "unified_tools"}
         ))
         
         # ==========================================

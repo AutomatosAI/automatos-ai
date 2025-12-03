@@ -23,6 +23,7 @@ class LLMProvider(Enum):
     AZURE = "azure"
     HUGGINGFACE = "huggingface"
     AWS_BEDROCK = "aws_bedrock"  # Cost-effective gateway to multiple models
+    GROK = "grok"  # xAI Grok models
 
 
 class EmbeddingProvider(Enum):

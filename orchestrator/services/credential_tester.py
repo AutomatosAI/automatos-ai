@@ -72,7 +72,8 @@ class CredentialTester:
             'huggingface_api': self._test_huggingface,
             'oauth2_token': self._test_oauth2_token,
             'http_basic_auth': self._test_http_basic_auth,
-            's3_credentials': self._test_s3
+            's3_credentials': self._test_s3,
+            'xai_api': self._test_xai
         }
         
         if credential_type not in test_methods:
@@ -543,6 +544,36 @@ class CredentialTester:
     
     async def _test_s3(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': 'S3 credential testing not yet implemented'}
+    
+    async def _test_xai(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Test xAI/Grok API credentials"""
+        api_key = data.get('api_key')
+        
+        if not api_key:
+            return {'success': False, 'message': 'API key is required'}
+        
+        url = "https://api.x.ai/v1/models"
+        headers = {'Authorization': f'Bearer {api_key}'}
+        
+        async with self.session.get(url, headers=headers) as response:
+            if response.status == 200:
+                models = await response.json()
+                model_list = models.get("data", [])
+                return {
+                    'success': True,
+                    'message': f'xAI API connection successful. Found {len(model_list)} models.',
+                    'details': {
+                        'models_count': len(model_list),
+                        'models': [m.get('id') for m in model_list[:5]]
+                    }
+                }
+            else:
+                error_text = await response.text()
+                return {
+                    'success': False,
+                    'message': f'xAI API error: {response.status}',
+                    'details': {'status': response.status, 'error': error_text[:200]}
+                }
 
 
 # Usage example

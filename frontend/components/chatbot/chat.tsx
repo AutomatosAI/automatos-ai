@@ -52,13 +52,20 @@ export function Chat({
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  const [activeChatId, setActiveChatId] = useState(id)
+  
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
-    id,
+    id: activeChatId,
     initialMessages,
+    selectedModelId: currentModelId,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
       }
+    },
+    onChatIdUpdate: (newChatId) => {
+      // Update local state when backend creates/returns chat ID
+      setActiveChatId(newChatId)
     },
   })
 

@@ -17,6 +17,7 @@ from .clients.google_client import GoogleProvider
 from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider
+from .clients.grok_client import GrokProvider
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,9 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             "azure": "azure_openai",
             "huggingface": "huggingface_api",
             "aws_bedrock": "aws_bedrock_api",
-            "bedrock": "aws_bedrock_api"
+            "bedrock": "aws_bedrock_api",
+            "grok": "xai_api",
+            "xai": "xai_api"
         }
         
         credential_type = credential_type_map.get(provider.lower())
@@ -194,8 +197,8 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
         
         # Strategy 1: Try standard naming pattern with _api suffix
         credential_name_variations = [
-            f"{environment}_{provider}_api",      # development_openai_api (standard)
-            f"{environment}_{provider}",          # development_openai (user's format)
+            f"{environment}_{provider}_api",      # production_openai_api (standard)
+            f"{environment}_{provider}",          # production_openai (user's format)
             f"{provider}_api",                     # openai_api (simple)
             provider,                              # openai (provider name only)
             provider.lower(),                      # openai (lowercase)
@@ -213,6 +216,18 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
                 f"{environment}_huggingface",
             ])
         
+        # If not in development, also try development environment variations early
+        if environment != 'development':
+            credential_name_variations.extend([
+                f"development_{provider}_api",
+                f"development_{provider}",
+            ])
+            if provider.lower() == "huggingface":
+                credential_name_variations.extend([
+                    "development_HuggingFace",
+                    "development_huggingface",
+                ])
+        
         # AWS Bedrock credential variations
         if provider.lower() in ["aws_bedrock", "bedrock"]:
             credential_name_variations.extend([
@@ -224,12 +239,14 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
                 "aws",
             ])
         
-        # Try each credential name variation
+        # Try each credential name variation in the current environment
         for cred_name in credential_name_variations:
             try:
-                cred_data = resolver.get_dict(cred_name, environment=environment)
+                # If credential name starts with 'development_', try in development environment
+                lookup_env = 'development' if cred_name.startswith('development_') else environment
+                cred_data = resolver.get_dict(cred_name, environment=lookup_env)
                 if cred_data and len(cred_data) > 0:
-                    logger.info(f"Found credential '{cred_name}' for provider '{provider}'")
+                    logger.info(f"Found credential '{cred_name}' for provider '{provider}' (env: {lookup_env})")
                     return cred_data
             except Exception as e:
                 logger.debug(f"Credential name '{cred_name}' not found: {e}")
@@ -273,6 +290,56 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
         except Exception as e:
             logger.debug(f"Type-based credential lookup failed: {e}")
         
+        # Strategy 3: If current environment failed, try 'development' as fallback
+        if environment != 'development':
+            logger.debug(f"Trying 'development' environment as fallback for provider '{provider}'")
+            
+            # First try name-based lookup in development
+            try:
+                for cred_name in credential_name_variations:
+                    try:
+                        cred_data = resolver.get_dict(cred_name, environment='development')
+                        if cred_data and len(cred_data) > 0:
+                            logger.info(f"Found credential '{cred_name}' in 'development' environment for provider '{provider}'")
+                            return cred_data
+                    except Exception as e:
+                        logger.debug(f"Credential name '{cred_name}' not found in development: {e}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Name-based lookup in development failed: {e}")
+            
+            # Then try type-based lookup in development
+            try:
+                from database.database import SessionLocal
+                from services.credential_service import CredentialStore
+                
+                db = SessionLocal()
+                try:
+                    store = CredentialStore(db)
+                    cred_type = store.get_credential_type_by_name(credential_type)
+                    if cred_type:
+                        credentials = store.list_credentials(
+                            credential_type_id=cred_type.id,
+                            environment='development',
+                            active_only=True
+                        )
+                        
+                        if credentials:
+                            cred = credentials[0]
+                            logger.info(
+                                f"Found credential '{cred.name}' in 'development' environment "
+                                f"(type: {credential_type}) for provider '{provider}'"
+                            )
+                            decrypted = store.get_decrypted_credential(
+                                cred.id,
+                                service_name="llm_provider"
+                            )
+                            return decrypted
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.debug(f"Type-based lookup in development failed: {e}")
+        
         logger.warning(
             f"Could not find credential for provider '{provider}' using any variation. "
             f"Tried: {credential_name_variations}"
@@ -307,6 +374,30 @@ class LLMManager:
         
         if config is None:
             config = self._load_config_from_settings(service_name, provider, model)
+        elif not config.api_key:
+            # Config provided but no api_key - look up credential
+            logger.debug(f"Config provided without api_key, looking up credential for {config.provider.value}")
+            cred_data = get_credential_data(config.provider.value, service_name=service_name)
+            
+            # Extract API key based on provider
+            api_key = None
+            if config.provider == LLMProvider.HUGGINGFACE:
+                api_key = cred_data.get("api_token") or cred_data.get("api_key")
+            elif config.provider == LLMProvider.GROK:
+                api_key = cred_data.get("api_key") or cred_data.get("api_token")
+            else:
+                api_key = cred_data.get("api_key") or cred_data.get("api_token")
+            
+            if api_key:
+                config = LLMConfig(
+                    provider=config.provider,
+                    model=config.model,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    api_key=api_key,
+                    base_url=config.base_url
+                )
+                logger.info(f"Credential found for {config.provider.value}")
         
         self.config = config
         self.provider = None  # Lazy initialization
@@ -358,7 +449,8 @@ class LLMManager:
                     LLMProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
                     LLMProvider.GOOGLE: "gemini-pro",
                     LLMProvider.AZURE: "gpt-4",
-                    LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2"
+                    LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
+                    LLMProvider.GROK: "grok-2-latest"
                 }
                 model = default_models.get(provider, "gpt-4")
         
@@ -414,20 +506,28 @@ class LLMManager:
             # Region is stored in base_url for compatibility with LLMConfig
             aws_region = cred_data.get("aws_region", "us-east-1")
             base_url = aws_region  # Store region in base_url field
+        elif provider == LLMProvider.GROK:
+            api_key = cred_data.get("api_key") or cred_data.get("api_token")
         
-        # Fallback to environment variables if credentials not found
-        if not api_key:
+        # Fallback to environment variables if credentials not found (except HuggingFace)
+        if not api_key and provider != LLMProvider.HUGGINGFACE:
             fallback_env_vars = {
                 LLMProvider.OPENAI: "OPENAI_API_KEY",
                 LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
                 LLMProvider.GOOGLE: "GOOGLE_API_KEY",
                 LLMProvider.AZURE: "AZURE_OPENAI_API_KEY",
-                LLMProvider.HUGGINGFACE: "HUGGINGFACE_API_TOKEN",
-                LLMProvider.AWS_BEDROCK: "AWS_ACCESS_KEY_ID"
+                LLMProvider.AWS_BEDROCK: "AWS_ACCESS_KEY_ID",
+                LLMProvider.GROK: "XAI_API_KEY"
             }
             env_var = fallback_env_vars.get(provider)
             if env_var:
                 api_key = os.getenv(env_var)
+
+        if not api_key and provider == LLMProvider.HUGGINGFACE:
+            raise ValueError(
+                "HuggingFace credential not found. Create an active credential such as "
+                "'development_huggingface' (or environment-specific variation) in the credential store."
+            )
         
         return LLMConfig(
             provider=provider,
@@ -459,6 +559,8 @@ class LLMManager:
             return HuggingFaceProvider(self.config)
         elif self.config.provider == LLMProvider.AWS_BEDROCK:
             return BedrockProvider(self.config)
+        elif self.config.provider == LLMProvider.GROK:
+            return GrokProvider(self.config)
         else:
             raise ValueError(f"Unsupported provider: {self.config.provider}")
     

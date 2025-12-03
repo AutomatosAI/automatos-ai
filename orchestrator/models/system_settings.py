@@ -21,6 +21,7 @@ class SettingCategory(str, Enum):
     GENERAL = "general"
     ORCHESTRATOR_LLM = "orchestrator_llm"
     CODEGRAPH = "codegraph"
+    CHATBOT = "chatbot"
     SYSTEM_LOGGING = "system_logging"
     API_RATE_LIMITING = "api_rate_limiting"
     BACKEND_API_KEYS = "backend_api_keys"

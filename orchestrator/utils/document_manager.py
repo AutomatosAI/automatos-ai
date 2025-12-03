@@ -189,9 +189,34 @@ class DocumentProcessor:
         return text
     
     def chunk_document(self, text: str, file_type: DocumentType, metadata: Dict = None) -> List[DocumentChunk]:
-        """Split document into chunks based on file type"""
+        """
+        Split document into chunks based on file type.
+        Uses intelligent chunking that prevents separator-only chunks.
+        """
         chunks = []
         
+        # PRE-PROCESS: Clean markdown to avoid separator-only chunks
+        if file_type == DocumentType.MARKDOWN:
+            # Remove standalone separators (lines that are just "---" surrounded by newlines)
+            lines = text.split('\n')
+            cleaned_lines = []
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                # Skip standalone separators unless they're part of frontmatter or important structure
+                if stripped in ['---', '```']:
+                    # Check if it's closing a code block or frontmatter
+                    prev_line = cleaned_lines[-1].strip() if cleaned_lines else ''
+                    next_line = lines[i + 1].strip() if i + 1 < len(lines) else ''
+                    # Keep if it's part of code block or frontmatter delimiter
+                    if (prev_line.startswith('```') or next_line.startswith('```') or 
+                        (i > 0 and i < len(lines) - 1 and '---' in prev_line and '---' in next_line)):
+                        cleaned_lines.append(line)
+                    # Otherwise skip standalone separators
+                else:
+                    cleaned_lines.append(line)
+            text = '\n'.join(cleaned_lines)
+        
+        # Create chunks using appropriate splitter
         if file_type == DocumentType.MARKDOWN:
             docs = self.markdown_splitter.create_documents([text])
         elif file_type == DocumentType.PYTHON:
@@ -199,21 +224,50 @@ class DocumentProcessor:
         else:
             docs = self.text_splitter.create_documents([text])
         
-        for i, doc in enumerate(docs):
+        # POST-PROCESS: Filter and merge chunks
+        valid_chunks = []
+        chunk_index = 0
+        
+        for doc in docs:
+            content = doc.page_content.strip()
+            
+            # FILTER OUT BAD CHUNKS: separators, empty, too short
+            if not content or len(content) < 50:  # Minimum 50 chars for quality
+                continue
+            
+            # Skip chunks that are just separators or code fences
+            if content in ['---', '```', '```python', '```javascript', '```typescript', '```json', '```yaml', '```bash']:
+                continue
+            
+            # Skip chunks that are mostly separators/whitespace
+            without_separators = content.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').replace('*', '').strip()
+            if len(without_separators) < 30:  # At least 30 chars of real content
+                continue
+            
+            # Skip chunks that are just markdown headers with no content
+            if content.count('\n') == 0 and content.startswith('#'):
+                continue
+            
+            # Check if chunk has meaningful content (not just formatting)
+            words = without_separators.split()
+            if len(words) < 5:  # Need at least 5 words
+                continue
+            
             chunk_metadata = {
                 'file_type': file_type.value,
-                'chunk_size': len(doc.page_content),
+                'chunk_size': len(content),
                 **(metadata or {})
             }
             
-            chunks.append(DocumentChunk(
+            valid_chunks.append(DocumentChunk(
                 document_id=0,  # Will be set when saving
-                chunk_index=i,
-                content=doc.page_content,
+                chunk_index=chunk_index,
+                content=content,
                 metadata=chunk_metadata
             ))
+            chunk_index += 1
         
-        return chunks
+        return valid_chunks
 
 class DocumentManager:
     """Main document management class"""
@@ -585,8 +639,19 @@ class DocumentManager:
             })
             
             # Generate embeddings and save chunks
+            valid_chunks = []
             for chunk in chunks:
                 chunk.document_id = document_id
+                
+                # SAFETY CHECK: Skip bad chunks (separators, empty, too short)
+                content = chunk.content.strip() if chunk.content else ""
+                if not content or len(content) < 20:
+                    continue
+                if content in ['---', '```', '```python', '```javascript', '```typescript']:
+                    continue
+                stripped = content.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').strip()
+                if len(stripped) < 10:
+                    continue
                 
                 # Generate embedding
                 embedding = await self._generate_embedding(chunk.content)
@@ -600,6 +665,7 @@ class DocumentManager:
                     chunk.document_id, chunk.chunk_index, chunk.content,
                     embedding, json.dumps(chunk.metadata)
                 ))
+                valid_chunks.append(chunk)
             
             # Update document status
             cursor.execute("""
@@ -607,7 +673,7 @@ class DocumentManager:
                 SET status = %s, processed_date = %s, chunk_count = %s
                 WHERE id = %s
             """, (
-                DocumentStatus.COMPLETED.value, datetime.now(), len(chunks), document_id
+                DocumentStatus.COMPLETED.value, datetime.now(), len(valid_chunks), document_id
             ))
             
             conn.commit()

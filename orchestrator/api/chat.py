@@ -131,18 +131,21 @@ async def stream_chat(
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
     
-    # Stream response with tools enabled
+    # Stream response using AI SDK Data Stream format
+    # Pass selected model from frontend request
     return StreamingResponse(
-        streaming_service.stream_response(
+        streaming_service.stream_response_aisdk(
             chat_id=chat_id,
             messages=message_history,
-            tools=CHAT_TOOLS  # Enable database query, code search, and document search tools
+            tools=CHAT_TOOLS,
+            selected_model=request.selectedChatModel
         ),
-        media_type="text/event-stream",
+        media_type="text/plain; charset=utf-8",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
+            "x-vercel-ai-data-stream": "v1"
         }
     )
 

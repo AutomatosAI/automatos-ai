@@ -52,14 +52,24 @@ class EnhancedOrchestratorService:
         self.logger = logging.getLogger(__name__)
         self.db = db_session
         
-        # Initialize services
-        self.llm_provider = create_llm_manager(service_name="orchestrator")
+        # Initialize services (lazy-load LLM provider to avoid startup crashes)
+        try:
+            self.llm_provider = create_llm_manager(service_name="orchestrator")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize LLM provider at startup: {e}. Will retry on first use.")
+            self.llm_provider = None
         self.rag_service = RAGService()
         self.agent_factory = AgentFactory(db_session=self.db)
         self.performance_service = get_performance_service(self.db)
         
-        # Initialize Stage Components
-        self.task_decomposer = RealTaskDecomposer(self.llm_provider)
+        # Initialize Stage Components (handle None LLM provider)
+        if self.llm_provider:
+            self.task_decomposer = RealTaskDecomposer(self.llm_provider)
+            self.quality_assessor = OutputQualityAssessor(self.llm_provider)
+        else:
+            self.task_decomposer = None
+            self.quality_assessor = None
+            self.logger.warning("Task decomposer and quality assessor not initialized - LLM provider unavailable")
         
         # SemanticSkillMatcher uses global embedding provider from General Settings
         self.skill_matcher = SemanticSkillMatcher()
@@ -67,7 +77,6 @@ class EnhancedOrchestratorService:
         self.context_integrator = ContextEngineeringIntegrator(db_session=self.db)
         self.execution_manager = AgentExecutionManager(db_session=self.db)
         self.result_aggregator = ResultAggregator()
-        self.quality_assessor = OutputQualityAssessor(self.llm_provider)
         
         # Memory Integrator needs memory system, assuming it's available or passed
         # For now, we'll instantiate with None and let it handle missing deps gracefully or mock
@@ -77,6 +86,20 @@ class EnhancedOrchestratorService:
         self.memory_integrator = WorkflowMemoryIntegrator(self.memory_system)
 
         self.logger.info("✅ Enhanced Orchestrator Service initialized with 9-stage pipeline")
+    
+    def _ensure_llm_provider(self):
+        """Lazy initialization of LLM provider if it wasn't available at startup"""
+        if self.llm_provider is None:
+            try:
+                self.llm_provider = create_llm_manager(service_name="orchestrator")
+                if self.task_decomposer is None:
+                    self.task_decomposer = RealTaskDecomposer(self.llm_provider)
+                if self.quality_assessor is None:
+                    self.quality_assessor = OutputQualityAssessor(self.llm_provider)
+                self.logger.info("✅ LLM provider initialized successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize LLM provider: {e}")
+                raise
 
     async def execute_workflow(self, user_prompt: str, user_id: int, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -95,6 +118,9 @@ class EnhancedOrchestratorService:
         self.logger.info(f"🚀 STARTING WORKFLOW {workflow_id}: {user_prompt[:50]}...")
         
         try:
+            # Ensure LLM provider is initialized
+            self._ensure_llm_provider()
+            
             # --- STAGE 1: Task Decomposition ---
             self.logger.info("--- STAGE 1: Task Decomposition ---")
             decomposition = await self.task_decomposer.decompose_task(user_prompt)

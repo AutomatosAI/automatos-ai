@@ -1774,6 +1774,11 @@ INSERT INTO schema_versions (version, description)
 VALUES ('1.0.0', 'Complete schema initialization - October 2025')
 ON CONFLICT DO NOTHING;
 
+-- Insert system agent for chatbot memory (required for memory_items foreign key)
+INSERT INTO agents (id, name, agent_type, status, configuration, created_at, updated_at)
+VALUES (1, 'ChatMemory', 'system', 'active', '{}', NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
 -- Insert default system configurations
 INSERT INTO system_configurations (config_key, config_value, description) VALUES
 ('system.max_agents', '{"value": 100}', 'Maximum number of agents allowed'),
