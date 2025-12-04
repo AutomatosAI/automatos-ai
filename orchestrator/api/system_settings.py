@@ -16,8 +16,8 @@ import logging
 import uuid
 import json
 
-from database.database import get_db
-from models.system_settings import (
+from core.database.database import get_db
+from core.models.system_settings import (
     SystemSetting, SystemSettingResponse, SystemSettingUpdate, 
     SystemSettingCreate, SystemSettingsByCategory, SystemSettingsStats,
     SettingCategory

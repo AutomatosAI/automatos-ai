@@ -84,7 +84,7 @@ class RAGService:
             
         # Use centralized embedding manager
         try:
-            from shared.llm import create_embedding_manager
+            from core.llm import create_embedding_manager
             self._embedding_manager = create_embedding_manager()
         except Exception as e:
             logger.warning(f"Embedding manager not available: {e}")
@@ -253,7 +253,7 @@ class RAGService:
         try:
             import psycopg2
             from psycopg2.extras import RealDictCursor
-            from database.database import get_database_url
+            from core.database.database import get_database_url
             
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)

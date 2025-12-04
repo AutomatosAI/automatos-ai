@@ -27,11 +27,11 @@ from sqlalchemy.orm import Session
 # import pandas as pd
 
 # Automatos imports (from existing system)
-from services.credential_resolver import CredentialResolver
-from shared.llm import LLMProvider
+from core.credentials.resolver import CredentialResolver
+from core.llm import LLMProvider
 from modules.rag import RAGService
-from services.context_engineering_service import ContextEngineeringService
-from services.audit_service import AuditService
+from modules.search.services.context_engineering_service import ContextEngineeringService
+from core.services.audit_service import AuditService
 
 # Module-internal imports
 from .query.nl_to_sql_service import NaturalLanguageToSQLService
@@ -95,8 +95,8 @@ class DatabaseKnowledgeService:
     
     async def _get_source(self, source_id: str) -> 'DatabaseKnowledgeSource':
         """Fetch database source by ID"""
-        from database.database import SessionLocal
-        from models.database_knowledge import DatabaseKnowledgeSource as DBKSource
+        from core.database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource as DBKSource
         
         db_session = SessionLocal()
         try:
@@ -118,9 +118,9 @@ class DatabaseKnowledgeService:
         Add a new database as a knowledge source.
         """
         # Step 1: Resolve and test credentials
-        from services.credential_service import CredentialStore
-        from database.database import SessionLocal
-        from services.encryption_service import EncryptionService
+        from core.credentials.service import CredentialStore
+        from core.database.database import SessionLocal
+        from core.credentials.encryption import EncryptionService
         
         db_session = SessionLocal()
         try:
@@ -136,8 +136,8 @@ class DatabaseKnowledgeService:
             db_session.close()
         
         # Step 2: Create database source record
-        from models.database_knowledge import DatabaseKnowledgeSource
-        from database.database import SessionLocal
+        from core.models.database_knowledge import DatabaseKnowledgeSource
+        from core.database.database import SessionLocal
         from sqlalchemy.exc import IntegrityError
         
         db_session = SessionLocal()
@@ -217,9 +217,9 @@ class DatabaseKnowledgeService:
         REAL IMPLEMENTATION - No mock data.
         """
         from sqlalchemy import create_engine, text
-        from services.credential_service import CredentialStore
-        from database.database import SessionLocal
-        from services.encryption_service import EncryptionService
+        from core.credentials.service import CredentialStore
+        from core.database.database import SessionLocal
+        from core.credentials.encryption import EncryptionService
         import json
         
         start_time = datetime.utcnow()

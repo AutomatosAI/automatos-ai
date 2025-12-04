@@ -128,9 +128,9 @@ class HierarchicalMemorySystem:
     
     def __init__(self):
         # ALWAYS use centralized clients - NO PARAMETERS, NO FALLBACKS
-        from core.redis_client import get_redis_client
-        from database.database import get_database_url
-        from shared.llm import create_embedding_manager
+        from core.redis.client import get_redis_client
+        from core.database.database import get_database_url
+        from core.llm import create_embedding_manager
         
         redis_from_central = get_redis_client()
         if not redis_from_central:

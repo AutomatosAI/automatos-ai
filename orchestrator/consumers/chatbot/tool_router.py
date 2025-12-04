@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional
 # Use modules.tools directly - NO duplicate tool definitions
 from modules.tools import ToolRegistry, ToolCategory, UnifiedToolExecutor
 from modules.tools.formatting.result_formatter import ToolResultFormatter
-from database.database import get_db_session
+from core.database.database import get_db_session
 
 logger = logging.getLogger(__name__)
 

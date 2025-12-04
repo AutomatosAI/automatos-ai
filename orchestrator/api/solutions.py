@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from database.database import get_db
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ from sqlalchemy import func, and_, desc
 from dataclasses import dataclass, asdict
 import json
 
-from models import (
+from core.models import (
     WorkflowExecution, 
     Agent, 
     Workflow,

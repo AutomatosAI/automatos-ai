@@ -25,8 +25,8 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 
 # Import models
-from models import Task, Agent
-from database.database import get_db
+from core.models import Task, Agent
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 

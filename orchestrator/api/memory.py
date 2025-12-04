@@ -30,13 +30,13 @@ from modules.memory import (
 )
 
 # Import models
-from models import (
+from core.models import (
     MemoryItemCreate, MemoryItemResponse, 
     ExternalKnowledgeCreate, ExternalKnowledgeResponse
 )
 
 # Import database (if using persistence)
-# from database import get_db
+# from core.database import get_db
 
 logger = logging.getLogger(__name__)
 

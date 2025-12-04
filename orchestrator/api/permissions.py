@@ -15,10 +15,10 @@ from datetime import datetime
 import logging
 from pydantic import BaseModel, Field
 
-from database.database import get_db
-from models import Tool, Agent, AgentToolPermission, PermissionAuditLog
-from models import Tool, Agent, AgentToolPermission, PermissionAuditLog
-from shared.utils.logging_adapter import set_request_id
+from core.database.database import get_db
+from core.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
+from core.models import Tool, Agent, AgentToolPermission, PermissionAuditLog
+from core.utils.logging_adapter import set_request_id
 import uuid
 
 logger = logging.getLogger(__name__)

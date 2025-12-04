@@ -10,6 +10,25 @@ from typing import List, Optional
 from enum import Enum
 
 
+def _get_system_dimension() -> int:
+    """Get embedding dimension from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == "vector_store_dimensions"
+            ).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return 1024  # Fallback if DB unavailable
+
+
 class ChunkingStrategy(Enum):
     """Available chunking strategies"""
     FIXED_SIZE = "fixed_size"
@@ -33,10 +52,10 @@ class ChunkingConfig:
 
 @dataclass
 class EmbeddingConfig:
-    """Configuration for embeddings"""
+    """Configuration for embeddings - reads dimension from system settings"""
     provider: str = "huggingface_local"
     model: str = "BAAI/bge-large-en-v1.5"
-    dimension: int = 1024
+    dimension: int = field(default_factory=_get_system_dimension)
     batch_size: int = 32
     normalize: bool = True
 

@@ -28,8 +28,8 @@ load_dotenv(env_path)
 from config import config
 
 # Import database and models
-from database.database import init_database, get_db
-from models import Base
+from core.database.database import init_database, get_db
+from core.models import Base
 
 # Import API routers
 from api.agents import router as agents_router
@@ -74,12 +74,12 @@ from api.query import router as query_router
 from api.recommendations import router as recommendations_router
 from api.solutions import router as solutions_router
 from api.synthesis import router as synthesis_router
-from api.websocket_api import router as websocket_api_router
+# WebSocket removed - using AI SDK SSE streaming instead
 from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
-from api.redis_websocket import router as redis_websocket_router
+# redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.execution_history import router as execution_history_router  # Enhanced execution history
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
@@ -92,9 +92,8 @@ from api.dashboard_integration import (
     shutdown_dashboard
 )
 
-# Import WebSocket manager
-from services.websocket_manager import manager, WebSocketEventType
-from shared.utils.logging_adapter import (
+# WebSocket manager removed - using AI SDK SSE streaming instead
+from core.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
     clear_request_id,
@@ -411,8 +410,7 @@ app.include_router(query_router)
 app.include_router(recommendations_router)
 app.include_router(solutions_router)
 app.include_router(synthesis_router)
-app.include_router(websocket_api_router)
-app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
+# WebSocket routers removed - using AI SDK SSE streaming
 app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward compatibility)
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
@@ -430,162 +428,8 @@ try:
 except Exception as e:
     logger.warning(f"Could not mount legacy routes: {e}")
 
-# WebSocket endpoint
-@app.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    client_id: str = Query(None, description="Optional client identifier for connection tracking and personalized messaging")
-):
-    """
-    ## 🔌 Real-time WebSocket Communication
-    
-    Establishes a bidirectional WebSocket connection for real-time updates and communication.
-    
-    ### 📥 **Supported Message Types (Client → Server):**
-    
-    **Ping/Pong:**
-    ```json
-    {"type": "ping"}
-    ```
-    
-    **Event Subscription:**
-    ```json
-    {
-        "type": "subscribe", 
-        "data": {
-            "events": ["agent_updates", "workflow_progress", "system_notifications"]
-        }
-    }
-    ```
-    
-    **Status Request:**
-    ```json
-    {"type": "get_status"}
-    ```
-    
-    ### 📤 **Server Response Types:**
-    
-    **Connection Established:**
-    ```json
-    {
-        "type": "connection_established",
-        "data": {
-            "message": "Connected to Automotas AI",
-            "client_id": "your-client-id",
-            "features": ["agent_updates", "workflow_progress", "document_processing", "system_notifications"]
-        }
-    }
-    ```
-    
-    **System Status:**
-    ```json
-    {
-        "type": "system_status",
-        "data": {
-            "active_connections": 5,
-            "server_status": "running",
-            "features_available": true
-        }
-    }
-    ```
-    
-    ### 🎯 **Use Cases:**
-    - Real-time agent status updates
-    - Workflow execution progress
-    - Document processing notifications
-    - System health alerts
-    - Multi-agent coordination events
-    
-    ### 🔐 **Authentication:**
-    - Session-based authentication supported
-    - Optional client_id for connection tracking
-    
-    ### ⚡ **Performance:**
-    - Automatic connection management
-    - Heartbeat/ping support
-    - Graceful disconnection handling
-    """
-    await manager.connect(websocket, client_id)
-    
-    try:
-        # Send welcome message
-        await manager.send_personal_message({
-            "type": "connection_established",
-            "data": {
-                "message": "Connected to Automotas AI",
-                "client_id": client_id,
-                "features": [
-                    "agent_updates",
-                    "workflow_progress",
-                    "document_processing",
-                    "system_notifications"
-                ]
-            }
-        }, websocket)
-        
-        while True:
-            # Receive messages from client
-            data = await websocket.receive_text()
-            
-            try:
-                import json
-                message = json.loads(data)
-                message_type = message.get("type")
-                
-                # Handle different message types
-                if message_type == "ping":
-                    await manager.update_last_ping(websocket)
-                    await manager.send_personal_message({
-                        "type": "pong",
-                        "data": {"message": "pong"}
-                    }, websocket)
-                
-                elif message_type == "subscribe":
-                    # Handle subscription to specific events
-                    events = message.get("data", {}).get("events", [])
-                    await manager.send_personal_message({
-                        "type": "subscription_confirmed",
-                        "data": {
-                            "events": events,
-                            "message": f"Subscribed to {len(events)} event types"
-                        }
-                    }, websocket)
-                
-                elif message_type == "get_status":
-                    # Send current system status
-                    await manager.send_personal_message({
-                        "type": "system_status",
-                        "data": {
-                            "active_connections": manager.get_connection_count(),
-                            "server_status": "running",
-                            "features_available": True
-                        }
-                    }, websocket)
-                
-                else:
-                    # Echo unknown messages
-                    await manager.send_personal_message({
-                        "type": "echo",
-                        "data": message
-                    }, websocket)
-                    
-            except json.JSONDecodeError:
-                await manager.send_personal_message({
-                    "type": "error",
-                    "data": {"message": "Invalid JSON format"}
-                }, websocket)
-            except Exception as e:
-                logger.error(f"Error processing WebSocket message: {e}")
-                await manager.send_personal_message({
-                    "type": "error",
-                    "data": {"message": "Error processing message"}
-                }, websocket)
-                
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        manager.disconnect(websocket)
+# WebSocket endpoint removed - using AI SDK SSE streaming instead
+# See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
 
 # Health check endpoint
 @app.get("/health",

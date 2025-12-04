@@ -19,9 +19,28 @@ import numpy as np
 from datetime import datetime
 
 # Import mathematical foundations from shared
-from shared.math import DistanceMetrics, VectorOperations, StatisticalAnalysis
+from core.math import DistanceMetrics, VectorOperations, StatisticalAnalysis
 
 logger = logging.getLogger(__name__)
+
+
+def _get_system_dimension() -> int:
+    """Get embedding dimension from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == "vector_store_dimensions"
+            ).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return 1024  # Fallback if DB unavailable
 
 class SearchMode(Enum):
     """Available search modes"""
@@ -83,12 +102,12 @@ class EnhancedVectorStore:
     def __init__(
         self,
         database_url: str,
-        embedding_dimension: int = 768,  # Default for many models
+        embedding_dimension: Optional[int] = None,  # Reads from system settings
         similarity_function: str = "cosine",  # cosine, l2, inner_product
         table_name: str = "vector_documents"
     ):
         self.database_url = database_url
-        self.embedding_dimension = embedding_dimension
+        self.embedding_dimension = embedding_dimension or _get_system_dimension()
         self.similarity_function = similarity_function
         self.table_name = table_name
         

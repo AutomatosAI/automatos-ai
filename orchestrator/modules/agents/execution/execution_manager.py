@@ -26,7 +26,7 @@ from sqlalchemy import text
 import numpy as np
 
 from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata, get_action_executor
-from models import Agent
+from core.models import Agent
 from modules.memory.operations.prompt_injection import MemoryPromptInjector
 
 # PHASE 2: Import communication components
@@ -1023,8 +1023,8 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
     ):
         """Update a SINGLE subtask in database immediately after completion"""
         try:
-            from database.database import get_db_session
-            from models import WorkflowExecution
+            from core.database.database import get_db_session
+            from core.models import WorkflowExecution
             
             with get_db_session() as db:
                 execution = db.query(WorkflowExecution).filter(
@@ -1090,8 +1090,8 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
     ):
         """Update execution output_data in database with latest subtask results"""
         try:
-            from database.database import get_db_session
-            from models import WorkflowExecution
+            from core.database.database import get_db_session
+            from core.models import WorkflowExecution
             
             with get_db_session() as db:
                 execution = db.query(WorkflowExecution).filter(

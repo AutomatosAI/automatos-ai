@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel, Field
 
-from database.database import get_db
+from core.database.database import get_db
 from modules.codegraph import CodeGraphService
 
 logger = logging.getLogger(__name__)
@@ -77,10 +77,10 @@ def get_openai_key() -> str:
     Future: Will support multiple embedding providers via LLM service settings.
     """
     try:
-        from services.credential_resolver import get_credential_resolver
+        from core.credentials.resolver import get_credential_resolver
         resolver = get_credential_resolver()
         # Try to get from LLM service settings first
-        from shared.llm.manager import get_provider_and_model_from_settings, get_credential_data
+        from core.llm.manager import get_provider_and_model_from_settings, get_credential_data
         
         provider, _ = get_provider_and_model_from_settings("codegraph")
         cred_data = get_credential_data(provider, service_name="codegraph")

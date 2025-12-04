@@ -32,7 +32,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from modules.orchestrator.stages import IntelligentAgentSelector
 from modules.orchestrator.llm.llm_agent_selector import LLMAgentSelector
 from modules.agents import AgentExecutionManager
-from models import Agent, WorkflowExecution
+from core.models import Agent, WorkflowExecution
 
 logger = logging.getLogger(__name__)
 

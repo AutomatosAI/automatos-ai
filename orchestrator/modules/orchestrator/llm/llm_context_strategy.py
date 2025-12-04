@@ -596,8 +596,8 @@ RESPONSE FORMAT:
             # Lazy import to avoid circular dependencies
             import sys
             if 'database.database' in sys.modules and hasattr(sys.modules.get('database.database'), 'SessionLocal'):
-                from database.database import SessionLocal
-                from services.model_registry import ModelRegistry
+                from core.database.database import SessionLocal
+                from core.llm.model_registry import ModelRegistry
                 
                 db = SessionLocal()
                 try:

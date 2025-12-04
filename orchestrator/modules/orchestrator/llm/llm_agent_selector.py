@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from models import Agent, WorkflowExecution
+from core.models import Agent, WorkflowExecution
 from core.llm import (
     OrchestratorLLM,
     FunctionRegistry,

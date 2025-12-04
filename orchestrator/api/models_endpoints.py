@@ -11,8 +11,8 @@ Date: 2025-10-06
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from database.database import get_db
-from services.model_registry import ModelRegistry, ModelInfo
+from core.database.database import get_db
+from core.llm.model_registry import ModelRegistry, ModelInfo
 import logging
 
 logger = logging.getLogger(__name__)

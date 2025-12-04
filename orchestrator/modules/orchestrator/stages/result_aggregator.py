@@ -23,7 +23,7 @@ from modules.agents import SubtaskExecution, SubtaskStatus
 
 # Import probability theory from shared math
 try:
-    from shared.math import ProbabilityTheory, ConfidenceInterval
+    from core.math import ProbabilityTheory, ConfidenceInterval
     PROBABILITY_AVAILABLE = True
 except ImportError:
     PROBABILITY_AVAILABLE = False

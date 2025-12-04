@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 import logging
 
-from database.database import get_db
+from core.database.database import get_db
 from sqlalchemy.orm import Session
 from consumers.workflows.analytics import WorkflowAnalyticsService
 
@@ -117,7 +117,7 @@ async def get_dashboard_summary(
     """Get summary statistics for dashboard"""
     
     try:
-        from models import WorkflowExecution, Agent, Workflow, ExecutionStatus
+        from core.models import WorkflowExecution, Agent, Workflow, ExecutionStatus
         from sqlalchemy import and_, func
         
         since_date = datetime.now() - timedelta(days=days)
@@ -215,7 +215,7 @@ async def analyze_agent_selection(
     """Analyze agent selection patterns and effectiveness"""
     
     try:
-        from models import WorkflowExecution, ExecutionStatus
+        from core.models import WorkflowExecution, ExecutionStatus
         from sqlalchemy import and_
         
         since_date = datetime.now() - timedelta(days=days)

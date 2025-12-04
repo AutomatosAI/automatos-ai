@@ -17,15 +17,15 @@ import asyncio
 import logging
 import json
 
-from database.database import get_db
-from models import (
+from core.database.database import get_db
+from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
-from services.websocket_manager import manager
-from services.workspace_manager import WorkspaceManager
+# websocket_manager removed - using AI SDK SSE streaming
+from core.services.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -377,7 +377,7 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from models import workflow_agents
+            from core.models import workflow_agents
             from sqlalchemy import delete
             db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id == workflow_id))
         except Exception as e:
@@ -433,7 +433,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from models import workflow_agents
+            from core.models import workflow_agents
             from sqlalchemy import delete
             db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id.in_(workflow_ids)))
         except Exception as e:
@@ -1285,7 +1285,7 @@ async def get_execution_results(execution_id: int, db: Session = Depends(get_db)
 
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
-    from database.database import get_db_session
+    from core.database.database import get_db_session
     from modules.orchestrator.stages import (
         RealTaskDecomposer,
         ContextEngineeringIntegrator,
@@ -1296,7 +1296,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from modules.agents import AgentExecutionManager
     from modules.learning import LearningSystemUpdater
     from modules.memory.storage import HierarchicalMemorySystem
-    from services.workspace_manager import WorkspaceManager  # Unique workspace per execution
+    from core.services.workspace_manager import WorkspaceManager  # Unique workspace per execution
     from consumers.workflows import ModelUsageTracker  # PRD-15
     import os
     
@@ -1322,7 +1322,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             db.commit()
             
             # Publish execution start to Redis
-            from core.redis_client import get_redis_client
+            from core.redis.client import get_redis_client
             redis_client = get_redis_client()
             if redis_client:
                 redis_client.publish_workflow_event(
@@ -2362,7 +2362,7 @@ Subtask Results:
                 logger.error(f"❌ Failed to save results or cleanup workspace: {cleanup_err}")
             
             # Publish execution completion to Redis
-            from core.redis_client import get_redis_client
+            from core.redis.client import get_redis_client
             redis_client = get_redis_client()
             if redis_client:
                 redis_client.publish_workflow_event(
@@ -2456,7 +2456,7 @@ async def get_execution_results_files(execution_id: int, db: Session = Depends(g
     Returns metadata about all files created during execution that are available for download.
     """
     try:
-        from services.workspace_manager import WorkspaceManager
+        from core.services.workspace_manager import WorkspaceManager
         
         # Verify execution exists
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()

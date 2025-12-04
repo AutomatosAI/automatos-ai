@@ -47,7 +47,7 @@ async def get_context_retrieval_engine():
             )
             from modules.search.vector_store.store import EnhancedVectorStore
             from modules.rag.chunking.semantic_chunker import SemanticChunker
-            from database.database import get_database_url
+            from core.database.database import get_database_url
             from modules.memory import get_embedding_dimension
             
             vector_store = EnhancedVectorStore(
@@ -247,7 +247,7 @@ class MemoryInjector:
     async def _get_recent_memories(self, limit: int = 10) -> List[Dict]:
         """Fetch the most recent memories regardless of semantic similarity."""
         try:
-            from database.database import get_db_session
+            from core.database.database import get_db_session
             from sqlalchemy import text
             
             with get_db_session() as db:

@@ -13,7 +13,7 @@ import logging
 from datetime import datetime
 
 # Import mathematical foundations from shared
-from shared.math import (
+from core.math import (
     InformationTheory,
     VectorOperations,
     DistanceMetrics,

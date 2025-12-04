@@ -16,10 +16,10 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from shared.llm import create_llm_manager, LLMConfig, LLMProvider
+from core.llm import create_llm_manager, LLMConfig, LLMProvider
 
 # Import graph theory from shared math
-from shared.math import GraphTheory
+from core.math import GraphTheory
 
 logger = logging.getLogger(__name__)
 

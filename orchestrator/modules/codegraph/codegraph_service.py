@@ -70,7 +70,7 @@ class CodeGraphService:
         self.db = db
         
         # Use centralized embedding manager (reads from General Settings)
-        from shared.llm import create_embedding_manager
+        from core.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         logger.info(f"CodeGraphService using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
@@ -665,7 +665,7 @@ class CodeGraphService:
         """Ensure the embedding column dimension matches the current embedding model from database settings"""
         try:
             # Read dimension directly from database settings (no hardcoding)
-            from shared.llm.embedding_manager import get_system_setting
+            from core.llm.embedding_manager import get_system_setting
             dimension_str = get_system_setting("vector_store_dimensions")
             
             if not dimension_str:

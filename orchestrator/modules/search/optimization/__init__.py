@@ -26,8 +26,8 @@ from .context_optimizer import (
     optimize_prompt_context,
 )
 
-# Re-export mathematical foundations from shared.math for backward compatibility
-from shared.math import (
+# Re-export mathematical foundations from core.math for backward compatibility
+from core.math import (
     InformationTheory,
     VectorOperations,
     OptimizationAlgorithms,

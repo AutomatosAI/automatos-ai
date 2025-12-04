@@ -14,8 +14,8 @@ import os
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
-from services.agent_platform_tools import AgentPlatformTools
-from services.agent_action_executor import ActionExecutor
+from modules.agents.services.agent_platform_tools import AgentPlatformTools
+from modules.agents.services.agent_action_executor import ActionExecutor
 from modules.tools.execution.mcp_executor import MCPToolExecutor
 from modules.tools.registry import ToolRegistry
 
@@ -150,7 +150,7 @@ class UnifiedToolExecutor:
             return True
             
         # Check AgentToolPermission table for other tools
-        from models.tools import AgentToolPermission, Tool
+        from core.models.tools import AgentToolPermission, Tool
         
         try:
             # Find tool in tools table
@@ -262,7 +262,7 @@ class UnifiedToolExecutor:
         """
         import httpx
         from config import config
-        from services.pandas_ai_service import get_pandasai_service
+        from modules.tools.services.pandas_ai_service import get_pandasai_service
         
         query = parameters.get('query', '')
         database_name = parameters.get('database_name')
@@ -332,9 +332,9 @@ class UnifiedToolExecutor:
     
     async def _query_main_database(self, query: str, analysis_prompt: str = None) -> Dict[str, Any]:
         """Direct query to main Automatos database using NL-to-SQL"""
-        from shared.llm import create_llm_manager
-        from services.pandas_ai_service import get_pandasai_service
-        from database.database import get_db_session
+        from core.llm import create_llm_manager
+        from modules.tools.services.pandas_ai_service import get_pandasai_service
+        from core.database.database import get_db_session
         from sqlalchemy import text
         import time
         
@@ -427,7 +427,7 @@ class UnifiedToolExecutor:
         agent_id: int
     ) -> Dict[str, Any]:
         """Execute multimodal search (tables, images, formulas, combined)"""
-        from services.multimodal_knowledge_tools import MultimodalKnowledgeTools
+        from modules.rag.services.multimodal_knowledge_tools import MultimodalKnowledgeTools
         
         logger.info(f"🔧 Agent {agent_id} executing multimodal tool: {tool_name}")
         
@@ -1099,5 +1099,5 @@ Analysis complete.
 
 
 # Import MCPTool model at the bottom to avoid circular imports
-from models import MCPTool
+from core.models import MCPTool
 

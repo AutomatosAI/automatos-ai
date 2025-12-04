@@ -14,7 +14,7 @@ from pathlib import Path
 # Add orchestrator to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database.connection import get_db_connection
+from core.database.connection import get_db_connection
 from sqlalchemy import text
 
 def run_migration(migration_file: str):

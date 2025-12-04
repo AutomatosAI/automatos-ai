@@ -11,8 +11,8 @@ from datetime import datetime
 import logging
 
 from sqlalchemy.orm import Session
-from database.database import get_db
-from models import (
+from core.database.database import get_db
+from core.models import (
     Agent, AgentCreate, AgentResponse,
     AgentType, AgentStatus
 )
@@ -328,7 +328,7 @@ async def get_agent_logs(
     Returns recent execution logs for the agent.
     """
     try:
-        from models import WorkflowExecution
+        from core.models import WorkflowExecution
         from sqlalchemy import desc
         
         # Verify agent exists
@@ -703,7 +703,7 @@ async def update_agent_model_config(
     Note: Agent must be recreated for changes to take effect in runtime.
     """
     try:
-        from services.model_registry import ModelRegistry
+        from core.llm.model_registry import ModelRegistry
         from sqlalchemy import update
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -827,7 +827,7 @@ async def switch_agent_model(
     3. Provides recommended settings
     """
     try:
-        from services.model_registry import ModelRegistry
+        from core.llm.model_registry import ModelRegistry
         from sqlalchemy.orm import attributes
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()

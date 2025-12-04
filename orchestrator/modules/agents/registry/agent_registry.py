@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
-from models import Agent, Skill, AgentToolAssignment, WorkflowExecution
+from core.models import Agent, Skill, AgentToolAssignment, WorkflowExecution
 
 logger = logging.getLogger(__name__)
 

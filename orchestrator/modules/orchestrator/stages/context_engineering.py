@@ -42,7 +42,7 @@ except ImportError as e:
 try:
     from modules.search.vector_store.store import EnhancedVectorStore as PgVectorStore
     from modules.search.vector_store.store import SearchResult as VectorSearchResult
-    from shared.llm.embedding_manager import EmbeddingManager
+    from core.llm.embedding_manager import EmbeddingManager
     VECTOR_STORE_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"VectorStore not available: {e}. Using HTTP API fallback.")
@@ -636,7 +636,7 @@ class ContextEngineeringIntegrator:
         try:
             # Lazy initialization of vector store
             if not self.vector_store:
-                from database.database import get_database_url as get_db_session_string
+                from core.database.database import get_database_url as get_db_session_string
                 db_string = get_db_session_string()
                 self.vector_store = PgVectorStore(connection_string=db_string)
                 await self.vector_store.initialize(dimension=1536)

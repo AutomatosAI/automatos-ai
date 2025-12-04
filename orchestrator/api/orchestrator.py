@@ -16,10 +16,10 @@ import logging
 import json
 import uuid
 
-from database.database import get_db
-from models import Workflow, WorkflowExecution, Agent
+from core.database.database import get_db
+from core.models import Workflow, WorkflowExecution, Agent
 # from services.orchestrator_service import EnhancedOrchestratorService  # Temporarily disabled
-from services.websocket_manager import manager
+# websocket_manager removed - using AI SDK SSE streaming
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/orchestrator", tags=["orchestrator"])

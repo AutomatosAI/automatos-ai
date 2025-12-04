@@ -21,7 +21,7 @@ from ..vector_store.store import (
     EnhancedVectorStore, VectorDocument, SearchResult, 
     SearchMode, RankingStrategy, SearchFilter
 )
-from shared.math import InformationTheory, StatisticalAnalysis
+from core.math import InformationTheory, StatisticalAnalysis
 
 # Lazy import chunker to avoid circular import (search <-> rag)
 SemanticChunker = None

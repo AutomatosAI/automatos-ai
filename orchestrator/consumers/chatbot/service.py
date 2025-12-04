@@ -20,7 +20,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
-from models import Chat, Message, Vote
+from core.models import Chat, Message, Vote
 from config import config
 
 # Import from consumer's own modules
@@ -222,8 +222,8 @@ class StreamingChatService:
         
         Format: 0:"text"\n for text, d:{json}\n for data, e:{json}\n for errors
         """
-        # Import from shared.llm
-        from shared.llm import create_llm_manager
+        # Import from core.llm
+        from core.llm import create_llm_manager
         import asyncio
         
         # Get tools from modules.tools if not provided
@@ -324,7 +324,7 @@ class StreamingChatService:
         """
         Stream chat response using legacy SSE format.
         """
-        from shared.llm import create_llm_manager
+        from core.llm import create_llm_manager
         
         # Get tools from modules.tools if not provided
         if tools is None:

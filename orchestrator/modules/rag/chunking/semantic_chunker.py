@@ -15,7 +15,7 @@ from enum import Enum
 import numpy as np
 
 # Import mathematical foundations from shared
-from shared.math import InformationTheory, VectorOperations, StatisticalAnalysis
+from core.math import InformationTheory, VectorOperations, StatisticalAnalysis
 
 logger = logging.getLogger(__name__)
 

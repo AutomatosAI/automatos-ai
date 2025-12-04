@@ -47,7 +47,7 @@ class ExecutionHistorySearch:
     def _ensure_embedding_manager(self):
         """Lazy load embedding manager"""
         if self._embedding_manager is None:
-            from shared.llm import create_embedding_manager
+            from core.llm import create_embedding_manager
             self._embedding_manager = create_embedding_manager()
         return self._embedding_manager
     

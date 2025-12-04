@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
-from database.database import get_db
-from models import WorkflowExecution, Workflow, Agent
+from core.database.database import get_db
+from core.models import WorkflowExecution, Workflow, Agent
 from consumers.workflows.analytics import WorkflowAnalyticsService
 
 logger = logging.getLogger(__name__)

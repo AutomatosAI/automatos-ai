@@ -17,8 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
-from database.database import get_db
-from models import Document, DocumentUploadResponse, DocumentResponse
+from core.database.database import get_db
+from core.models import Document, DocumentUploadResponse, DocumentResponse
 from modules.rag import DocumentManager, DocumentStatus, DocumentType
 import logging
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Initialize credential resolver
-from services.credential_resolver import get_credential_resolver
+from core.credentials.resolver import get_credential_resolver
 import os
 
 resolver = get_credential_resolver()
@@ -565,7 +565,7 @@ async def semantic_search(
         start_time = time.time()
         
         # Generate query embedding using centralized embedding manager
-        from shared.llm import create_embedding_manager
+        from core.llm import create_embedding_manager
         import asyncio
         
         embedding_manager = create_embedding_manager()
@@ -973,7 +973,7 @@ async def rag_retrieve(
         candidate_limit = max_chunks * 3
         
         # Generate query embedding using centralized embedding manager
-        from shared.llm import create_embedding_manager
+        from core.llm import create_embedding_manager
         
         embedding_manager = create_embedding_manager()
         query_embedding = await embedding_manager.generate_embedding(query)

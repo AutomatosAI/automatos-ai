@@ -319,7 +319,7 @@ class DocumentManager:
         self.processor = DocumentProcessor()
         
         # Use centralized embedding manager
-        from shared.llm import create_embedding_manager
+        from core.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         logger.info(f"DocumentManager using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         

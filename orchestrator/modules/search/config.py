@@ -10,6 +10,25 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
 
+def _get_system_dimension() -> int:
+    """Get embedding dimension from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == "vector_store_dimensions"
+            ).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return 1024  # Fallback if DB unavailable
+
+
 @dataclass
 class SearchConfig:
     """Configuration for the Search module"""
@@ -17,8 +36,8 @@ class SearchConfig:
     # Database configuration
     database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
     
-    # Embedding configuration
-    embedding_dimension: int = 1024  # Default for text-embedding-3-small
+    # Embedding configuration - reads from system settings
+    embedding_dimension: int = field(default_factory=_get_system_dimension)
     embedding_model: str = "text-embedding-3-small"
     
     # Vector store configuration
@@ -36,10 +55,10 @@ class SearchConfig:
     
     @classmethod
     def from_env(cls) -> "SearchConfig":
-        """Create config from environment variables"""
+        """Create config from environment variables (prefers system settings)"""
         return cls(
             database_url=os.getenv("DATABASE_URL", ""),
-            embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "1024")),
+            embedding_dimension=_get_system_dimension(),  # Always from system settings
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
             similarity_function=os.getenv("SIMILARITY_FUNCTION", "cosine"),
             vector_table_name=os.getenv("VECTOR_TABLE_NAME", "document_chunks"),

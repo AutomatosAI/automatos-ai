@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 
-from models import Agent, WorkflowExecution, Workflow
+from core.models import Agent, WorkflowExecution, Workflow
 from modules.agents import SubtaskExecution, SubtaskStatus
 from modules.orchestrator.stages import AggregatedResults
 

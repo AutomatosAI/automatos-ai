@@ -21,23 +21,23 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from shared.llm import (
+from core.llm import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
 )
-from models import (
+from core.models import (
     Agent, Skill, PriorityLevel, Base,
     AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
-from services.skill_loader import get_skill_loader
+from modules.agents.services.skill_loader import get_skill_loader
 
 # Import new services (lazy import to avoid circular deps)
 def get_action_executor():
-    from services.agent_action_executor import get_action_executor as _get_executor
+    from modules.agents.services.agent_action_executor import get_action_executor as _get_executor
     return _get_executor()
 
 def get_monitoring_service():
-    from services.monitoring_service import get_monitoring_service as _get_monitor
+    from core.services.monitoring_service import get_monitoring_service as _get_monitor
     return _get_monitor()
 
 def get_rag_service():
@@ -548,7 +548,7 @@ class AgentFactory:
         if db_session:
             self.db_session = db_session
         else:
-            from database.database import SessionLocal
+            from core.database.database import SessionLocal
             self.db_session = SessionLocal()
         
         self.active_agents: Dict[int, AgentRuntime] = {}
@@ -565,7 +565,7 @@ class AgentFactory:
             Dictionary with LLM configuration
         """
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             
             # Get provider and model from settings - check both key formats
             provider = get_system_setting("orchestrator_llm", "llm_provider")
@@ -602,7 +602,7 @@ class AgentFactory:
             
             # Get context window from LLM models registry
             try:
-                from models import LLMModel
+                from core.models import LLMModel
                 llm_model = self.db_session.query(LLMModel).filter_by(model_id=model).first()
                 if llm_model:
                     context_window = llm_model.context_window
@@ -859,7 +859,7 @@ Available Shell Tools:
         Raises:
             ValueError: If provider is unsupported
         """
-        from shared.llm import LLMConfig, LLMProvider as LLMProviderEnum
+        from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
         
         # Map provider string to enum
         provider_map = {
@@ -873,7 +873,7 @@ Available Shell Tools:
         provider = provider_map[model_config.provider]
         
         # Get API key from credential resolver
-        from services.credential_resolver import get_credential_resolver
+        from core.credentials.resolver import get_credential_resolver
         resolver = get_credential_resolver()
         
         api_key = None

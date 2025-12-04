@@ -5,13 +5,13 @@ from sqlalchemy import and_, or_, func, text
 import time
 import logging
 
-from database.database import get_db
-from models import PriorityLevel
-from models import Agent, Skill, Pattern, agent_skills
+from core.database.database import get_db
+from core.models import PriorityLevel
+from core.models import Agent, Skill, Pattern, agent_skills
 # Import MCP tool models from database.models (SQLAlchemy models)
-from models import AgentToolAssignment, MCPTool
+from core.models import AgentToolAssignment, MCPTool
 # Import Pydantic models from database.models (not models.py)
-from models import (
+from core.models import (
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,

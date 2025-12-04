@@ -17,9 +17,9 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
 
-from database.database import get_db
-from shared.llm import create_llm_manager
-from services.pandas_ai_service import get_pandasai_service
+from core.database.database import get_db
+from core.llm import create_llm_manager
+from modules.tools.services.pandas_ai_service import get_pandasai_service
 from config import config
 
 # Import tools from consumers.chatbot (uses modules.tools - single source of truth)
@@ -58,7 +58,7 @@ def get_anthropic_client():
     Legacy function - now uses LLM service instead.
     Kept for backward compatibility only.
     """
-    from shared.llm import create_llm_manager
+    from core.llm import create_llm_manager
     llm = create_llm_manager(service_name="orchestrator", provider="anthropic")
     # Return a mock Anthropic client interface (not used, but maintains compatibility)
     # Actual API calls should use llm.generate_response() instead
@@ -261,7 +261,7 @@ async def list_available_models(
     Returns models organized by provider for easy selection in UI.
     """
     try:
-        from services.model_registry import ModelRegistry
+        from core.llm.model_registry import ModelRegistry
         
         registry = ModelRegistry(db)
         
@@ -288,7 +288,7 @@ async def list_available_models(
             })
         
         # Get default model from settings
-        from shared.llm.manager import get_provider_and_model_from_settings
+        from core.llm.manager import get_provider_and_model_from_settings
         default_provider, default_model = get_provider_and_model_from_settings("orchestrator")
         
         return {
@@ -360,7 +360,7 @@ Then provide a helpful, technical response based on the search results."""
         # Agentic loop - let LLM call tools iteratively
         for iteration in range(3):  # Max 3 tool call iterations
             # Use LLM service - allow per-request provider/model override
-            from shared.llm import create_llm_manager
+            from core.llm import create_llm_manager
             
             # Use override if provided, otherwise use default orchestrator settings
             if chat_query.provider or chat_query.model:

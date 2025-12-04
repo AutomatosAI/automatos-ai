@@ -38,14 +38,14 @@ from modules.agents import AgentExecutionManager
 from core.llm.semantic_skill_matcher import SemanticSkillMatcher
 
 # Services (Assumed available based on imports)
-from shared.llm import create_llm_manager
+from core.llm import create_llm_manager
 from modules.rag import RAGService
 from modules.agents import AgentFactory
-from services.agent_performance_service import get_performance_service
+from modules.agents.services.agent_performance_service import get_performance_service
 
 # Shared Components (Phase 3 alignment)
-from services.context_level_decision import get_context_decision_engine, ContextLevel
-from services.tool_result_formatter import ToolResultFormatter
+from modules.search.services.context_level_decision import get_context_decision_engine, ContextLevel
+from modules.tools.formatting.result_formatter import ToolResultFormatter
 from modules.nl_to_sql import get_schema_provider
 
 logger = logging.getLogger(__name__)

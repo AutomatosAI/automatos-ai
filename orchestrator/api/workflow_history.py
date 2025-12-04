@@ -13,8 +13,8 @@ from datetime import datetime
 import json
 import logging
 
-from database.database import get_db
-from models import WorkflowExecution, Workflow
+from core.database.database import get_db
+from core.models import WorkflowExecution, Workflow
 
 logger = logging.getLogger(__name__)
 

@@ -38,8 +38,8 @@ from .optimization.context_optimizer import (
     optimize_prompt_context,
 )
 
-# Mathematical foundations (from shared.math)
-from shared.math import (
+# Mathematical foundations (from core.math)
+from core.math import (
     InformationTheory,
     VectorOperations,
     OptimizationAlgorithms,

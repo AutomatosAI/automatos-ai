@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from shared.llm import LLMManager, LLMConfig, LLMProvider as LLMProviderEnum
+from core.llm import LLMManager, LLMConfig, LLMProvider as LLMProviderEnum
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class OrchestratorLLM:
     def _create_llm_manager(self) -> LLMManager:
         """Create LLM manager from system settings (NO hardcoded defaults)"""
         # Use centralized manager that reads from database settings
-        from shared.llm import create_llm_manager
+        from core.llm import create_llm_manager
         
         # Create manager with service_name to get settings from database
         manager = create_llm_manager(service_name="orchestrator")
@@ -113,7 +113,7 @@ class OrchestratorLLM:
         # Override model/temperature if explicitly provided
         if self.model and self.model != manager.config.model:
             # Create new config with overrides
-            from shared.llm import LLMConfig
+            from core.llm import LLMConfig
             new_config = LLMConfig(
                 provider=manager.config.provider,
                 model=self.model,

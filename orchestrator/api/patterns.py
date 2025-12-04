@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 import logging
 
-from database.database import get_db
-from models import Pattern, PatternCreate, PatternResponse
+from core.database.database import get_db
+from core.models import Pattern, PatternCreate, PatternResponse
 #from main import require_api_key
 
 logger = logging.getLogger(__name__)

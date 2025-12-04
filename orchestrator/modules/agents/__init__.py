@@ -49,6 +49,13 @@ from .communication import (
     SharedContext,
 )
 
+# Multi-agent systems exports
+from .multi_agent import (
+    CoordinationManager,
+    EmergentBehaviorMonitor,
+    MultiAgentOptimizer,
+)
+
 __all__ = [
     # Main Service
     "AgentService",
@@ -78,4 +85,9 @@ __all__ = [
     "MessageType",
     "MessagePriority",
     "SharedContext",
+    
+    # Multi-Agent Systems
+    "CoordinationManager",
+    "EmergentBehaviorMonitor",
+    "MultiAgentOptimizer",
 ]

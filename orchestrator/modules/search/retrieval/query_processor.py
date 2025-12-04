@@ -18,7 +18,7 @@ from datetime import datetime
 import json
 
 # Import mathematical foundations from shared
-from shared.math import InformationTheory, StatisticalAnalysis
+from core.math import InformationTheory, StatisticalAnalysis
 
 logger = logging.getLogger(__name__)
 

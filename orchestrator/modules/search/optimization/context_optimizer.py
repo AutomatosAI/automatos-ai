@@ -34,10 +34,29 @@ import tiktoken
 from openai import OpenAI  # For sync LLM calls only (not embeddings)
 
 # Import mathematical foundations from shared
-from shared.math import InformationTheory, VectorOperations, OptimizationAlgorithms
+from core.math import InformationTheory, VectorOperations, OptimizationAlgorithms
 
 # Use centralized embedding manager
-from shared.llm.embedding_manager import EmbeddingManager
+from core.llm.embedding_manager import EmbeddingManager
+
+
+def _get_system_dimension() -> int:
+    """Get embedding dimension from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == "vector_store_dimensions"
+            ).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return 1024  # Fallback if DB unavailable
 
 # PromptType and PromptTemplate defined locally (only consumer)
 from enum import Enum
@@ -69,18 +88,18 @@ class PromptTemplate:
 
 # Backward compatibility aliases
 class EmbeddingConfig:
-    """DEPRECATED: Use EmbeddingManager from shared.llm"""
+    """DEPRECATED: Use EmbeddingManager from core.llm"""
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", model_type: str = "sentence_transformer", 
-                 dimension: int = 384, batch_size: int = 32, normalize: bool = True, cache_embeddings: bool = True):
+                 dimension: Optional[int] = None, batch_size: int = 32, normalize: bool = True, cache_embeddings: bool = True):
         self.model_name = model_name
         self.model_type = model_type
-        self.dimension = dimension
+        self.dimension = dimension or _get_system_dimension()
         self.batch_size = batch_size
         self.normalize = normalize
         self.cache_embeddings = cache_embeddings
 
 class EmbeddingGenerator:
-    """DEPRECATED: Use EmbeddingManager from shared.llm instead"""
+    """DEPRECATED: Use EmbeddingManager from core.llm instead"""
     def __init__(self, config: EmbeddingConfig = None):
         self.manager = EmbeddingManager()
         self.config = config or EmbeddingConfig()
@@ -226,7 +245,7 @@ class ContextOptimizer:
         Initialize the context optimizer with centralized embedding manager.
         """
         # Use centralized embedding manager (reads from General Settings)
-        from shared.llm import create_embedding_manager
+        from core.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         self.embedding_dim = self.embedding_manager.get_dimension()
         provider_info = self.embedding_manager.get_provider_info()

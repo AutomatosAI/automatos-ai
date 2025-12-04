@@ -227,7 +227,7 @@ class ToolRegistry:
             List of tool category names
         """
         # Import mapper to avoid circular dependency
-        from services.tool_capability_mapper import ToolCapabilityMapper
+        from modules.tools.services.tool_capability_mapper import ToolCapabilityMapper
         
         mapper = ToolCapabilityMapper()
         return mapper.get_tool_categories_for_task(task_type)
@@ -809,7 +809,7 @@ class ToolRegistry:
     def _register_mcp_tools(self):
         """Register MCP tools from database - only load configured tools"""
         try:
-            from models import MCPTool
+            from core.models import MCPTool
             
             # PRD-17: Only load tools that are active AND properly configured
             mcp_tools = self.db.query(MCPTool).filter(
@@ -884,7 +884,7 @@ class ToolRegistry:
         # For MCP tools, check database permissions
         if tool.category == ToolCategory.MCP_TOOLS and db:
             try:
-                from models import AgentToolAssignment
+                from core.models import AgentToolAssignment
                 
                 tool_id = tool.metadata.get("tool_id")
                 if not tool_id:

@@ -16,9 +16,9 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database.database import SessionLocal, init_database
-from models.credentials import CredentialType
-from credentials.types import ALL_CREDENTIAL_TYPES
+from core.database.database import SessionLocal, init_database
+from core.models.credentials import CredentialType
+from core.credentials.types import ALL_CREDENTIAL_TYPES
 import json
 
 

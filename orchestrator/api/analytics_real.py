@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc, asc
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from database.database import get_db
-from models import (
+from core.database.database import get_db
+from core.models import (
     Agent, Skill, Pattern, Workflow, WorkflowExecution, 
     AgentStatistics, SystemMetrics
 )

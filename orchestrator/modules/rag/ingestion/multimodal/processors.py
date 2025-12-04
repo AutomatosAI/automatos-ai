@@ -722,6 +722,6 @@ def create_multimodal_processor():
         Multi modal processor instance
     """
     # Uses centralized LLM manager - no API key needed
-    from shared.llm import create_llm_manager
+    from core.llm import create_llm_manager
     
     return MultimodalDocumentProcessor()

@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0, '/root/automatos-ai/orchestrator')
 
-from database.database import get_db_session
+from core.database.database import get_db_session
 from sqlalchemy import text
 
 with get_db_session() as db:

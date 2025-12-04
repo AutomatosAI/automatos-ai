@@ -75,7 +75,7 @@ class Config:
     def LLM_PROVIDER(self) -> str:
         """Get LLM provider from system settings (database) or environment"""
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             # Get from database settings, fallback to env var only (NO hardcoded default)
             return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER"))
         except Exception:
@@ -85,7 +85,7 @@ class Config:
     def LLM_MODEL(self) -> str:
         """Get LLM model from system settings (database) or environment"""
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             # Get from database settings, fallback to env var only (NO hardcoded default)
             return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL"))
         except Exception:
@@ -139,7 +139,7 @@ class Config:
     def RAG_MIN_SIMILARITY(self) -> float:
         """Get min similarity threshold from system settings (default: 0.65)"""
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             val = get_system_setting("rag", "min_similarity", "0.65")
             return float(val) if val else 0.65
         except Exception:
@@ -149,7 +149,7 @@ class Config:
     def RAG_TOP_K(self) -> int:
         """Get default top_k results from system settings (default: 5)"""
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             val = get_system_setting("rag", "top_k", "5")
             return int(val) if val else 5
         except Exception:
@@ -159,7 +159,7 @@ class Config:
     def RAG_RERANK_ENABLED(self) -> bool:
         """Get rerank enabled from system settings (default: False)"""
         try:
-            from shared.llm.manager import get_system_setting
+            from core.llm.manager import get_system_setting
             val = get_system_setting("rag", "rerank_enabled", "false")
             return str(val).lower() == "true" if val else False
         except Exception:

@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func
 import logging
 
-from database.database import get_db
-from models import Agent, MCPTool, AgentToolAssignment, MCPToolCreate, MCPToolUpdate, MCPToolResponse, AgentToolAssignmentCreate, AgentToolAssignmentResponse
+from core.database.database import get_db
+from core.models import Agent, MCPTool, AgentToolAssignment, MCPToolCreate, MCPToolUpdate, MCPToolResponse, AgentToolAssignmentCreate, AgentToolAssignmentResponse
 
 logger = logging.getLogger(__name__)
 

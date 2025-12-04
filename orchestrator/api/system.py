@@ -14,7 +14,7 @@ from datetime import datetime
 import psutil
 import os
 
-from database.database import get_db
+from core.database.database import get_db
 
 # Simple API key auth dependency
 def require_api_key(x_api_key: str = Header(None)):
@@ -22,7 +22,7 @@ def require_api_key(x_api_key: str = Header(None)):
     if required and x_api_key != required:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True
-from models import (
+from core.models import (
     SystemConfiguration, RAGConfiguration,
     SystemConfigCreate, SystemConfigResponse,
     RAGConfigCreate, RAGConfigResponse,
@@ -341,7 +341,7 @@ async def get_system_health(db: Session = Depends(get_db)):
             db_status = "unhealthy"
         
         # Check services status - convert to ComponentHealth format
-        from models import ComponentHealth
+        from core.models import ComponentHealth
         components = [
             ComponentHealth(
                 name="database",
@@ -473,7 +473,7 @@ async def get_system_metrics(
         
         # Get analytics data
         try:
-            from services.analytics_engine import AnalyticsEngine
+            from core.services.analytics_engine import AnalyticsEngine
             analytics_engine = AnalyticsEngine(db)
             
             context_metrics = await analytics_engine._get_context_metrics()
@@ -677,7 +677,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
         from sqlalchemy import func
-        from models import Agent, AgentType
+        from core.models import Agent, AgentType
         
         total_agents = db.query(func.count(Agent.id)).scalar() or 0
         active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active").scalar() or 0
@@ -708,7 +708,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
-        from models import Agent
+        from core.models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
@@ -737,7 +737,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
     """Execute an agent with given parameters"""
     import time
     try:
-        from models import Agent
+        from core.models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:

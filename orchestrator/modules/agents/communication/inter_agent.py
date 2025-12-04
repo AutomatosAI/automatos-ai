@@ -32,8 +32,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata
-from shared.llm import LLMManager
-from models import Agent, Base
+from core.llm import LLMManager
+from core.models import Agent, Base
 
 # Load environment variables
 load_dotenv()
@@ -408,7 +408,7 @@ class SharedContextManager:
         if db_session:
             self.db_session = db_session
         else:
-            from database.database import SessionLocal
+            from core.database.database import SessionLocal
             self.db_session = SessionLocal()
         
         self.contexts: Dict[str, SharedContext] = {}

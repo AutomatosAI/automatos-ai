@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 
-from database.database import get_db
+from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
 
 # Get tools from consumers.chatbot (uses modules.tools)
