@@ -33,13 +33,11 @@ import tiktoken
 # OpenAI for embeddings
 from openai import OpenAI  # For sync LLM calls only (not embeddings)
 
-# Import mathematical foundations (now in same directory)
-from .information_theory import InformationTheory
-from .vector_operations import VectorOperations
-from .optimization_algorithms import OptimizationAlgorithms
+# Import mathematical foundations from shared
+from shared.math import InformationTheory, VectorOperations, OptimizationAlgorithms
 
 # Use centralized embedding manager
-from services.llm_provider.embedding_manager import EmbeddingManager
+from shared.llm.embedding_manager import EmbeddingManager
 
 # PromptType and PromptTemplate defined locally (only consumer)
 from enum import Enum
@@ -71,7 +69,7 @@ class PromptTemplate:
 
 # Backward compatibility aliases
 class EmbeddingConfig:
-    """DEPRECATED: Use EmbeddingManager from services.llm_provider"""
+    """DEPRECATED: Use EmbeddingManager from shared.llm"""
     def __init__(self, model_name: str = "all-MiniLM-L6-v2", model_type: str = "sentence_transformer", 
                  dimension: int = 384, batch_size: int = 32, normalize: bool = True, cache_embeddings: bool = True):
         self.model_name = model_name
@@ -82,7 +80,7 @@ class EmbeddingConfig:
         self.cache_embeddings = cache_embeddings
 
 class EmbeddingGenerator:
-    """DEPRECATED: Use EmbeddingManager from services.llm_provider instead"""
+    """DEPRECATED: Use EmbeddingManager from shared.llm instead"""
     def __init__(self, config: EmbeddingConfig = None):
         self.manager = EmbeddingManager()
         self.config = config or EmbeddingConfig()
@@ -228,7 +226,7 @@ class ContextOptimizer:
         Initialize the context optimizer with centralized embedding manager.
         """
         # Use centralized embedding manager (reads from General Settings)
-        from services.llm_provider import create_embedding_manager
+        from shared.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         self.embedding_dim = self.embedding_manager.get_dimension()
         provider_info = self.embedding_manager.get_provider_info()

@@ -21,11 +21,26 @@ from ..vector_store.store import (
     EnhancedVectorStore, VectorDocument, SearchResult, 
     SearchMode, RankingStrategy, SearchFilter
 )
-from ..optimization.information_theory import InformationTheory
-from ..optimization.statistical_analysis import StatisticalAnalysis
+from shared.math import InformationTheory, StatisticalAnalysis
 
-# Import chunker from RAG module
-from modules.rag.chunking.semantic_chunker import SemanticChunker, SemanticChunk, ChunkingStrategy
+# Lazy import chunker to avoid circular import (search <-> rag)
+SemanticChunker = None
+SemanticChunk = None
+ChunkingStrategy = None
+
+def _get_chunker_classes():
+    """Lazy load chunker classes to avoid circular import"""
+    global SemanticChunker, SemanticChunk, ChunkingStrategy
+    if SemanticChunker is None:
+        from modules.rag.chunking.semantic_chunker import (
+            SemanticChunker as _SC,
+            SemanticChunk as _SCh,
+            ChunkingStrategy as _CS
+        )
+        SemanticChunker = _SC
+        SemanticChunk = _SCh
+        ChunkingStrategy = _CS
+    return SemanticChunker, SemanticChunk, ChunkingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +104,7 @@ class ContextRetrievalEngine:
     def __init__(
         self,
         vector_store: EnhancedVectorStore,
-        chunker: SemanticChunker,
+        chunker: "SemanticChunker" = None,
         default_strategy: RetrievalStrategy = RetrievalStrategy.SIMILARITY_BASED
     ):
         self.vector_store = vector_store

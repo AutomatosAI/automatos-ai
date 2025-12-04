@@ -15,7 +15,7 @@ from sqlalchemy import text
 from pydantic import BaseModel, Field
 
 from database.database import get_db
-from services.codegraph_service import CodeGraphService
+from modules.codegraph import CodeGraphService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
@@ -80,7 +80,7 @@ def get_openai_key() -> str:
         from services.credential_resolver import get_credential_resolver
         resolver = get_credential_resolver()
         # Try to get from LLM service settings first
-        from services.llm_provider.manager import get_provider_and_model_from_settings, get_credential_data
+        from shared.llm.manager import get_provider_and_model_from_settings, get_credential_data
         
         provider, _ = get_provider_and_model_from_settings("codegraph")
         cred_data = get_credential_data(provider, service_name="codegraph")

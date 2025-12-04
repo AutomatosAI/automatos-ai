@@ -168,7 +168,7 @@ async def analyze_task(
                 task_description = workflow.description or workflow.workflow_definition.get("description", "Task to be analyzed")
         
         # Import the REAL task decomposer
-        from core.real_task_decomposer import get_decomposer
+        from modules.orchestrator.stages import get_decomposer
         
         # Get the decomposer instance
         decomposer = get_decomposer()

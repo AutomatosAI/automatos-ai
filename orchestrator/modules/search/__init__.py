@@ -38,14 +38,18 @@ from .optimization.context_optimizer import (
     optimize_prompt_context,
 )
 
-# Mathematical foundations
-from .optimization.information_theory import InformationTheory
-from .optimization.vector_operations import VectorOperations
-from .optimization.optimization_algorithms import OptimizationAlgorithms
-from .optimization.distance_metrics import DistanceMetrics
-from .optimization.graph_theory import GraphTheory
-from .optimization.probability_theory import ProbabilityTheory, ConfidenceInterval
-from .optimization.statistical_analysis import StatisticalAnalysis, TrendAnalysis
+# Mathematical foundations (from shared.math)
+from shared.math import (
+    InformationTheory,
+    VectorOperations,
+    OptimizationAlgorithms,
+    DistanceMetrics,
+    GraphTheory,
+    ProbabilityTheory,
+    ConfidenceInterval,
+    StatisticalAnalysis,
+    TrendAnalysis,
+)
 
 # Retrieval
 from .retrieval.context_retrieval_engine import (

@@ -15,7 +15,7 @@ from sqlalchemy import desc, and_
 
 from database.database import get_db
 from models import WorkflowExecution, Workflow, Agent
-from services.workflow_analytics_service import WorkflowAnalyticsService
+from consumers.workflows.analytics import WorkflowAnalyticsService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/execution-history", tags=["execution-history"])

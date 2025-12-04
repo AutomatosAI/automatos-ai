@@ -16,7 +16,10 @@ from sqlalchemy import text
 from pydantic import BaseModel
 
 from database.database import get_db
-from services.chat_service import ChatService, StreamingChatService, CHAT_TOOLS
+from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
+
+# Get tools from consumers.chatbot (uses modules.tools)
+CHAT_TOOLS = get_chat_tools()
 
 logger = logging.getLogger(__name__)
 

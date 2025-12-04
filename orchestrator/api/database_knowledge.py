@@ -17,7 +17,7 @@ from models.database_knowledge import (
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
-from services.database_knowledge_service import DatabaseKnowledgeService
+from modules.nl_to_sql import DatabaseKnowledgeService
 from services.database_cache_service import get_database_cache_service
 from services.database_tool_integration import get_database_tool_integration
 from services.credential_resolver import get_credential_resolver
@@ -25,7 +25,7 @@ from services.credential_resolver import get_credential_resolver
 # NEW imports for introspection wiring
 from models.database_knowledge import DatabaseKnowledgeSource
 from services.credential_service import CredentialStore
-from services.database_introspection import DatabaseIntrospectionService
+from modules.nl_to_sql import DatabaseIntrospectionService
 # NEW import for auditing
 from models.database_knowledge import DatabaseQueryAudit
 
@@ -39,7 +39,7 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from services.llm_provider import create_llm_manager
+        from shared.llm import create_llm_manager
         from modules.rag import RAGService
         from services.context_engineering_service import ContextEngineeringService
         from services.audit_service import AuditService
@@ -275,7 +275,7 @@ async def update_semantic_layer(
     
     try:
         # Convert to proper types
-        from services.database_knowledge_service import SemanticMetric, SemanticDimension
+        from modules.nl_to_sql import SemanticMetric, SemanticDimension
         
         metric_objects = [
             SemanticMetric(**m.dict()) for m in metrics
@@ -413,7 +413,7 @@ async def execute_validated_sql(
         raise HTTPException(status_code=404, detail="Database source not found")
 
     # Validate SQL
-    from services.sql_validator import SQLValidator, SQLValidationError
+    from modules.nl_to_sql import SQLValidator, SQLValidationError
     validator = SQLValidator(max_limit=min(int(payload.get("max_rows", 1000)), source.max_rows_limit or 1000))
     try:
         validated_sql, reasons = validator.validate_and_rewrite(sql, schema_metadata=source.schema_metadata)

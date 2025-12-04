@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 import json
 
 from database.database import get_db
-from services.multimodal_processors import (
+from modules.rag import (
     create_multimodal_processor,
     ContentModality,
     TableExtraction,

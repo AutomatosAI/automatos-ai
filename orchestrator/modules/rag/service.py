@@ -84,7 +84,7 @@ class RAGService:
             
         # Use centralized embedding manager
         try:
-            from services.llm_provider import create_embedding_manager
+            from shared.llm import create_embedding_manager
             self._embedding_manager = create_embedding_manager()
         except Exception as e:
             logger.warning(f"Embedding manager not available: {e}")
@@ -381,6 +381,214 @@ class RAGService:
             if len(chunk_content.strip()) > 50:
                 chunks.append({"content": chunk_content, "metadata": {}})
         return chunks
+    
+    # =========================================================================
+    # Stats & Analytics Methods (for api/context.py)
+    # =========================================================================
+    
+    def get_retrieval_stats(self, db) -> Dict[str, Any]:
+        """Get retrieval statistics from database"""
+        try:
+            from sqlalchemy import text
+            
+            # Count total RAG queries from documents table
+            result = db.execute(text("""
+                SELECT 
+                    COUNT(*) as total_docs,
+                    SUM(chunk_count) as total_chunks,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
+                FROM documents
+            """)).fetchone()
+            
+            total_docs = result.total_docs or 0
+            total_chunks = result.total_chunks or 0
+            completed_docs = result.completed_docs or 0
+            
+            # Calculate success rate
+            success_rate = (completed_docs / total_docs * 100) if total_docs > 0 else 0
+            
+            return {
+                'total_queries': total_docs,
+                'success_rate': round(success_rate, 1),
+                'avg_response_time': 150,  # TODO: Track actual response times
+                'vector_embeddings': total_chunks,
+                'system_status': 'operational' if total_chunks > 0 else 'no_data',
+                'last_query_time': None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting retrieval stats: {e}")
+            return {
+                'total_queries': 0,
+                'success_rate': 0,
+                'avg_response_time': 0,
+                'vector_embeddings': 0,
+                'system_status': 'error',
+                'last_query_time': None
+            }
+    
+    def get_performance_data(self, db, time_range: str = "24h") -> List[Dict]:
+        """Get performance data for charts"""
+        try:
+            from sqlalchemy import text
+            from datetime import datetime, timedelta
+            
+            # Parse time range
+            hours = 24
+            if time_range == "7d":
+                hours = 168
+            elif time_range == "30d":
+                hours = 720
+            
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            
+            result = db.execute(text("""
+                SELECT 
+                    DATE_TRUNC('hour', processed_date) as time_bucket,
+                    COUNT(*) as queries,
+                    AVG(chunk_count) as avg_chunks
+                FROM documents
+                WHERE processed_date >= :cutoff
+                GROUP BY DATE_TRUNC('hour', processed_date)
+                ORDER BY time_bucket
+            """), {"cutoff": cutoff}).fetchall()
+            
+            return [
+                {
+                    "time": row.time_bucket.isoformat() if row.time_bucket else None,
+                    "queries": row.queries or 0,
+                    "avgChunks": float(row.avg_chunks or 0)
+                }
+                for row in result
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting performance data: {e}")
+            return []
+    
+    def get_context_sources(self, db) -> List[Dict]:
+        """Get context sources distribution"""
+        try:
+            from sqlalchemy import text
+            
+            result = db.execute(text("""
+                SELECT 
+                    file_type,
+                    COUNT(*) as count,
+                    SUM(chunk_count) as total_chunks
+                FROM documents
+                WHERE status = 'completed'
+                GROUP BY file_type
+                ORDER BY count DESC
+            """)).fetchall()
+            
+            return [
+                {
+                    "source": row.file_type or "unknown",
+                    "count": row.count or 0,
+                    "chunks": row.total_chunks or 0
+                }
+                for row in result
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting context sources: {e}")
+            return []
+    
+    def get_recent_queries(self, db, limit: int = 10) -> List[Dict]:
+        """Get recent RAG queries from document_usage table"""
+        try:
+            from sqlalchemy import text
+            
+            # RAG queries are tracked in document_usage with event_type='rag_query'
+            result = db.execute(text("""
+                SELECT 
+                    id,
+                    query,
+                    results_count,
+                    execution_time_ms,
+                    metadata,
+                    timestamp
+                FROM document_usage
+                WHERE event_type = 'rag_query' AND query IS NOT NULL
+                ORDER BY timestamp DESC
+                LIMIT :limit
+            """), {"limit": limit}).fetchall()
+            
+            return [
+                {
+                    "id": row.id,
+                    "query": row.query,
+                    "type": "rag_query",
+                    "resultsCount": row.results_count or 0,
+                    "responseTime": row.execution_time_ms or 0,
+                    "metadata": row.metadata or {},
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None
+                }
+                for row in result
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting recent queries: {e}")
+            return []
+    
+    async def get_context_patterns(self, db) -> List[Dict]:
+        """Get RAG configurations as patterns"""
+        try:
+            from sqlalchemy import text
+            
+            result = db.execute(text("""
+                SELECT 
+                    id,
+                    name,
+                    embedding_model,
+                    chunk_size,
+                    chunk_overlap,
+                    retrieval_strategy,
+                    top_k,
+                    similarity_threshold,
+                    is_active,
+                    configuration,
+                    created_at,
+                    updated_at
+                FROM rag_configurations
+                ORDER BY is_active DESC, updated_at DESC NULLS LAST
+                LIMIT 20
+            """)).fetchall()
+            
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name or f"Pattern {row.id}",
+                    "description": f"Embedding: {row.embedding_model}, Chunk: {row.chunk_size}, Strategy: {row.retrieval_strategy}",
+                    "type": row.retrieval_strategy or "similarity",
+                    "model": row.embedding_model,
+                    "chunkSize": row.chunk_size or 1000,
+                    "chunkOverlap": row.chunk_overlap or 200,
+                    "strategy": row.retrieval_strategy or "similarity",
+                    "topK": row.top_k or 5,
+                    "threshold": float(row.similarity_threshold) if row.similarity_threshold else 0.7,
+                    "active": row.is_active,
+                    "configuration": row.configuration or {},
+                    "created": row.created_at.isoformat() if row.created_at else None,
+                    "updated": row.updated_at.isoformat() if row.updated_at else None,
+                    # Stats would need actual tracking
+                    "usageCount": 0,
+                    "accuracy": 0.0,
+                    "avgSources": 0
+                }
+                for row in result
+            ]
+            
+        except Exception as e:
+            logger.error(f"Error getting context patterns: {e}")
+            return []
+    
+    @property
+    def context_system(self):
+        """Check if context system is initialized"""
+        self._ensure_initialized()
+        return self._embedding_manager is not None
 
 
 # Singleton

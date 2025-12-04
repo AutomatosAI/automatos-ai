@@ -92,7 +92,7 @@ from api.dashboard_integration import (
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
-from utils.logging_adapter import (
+from shared.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
     clear_request_id,

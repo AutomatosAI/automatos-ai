@@ -20,10 +20,18 @@ from .codegraph_service import (
     CodeRelationship,
     ParseResult
 )
+from .project_context import (
+    ProjectContextAnalyzer,
+    ProjectContext,
+    get_project_analyzer
+)
 
 __all__ = [
     "CodeGraphService",
     "CodeSymbol",
     "CodeRelationship",
-    "ParseResult"
+    "ParseResult",
+    "ProjectContextAnalyzer",
+    "ProjectContext",
+    "get_project_analyzer"
 ]

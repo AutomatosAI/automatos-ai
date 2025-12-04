@@ -26,13 +26,18 @@ from .context_optimizer import (
     optimize_prompt_context,
 )
 
-from .information_theory import InformationTheory
-from .vector_operations import VectorOperations
-from .optimization_algorithms import OptimizationAlgorithms
-from .distance_metrics import DistanceMetrics
-from .graph_theory import GraphTheory
-from .probability_theory import ProbabilityTheory, ConfidenceInterval
-from .statistical_analysis import StatisticalAnalysis, TrendAnalysis
+# Re-export mathematical foundations from shared.math for backward compatibility
+from shared.math import (
+    InformationTheory,
+    VectorOperations,
+    OptimizationAlgorithms,
+    DistanceMetrics,
+    GraphTheory,
+    ProbabilityTheory,
+    ConfidenceInterval,
+    StatisticalAnalysis,
+    TrendAnalysis,
+)
 
 __all__ = [
     # Context Optimizer

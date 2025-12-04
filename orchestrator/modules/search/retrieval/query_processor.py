@@ -17,9 +17,8 @@ from enum import Enum
 from datetime import datetime
 import json
 
-# Import mathematical foundations from search module
-from modules.search.optimization.information_theory import InformationTheory
-from modules.search.optimization.statistical_analysis import StatisticalAnalysis
+# Import mathematical foundations from shared
+from shared.math import InformationTheory, StatisticalAnalysis
 
 logger = logging.getLogger(__name__)
 

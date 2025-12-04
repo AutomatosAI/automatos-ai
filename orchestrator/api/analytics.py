@@ -12,7 +12,7 @@ import logging
 
 from database.database import get_db
 from sqlalchemy.orm import Session
-from services.workflow_analytics_service import WorkflowAnalyticsService
+from consumers.workflows.analytics import WorkflowAnalyticsService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 logger = logging.getLogger(__name__)

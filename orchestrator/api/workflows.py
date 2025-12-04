@@ -1144,7 +1144,7 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
     logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
     
     try:
-        from services.workflow_streaming_service import stream_workflow_execution
+        from consumers.workflows.streaming import stream_workflow_execution
         
         return StreamingResponse(
             stream_workflow_execution(execution_id),
@@ -1185,7 +1185,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
     logger.info(f"🚀 Starting AI SDK stream for execution {execution_id}")
     
     try:
-        from services.workflow_streaming_service import stream_workflow_as_aisdk
+        from consumers.workflows.streaming import stream_workflow_as_aisdk
         
         return StreamingResponse(
             stream_workflow_as_aisdk(execution_id),
@@ -1239,7 +1239,7 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
     logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id}")
     
     try:
-        from services.workflow_streaming_service import stream_workflow_as_aisdk
+        from consumers.workflows.streaming import stream_workflow_as_aisdk
         
         return StreamingResponse(
             stream_workflow_as_aisdk(execution_id),
@@ -1286,16 +1286,18 @@ async def get_execution_results(execution_id: int, db: Session = Depends(get_db)
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
     from database.database import get_db_session
-    from core.real_task_decomposer import RealTaskDecomposer
-    from core.llm.llm_agent_selector import LLMAgentSelector  # ALWAYS use LLM selector
-    from core.context_engineering_integrator import ContextEngineeringIntegrator
+    from modules.orchestrator.stages import (
+        RealTaskDecomposer,
+        ContextEngineeringIntegrator,
+        ResultAggregator,
+        WorkflowMemoryIntegrator,
+    )
+    from modules.orchestrator.llm import LLMAgentSelector  # ALWAYS use LLM selector
     from modules.agents import AgentExecutionManager
-    from core.result_aggregator import ResultAggregator
-    from core.learning_system_updater import LearningSystemUpdater
-    from core.workflow_memory_integrator import WorkflowMemoryIntegrator
-    from services.memory_knowledge_system import HierarchicalMemorySystem
+    from modules.learning import LearningSystemUpdater
+    from modules.memory.storage import HierarchicalMemorySystem
     from services.workspace_manager import WorkspaceManager  # Unique workspace per execution
-    from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
+    from consumers.workflows import ModelUsageTracker  # PRD-15
     import os
     
     # Create unique workspace for this execution
@@ -1337,7 +1339,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 logger.warning("Redis client not initialized for execution_started event")
             
             # Initialize SSE stream manager for instant UI updates
-            from services.workflow_streaming_service import get_stream_manager
+            from consumers.workflows.streaming import get_stream_manager
             stream_manager = get_stream_manager()
             
             # Initialize stage tracker for 9-stage workflow with stream manager
@@ -1502,7 +1504,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             # Get the agent details
                             agent = db.query(Agent).filter(Agent.id == required_agent_id).first()
                             if agent:
-                                from core.intelligent_agent_selector import AgentMatch
+                                from modules.orchestrator.llm import AgentMatch
                                 agent_assignments[subtask_id] = [
                                     AgentMatch(
                                         agent_id=agent.id,
@@ -1617,8 +1619,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             memory_retrieval_results = {}
             try:
                 # Initialize memory system using centralized embedding manager
-                from services.memory_knowledge_system import HierarchicalMemorySystem
-                from core.workflow_memory_integrator import WorkflowMemoryIntegrator
+                from modules.memory.storage import HierarchicalMemorySystem
+                from modules.orchestrator.stages import WorkflowMemoryIntegrator
                 
                 # Memory system uses centralized embedding manager internally
                 memory_system = HierarchicalMemorySystem()
@@ -2025,7 +2027,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # QUALITY ASSESSMENT
             logger.info(f"🎯 Assessing workflow output quality...")
             try:
-                from core.output_quality_assessor import OutputQualityAssessor, OutputType
+                from modules.orchestrator.stages import OutputQualityAssessor, OutputType
                 
                 quality_assessor = OutputQualityAssessor(
                     llm_client=None,  # Will use heuristic assessment
@@ -2315,8 +2317,8 @@ Subtask Results:
             
             # Record workflow analytics for monitoring
             try:
-                from services.workflow_analytics_service import WorkflowAnalyticsService
-                from services.orchestration_tracker import orchestration_tracker
+                from consumers.workflows.analytics import WorkflowAnalyticsService
+                from modules.orchestrator import orchestration_tracker
                 analytics_service = WorkflowAnalyticsService(db)
                 analytics = analytics_service.record_workflow_analytics(execution)
                 logger.info(

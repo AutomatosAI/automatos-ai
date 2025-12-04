@@ -17,7 +17,7 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
-from services.codegraph_service import CodeGraphService
+from modules.codegraph import CodeGraphService
 from services.tool_result_formatter import ToolResultFormatter
 from config import config
 

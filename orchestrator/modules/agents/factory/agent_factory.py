@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from services.llm_provider import (
+from shared.llm import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
     create_llm_manager
 )
@@ -565,7 +565,7 @@ class AgentFactory:
             Dictionary with LLM configuration
         """
         try:
-            from services.llm_provider.manager import get_system_setting
+            from shared.llm.manager import get_system_setting
             
             # Get provider and model from settings - check both key formats
             provider = get_system_setting("orchestrator_llm", "llm_provider")
@@ -859,7 +859,7 @@ Available Shell Tools:
         Raises:
             ValueError: If provider is unsupported
         """
-        from services.llm_provider import LLMConfig, LLMProvider as LLMProviderEnum
+        from shared.llm import LLMConfig, LLMProvider as LLMProviderEnum
         
         # Map provider string to enum
         provider_map = {

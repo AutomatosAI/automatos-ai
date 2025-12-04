@@ -18,10 +18,8 @@ import asyncpg
 import numpy as np
 from datetime import datetime
 
-# Import mathematical foundations from optimization module
-from ..optimization.distance_metrics import DistanceMetrics
-from ..optimization.vector_operations import VectorOperations
-from ..optimization.statistical_analysis import StatisticalAnalysis
+# Import mathematical foundations from shared
+from shared.math import DistanceMetrics, VectorOperations, StatisticalAnalysis
 
 logger = logging.getLogger(__name__)
 

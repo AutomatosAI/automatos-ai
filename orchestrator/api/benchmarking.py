@@ -15,7 +15,7 @@ import logging
 
 from database.database import get_db
 from models import WorkflowExecution, Workflow, Agent
-from services.orchestration_tracker import orchestration_tracker
+from modules.orchestrator import orchestration_tracker
 
 logger = logging.getLogger(__name__)
 

@@ -35,7 +35,7 @@ from services.credential_service import (
     CredentialValidationError
 )
 from services.encryption_service import EncryptionKeyError
-from utils.logging_adapter import set_request_id
+from shared.utils.logging_adapter import set_request_id
 
 logger = logging.getLogger(__name__)
 

@@ -32,7 +32,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata
-from services.llm_provider import LLMManager
+from shared.llm import LLMManager
 from models import Agent, Base
 
 # Load environment variables

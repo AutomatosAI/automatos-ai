@@ -19,7 +19,7 @@ from sqlalchemy import or_, text
 
 from database.database import get_db
 from models import Document, DocumentUploadResponse, DocumentResponse
-from utils.document_manager import DocumentManager, DocumentStatus, DocumentType
+from modules.rag import DocumentManager, DocumentStatus, DocumentType
 import logging
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ async def upload_document(
             # Use existing document manager for processing
             # Note: DocumentManager creates its own DB record, so we skip calling it
             # and instead trigger processing directly
-            from utils.document_manager import DocumentManager, DocumentType
+            from modules.rag import DocumentManager, DocumentType
             import asyncio
             
             # Determine file type enum
@@ -565,7 +565,7 @@ async def semantic_search(
         start_time = time.time()
         
         # Generate query embedding using centralized embedding manager
-        from services.llm_provider import create_embedding_manager
+        from shared.llm import create_embedding_manager
         import asyncio
         
         embedding_manager = create_embedding_manager()
@@ -973,7 +973,7 @@ async def rag_retrieve(
         candidate_limit = max_chunks * 3
         
         # Generate query embedding using centralized embedding manager
-        from services.llm_provider import create_embedding_manager
+        from shared.llm import create_embedding_manager
         
         embedding_manager = create_embedding_manager()
         query_embedding = await embedding_manager.generate_embedding(query)

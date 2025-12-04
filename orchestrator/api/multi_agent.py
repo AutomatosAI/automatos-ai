@@ -19,7 +19,7 @@ from datetime import datetime
 
 # Import database and dependencies
 from database.database import get_db
-from services.orchestrator_service import EnhancedOrchestratorService
+from modules.orchestrator import EnhancedOrchestratorService
 # Circular import - moved to utils
 
 logger = logging.getLogger(__name__)

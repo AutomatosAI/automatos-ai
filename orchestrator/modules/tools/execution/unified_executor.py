@@ -332,7 +332,7 @@ class UnifiedToolExecutor:
     
     async def _query_main_database(self, query: str, analysis_prompt: str = None) -> Dict[str, Any]:
         """Direct query to main Automatos database using NL-to-SQL"""
-        from services.llm_provider import create_llm_manager
+        from shared.llm import create_llm_manager
         from services.pandas_ai_service import get_pandasai_service
         from database.database import get_db_session
         from sqlalchemy import text
@@ -342,7 +342,7 @@ class UnifiedToolExecutor:
             start_time = time.time()
             
             # Get schema from centralized provider
-            from services.schema_provider import get_schema_provider
+            from modules.nl_to_sql import get_schema_provider
             schema_provider = get_schema_provider(self.db)
             schema = schema_provider.get_database_schema_overview()
 

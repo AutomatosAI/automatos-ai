@@ -70,7 +70,7 @@ class CodeGraphService:
         self.db = db
         
         # Use centralized embedding manager (reads from General Settings)
-        from services.llm_provider import create_embedding_manager
+        from shared.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         logger.info(f"CodeGraphService using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
@@ -665,7 +665,7 @@ class CodeGraphService:
         """Ensure the embedding column dimension matches the current embedding model from database settings"""
         try:
             # Read dimension directly from database settings (no hardcoding)
-            from services.llm_provider.embedding_manager import get_system_setting
+            from shared.llm.embedding_manager import get_system_setting
             dimension_str = get_system_setting("vector_store_dimensions")
             
             if not dimension_str:
@@ -756,16 +756,16 @@ class CodeGraphService:
                 if not self.embedding_manager:
                     raise ValueError("embedding_manager is None")
                 
-                logger.error(f"🔍 DEBUG: embedding_manager type: {type(self.embedding_manager)}")
-                logger.error(f"🔍 DEBUG: embedding_manager has generate_embedding: {hasattr(self.embedding_manager, 'generate_embedding')}")
+                logger.debug(f"🔍 embedding_manager type: {type(self.embedding_manager)}")
+                logger.debug(f"🔍 embedding_manager has generate_embedding: {hasattr(self.embedding_manager, 'generate_embedding')}")
                 
                 if not hasattr(self.embedding_manager, 'generate_embedding'):
                     raise ValueError(f"embedding_manager has no generate_embedding method. Type: {type(self.embedding_manager)}")
                 
                 # Check if generate_embedding is callable
                 gen_method = getattr(self.embedding_manager, 'generate_embedding', None)
-                logger.error(f"🔍 DEBUG: generate_embedding type: {type(gen_method)}, callable: {callable(gen_method)}")
-                logger.error(f"🔍 DEBUG: generate_embedding value (first 200 chars): {repr(gen_method)[:200]}")
+                logger.debug(f"🔍 generate_embedding type: {type(gen_method)}, callable: {callable(gen_method)}")
+                logger.debug(f"🔍 generate_embedding value (first 200 chars): {repr(gen_method)[:200]}")
                 
                 if not callable(gen_method):
                     raise ValueError(
@@ -773,9 +773,9 @@ class CodeGraphService:
                         f"Type: {type(gen_method)}, Value: {repr(gen_method)[:200]}"
                     )
                 
-                logger.error(f"🔍 DEBUG: About to call generate_embedding for {len(texts)} texts")
+                logger.debug(f"🔍 About to call generate_embedding for {len(texts)} texts")
                 for idx, text_content in enumerate(texts):
-                    logger.error(f"🔍 DEBUG: Calling generate_embedding for text {idx+1}/{len(texts)}")
+                    logger.debug(f"🔍 Calling generate_embedding for text {idx+1}/{len(texts)}")
                     embedding = await gen_method(text_content)
                     # Ensure embedding is a list/array, not a string
                     if isinstance(embedding, str):
@@ -790,9 +790,9 @@ class CodeGraphService:
                     if not isinstance(embedding, (list, tuple)):
                         raise ValueError(f"Embedding is not a list/array: {type(embedding)}")
                     embeddings.append(embedding)
-                    logger.error(f"🔍 DEBUG: Got embedding of length {len(embedding)}, type: {type(embedding)}")
+                    logger.debug(f"🔍 Got embedding of length {len(embedding)}, type: {type(embedding)}")
                 
-                logger.error(f"🔍 DEBUG: Successfully generated {len(embeddings)} embeddings, now storing...")
+                logger.debug(f"🔍 Successfully generated {len(embeddings)} embeddings, now storing...")
                 
                 # Store symbols with embeddings
                 for j, symbol in enumerate(batch):
@@ -839,16 +839,16 @@ class CodeGraphService:
                             """),
                             params
                         )
-                        logger.error(f"🔍 DEBUG: Stored symbol {j+1}/{len(batch)}")
+                        logger.debug(f"🔍 Stored symbol {j+1}/{len(batch)}")
                     except Exception as e:
                         import traceback
-                        logger.error(f"🔍 DEBUG: Failed to store symbol {j}: {e}")
-                        logger.error(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
-                        logger.error(f"🔍 DEBUG: Symbol keys: {list(symbol.keys()) if isinstance(symbol, dict) else 'N/A'}")
+                        logger.debug(f"🔍 Failed to store symbol {j}: {e}")
+                        logger.debug(f"🔍 Traceback: {traceback.format_exc()}")
+                        logger.debug(f"🔍 Symbol keys: {list(symbol.keys()) if isinstance(symbol, dict) else 'N/A'}")
                         raise
                 
                 self.db.commit()
-                logger.error(f"🔍 DEBUG: Successfully committed batch of {len(batch)} symbols")
+                logger.debug(f"🔍 Successfully committed batch of {len(batch)} symbols")
                 
             except Exception as e:
                 logger.error(f"Failed to generate embeddings for batch: {e}")

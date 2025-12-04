@@ -12,14 +12,16 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 
-# Import mathematical foundations from search module
-from modules.search.optimization.information_theory import InformationTheory
-from modules.search.optimization.vector_operations import VectorOperations  
-from modules.search.optimization.distance_metrics import DistanceMetrics
-from modules.search.optimization.probability_theory import ProbabilityTheory
-from modules.search.optimization.graph_theory import GraphTheory
-from modules.search.optimization.statistical_analysis import StatisticalAnalysis
-from modules.search.optimization.optimization_algorithms import OptimizationAlgorithms
+# Import mathematical foundations from shared
+from shared.math import (
+    InformationTheory,
+    VectorOperations,
+    DistanceMetrics,
+    ProbabilityTheory,
+    GraphTheory,
+    StatisticalAnalysis,
+    OptimizationAlgorithms
+)
 
 logger = logging.getLogger(__name__)
 

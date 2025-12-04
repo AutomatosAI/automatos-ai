@@ -1,17 +1,22 @@
 """
-RAG Module - Document Retrieval-Augmented Generation
-====================================================
+RAG Module - Complete Knowledge Base System
+===========================================
 
-Document chunking, ingestion, and retrieval.
-Depends on: modules.search
+Full document pipeline: Upload → Parse → Chunk → Embed → Store → Search
 
 Components:
-- chunking/    - Semantic chunking, strategies
-- ingestion/   - Document processing, file handlers
+- ingestion/       - Document upload, parsing, multimodal extraction
+- chunking/        - Semantic chunking strategies
+- service.py       - RAG retrieval service
 
 Usage:
-    from modules.rag import RAGService, SemanticChunker, get_rag_service
+    # Upload documents
+    from modules.rag import DocumentManager, DocumentStatus
+    doc_manager = DocumentManager(db_config)
+    doc_id = await doc_manager.upload_document("/path/to/doc.pdf")
     
+    # Search/retrieve
+    from modules.rag import get_rag_service
     rag = get_rag_service()
     result = await rag.retrieve("How do agents work?")
 
@@ -34,16 +39,55 @@ from .chunking import (
     DocumentChunker,
     MultiModalChunker
 )
-from .ingestion import DocumentProcessor, IngestionResult
+from .ingestion import (
+    # Document Manager (main entry for uploads)
+    DocumentManager,
+    DocumentMetadata,
+    DocumentChunk,
+    DocumentStatus,
+    DocumentType,
+    # Processors
+    DocumentProcessor,
+    IngestionResult,
+    IngestionPipeline,
+    PipelineConfig,
+    PipelineResult,
+    TextHandler,
+    # Multimodal
+    TableProcessor,
+    ImageProcessor,
+    FormulaProcessor,
+    MultimodalDocumentProcessor,
+    ContentModality,
+    TableExtraction,
+    ImageExtraction,
+    FormulaExtraction,
+    create_multimodal_processor,
+)
+from .config import (
+    RAGModuleConfig,
+    ChunkingConfig,
+    EmbeddingConfig,
+    RetrievalConfig,
+    IngestionConfig,
+    default_config
+)
 
 __all__ = [
-    # Main service
+    # Main service (retrieval)
     "RAGService",
     "RAGConfig",
     "RAGResult",
     "get_rag_service",
     "UniversalRAGService",
     "get_universal_rag",
+    
+    # Document Manager (upload/storage)
+    "DocumentManager",
+    "DocumentMetadata",
+    "DocumentChunk",
+    "DocumentStatus",
+    "DocumentType",
     
     # Chunking
     "SemanticChunker",
@@ -55,5 +99,28 @@ __all__ = [
     
     # Ingestion
     "DocumentProcessor",
-    "IngestionResult"
+    "IngestionResult",
+    "IngestionPipeline",
+    "PipelineConfig",
+    "PipelineResult",
+    "TextHandler",
+    
+    # Multimodal
+    "TableProcessor",
+    "ImageProcessor",
+    "FormulaProcessor",
+    "MultimodalDocumentProcessor",
+    "ContentModality",
+    "TableExtraction",
+    "ImageExtraction",
+    "FormulaExtraction",
+    "create_multimodal_processor",
+    
+    # Config
+    "RAGModuleConfig",
+    "ChunkingConfig",
+    "EmbeddingConfig",
+    "RetrievalConfig",
+    "IngestionConfig",
+    "default_config"
 ]

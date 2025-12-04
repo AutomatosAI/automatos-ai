@@ -77,7 +77,7 @@ from api.synthesis import router as synthesis_router
 from api.websocket_api import router as websocket_api_router
 from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
-from api.document_processing import router as document_processing_router
+# document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
 from api.redis_websocket import router as redis_websocket_router
 from api.models_endpoints import router as models_router  # PRD-15: Model management
@@ -94,7 +94,7 @@ from api.dashboard_integration import (
 
 # Import WebSocket manager
 from services.websocket_manager import manager, WebSocketEventType
-from utils.logging_adapter import (
+from shared.utils.logging_adapter import (
     install_request_context_logging,
     set_request_id,
     clear_request_id,
@@ -415,7 +415,7 @@ app.include_router(websocket_api_router)
 app.include_router(redis_websocket_router)  # Redis-backed WebSocket for real-time updates
 app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward compatibility)
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
-app.include_router(document_processing_router)
+# document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics

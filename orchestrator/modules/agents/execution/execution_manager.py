@@ -27,14 +27,15 @@ import numpy as np
 
 from modules.agents.factory import AgentFactory, AgentRuntime, AgentMetadata, get_action_executor
 from models import Agent
-from core.memory_prompt_injector import MemoryPromptInjector
+from modules.memory.operations.prompt_injection import MemoryPromptInjector
 
 # PHASE 2: Import communication components
 try:
-    from services.inter_agent_communication import (
+    from modules.agents.communication import (
         AgentCommunicationProtocol,
         SharedContextManager,
-        MessageType
+        MessageType,
+        Message
     )
     COMMUNICATION_AVAILABLE = True
 except ImportError as e:
@@ -917,7 +918,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
         self.logger.info(f"🔔 Broadcasting SSE update for subtask {execution.subtask_id} - status: {execution.status.value}")
         
         try:
-            from services.workflow_streaming_service import get_stream_manager
+            from consumers.workflows.streaming import get_stream_manager
             
             manager = get_stream_manager()
             
@@ -1159,7 +1160,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
         
         try:
             # Broadcast task start to all team members
-            from services.inter_agent_communication import Message
+            # Message imported from modules.agents.communication at top
             message = Message(
                 from_agent_id=execution.agent_id,
                 message_type=MessageType.COORDINATION,
@@ -1213,7 +1214,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
             
             # 2. Optional: Broadcast result to team (only if communication enabled)
             if self.enable_communication and self.communication:
-                from services.inter_agent_communication import Message
+                # Message imported from modules.agents.communication at top
                 message = Message(
                     from_agent_id=execution.agent_id,
                     message_type=MessageType.RESULT_SHARE,
@@ -1253,7 +1254,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
             return
         
         try:
-            from services.inter_agent_communication import Message
+            # Message imported from modules.agents.communication at top
             message = Message(
                 from_agent_id=execution.agent_id,
                 message_type=MessageType.TASK_REQUEST,
@@ -1292,7 +1293,7 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
             return
         
         try:
-            from services.inter_agent_communication import Message
+            # Message imported from modules.agents.communication at top
             message = Message(
                 from_agent_id=agent_id,
                 message_type=MessageType.KNOWLEDGE_SHARE,
