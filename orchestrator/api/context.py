@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from database.database import get_db
 from models import RAGConfiguration, Document
-from services.rag_service import get_rag_service, RAGService
+from modules.rag import get_rag_service, RAGService
 
 # Request models
 class RAGConfigCreate(BaseModel):

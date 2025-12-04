@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 
 from models import Agent, WorkflowExecution, Workflow
-from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+from modules.agents import SubtaskExecution, SubtaskStatus
 from core.result_aggregator import AggregatedResults
 
 logger = logging.getLogger(__name__)

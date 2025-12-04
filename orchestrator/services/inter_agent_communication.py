@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata
+from modules.agents import AgentFactory, AgentRuntime, AgentMetadata
 from services.llm_provider import LLMManager
 from models import Agent, Base
 
@@ -1054,7 +1054,7 @@ async def verify_inter_agent_communication():
                 agent_type="code_architect",
                 description="Expert in API design and architecture",
                 skills=["api_design", "system_architecture", "rest_principles"],
-                preferred_model="gpt-4",
+                preferred_model=None,  # Use database settings
                 temperature=0.7
             ),
             auto_verify=True
@@ -1068,7 +1068,7 @@ async def verify_inter_agent_communication():
                 agent_type="security_expert",
                 description="Expert in API security and authentication",
                 skills=["security_audit", "authentication", "authorization"],
-                preferred_model="gpt-4",
+                preferred_model=None,  # Use database settings
                 temperature=0.6
             ),
             auto_verify=True
@@ -1082,7 +1082,7 @@ async def verify_inter_agent_communication():
                 agent_type="data_analyst",
                 description="Expert in data modeling and database design",
                 skills=["data_modeling", "database_design", "optimization"],
-                preferred_model="gpt-4",
+                preferred_model=None,  # Use database settings
                 temperature=0.7
             ),
             auto_verify=True

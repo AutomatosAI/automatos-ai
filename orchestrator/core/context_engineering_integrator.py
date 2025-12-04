@@ -26,9 +26,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-# PHASE 1: Import ContextOptimizer components
+# PHASE 1: Import ContextOptimizer from search module
 try:
-    from context_engineering.context_optimizer import ContextOptimizer, ContextItem, AtomicPrompt
+    from modules.search.optimization.context_optimizer import ContextOptimizer, ContextItem, AtomicPrompt
     CONTEXT_OPTIMIZER_AVAILABLE = True
 except ImportError as e:
     logging.warning(f"ContextOptimizer not available: {e}. Falling back to basic RAG.")
@@ -38,16 +38,18 @@ except ImportError as e:
     class ContextItem: pass
     class ContextOptimizer: pass
 
-# PHASE 3: Import PgVectorStore for direct semantic search
+# PHASE 3: Import VectorStore from search module
 try:
-    from context_engineering.vector_store import PgVectorStore, VectorSearchResult
-    from context_engineering.embeddings import EmbeddingGenerator, EmbeddingConfig
+    from modules.search.vector_store.store import EnhancedVectorStore as PgVectorStore
+    from modules.search.vector_store.store import SearchResult as VectorSearchResult
+    from services.llm_provider.embedding_manager import EmbeddingManager
     VECTOR_STORE_AVAILABLE = True
 except ImportError as e:
-    logging.warning(f"PgVectorStore not available: {e}. Using HTTP API fallback.")
+    logging.warning(f"VectorStore not available: {e}. Using HTTP API fallback.")
     VECTOR_STORE_AVAILABLE = False
     class PgVectorStore: pass
     class VectorSearchResult: pass
+    class EmbeddingManager: pass
 
 logger = logging.getLogger(__name__)
 
@@ -158,14 +160,8 @@ class ContextEngineeringIntegrator:
         
         if self.use_vector_store:
             try:
-                # Initialize embedding generator for query vectorization
-                embedding_config = EmbeddingConfig(
-                    model_name="text-embedding-3-small",
-                    model_type="openai",
-                    dimension=1536,
-                    normalize=True
-                )
-                self.embedding_generator = EmbeddingGenerator(embedding_config)
+                # Use centralized embedding manager (reads config from database)
+                self.embedding_generator = EmbeddingManager()
                 logger.info("✅ Vector Store integration ready (will initialize on first use)")
             except Exception as e:
                 logger.warning(f"Failed to initialize embedding generator: {e}")
@@ -378,7 +374,7 @@ class ContextEngineeringIntegrator:
         
         # Use real RAG service with vector search
         try:
-            from services.rag_service import get_rag_service
+            from modules.rag import get_rag_service
             rag_service = get_rag_service()
             
             # Get enhanced prompt with context

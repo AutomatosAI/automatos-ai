@@ -13,7 +13,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from services.tool_registry import ToolRegistry, ToolCategory, SecurityLevel
+from modules.tools import ToolRegistry, ToolCategory, SecurityLevel
 from services.tool_capability_mapper import ToolCapabilityMapper
 from models.database_knowledge import DatabaseKnowledgeSource
 
@@ -374,7 +374,7 @@ def get_database_tool_integration() -> DatabaseToolIntegration:
     """Get or create the database tool integration singleton."""
     global _integration_service
     if _integration_service is None:
-        from services.tool_registry import get_tool_registry
+        from modules.tools.registry import get_tool_registry
         from services.tool_capability_mapper import get_tool_capability_mapper
         
         _integration_service = DatabaseToolIntegration(

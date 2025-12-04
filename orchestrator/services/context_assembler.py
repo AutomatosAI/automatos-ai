@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from models.context_policy import ContextPolicyModel
-from context_engineering.policies import ContextPolicy, assemble_context, SlotName
+from modules.search.policies import ContextPolicy, assemble_context, SlotName
 
 
 class ContextAssembler:

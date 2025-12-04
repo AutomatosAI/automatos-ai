@@ -43,7 +43,6 @@ from api.analytics import router as analytics_router
 from api.workflow_history import router as workflow_history_router
 from api.benchmarking import router as benchmarking_router
 from api.memory_stats import router as memory_stats_router
-from api.evaluation import router as evaluation_router
 from api.multi_agent import router as multi_agent_router
 from api.field_theory import router as field_theory_router
 from api.context_policy import router as context_policy_router
@@ -381,7 +380,6 @@ app.include_router(analytics_router)
 app.include_router(workflow_history_router)
 app.include_router(execution_history_router)  # Enhanced execution history API
 app.include_router(benchmarking_router)  # Workflow and agent analytics
-app.include_router(evaluation_router)
 app.include_router(multi_agent_router)
 app.include_router(field_theory_router)
 app.include_router(context_policy_router)

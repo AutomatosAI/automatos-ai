@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 # Automatos imports (from existing system)
 from services.credential_resolver import CredentialResolver
 from services.llm_provider import LLMProvider
-from services.rag_service import RAGService
+from modules.rag import RAGService
 from services.context_engineering_service import ContextEngineeringService
 from services.audit_service import AuditService
 # Placeholder models

@@ -39,14 +39,14 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from services.llm_provider import LLMManager
-        from services.rag_service import RAGService
+        from services.llm_provider import create_llm_manager
+        from modules.rag import RAGService
         from services.context_engineering_service import ContextEngineeringService
         from services.audit_service import AuditService
         
         db_service = DatabaseKnowledgeService(
             credential_resolver=get_credential_resolver(),
-            llm_provider=LLMManager(),
+            llm_provider=create_llm_manager(service_name="orchestrator"),
             rag_service=RAGService(),
             context_engineering=ContextEngineeringService(),
             audit_service=AuditService()

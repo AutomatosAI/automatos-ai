@@ -26,7 +26,7 @@ from services.memory_knowledge_system import (
     KnowledgeGraph,
     LearningEngine
 )
-from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+from modules.agents import SubtaskExecution, SubtaskStatus
 from core.result_aggregator import AggregatedResults
 
 logger = logging.getLogger(__name__)

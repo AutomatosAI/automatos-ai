@@ -18,8 +18,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from services.llm_provider import create_llm_manager, LLMConfig, LLMProvider
 
-# PHASE 4A: Import graph theory for dependency validation
-from context_engineering.mathematical_foundations.graph_theory import GraphTheory
+# PHASE 4A: Import graph theory from search module
+from modules.search.optimization.graph_theory import GraphTheory
 
 logger = logging.getLogger(__name__)
 

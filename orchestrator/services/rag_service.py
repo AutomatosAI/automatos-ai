@@ -48,25 +48,25 @@ class RAGService:
         if self._initialized:
             return
             
-        # Import existing components
+        # Import from modules.search (re-exports from context_engineering)
         try:
-            from context_engineering.context_optimizer import ContextOptimizer, ContextItem
+            from modules.search import ContextOptimizer, ContextItem
             self._context_optimizer = ContextOptimizer()
             self._ContextItem = ContextItem
-            logger.info("✅ Using existing ContextOptimizer (Knapsack, MMR, Entropy)")
+            logger.info("✅ Using modules.search.ContextOptimizer (Knapsack, MMR, Entropy)")
         except ImportError as e:
             logger.warning(f"ContextOptimizer not available: {e}")
             self._context_optimizer = None
             
         try:
-            from context_engineering.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
+            from modules.rag import SemanticChunker, ChunkingStrategy
             self._semantic_chunker = SemanticChunker(
                 strategy=ChunkingStrategy.ADAPTIVE,
                 target_chunk_size=500,
                 min_chunk_size=100,
                 max_chunk_size=1500
             )
-            logger.info("✅ Using existing SemanticChunker (5 strategies)")
+            logger.info("✅ Using modules.rag.SemanticChunker (5 strategies)")
         except ImportError as e:
             logger.warning(f"SemanticChunker not available: {e}")
             self._semantic_chunker = None
@@ -118,6 +118,24 @@ class RAGService:
         else:
             # Fallback to basic retrieval
             return self._basic_retrieval(query, candidates, max_chunks, max_tokens)
+    
+    # Alias for backward compatibility (used by agent_platform_tools)
+    async def retrieve_context(
+        self,
+        query: str,
+        top_k: int = 8,
+        max_chunks: int = None,
+        max_tokens: int = 2000,
+        min_similarity: float = 0.5
+    ) -> RAGResult:
+        """Backward-compatible alias for retrieve()."""
+        chunks = max_chunks if max_chunks is not None else top_k
+        return await self.retrieve(
+            query=query,
+            max_chunks=chunks,
+            max_tokens=max_tokens,
+            diversity=0.3
+        )
     
     async def _optimize_with_context_optimizer(
         self,

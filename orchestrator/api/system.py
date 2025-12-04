@@ -308,7 +308,7 @@ async def test_rag_config(
     """Test RAG configuration with a query"""
     try:
         # Import and use real RAG service
-        from services.rag_service import get_rag_service
+        from modules.rag import get_rag_service
         rag_service = await get_rag_service()
         
         # Use real RAG testing

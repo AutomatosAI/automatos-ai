@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+from modules.agents import SubtaskExecution, SubtaskStatus
 from core.llm import (
     OrchestratorLLM,
     FunctionRegistry,

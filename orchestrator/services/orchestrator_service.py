@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from core.real_task_decomposer import RealTaskDecomposer
 from core.intelligent_agent_selector import IntelligentAgentSelector
 from core.context_engineering_integrator import ContextEngineeringIntegrator
-from core.agent_execution_manager import AgentExecutionManager
+from modules.agents import AgentExecutionManager
 from core.result_aggregator import ResultAggregator
 from core.output_quality_assessor import OutputQualityAssessor
 from core.workflow_memory_integrator import WorkflowMemoryIntegrator
@@ -37,8 +37,8 @@ from core.llm.semantic_skill_matcher import SemanticSkillMatcher
 
 # Services (Assumed available based on imports)
 from services.llm_provider import create_llm_manager
-from services.rag_service import RAGService
-from services.agent_factory import AgentFactory
+from modules.rag import RAGService
+from modules.agents import AgentFactory
 from services.agent_performance_service import get_performance_service
 
 # Shared Components (Phase 3 alignment)

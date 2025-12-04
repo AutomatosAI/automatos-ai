@@ -16,7 +16,7 @@ from models import (
     Agent, AgentCreate, AgentResponse,
     AgentType, AgentStatus
 )
-from services.agent_factory import (
+from modules.agents import (
     AgentFactory, AgentLifecycle, create_specialized_agent
 )
 

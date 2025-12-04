@@ -39,16 +39,17 @@ async def get_context_retrieval_engine():
     global _context_retrieval_engine
     if _context_retrieval_engine is None:
         try:
-            from context_engineering.retrieval.context_retrieval_engine import (
+            from modules.search.retrieval.context_retrieval_engine import (
                 ContextRetrievalEngine, RetrievalStrategy
             )
-            from context_engineering.retrieval.vector_store_enhanced import EnhancedVectorStore
-            from context_engineering.chunking.semantic_chunker import SemanticChunker
+            from modules.search.vector_store.store import EnhancedVectorStore
+            from modules.rag.chunking.semantic_chunker import SemanticChunker
             from database.database import get_database_url
+            from modules.memory import get_embedding_dimension
             
             vector_store = EnhancedVectorStore(
                 database_url=get_database_url(),
-                embedding_dimension=384
+                embedding_dimension=get_embedding_dimension()
             )
             await vector_store.initialize()
             
@@ -118,7 +119,7 @@ class MemoryInjector:
     ) -> Optional[str]:
         """Use the ContextRetrievalEngine for advanced retrieval."""
         try:
-            from context_engineering.retrieval.context_retrieval_engine import (
+            from modules.search.retrieval.context_retrieval_engine import (
                 ContextQuery, ContextType, RetrievalStrategy
             )
             

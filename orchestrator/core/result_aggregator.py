@@ -19,11 +19,11 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+from modules.agents import SubtaskExecution, SubtaskStatus
 
-# PHASE 4B: Import probability theory for confidence intervals
+# PHASE 4B: Import probability theory from search module
 try:
-    from context_engineering.mathematical_foundations.probability_theory import (
+    from modules.search.optimization.probability_theory import (
         ProbabilityTheory,
         ConfidenceInterval
     )

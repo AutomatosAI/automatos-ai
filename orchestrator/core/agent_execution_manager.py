@@ -25,7 +25,8 @@ from sqlalchemy import text
 
 import numpy as np
 
-from services.agent_factory import AgentFactory, AgentRuntime, AgentMetadata, get_action_executor
+from modules.agents import AgentFactory, AgentRuntime, AgentMetadata
+from modules.agents.factory import get_action_executor
 from models import Agent
 from core.memory_prompt_injector import MemoryPromptInjector
 

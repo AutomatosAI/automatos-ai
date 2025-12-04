@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from context_engineering.policies import ContextPolicy, SlotName
+from modules.search.policies import ContextPolicy, SlotName
 from services.context_assembler import ContextAssembler
 
 

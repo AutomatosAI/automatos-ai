@@ -1289,7 +1289,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
     from core.real_task_decomposer import RealTaskDecomposer
     from core.llm.llm_agent_selector import LLMAgentSelector  # ALWAYS use LLM selector
     from core.context_engineering_integrator import ContextEngineeringIntegrator
-    from core.agent_execution_manager import AgentExecutionManager
+    from modules.agents import AgentExecutionManager
     from core.result_aggregator import ResultAggregator
     from core.learning_system_updater import LearningSystemUpdater
     from core.workflow_memory_integrator import WorkflowMemoryIntegrator

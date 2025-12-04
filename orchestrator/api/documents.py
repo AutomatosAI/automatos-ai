@@ -1456,7 +1456,7 @@ async def reprocess_document(
     Use after changing embedding models or to improve chunk quality.
     """
     try:
-        from services.rag_service import get_rag_service
+        from modules.rag import get_rag_service
         
         rag_service = get_rag_service()
         result = await rag_service.reprocess_document(document_id)
@@ -1496,7 +1496,7 @@ async def reprocess_all_documents(
     Runs in background - check status via /status endpoint.
     """
     try:
-        from services.rag_service import get_rag_service
+        from modules.rag import get_rag_service
         
         # Run in background
         async def run_reprocessing():

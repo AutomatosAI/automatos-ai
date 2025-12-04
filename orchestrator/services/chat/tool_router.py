@@ -26,7 +26,7 @@ def get_tool_registry():
     global _tool_registry
     if _tool_registry is None:
         try:
-            from services.tool_registry import ToolRegistry
+            from modules.tools import ToolRegistry
             _tool_registry = ToolRegistry()
             logger.info(f"✅ ToolRouter connected to ToolRegistry ({len(_tool_registry.tools)} tools)")
         except Exception as e:
@@ -44,7 +44,7 @@ def get_chatbot_tools() -> List[Dict[str, Any]]:
         return _get_fallback_tools()
     
     try:
-        from services.tool_registry import ToolCategory
+        from modules.tools import ToolCategory
         
         # Get RESEARCH and DATABASE tools
         research_tools = registry.get_tools_by_category(ToolCategory.RESEARCH)
@@ -119,7 +119,7 @@ async def execute_tool(
     Execute a tool via UnifiedToolExecutor.
     SINGLE ENTRY POINT for all tool execution in chat.
     """
-    from services.unified_tool_executor import UnifiedToolExecutor
+    from modules.tools import UnifiedToolExecutor
     from database.database import get_db_session
     
     with get_db_session() as db_session:

@@ -60,7 +60,7 @@ class MemoryItem(Base):
     memory_type = Column(String(50), nullable=False)
     memory_level = Column(String(50), nullable=False, default=MemoryLevel.SHORT_TERM)
     importance = Column(Float, default=0.5)
-    embedding = Column(Vector(384))  # Configurable via General Settings embedding provider
+    embedding = Column(Vector(1024))  # Must match DB schema - update via migration when changing embedding model
     access_count = Column(Integer, default=0)
     last_access = Column(DateTime, default=datetime.now)
     decay_rate = Column(Float, default=0.1)
@@ -83,7 +83,7 @@ class KnowledgeNode(Base):
     concept = Column(String(255), nullable=False)
     description = Column(Text)
     node_type = Column(String(50), nullable=False)
-    embedding = Column(Vector(384))
+    embedding = Column(Vector(1024))
     importance = Column(Float, default=0.5)
     confidence = Column(Float, default=0.5)
     meta_data = Column('metadata', JSON, default={})

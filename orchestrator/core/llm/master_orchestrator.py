@@ -538,7 +538,7 @@ Provide your orchestration plan with reasoning.
             aggregator = self.stage_llms['result_aggregation']
             
             # Convert to expected format
-            from core.agent_execution_manager import SubtaskExecution, SubtaskStatus
+            from modules.agents import SubtaskExecution, SubtaskStatus
             
             subtask_executions = {}
             for subtask_id, result in execution_results.items():

@@ -16,8 +16,7 @@ from sqlalchemy.orm import Session
 
 from services.agent_platform_tools import AgentPlatformTools
 from services.agent_action_executor import ActionExecutor
-from services.mcp_tool_executor import MCPToolExecutor
-from services.tool_registry import ToolRegistry
+from modules.tools import MCPToolExecutor, ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -349,8 +348,8 @@ class UnifiedToolExecutor:
             # Add query guidance
             schema += "\n\nUse DATE_TRUNC('day', col) for daily grouping. Use NOW() - INTERVAL 'N days' for date ranges.\nAlways use explicit JOIN syntax. Aggregate by date for time-based queries."
             
-            # Get LLM to generate SQL
-            llm_manager = await create_llm_manager(provider="openai", model="gpt-4")
+            # Get LLM from orchestrator service settings
+            llm_manager = create_llm_manager(service_name="orchestrator")
             
             response = await llm_manager.generate_response([
                 {"role": "system", "content": f"You are a PostgreSQL expert. Generate ONLY the SQL query, nothing else. Only SELECT allowed. Always include proper date handling and grouping.\n\n{schema}"},

@@ -58,7 +58,7 @@ class WorkflowStreamManager:
                         break
                 logger.info(f"📡 SSE stream created for execution {execution_id} - replayed {len(self._event_history[execution_id])} events")
             else:
-            logger.info(f"📡 SSE stream created for execution {execution_id} (total streams: {len(self._streams[execution_id])})")
+                logger.info(f"📡 SSE stream created for execution {execution_id} (total streams: {len(self._streams[execution_id])})")
             
             return queue
     

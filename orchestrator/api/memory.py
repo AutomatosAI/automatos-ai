@@ -19,12 +19,15 @@ from fastapi.responses import JSONResponse
 from datetime import datetime
 import asyncio
 
-# Import memory system components
-from memory.manager import AdvancedMemoryManager
-from memory.memory_types import MemoryType, MemoryLevel
-from memory.access_patterns import AccessPattern
-from memory.augmentation import AugmentationStrategy
-from memory.consolidation import ConsolidationStrategy
+# Import memory system components from modules
+from modules.memory import (
+    AdvancedMemoryManager,
+    MemoryType,
+    MemoryLevel,
+    AccessPattern,
+    AugmentationStrategy,
+    ConsolidationStrategy
+)
 
 # Import models
 from models import (

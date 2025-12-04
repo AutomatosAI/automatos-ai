@@ -16,7 +16,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 
-from services.rag_service import RAGService
+from modules.rag import RAGService
 from services.codegraph_service import CodeGraphService
 from services.tool_result_formatter import ToolResultFormatter
 from config import config
@@ -127,32 +127,23 @@ class AgentPlatformTools:
                 self.logger.info(f"  🔍 Searching knowledge base: '{query}' (limit: {limit})")
                 
                 # Call RAG service retrieve_context method
-                search_results = await self.rag_service.retrieve_context(
+                rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
                     min_similarity=config.RAG_MIN_SIMILARITY
                 )
                 
-                self.logger.info(f"  📊 RAG returned {len(search_results)} results")
+                # RAGResult has .chunks (list of dicts with content, source_file, similarity)
+                chunks = rag_result.chunks if hasattr(rag_result, 'chunks') else []
+                self.logger.info(f"  📊 RAG returned {len(chunks)} results")
                 
-                # Convert SearchResult objects to raw dicts for formatter
+                # Convert chunks to raw dicts for formatter
                 raw_results = []
-                for r in search_results[:limit]:
-                    doc_content = r.document.content if hasattr(r, 'document') else str(r)
-                    doc_source = 'Unknown'
-                    if hasattr(r, 'document') and r.document:
-                        meta = r.document.metadata or {}
-                        doc_source = (
-                            meta.get('source_file') or 
-                            meta.get('source') or 
-                            meta.get('filename') or 
-                            r.document.source or 
-                            'knowledge-base'
-                        )
+                for chunk in chunks[:limit]:
                     raw_results.append({
-                        "content": doc_content,
-                        "source": doc_source,
-                        "similarity": float(r.score) if hasattr(r, 'score') else 0.0
+                        "content": chunk.get("content", ""),
+                        "source": chunk.get("source_file", "knowledge-base"),
+                        "similarity": float(chunk.get("similarity", 0.0))
                     })
                 
                 # Use unified formatter - NO MORE DUPLICATE LOGIC
@@ -174,21 +165,22 @@ class AgentPlatformTools:
                 limit = parameters.get("limit", 5)
                 
                 self.logger.info(f"  🔍 Semantic search via RAG: '{query}'")
-                search_results = await self.rag_service.retrieve_context(
+                rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
                     min_similarity=config.RAG_MIN_SIMILARITY
                 )
                 
+                # RAGResult has .chunks (list of dicts with content, source_file, similarity)
+                chunks = rag_result.chunks if hasattr(rag_result, 'chunks') else []
+                
                 # Convert to raw format for formatter
                 raw_results = []
-                for r in search_results[:limit]:
-                    doc_content = r.document.content if hasattr(r, 'document') else str(r)
-                    doc_source = r.document.metadata.get('source', 'Unknown') if hasattr(r, 'document') and r.document.metadata else 'Unknown'
+                for chunk in chunks[:limit]:
                     raw_results.append({
-                        "content": doc_content,
-                        "source": doc_source,
-                        "similarity": float(r.score) if hasattr(r, 'score') else 0.0
+                        "content": chunk.get("content", ""),
+                        "source": chunk.get("source_file", "knowledge-base"),
+                        "similarity": float(chunk.get("similarity", 0.0))
                     })
                 
                 # Use unified formatter

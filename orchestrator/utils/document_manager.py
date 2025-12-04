@@ -37,9 +37,9 @@ from langchain_core.documents import Document
 # OpenAI embeddings handled by centralized manager
 import psycopg2
 
-# Use EXISTING SemanticChunker from context_engineering (NOT a duplicate!)
+# Use SemanticChunker from RAG module
 try:
-    from context_engineering.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
+    from modules.rag.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
     SEMANTIC_CHUNKER_AVAILABLE = True
 except ImportError:
     SEMANTIC_CHUNKER_AVAILABLE = False

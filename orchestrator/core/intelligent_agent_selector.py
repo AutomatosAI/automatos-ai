@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from core.llm.semantic_skill_matcher import SemanticSkillMatcher
-# PHASE 2: Import ContextOptimizer for resource logic
+# PHASE 2: Import ContextOptimizer from search module
 try:
-    from context_engineering.context_optimizer import ContextOptimizer
+    from modules.search.optimization.context_optimizer import ContextOptimizer
     OPTIMIZER_AVAILABLE = True
 except ImportError:
     OPTIMIZER_AVAILABLE = False

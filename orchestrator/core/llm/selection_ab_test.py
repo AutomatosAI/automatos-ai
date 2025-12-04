@@ -31,7 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from core.intelligent_agent_selector import IntelligentAgentSelector
 from core.llm.llm_agent_selector import LLMAgentSelector
-from core.agent_execution_manager import AgentExecutionManager
+from modules.agents import AgentExecutionManager
 from models import Agent, WorkflowExecution
 
 logger = logging.getLogger(__name__)
