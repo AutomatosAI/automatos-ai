@@ -342,7 +342,7 @@ class UnifiedToolExecutor:
             start_time = time.time()
             
             # Get schema from centralized provider
-            from modules.nl_to_sql import get_schema_provider
+            from modules.nl2sql import get_schema_provider
             schema_provider = get_schema_provider(self.db)
             schema = schema_provider.get_database_schema_overview()
 

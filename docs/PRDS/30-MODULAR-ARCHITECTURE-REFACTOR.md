@@ -67,7 +67,7 @@ orchestrator/
 │   │   ├── operations/        # Augmentation, consolidation, access
 │   │   └── tests/
 │   │
-│   ├── nl_to_sql/     # Natural language to SQL
+│   ├── nl2sql/        # Natural language to SQL
 │   │   ├── query/             # NLToSQLService, SQLValidator
 │   │   ├── schema/            # Introspection, SchemaProvider
 │   │   └── tests/
@@ -2021,7 +2021,7 @@ else:
 |--------|---------|-------|-------------|
 | `search/` | Core vector search engine | 19 | `automatos-search` |
 | `rag/` | Document RAG (chunking, ingestion) | 17 | `automatos-rag` |
-| `nl_to_sql/` | Natural language to SQL | 9 | `automatos-nl2sql` |
+| `nl2sql/` | Natural language to SQL | 9 | `automatos-nl2sql` |
 | `codegraph/` | Code analysis & search | 7 | `automatos-codegraph` |
 | `memory/` | Multi-type memory system | 15 | `automatos-memory` |
 | `agents/` | Agent lifecycle + multi-agent | 20 | `automatos-agents` |

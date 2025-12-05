@@ -77,6 +77,10 @@ export function WorkflowStreamViewer({
         setCurrentStage(null);
         setIsComplete(false);
 
+        // Create AbortController for fetch cancellation
+        const abortController = new AbortController();
+        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
         // Use fetch with streaming for AI SDK protocol
         const connectStream = async () => {
             try {
@@ -86,18 +90,19 @@ export function WorkflowStreamViewer({
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ executionId }),
+                    signal: abortController.signal, // Pass abort signal to fetch
                 });
 
                 if (!response.ok) {
                     throw new Error(`Stream failed: ${response.statusText}`);
                 }
 
-                const reader = response.body?.getReader();
-                const decoder = new TextDecoder();
-
-                if (!reader) {
+                if (!response.body) {
                     throw new Error('No response body');
                 }
+
+                reader = response.body.getReader();
+                const decoder = new TextDecoder();
 
                 let buffer = '';
 
@@ -171,6 +176,12 @@ export function WorkflowStreamViewer({
                     }
                 }
             } catch (err: any) {
+                // Ignore AbortError - it's expected when component unmounts
+                if (err.name === 'AbortError') {
+                    console.log('🛑 Stream aborted (component unmounted or cancelled)');
+                    return;
+                }
+
                 console.error('❌ Stream error:', err);
                 setError(err);
                 setIsLoading(false);
@@ -180,7 +191,19 @@ export function WorkflowStreamViewer({
         connectStream();
 
         return () => {
-            // Cleanup on unmount
+            // Cleanup on unmount or executionId change
+            console.log('🧹 Cleaning up stream connection');
+
+            // Abort the fetch request
+            abortController.abort();
+
+            // Cancel the reader if it exists
+            reader?.cancel().catch(err => {
+                // Ignore errors during cleanup
+                console.log('Reader cancel error (safe to ignore):', err.message);
+            });
+
+            // Reset loading state
             setIsLoading(false);
         };
     }, [executionId]);

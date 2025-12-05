@@ -120,9 +120,8 @@ async def broadcast_dashboard_update(update_type: str, data: dict):
     """Broadcast update to dashboard - now via Redis pub/sub only"""
     if redis_client:
         try:
-            import json
-            message = json.dumps({"type": update_type, "data": data})
-            await redis_client.publish("dashboard_updates", message)
+            message = {"type": update_type, "data": data}
+            redis_client.publish("dashboard_updates", message)
         except Exception as e:
             logger.error(f"Error broadcasting dashboard update: {e}")
 

@@ -10,7 +10,7 @@ Available Modules (Complete):
 - memory/      - Multi-type memory system ✅
 - agents/      - Agent lifecycle management ✅
 - tools/       - Tool registry and execution ✅
-- nl_to_sql/   - Natural language to SQL ✅
+- nl2sql/     - Natural language to SQL ✅
 - codegraph/   - Code analysis and search ✅
 - learning/    - Self-improvement (patterns, playbooks, feedback) ✅
 - reasoning/   - Collaborative reasoning engine ✅
@@ -33,7 +33,7 @@ __all__ = [
     "memory",
     "agents",
     "tools",
-    "nl_to_sql",
+    "nl2sql",
     "codegraph",
     "learning",
     "reasoning",

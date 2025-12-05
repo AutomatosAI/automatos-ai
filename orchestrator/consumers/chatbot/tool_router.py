@@ -73,9 +73,14 @@ async def execute_tool(
     Execute a tool via modules.tools.UnifiedToolExecutor.
     SINGLE ENTRY POINT for all tool execution in chat.
     """
-    with get_db_session() as db_session:
+    # Explicit session management to keep session alive during async operation
+    db_session = get_db_session()
+    try:
         executor = UnifiedToolExecutor(db_session)
         return await executor.execute_tool(tool_name, tool_args, agent_id)
+    finally:
+        # Explicitly close session after async operation completes
+        db_session.close()
 
 
 class ToolRouter:

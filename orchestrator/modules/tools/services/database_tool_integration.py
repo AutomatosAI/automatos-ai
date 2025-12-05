@@ -264,7 +264,7 @@ class DatabaseToolIntegration:
         """
         async def executor(**kwargs):
             """Execute database tool with provided parameters."""
-            from modules.nl_to_sql import DatabaseKnowledgeService
+            from modules.nl2sql import DatabaseKnowledgeService
             
             # Get service instance
             service = DatabaseKnowledgeService()

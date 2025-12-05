@@ -46,7 +46,7 @@ from modules.agents.services.agent_performance_service import get_performance_se
 # Shared Components (Phase 3 alignment)
 from modules.search.services.context_level_decision import get_context_decision_engine, ContextLevel
 from modules.tools.formatting.result_formatter import ToolResultFormatter
-from modules.nl_to_sql import get_schema_provider
+from modules.nl2sql import get_schema_provider
 
 logger = logging.getLogger(__name__)
 

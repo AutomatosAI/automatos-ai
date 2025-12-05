@@ -17,7 +17,7 @@ from core.models.database_knowledge import (
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
-from modules.nl_to_sql import DatabaseKnowledgeService
+from modules.nl2sql import DatabaseKnowledgeService
 from core.database.database_cache_service import get_database_cache_service
 from modules.tools.services.database_tool_integration import get_database_tool_integration
 from core.credentials.resolver import get_credential_resolver
@@ -25,7 +25,7 @@ from core.credentials.resolver import get_credential_resolver
 # NEW imports for introspection wiring
 from core.models.database_knowledge import DatabaseKnowledgeSource
 from core.credentials.service import CredentialStore
-from modules.nl_to_sql import DatabaseIntrospectionService
+from modules.nl2sql import DatabaseIntrospectionService
 # NEW import for auditing
 from core.models.database_knowledge import DatabaseQueryAudit
 
@@ -275,7 +275,7 @@ async def update_semantic_layer(
     
     try:
         # Convert to proper types
-        from modules.nl_to_sql import SemanticMetric, SemanticDimension
+        from modules.nl2sql import SemanticMetric, SemanticDimension
         
         metric_objects = [
             SemanticMetric(**m.dict()) for m in metrics
@@ -413,7 +413,7 @@ async def execute_validated_sql(
         raise HTTPException(status_code=404, detail="Database source not found")
 
     # Validate SQL
-    from modules.nl_to_sql import SQLValidator, SQLValidationError
+    from modules.nl2sql import SQLValidator, SQLValidationError
     validator = SQLValidator(max_limit=min(int(payload.get("max_rows", 1000)), source.max_rows_limit or 1000))
     try:
         validated_sql, reasons = validator.validate_and_rewrite(sql, schema_metadata=source.schema_metadata)

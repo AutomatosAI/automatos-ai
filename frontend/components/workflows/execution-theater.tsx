@@ -1209,6 +1209,82 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     }
   }
 
+  const handlePauseExecution = async () => {
+    try {
+      // Step 1: Abort the client-side stream
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort()
+        console.log('✅ Client-side stream aborted')
+      }
+
+      // Step 2: Call backend cancel API if we have an execution ID
+      if (currentExecutionId) {
+        try {
+          await apiClient.cancelWorkflowExecution(currentExecutionId.toString())
+          console.log('✅ Backend execution cancelled successfully')
+        } catch (apiError) {
+          console.error('❌ Failed to cancel backend execution:', apiError)
+          // Log the error but continue with UI update
+        }
+      }
+
+      // Step 3: Update UI state
+      setIsExecuting(false)
+
+      // Step 4: Add a log entry about the pause
+      setLogs(prev => [...prev, {
+        id: `pause-${Date.now()}`,
+        timestamp: new Date(),
+        stage: currentStage,
+        type: 'info',
+        message: '⏸️ Execution paused by user'
+      }])
+
+    } catch (error) {
+      console.error('❌ Error during pause execution:', error)
+      // Still update UI state even if something failed
+      setIsExecuting(false)
+    }
+  }
+
+  const handleStopExecution = async () => {
+    try {
+      // Step 1: Abort the client-side stream
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort()
+        console.log('✅ Client-side stream aborted')
+      }
+
+      // Step 2: Call backend cancel API if we have an execution ID
+      if (currentExecutionId) {
+        try {
+          await apiClient.cancelWorkflowExecution(currentExecutionId.toString())
+          console.log('✅ Backend execution stopped successfully')
+        } catch (apiError) {
+          console.error('❌ Failed to stop backend execution:', apiError)
+          // Log the error but continue with UI update
+        }
+      }
+
+      // Step 3: Update UI state
+      setIsExecuting(false)
+
+      // Step 4: Add a log entry about the stop
+      setLogs(prev => [...prev, {
+        id: `stop-${Date.now()}`,
+        timestamp: new Date(),
+        stage: currentStage,
+        type: 'task_error',
+        message: '🛑 Execution stopped by user'
+      }])
+
+    } catch (error) {
+      console.error('❌ Error during stop execution:', error)
+      // Still update UI state even if something failed
+      setIsExecuting(false)
+    }
+  }
+
   const handleStageClick = (stage: number) => { if (completedStages.includes(stage) || stage === currentStage) setSelectedStageFilter(selectedStageFilter === stage ? null : stage) }
 
   if (!executionData) {
@@ -1243,8 +1319,8 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
               <Button onClick={handleStartExecution} className="gap-2 glow-orange"><Play className="w-4 h-4" />Execute</Button>
             ) : (
               <>
-                <Button variant="outline" size="sm" onClick={() => setIsExecuting(false)}><Pause className="w-4 h-4 mr-2" />Pause</Button>
-                <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300" onClick={() => setIsExecuting(false)}><Square className="w-4 h-4 mr-2" />Stop</Button>
+                <Button variant="outline" size="sm" onClick={handlePauseExecution}><Pause className="w-4 h-4 mr-2" />Pause</Button>
+                <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300" onClick={handleStopExecution}><Square className="w-4 h-4 mr-2" />Stop</Button>
               </>
             )}
             <Button variant="ghost" size="icon" onClick={() => setIsFullscreen(!isFullscreen)}>
