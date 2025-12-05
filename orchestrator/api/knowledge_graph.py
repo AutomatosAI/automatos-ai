@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import logging
 
-from database.database import get_db
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ async def get_entity_details(entity_id: int, include_related: bool = True):
         entity_id: Entity ID
         include_related: Whether to include related entities
     """
-    from database.database import get_db
+    from core.database.database import get_db
     db = await get_db()
     
     # Get entity
@@ -266,7 +266,7 @@ async def get_entity_graph(
     Returns:
         Graph structure with nodes and edges for visualization
     """
-    from database.database import get_db
+    from core.database.database import get_db
     db = await get_db()
     
     # Get center entity
@@ -383,7 +383,7 @@ async def get_entity_documents(entity_id: int, limit: int = Query(20, le=100)):
         entity_id: Entity ID
         limit: Maximum results
     """
-    from database.database import get_db
+    from core.database.database import get_db
     db = await get_db()
     
     query = """
@@ -427,7 +427,7 @@ async def find_connection(
     Returns:
         Shortest path and supporting evidence
     """
-    from database.database import get_db
+    from core.database.database import get_db
     db = await get_db()
     
     # Get entity IDs

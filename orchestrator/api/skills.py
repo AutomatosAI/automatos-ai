@@ -23,15 +23,15 @@ from pathlib import Path
 import zipfile
 
 # Adjust imports to match your project structure
-from database.database import get_db
-from models import (
+from core.database.database import get_db
+from core.models import (
     Skill, Agent, SkillSource, SkillFile, SkillVersion, SkillAuditLog,
     agent_skills
 )
 from sqlalchemy import text, or_
 from pydantic import BaseModel, Field
 from enum import Enum
-from services.skill_loader import get_skill_loader
+from modules.agents.services.skill_loader import get_skill_loader
 # PRD-22: Keep recommendations local to skills API to avoid coupling to agent factory
 
 # Minimal PRD-22 request/response types (inlined to avoid external dependency)
@@ -467,7 +467,7 @@ async def list_skills(
                 name=skill.name,
                 description=skill.description,
                 skill_type=skill.skill_type,
-                category=skill.category,
+                category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
                 skill_version=skill.skill_version,
                 skill_source=skill.skill_source,
                 git_repo_url=skill.git_repo_url,
@@ -589,7 +589,7 @@ async def get_skill_content(
             core_content = skill_loader.load_skill_core(skill.name, db=db)
             if core_content:
                 content = core_content
-                from services.skill_loader import estimate_tokens
+                from modules.agents.services.skill_loader import estimate_tokens
                 estimated_tokens = estimate_tokens(content)
         
         elif level == 3:
@@ -600,7 +600,7 @@ async def get_skill_content(
             resource_content = skill_loader.load_skill_resource(skill.name, resource_path, db=db)
             if resource_content:
                 content = resource_content
-                from services.skill_loader import estimate_tokens
+                from modules.agents.services.skill_loader import estimate_tokens
                 estimated_tokens = estimate_tokens(content)
             else:
                 raise HTTPException(status_code=404, detail=f"Resource not found: {resource_path}")
@@ -736,7 +736,7 @@ async def get_agent_skills(
                 name=skill.name,
                 description=skill.description,
                 skill_type=skill.skill_type,
-                category=skill.category,
+                category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
                 skill_version=skill.skill_version,
                 skill_source=skill.skill_source,
                 git_repo_url=skill.git_repo_url,

@@ -12,14 +12,16 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 
-# Import mathematical foundations
-from context_engineering.mathematical_foundations.information_theory import InformationTheory
-from context_engineering.mathematical_foundations.vector_operations import VectorOperations  
-from context_engineering.mathematical_foundations.distance_metrics import DistanceMetrics
-from context_engineering.mathematical_foundations.probability_theory import ProbabilityTheory
-from context_engineering.mathematical_foundations.graph_theory import GraphTheory
-from context_engineering.mathematical_foundations.statistical_analysis import StatisticalAnalysis
-from context_engineering.mathematical_foundations.optimization_algorithms import OptimizationAlgorithms
+# Import mathematical foundations from shared
+from core.math import (
+    InformationTheory,
+    VectorOperations,
+    DistanceMetrics,
+    ProbabilityTheory,
+    GraphTheory,
+    StatisticalAnalysis,
+    OptimizationAlgorithms
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +254,7 @@ async def chunk_text(
 ):
     """Perform semantic text chunking"""
     try:
-        from context_engineering.chunking import SemanticChunker, ChunkingStrategy
+        from modules.rag.chunking.semantic_chunker import SemanticChunker, ChunkingStrategy
         
         # Map string to enum
         strategy_map = {
@@ -311,7 +313,7 @@ async def process_query(
 ):
     """Process and expand a query"""
     try:
-        from context_engineering.retrieval.query_processor import QueryProcessor
+        from modules.search.retrieval.query_processor import QueryProcessor
         
         processor = QueryProcessor()
         processed_query = processor.process_query(query_text, context)
@@ -362,7 +364,7 @@ async def process_content(
 ):
     """Process multi-modal content"""
     try:
-        from context_engineering.retrieval.multimodal_processor import MultiModalProcessor, ContentModality
+        from modules.search.retrieval.multimodal_processor import MultiModalProcessor, ContentModality
         
         processor = MultiModalProcessor()
         

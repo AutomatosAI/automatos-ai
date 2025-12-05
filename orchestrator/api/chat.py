@@ -15,8 +15,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 
-from database.database import get_db
-from services.chat_service import ChatService, StreamingChatService
+from core.database.database import get_db
+from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
+
+# Get tools from consumers.chatbot (uses modules.tools)
+CHAT_TOOLS = get_chat_tools()
 
 logger = logging.getLogger(__name__)
 
@@ -131,17 +134,21 @@ async def stream_chat(
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
     
-    # Stream response
+    # Stream response using AI SDK Data Stream format
+    # Pass selected model from frontend request
     return StreamingResponse(
-        streaming_service.stream_response(
+        streaming_service.stream_response_aisdk(
             chat_id=chat_id,
-            messages=message_history
+            messages=message_history,
+            tools=CHAT_TOOLS,
+            selected_model=request.selectedChatModel
         ),
-        media_type="text/event-stream",
+        media_type="text/plain; charset=utf-8",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
+            "x-vercel-ai-data-stream": "v1"
         }
     )
 

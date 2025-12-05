@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 # Import database and dependencies
-from database.database import get_db
-from services.orchestrator_service import EnhancedOrchestratorService
+from core.database.database import get_db
+from modules.orchestrator import EnhancedOrchestratorService
 
 logger = logging.getLogger(__name__)
 

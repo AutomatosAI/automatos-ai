@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 import logging
 
-from database.database import get_db
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/database/analytics", tags=["Database Analytics"])

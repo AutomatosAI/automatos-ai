@@ -26,7 +26,7 @@ import {
 
 // Import individual tab components
 import GeneralSettingsTab from './GeneralSettingsTab'
-import OrchestratorLLMSettingsTab from './OrchestratorLLMSettingsTab'
+import SystemLLMSettingsTab from './SystemLLMSettingsTab'
 import CodeGraphSettingsTab from './CodeGraphSettingsTab'
 import SystemLoggingSettingsTab from './SystemLoggingSettingsTab'
 import APIRateLimitingSettingsTab from './APIRateLimitingSettingsTab'
@@ -205,7 +205,7 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
         </TabsContent>
 
         <TabsContent value="orchestrator_llm">
-          <OrchestratorLLMSettingsTab
+          <SystemLLMSettingsTab
             settings={settingsByCategory.find(cat => cat.category === 'orchestrator_llm')?.settings || []}
             onSave={(updates) => saveCategorySettings('orchestrator_llm', updates)}
             saving={saving}

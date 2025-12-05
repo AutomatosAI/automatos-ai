@@ -5,13 +5,13 @@ from sqlalchemy import and_, or_, func, text
 import time
 import logging
 
-from database.database import get_db
-from models import PriorityLevel
-from models import Agent, Skill, Pattern, agent_skills
+from core.database.database import get_db
+from core.models import PriorityLevel
+from core.models import Agent, Skill, Pattern, agent_skills
 # Import MCP tool models from database.models (SQLAlchemy models)
-from models import AgentToolAssignment, MCPTool
+from core.models import AgentToolAssignment, MCPTool
 # Import Pydantic models from database.models (not models.py)
-from models import (
+from core.models import (
     AgentCreate, AgentUpdate, AgentResponse,
     SkillCreate, SkillUpdate, SkillResponse,
     PatternCreate, PatternResponse,
@@ -92,7 +92,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
             name=skill.name,
             description=skill.description,
             skill_type=skill.skill_type,
-            category=skill.category,
+            category=getattr(skill, 'category', None) or skill.skill_type,  # Fallback to skill_type if category missing
             is_active=skill.is_active,
             created_at=skill.created_at,
             updated_at=skill.updated_at

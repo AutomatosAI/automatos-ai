@@ -1,12 +1,13 @@
 """
 Semantic Skill Matching for Agent Selection
 Uses embeddings to intelligently match skills instead of dumb string matching
+
+Uses the centralized EmbeddingManager from services/llm_provider.
 """
 
 import asyncio
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import numpy as np
-from openai import AsyncOpenAI
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 class SemanticSkillMatcher:
     """
-    Matches skills using semantic similarity instead of substring matching
+    Matches skills using semantic similarity instead of substring matching.
+    
+    Uses the centralized EmbeddingManager which reads from General Settings.
     
     Examples:
     - "writing" matches "writer", "author", "documentation", "technical_writing"
@@ -22,18 +25,29 @@ class SemanticSkillMatcher:
     - "analysis" matches "analyst", "analytical", "data_analysis"
     """
     
-    def __init__(self, openai_api_key: str, similarity_threshold: float = 0.65):
+    def __init__(self, similarity_threshold: float = 0.65):
         """
+        Initialize with centralized embedding manager.
+        
         Args:
-            openai_api_key: OpenAI API key for embeddings
             similarity_threshold: Minimum cosine similarity for a match (0-1)
         """
-        self.client = AsyncOpenAI(api_key=openai_api_key)
         self.similarity_threshold = similarity_threshold
         self.embedding_cache: Dict[str, List[float]] = {}
         
+        # Use centralized embedding manager
+        from core.llm import create_embedding_manager
+        self.embedding_manager = create_embedding_manager()
+        
+        provider_info = self.embedding_manager.get_provider_info()
+        logger.info(
+            f"SemanticSkillMatcher: Using {provider_info['provider']} embeddings "
+            f"(model: {provider_info.get('model', 'N/A')}, "
+            f"dimension: {provider_info.get('dimension', 'N/A')})"
+        )
+        
     async def get_embedding(self, text: str) -> List[float]:
-        """Get embedding for text (with caching)"""
+        """Get embedding for text using centralized manager (with caching)"""
         # Normalize text
         text = text.lower().strip()
         
@@ -41,19 +55,10 @@ class SemanticSkillMatcher:
         if text in self.embedding_cache:
             return self.embedding_cache[text]
         
-        # Get embedding from OpenAI
-        try:
-            response = await self.client.embeddings.create(
-                model="text-embedding-3-small",  # Fast and cheap
-                input=text
-            )
-            embedding = response.data[0].embedding
-            self.embedding_cache[text] = embedding
-            return embedding
-        except Exception as e:
-            logger.error(f"Failed to get embedding for '{text}': {e}")
-            # Return zero vector as fallback
-            return [0.0] * 1536
+        # Use embedding manager
+        embedding = await self.embedding_manager.generate_embedding(text)
+        self.embedding_cache[text] = embedding
+        return embedding
     
     def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Compute cosine similarity between two vectors"""
@@ -189,14 +194,10 @@ class SemanticSkillMatcher:
         return coverage, matches
 
 
-# Singleton instance
-_matcher: SemanticSkillMatcher = None
-
-
-def get_skill_matcher(openai_api_key: str) -> SemanticSkillMatcher:
-    """Get or create the global skill matcher"""
-    global _matcher
-    if _matcher is None:
-        _matcher = SemanticSkillMatcher(openai_api_key)
-    return _matcher
-
+# Factory function - uses centralized embedding manager
+def get_skill_matcher() -> SemanticSkillMatcher:
+    """
+    Get or create the global skill matcher.
+    Uses centralized embedding manager (no API key needed).
+    """
+    return SemanticSkillMatcher()

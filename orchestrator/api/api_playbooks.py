@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database.database import get_db
-from services.playbook_miner import PlaybookMiner
+from core.database.database import get_db
+from modules.learning import PlaybookMiner
 
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])

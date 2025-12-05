@@ -14,7 +14,7 @@ from datetime import datetime
 import psutil
 import os
 
-from database.database import get_db
+from core.database.database import get_db
 
 # Simple API key auth dependency
 def require_api_key(x_api_key: str = Header(None)):
@@ -22,7 +22,7 @@ def require_api_key(x_api_key: str = Header(None)):
     if required and x_api_key != required:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True
-from models import (
+from core.models import (
     SystemConfiguration, RAGConfiguration,
     SystemConfigCreate, SystemConfigResponse,
     RAGConfigCreate, RAGConfigResponse,
@@ -308,7 +308,7 @@ async def test_rag_config(
     """Test RAG configuration with a query"""
     try:
         # Import and use real RAG service
-        from services.rag_service import get_rag_service
+        from modules.rag import get_rag_service
         rag_service = await get_rag_service()
         
         # Use real RAG testing
@@ -340,33 +340,59 @@ async def get_system_health(db: Session = Depends(get_db)):
         except Exception:
             db_status = "unhealthy"
         
-        # Check services status
-        services = {
-            "database": db_status,
-            "redis": "healthy",  # Add Redis status that dashboard is expecting
-            "api": "healthy",
-            "document_processor": "healthy",  # TODO: Check actual status
-            "rag_system": "healthy"  # TODO: Check actual status
-        }
+        # Check services status - convert to ComponentHealth format
+        from core.models import ComponentHealth
+        components = [
+            ComponentHealth(
+                name="database",
+                status=db_status,
+                last_check=datetime.now(),
+                metrics={"connection": "active" if db_status == "healthy" else "failed"}
+            ),
+            ComponentHealth(
+                name="redis",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="api",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="document_processor",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            ),
+            ComponentHealth(
+                name="rag_system",
+                status="healthy",
+                last_check=datetime.now(),
+                metrics={}
+            )
+        ]
         
         # Overall system status
-        overall_status = "healthy" if all(status == "healthy" for status in services.values()) else "degraded"
+        overall_status = "healthy" if all(c.status == "healthy" for c in components) else "degraded"
         
-        metrics = {
+        system_metrics = {
             "cpu_usage": f"{cpu_percent}%",
             "memory_usage": f"{memory.percent}%",
             "memory_available": f"{memory.available / (1024**3):.1f}GB",
             "disk_usage": f"{disk.percent}%",
-            "disk_free": f"{disk.free / (1024**3):.1f}GB",
-            "uptime": "N/A"  # TODO: Track actual uptime
+            "disk_free": f"{disk.free / (1024**3):.1f}GB"
         }
         
         return SystemHealthResponse(
-            status=overall_status,
-            timestamp=datetime.now(),
-            services=services,
-            metrics=metrics,
-            version="1.0.0"  # TODO: Get from actual version
+            overall_status=overall_status,
+            components=components,
+            system_metrics=system_metrics,
+            uptime="N/A",  # TODO: Track actual uptime
+            version="1.0.0",  # TODO: Get from actual version
+            timestamp=datetime.now()
         )
         
     except Exception as e:
@@ -447,7 +473,7 @@ async def get_system_metrics(
         
         # Get analytics data
         try:
-            from services.analytics_engine import AnalyticsEngine
+            from core.services.analytics_engine import AnalyticsEngine
             analytics_engine = AnalyticsEngine(db)
             
             context_metrics = await analytics_engine._get_context_metrics()
@@ -651,7 +677,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
         from sqlalchemy import func
-        from models import Agent, AgentType
+        from core.models import Agent, AgentType
         
         total_agents = db.query(func.count(Agent.id)).scalar() or 0
         active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active").scalar() or 0
@@ -682,7 +708,7 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
-        from models import Agent
+        from core.models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:
@@ -711,7 +737,7 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
     """Execute an agent with given parameters"""
     import time
     try:
-        from models import Agent
+        from core.models import Agent
         
         agent = db.query(Agent).filter(Agent.id == agent_id).first()
         if not agent:

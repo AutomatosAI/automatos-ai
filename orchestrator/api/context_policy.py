@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from database.database import get_db
-from context_engineering.policies import ContextPolicy, SlotName
-from services.context_assembler import ContextAssembler
+from core.database.database import get_db
+from modules.search.policies import ContextPolicy, SlotName
+from modules.search.services.context_assembler import ContextAssembler
 
 
 router = APIRouter(prefix="/api/policy", tags=["context-policy"])

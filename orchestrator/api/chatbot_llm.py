@@ -17,10 +17,13 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
 
-from database.database import get_db
-from services.llm_provider import create_llm_manager
-from services.pandas_ai_service import get_pandasai_service
+from core.database.database import get_db
+from core.llm import create_llm_manager
+from modules.tools.services.pandas_ai_service import get_pandasai_service
 from config import config
+
+# Import tools from consumers.chatbot (uses modules.tools - single source of truth)
+from consumers.chatbot import get_chatbot_tools, execute_tool as consumer_execute_tool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chatbot", tags=["chatbot"])
@@ -55,7 +58,7 @@ def get_anthropic_client():
     Legacy function - now uses LLM service instead.
     Kept for backward compatibility only.
     """
-    from services.llm_provider import create_llm_manager
+    from core.llm import create_llm_manager
     llm = create_llm_manager(service_name="orchestrator", provider="anthropic")
     # Return a mock Anthropic client interface (not used, but maintains compatibility)
     # Actual API calls should use llm.generate_response() instead
@@ -134,7 +137,7 @@ async def search_documents_tool(query: str) -> Dict[str, Any]:
                 params={
                     "query": query,
                     "limit": 8,
-                    "min_similarity": 0.65
+                    "min_similarity": config.RAG_MIN_SIMILARITY
                 }
             )
             
@@ -242,64 +245,9 @@ async def query_database_tool(
         return {"success": False, "error": str(e)}
 
 
-# Tool definitions for LLM
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_code",
-            "description": "Search the codebase for functions, classes, or code patterns. Use this when the user asks about code implementation, functions, classes, or wants to find specific code.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query describing what code to find (e.g., 'authentication function', 'user model class', 'API endpoint handler')"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_documents",
-            "description": "Search documents and knowledge base for information. Use this when the user asks about documentation, guides, architecture, or general knowledge.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query describing what information to find (e.g., 'deployment guide', 'architecture overview', 'API documentation')"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_database",
-            "description": "Query databases using natural language. Convert user questions into SQL queries and return results.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language database query (e.g., 'show me top 10 customers by revenue', 'how many orders in the last month', 'what is the average order value')"
-                    },
-                    "database_name": {
-                        "type": "string",
-                        "description": "Optional: specific database name to query. If not provided, uses the first available database."
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    }
-]
+# Tool definitions for LLM - from consumers.chatbot (uses modules.tools)
+# Single source of truth - no duplicate definitions
+TOOLS = get_chatbot_tools()
 
 
 @router.get("/models")
@@ -313,7 +261,7 @@ async def list_available_models(
     Returns models organized by provider for easy selection in UI.
     """
     try:
-        from services.model_registry import ModelRegistry
+        from core.llm.model_registry import ModelRegistry
         
         registry = ModelRegistry(db)
         
@@ -340,7 +288,7 @@ async def list_available_models(
             })
         
         # Get default model from settings
-        from services.llm_provider.manager import get_provider_and_model_from_settings
+        from core.llm.manager import get_provider_and_model_from_settings
         default_provider, default_model = get_provider_and_model_from_settings("orchestrator")
         
         return {
@@ -412,7 +360,7 @@ Then provide a helpful, technical response based on the search results."""
         # Agentic loop - let LLM call tools iteratively
         for iteration in range(3):  # Max 3 tool call iterations
             # Use LLM service - allow per-request provider/model override
-            from services.llm_provider import create_llm_manager
+            from core.llm import create_llm_manager
             
             # Use override if provided, otherwise use default orchestrator settings
             if chat_query.provider or chat_query.model:

@@ -13,8 +13,8 @@ from typing import List, Dict, Any, Optional
 import logging
 import uuid
 
-from database.database import get_db
-from models.credentials import (
+from core.database.database import get_db
+from core.models.credentials import (
     CredentialType,
     Credential,
     CredentialAuditLog,
@@ -29,13 +29,13 @@ from models.credentials import (
     CredentialResolveRequest,
     CredentialResolveResponse
 )
-from services.credential_service import (
+from core.credentials.service import (
     CredentialStore,
     CredentialNotFoundError,
     CredentialValidationError
 )
-from services.encryption_service import EncryptionKeyError
-from utils.logging_adapter import set_request_id
+from core.credentials.encryption import EncryptionKeyError
+from core.utils.logging_adapter import set_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ async def list_credential_categories(
     set_request_id(str(uuid.uuid4()))
     
     try:
-        from credentials.types import get_all_categories
+        from core.credentials.types import get_all_categories
         return get_all_categories()
     
     except Exception as e:
@@ -207,7 +207,7 @@ async def create_credential(
         
         # PRD-20: AUTO-ACTIVATE matching MCP servers! 🚀
         try:
-            from services.mcp_auto_activation import MCPAutoActivationService
+            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
             
             activation_service = MCPAutoActivationService(db)
             activation_result = await activation_service.activate_mcp_servers_for_credential(
@@ -465,7 +465,7 @@ async def delete_credential(
         
         # PRD-20: DEACTIVATE linked MCP servers before deleting credential
         try:
-            from services.mcp_auto_activation import MCPAutoActivationService
+            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
             
             activation_service = MCPAutoActivationService(db)
             deactivation_result = await activation_service.deactivate_mcp_servers_for_credential(
@@ -647,7 +647,7 @@ async def get_audit_logs(
 @router.get("/health")
 async def credentials_health():
     """Health check for credentials service"""
-    from services.encryption_service import get_encryption_service
+    from core.credentials.encryption import get_encryption_service
     
     try:
         encryption_service = get_encryption_service()
@@ -679,7 +679,7 @@ async def clear_credential_cache(
     set_request_id(str(uuid.uuid4()))
     
     try:
-        from services.credential_resolver import get_credential_resolver
+        from core.credentials.resolver import get_credential_resolver
         resolver = get_credential_resolver()
         resolver.clear_cache(credential_name)
         

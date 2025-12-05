@@ -1,6 +1,8 @@
 """
 PRD-06: Dashboard Integration Helpers
 Integration functions to connect analytics with existing systems
+
+NOTE: WebSocket removed - using AI SDK SSE streaming instead
 """
 
 import asyncio
@@ -8,8 +10,7 @@ import logging
 from typing import Optional
 from fastapi import FastAPI
 
-from services.analytics_engine import AnalyticsEngine
-from services.dashboard_realtime import websocket_manager
+from core.services.analytics_engine import AnalyticsEngine
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,13 @@ async def startup_dashboard(app: FastAPI):
         analytics_engine = AnalyticsEngine()
         
         # Use centralized Redis client for real-time updates
-        from core.redis_client import get_redis_client
+        from core.redis.client import get_redis_client
         redis_client = get_redis_client()
         if redis_client:
             analytics_engine.redis_client = redis_client
-            websocket_manager.redis_client = redis_client
             logger.info("Redis connection established for real-time updates")
         else:
             logger.warning("Redis client not initialized for real-time updates")
-        
-        # Start WebSocket manager background tasks
-        asyncio.create_task(websocket_manager.start_redis_listener())
-        asyncio.create_task(websocket_manager.send_periodic_updates())
         
         logger.info("Dashboard services initialized successfully")
         
@@ -47,12 +43,12 @@ async def startup_dashboard(app: FastAPI):
 async def shutdown_dashboard(app: FastAPI):
     """Cleanup dashboard services on shutdown"""
     try:
-        # Stop WebSocket manager
-        await websocket_manager.stop_redis_listener()
-        
         # Close Redis connection
         if redis_client:
-            redis_client.close()
+            try:
+                redis_client.close()
+            except AttributeError:
+                pass  # Redis client may not have close method
         
         logger.info("Dashboard services shutdown complete")
         
@@ -62,10 +58,9 @@ async def shutdown_dashboard(app: FastAPI):
 def register_dashboard_routes(app: FastAPI):
     """Register dashboard API routes"""
     from api.analytics_api import router as analytics_router
-    from api.websocket_api import router as websocket_router
     
     app.include_router(analytics_router)
-    app.include_router(websocket_router)
+    # WebSocket router removed - using AI SDK SSE streaming
     
     logger.info("Dashboard API routes registered")
 
@@ -78,14 +73,11 @@ async def track_agent_execution(
     error_message: Optional[str] = None,
     context_optimization_applied: bool = False,
     memory_items_created: int = 0,
-    collaboration_sessions: int = 0
+    tools_used: int = 0
 ):
-    """
-    Track agent execution for analytics
-    Call this from your agent factory when agents execute tasks
-    """
-    try:
-        if analytics_engine:
+    """Track agent execution for analytics"""
+    if analytics_engine:
+        try:
             await analytics_engine.track_agent_execution(
                 agent_id=agent_id,
                 task_id=task_id,
@@ -95,56 +87,44 @@ async def track_agent_execution(
                 error_message=error_message,
                 context_optimization_applied=context_optimization_applied,
                 memory_items_created=memory_items_created,
-                collaboration_sessions=collaboration_sessions
+                tools_used=tools_used
             )
-    except Exception as e:
-        logger.error(f"Error tracking agent execution: {e}")
+        except Exception as e:
+            logger.error(f"Error tracking agent execution: {e}")
 
-async def track_context_optimization(
-    original_tokens: int,
-    optimized_tokens: int,
-    optimization_type: str,
-    pattern_used: Optional[str] = None,
-    execution_time: Optional[float] = None
+async def track_workflow_execution(
+    workflow_id: int,
+    execution_id: int,
+    execution_time: float,
+    stages_completed: int = 0,
+    total_tokens: int = 0,
+    success: bool = True,
+    error_message: Optional[str] = None
 ):
-    """
-    Track context optimization for analytics
-    Call this from your context optimizer when optimizations are applied
-    """
-    try:
-        if analytics_engine:
-            await analytics_engine.track_context_optimization(
-                original_tokens=original_tokens,
-                optimized_tokens=optimized_tokens,
-                optimization_type=optimization_type,
-                pattern_used=pattern_used,
-                execution_time=execution_time
+    """Track workflow execution for analytics"""
+    if analytics_engine:
+        try:
+            await analytics_engine.track_workflow_execution(
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                execution_time=execution_time,
+                stages_completed=stages_completed,
+                total_tokens=total_tokens,
+                success=success,
+                error_message=error_message
             )
-    except Exception as e:
-        logger.error(f"Error tracking context optimization: {e}")
+        except Exception as e:
+            logger.error(f"Error tracking workflow execution: {e}")
 
-async def track_learning_progress(
-    agent_id: int,
-    knowledge_items: int = 0,
-    memory_consolidations: int = 0,
-    performance_improvement: float = 0.0,
-    knowledge_transfers: int = 0
-):
-    """
-    Track learning progress for analytics
-    Call this from your memory system when learning occurs
-    """
-    try:
-        if analytics_engine:
-            await analytics_engine.track_learning_progress(
-                agent_id=agent_id,
-                knowledge_items=knowledge_items,
-                memory_consolidations=memory_consolidations,
-                performance_improvement=performance_improvement,
-                knowledge_transfers=knowledge_transfers
-            )
-    except Exception as e:
-        logger.error(f"Error tracking learning progress: {e}")
+async def broadcast_dashboard_update(update_type: str, data: dict):
+    """Broadcast update to dashboard - now via Redis pub/sub only"""
+    if redis_client:
+        try:
+            import json
+            message = json.dumps({"type": update_type, "data": data})
+            await redis_client.publish("dashboard_updates", message)
+        except Exception as e:
+            logger.error(f"Error broadcasting dashboard update: {e}")
 
 def get_analytics_engine() -> Optional[AnalyticsEngine]:
     """Get the global analytics engine instance"""

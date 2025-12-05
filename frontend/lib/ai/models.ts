@@ -62,6 +62,63 @@ export const chatModels: Model[] = [
       output: 0.015,
     },
   },
+  {
+    id: 'grok-2-latest',
+    name: 'Grok 2',
+    provider: 'grok',
+    description: 'xAI flagship model with real-time knowledge',
+    contextWindow: 131072,
+    pricing: {
+      input: 0.002,
+      output: 0.010,
+    },
+  },
+  {
+    id: 'grok-2-1212',
+    name: 'Grok 2 (Dec 2024)',
+    provider: 'grok',
+    description: 'Grok 2 December 2024 release',
+    contextWindow: 131072,
+    pricing: {
+      input: 0.002,
+      output: 0.010,
+    },
+  },
+  {
+    id: 'grok-3-beta',
+    name: 'Grok 3 Beta',
+    provider: 'grok',
+    description: 'Next-gen Grok with enhanced reasoning',
+    contextWindow: 131072,
+    pricing: {
+      input: 0.005,
+      output: 0.015,
+    },
+  },
+  {
+    id: 'google/gemma-2-9b-it',
+    name: 'Gemma 2 9B',
+    provider: 'huggingface',
+    description: 'Google Gemma 2 instruction-tuned',
+    contextWindow: 8192,
+    pricing: { input: 0.0, output: 0.0 },
+  },
+  {
+    id: 'microsoft/Phi-3.5-mini-instruct',
+    name: 'Phi 3.5 Mini',
+    provider: 'huggingface',
+    description: 'Microsoft compact reasoning model',
+    contextWindow: 4096,
+    pricing: { input: 0.0, output: 0.0 },
+  },
+  {
+    id: 'Qwen/Qwen2.5-7B-Instruct',
+    name: 'Qwen 2.5 7B',
+    provider: 'huggingface',
+    description: 'Alibaba Qwen 2.5 instruction model',
+    contextWindow: 8192,
+    pricing: { input: 0.0, output: 0.0 },
+  },
 ]
 
 /**

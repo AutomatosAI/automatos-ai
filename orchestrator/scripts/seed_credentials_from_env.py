@@ -20,9 +20,9 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-from database.database import SessionLocal, init_database
-from services.credential_service import CredentialStore
-from models.credentials import CredentialCreate
+from core.database.database import SessionLocal, init_database
+from core.credentials.service import CredentialStore
+from core.models.credentials import CredentialCreate
 
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -191,7 +191,7 @@ def seed_credentials(dry_run: bool = False, force: bool = False):
         try:
             if existing and force:
                 # Update existing credential
-                from models.credentials import CredentialUpdate
+                from core.models.credentials import CredentialUpdate
                 store.update_credential(
                     credential_id=existing.id,
                     update_data=CredentialUpdate(

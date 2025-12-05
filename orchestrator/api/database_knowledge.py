@@ -9,25 +9,25 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from database.database import get_db
-from models.database_knowledge import (
+from core.database.database import get_db
+from core.models.database_knowledge import (
     DatabaseKnowledgeSourceCreate,
     SemanticMetricCreate,
     SemanticDimensionCreate,
     DatabaseQueryRequest,
     QueryTemplateExecute
 )
-from services.database_knowledge_service import DatabaseKnowledgeService
-from services.database_cache_service import get_database_cache_service
-from services.database_tool_integration import get_database_tool_integration
-from services.credential_resolver import get_credential_resolver
+from modules.nl_to_sql import DatabaseKnowledgeService
+from core.database.database_cache_service import get_database_cache_service
+from modules.tools.services.database_tool_integration import get_database_tool_integration
+from core.credentials.resolver import get_credential_resolver
 
 # NEW imports for introspection wiring
-from models.database_knowledge import DatabaseKnowledgeSource
-from services.credential_service import CredentialStore
-from services.database_introspection import DatabaseIntrospectionService
+from core.models.database_knowledge import DatabaseKnowledgeSource
+from core.credentials.service import CredentialStore
+from modules.nl_to_sql import DatabaseIntrospectionService
 # NEW import for auditing
-from models.database_knowledge import DatabaseQueryAudit
+from core.models.database_knowledge import DatabaseQueryAudit
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
 
@@ -39,14 +39,14 @@ tool_integration = None
 def get_services():
     global db_service, cache_service, tool_integration
     if not db_service:
-        from services.llm_provider import LLMManager
-        from services.rag_service import RAGService
-        from services.context_engineering_service import ContextEngineeringService
+        from core.llm import create_llm_manager
+        from modules.rag import RAGService
+        from modules.search.services.context_engineering_service import ContextEngineeringService
         from services.audit_service import AuditService
         
         db_service = DatabaseKnowledgeService(
             credential_resolver=get_credential_resolver(),
-            llm_provider=LLMManager(),
+            llm_provider=create_llm_manager(service_name="orchestrator"),
             rag_service=RAGService(),
             context_engineering=ContextEngineeringService(),
             audit_service=AuditService()
@@ -72,7 +72,7 @@ def _map_dialect_to_introspector(dialect_value: Optional[str]) -> str:
 @router.get("/", response_model=List[Dict[str, Any]])
 async def list_database_sources(
     db: Session = Depends(get_db),
-    active_only: bool = True
+    active_only: bool = False  # Show all sources by default
 ):
     """
     List all database knowledge sources for the current tenant.
@@ -275,7 +275,7 @@ async def update_semantic_layer(
     
     try:
         # Convert to proper types
-        from services.database_knowledge_service import SemanticMetric, SemanticDimension
+        from modules.nl_to_sql import SemanticMetric, SemanticDimension
         
         metric_objects = [
             SemanticMetric(**m.dict()) for m in metrics
@@ -339,7 +339,7 @@ async def list_query_templates(
     """
     List available query templates.
     """
-    from models.database_knowledge import DatabaseQueryTemplate
+    from core.models.database_knowledge import DatabaseQueryTemplate
     
     query = db.query(DatabaseQueryTemplate)
     
@@ -413,7 +413,7 @@ async def execute_validated_sql(
         raise HTTPException(status_code=404, detail="Database source not found")
 
     # Validate SQL
-    from services.sql_validator import SQLValidator, SQLValidationError
+    from modules.nl_to_sql import SQLValidator, SQLValidationError
     validator = SQLValidator(max_limit=min(int(payload.get("max_rows", 1000)), source.max_rows_limit or 1000))
     try:
         validated_sql, reasons = validator.validate_and_rewrite(sql, schema_metadata=source.schema_metadata)
@@ -444,7 +444,7 @@ async def execute_validated_sql(
 
     # Resolve creds and execute
     from sqlalchemy import create_engine, text
-    from services.credential_service import CredentialStore
+    from core.credentials.service import CredentialStore
     cred_store = CredentialStore(db)
     try:
         creds = cred_store.get_decrypted_credential(

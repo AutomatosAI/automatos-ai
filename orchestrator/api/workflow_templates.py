@@ -11,14 +11,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from database.database import get_db
+from core.database.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflow-templates", tags=["workflow-templates"])
 
 # Import the model from main models file
-from models import WorkflowTemplate
+from core.models import WorkflowTemplate
 
 
 @router.get("")

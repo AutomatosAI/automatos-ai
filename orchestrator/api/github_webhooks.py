@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from database.database import get_db
+from core.database.database import get_db
 from api.workflows import execute_workflow
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ async def github_webhook(
             logger.info(f"🔍 PR #{pr_number} {action}: {pr_title}")
             
             # Find the PR Review workflow by name
-            from models import Workflow
+            from core.models import Workflow
             import os
             pr_workflow_name = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
             pr_workflow = db.query(Workflow).filter(

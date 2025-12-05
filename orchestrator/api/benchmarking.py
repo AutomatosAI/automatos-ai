@@ -13,9 +13,9 @@ from datetime import datetime, timedelta
 import statistics
 import logging
 
-from database.database import get_db
-from models import WorkflowExecution, Workflow, Agent
-from services.orchestration_tracker import orchestration_tracker
+from core.database.database import get_db
+from core.models import WorkflowExecution, Workflow, Agent
+from modules.orchestrator import orchestration_tracker
 
 logger = logging.getLogger(__name__)
 

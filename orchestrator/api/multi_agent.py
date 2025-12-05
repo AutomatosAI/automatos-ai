@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 # Import database and dependencies
-from database.database import get_db
-from services.orchestrator_service import EnhancedOrchestratorService
+from core.database.database import get_db
+from modules.orchestrator import EnhancedOrchestratorService
 # Circular import - moved to utils
 
 logger = logging.getLogger(__name__)
@@ -166,8 +166,15 @@ router = APIRouter(
     }
 )
 
-# Initialize service
-orchestrator_service = EnhancedOrchestratorService()
+# Initialize service lazily (don't create on import - wait until first use)
+_orchestrator_service = None
+
+def get_orchestrator_service():
+    """Get orchestrator service instance (lazy initialization)"""
+    global _orchestrator_service
+    if _orchestrator_service is None:
+        _orchestrator_service = EnhancedOrchestratorService()
+    return _orchestrator_service
 
 @router.post("/reasoning/collaborative", 
              response_model=Dict[str, Any],
@@ -245,7 +252,7 @@ async def perform_collaborative_reasoning(
     - Automatic retry with reduced agent set on partial failures
     """
     try:
-        result = await orchestrator_service.perform_collaborative_reasoning(
+        result = await get_orchestrator_service().perform_collaborative_reasoning(
             db=db,
             task_id=request.task_id,
             user_id=request.user_id,
@@ -277,7 +284,7 @@ async def coordinate_agents(
     hierarchical, mesh, and adaptive coordination with load balancing.
     """
     try:
-        result = await orchestrator_service.coordinate_multi_agents(
+        result = await get_orchestrator_service().coordinate_multi_agents(
             db=db,
             task_id=request.task_id,
             user_id=request.user_id,
@@ -338,7 +345,7 @@ async def optimize_multi_agent_system(
     robustness, efficiency, cost, and latency objectives.
     """
     try:
-        result = await orchestrator_service.optimize_multi_agent_system(
+        result = await get_orchestrator_service().optimize_multi_agent_system(
             db=db,
             task_id=request.task_id,
             user_id=request.user_id,
@@ -371,7 +378,7 @@ async def rebalance_agents(
     and improve overall system performance.
     """
     try:
-        result = await orchestrator_service.coordination_manager.rebalance_agents(
+        result = await get_orchestrator_service().coordination_manager.rebalance_agents(
             db=db,
             agents=request.agents,
             target_balance=request.target_balance
@@ -391,7 +398,7 @@ async def rebalance_agents(
 async def get_reasoning_statistics():
     """Get collaborative reasoning statistics and performance metrics"""
     try:
-        stats = orchestrator_service.collaborative_reasoning.get_reasoning_statistics()
+        stats = get_orchestrator_service().collaborative_reasoning.get_reasoning_statistics()
         
         return {
             "status": "success",
@@ -407,7 +414,7 @@ async def get_reasoning_statistics():
 async def get_coordination_statistics():
     """Get coordination management statistics and performance metrics"""
     try:
-        stats = orchestrator_service.coordination_manager.get_coordination_statistics()
+        stats = get_orchestrator_service().coordination_manager.get_coordination_statistics()
         
         return {
             "status": "success",
@@ -423,7 +430,7 @@ async def get_coordination_statistics():
 async def get_behavior_statistics():
     """Get behavior monitoring statistics and performance metrics"""
     try:
-        stats = orchestrator_service.behavior_monitor.get_monitoring_statistics()
+        stats = get_orchestrator_service().behavior_monitor.get_monitoring_statistics()
         
         return {
             "status": "success",
@@ -439,7 +446,7 @@ async def get_behavior_statistics():
 async def get_optimization_statistics():
     """Get optimization statistics and performance metrics"""
     try:
-        stats = orchestrator_service.multi_agent_optimizer.get_optimization_statistics()
+        stats = get_orchestrator_service().multi_agent_optimizer.get_optimization_statistics()
         
         return {
             "status": "success",
@@ -456,10 +463,11 @@ async def multi_agent_health_check():
     """Health check for multi-agent systems"""
     try:
         # Check system components
-        reasoning_status = "healthy" if orchestrator_service.collaborative_reasoning else "unavailable"
-        coordination_status = "healthy" if orchestrator_service.coordination_manager else "unavailable"
-        behavior_status = "healthy" if orchestrator_service.behavior_monitor else "unavailable"
-        optimization_status = "healthy" if orchestrator_service.multi_agent_optimizer else "unavailable"
+        service = get_orchestrator_service()
+        reasoning_status = "healthy" if service.collaborative_reasoning else "unavailable"
+        coordination_status = "healthy" if service.coordination_manager else "unavailable"
+        behavior_status = "healthy" if service.behavior_monitor else "unavailable"
+        optimization_status = "healthy" if service.multi_agent_optimizer else "unavailable"
         
         overall_status = "healthy" if all(status == "healthy" for status in [
             reasoning_status, coordination_status, behavior_status, optimization_status
@@ -519,7 +527,7 @@ async def realtime_behavior_monitoring(websocket: WebSocket):
             
             try:
                 # Perform behavior monitoring
-                result = await orchestrator_service.monitor_emergent_behavior(
+                result = await get_orchestrator_service().monitor_emergent_behavior(
                     session_id=session_id,
                     agents=agents,
                     interactions=interactions,

@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from services.llm_provider import LLMManager, LLMConfig, LLMProvider as LLMProviderEnum
+from core.llm.manager import LLMManager, LLMConfig, LLMProvider as LLMProviderEnum
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -103,38 +103,28 @@ class OrchestratorLLM:
         )
     
     def _create_llm_manager(self) -> LLMManager:
-        """Create LLM manager with configuration"""
-        provider_map = {
-            "openai": LLMProviderEnum.OPENAI,
-            "anthropic": LLMProviderEnum.ANTHROPIC
-        }
+        """Create LLM manager from system settings (NO hardcoded defaults)"""
+        # Use centralized manager that reads from database settings
+        from core.llm import create_llm_manager
         
-        provider_enum = provider_map.get(self.provider.lower())
-        if not provider_enum:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+        # Create manager with service_name to get settings from database
+        manager = create_llm_manager(service_name="orchestrator")
         
-        # Get API key from credential resolver
-        from services.credential_resolver import get_credential_resolver
-        resolver = get_credential_resolver()
+        # Override model/temperature if explicitly provided
+        if self.model and self.model != manager.config.model:
+            # Create new config with overrides
+            from core.llm.manager import LLMConfig
+            new_config = LLMConfig(
+                provider=manager.config.provider,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                api_key=manager.config.api_key,
+                base_url=manager.config.base_url
+            )
+            return LLMManager(config=new_config)
         
-        api_key = None
-        if provider_enum == LLMProviderEnum.OPENAI:
-            api_key = resolver.get_credential_field("development_openai", "api_key")
-        elif provider_enum == LLMProviderEnum.ANTHROPIC:
-            api_key = resolver.get_credential_field("development_anthropic", "api_key")
-        
-        if not api_key:
-            raise ValueError(f"API key not found for provider: {self.provider}")
-        
-        llm_config = LLMConfig(
-            provider=provider_enum,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            api_key=api_key
-        )
-        
-        return LLMManager(config=llm_config)
+        return manager
     
     async def generate_with_reasoning(
         self,

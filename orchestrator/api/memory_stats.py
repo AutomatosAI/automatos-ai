@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 
-from database.database import get_db
-from services.memory_knowledge_system import MemoryItem
+from core.database.database import get_db
+from modules.memory.storage.knowledge_system import MemoryItem
 
 logger = logging.getLogger(__name__)
 

@@ -41,11 +41,16 @@ class WorkflowService {
   async getWorkflowStats(): Promise<WorkflowStats> {
     try {
       // Get all workflows to calculate stats
-      const workflows = await apiClient.getWorkflows();
+      const workflowsResponse = await apiClient.getWorkflows();
       const systemMetrics = await apiClient.getSystemMetrics();
       
+      // Backend returns {items: [], total: number}, handle both array and object formats
+      const workflows = Array.isArray(workflowsResponse) 
+        ? workflowsResponse 
+        : (workflowsResponse?.items || workflowsResponse?.data?.items || []);
+      
       // Calculate real stats from actual data
-      const activeWorkflows = workflows.filter(w => w.status === 'active').length;
+      const activeWorkflows = workflows.filter((w: any) => w.status === 'active').length;
       const totalWorkflows = workflows.length;
       
       // For now, use system metrics and workflow data to calculate meaningful stats
@@ -77,10 +82,15 @@ class WorkflowService {
    */
   async getWorkflowsWithMetrics(): Promise<WorkflowWithMetrics[]> {
     try {
-      const workflows = await apiClient.getWorkflows();
+      const workflowsResponse = await apiClient.getWorkflows();
+      
+      // Backend returns {items: [], total: number}, handle both array and object formats
+      const workflows = Array.isArray(workflowsResponse) 
+        ? workflowsResponse 
+        : (workflowsResponse?.items || workflowsResponse?.data?.items || []);
       
       // Transform backend workflows to UI format
-      return workflows.map(workflow => this.transformWorkflowForUI(workflow));
+      return workflows.map((workflow: any) => this.transformWorkflowForUI(workflow));
     } catch (error) {
       console.error('Error fetching workflows:', error);
       return [];

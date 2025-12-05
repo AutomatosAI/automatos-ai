@@ -8,9 +8,9 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from services.analytics_engine import AnalyticsEngine
-from services.dashboard_realtime import get_websocket_manager
-from database.database import get_db
+from core.services.analytics_engine import AnalyticsEngine
+# dashboard_realtime removed - using AI SDK SSE streaming
+from core.database.database import get_db
 
 logger = logging.getLogger(__name__)
 

@@ -13,20 +13,20 @@ import json
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
-from database.database import get_db
-from models import Document, DocumentUploadResponse, DocumentResponse
-from utils.document_manager import DocumentManager, DocumentStatus, DocumentType
+from core.database.database import get_db
+from core.models import Document, DocumentUploadResponse, DocumentResponse
+from modules.rag import DocumentManager, DocumentStatus, DocumentType
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-# Initialize document manager with credentials from credential resolver
-from services.credential_resolver import get_credential_resolver
+# Initialize credential resolver
+from core.credentials.resolver import get_credential_resolver
 import os
 
 resolver = get_credential_resolver()
@@ -44,11 +44,6 @@ except Exception:
         'port': os.getenv('POSTGRES_PORT', '5432')
     }
 
-try:
-    openai_key = resolver.get_credential_field("development_openai", "api_key")
-except Exception:
-    # Fallback to environment variable
-    openai_key = os.getenv('OPENAI_API_KEY')
 
 db_config = {
     "database": postgres_creds.get('database', 'orchestrator_db'),
@@ -57,7 +52,9 @@ db_config = {
     "host": postgres_creds.get('host', 'localhost'),
     "port": postgres_creds.get('port', 5432)
 }
-doc_manager = DocumentManager(db_config, openai_key)
+
+# Document manager uses centralized embedding manager
+doc_manager = DocumentManager(db_config)
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
@@ -110,7 +107,9 @@ async def upload_document(
         file_type = "unknown"
         if file_extension in ['.pdf']:
             file_type = "pdf"
-        elif file_extension in ['.txt', '.md']:
+        elif file_extension in ['.md', '.markdown']:
+            file_type = "markdown"  # FIXED: Use markdown type for SmartChunker
+        elif file_extension in ['.txt']:
             file_type = "text"
         elif file_extension in ['.doc', '.docx']:
             file_type = "document"
@@ -148,7 +147,7 @@ async def upload_document(
             # Use existing document manager for processing
             # Note: DocumentManager creates its own DB record, so we skip calling it
             # and instead trigger processing directly
-            from utils.document_manager import DocumentManager, DocumentType
+            from modules.rag import DocumentManager, DocumentType
             import asyncio
             
             # Determine file type enum
@@ -565,17 +564,15 @@ async def semantic_search(
         import time
         start_time = time.time()
         
-        # Generate query embedding using OpenAI (matches DB - 1536-dim)
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        # Generate query embedding using centralized embedding manager
+        from core.llm import create_embedding_manager
+        import asyncio
         
+        embedding_manager = create_embedding_manager()
         logger.info(f"Generating embedding for query: {query[:50]}...")
         
-        response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        query_embedding = response.data[0].embedding
+        # Generate embedding asynchronously
+        query_embedding = await embedding_manager.generate_embedding(query)
         
         logger.info(f"Embedding generated, performing vector search...")
         
@@ -975,15 +972,11 @@ async def rag_retrieve(
         # Step 1: Get more candidates than needed for diversity selection
         candidate_limit = max_chunks * 3
         
-        # Generate query embedding using OpenAI (matches DB - 1536-dim)
-        from openai import OpenAI
-        client = OpenAI(api_key=openai_key)
+        # Generate query embedding using centralized embedding manager
+        from core.llm import create_embedding_manager
         
-        query_response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=query
-        )
-        query_embedding = query_response.data[0].embedding
+        embedding_manager = create_embedding_manager()
+        query_embedding = await embedding_manager.generate_embedding(query)
         
         # Step 2: Semantic search for candidates
         from sqlalchemy import text
@@ -1446,3 +1439,122 @@ async def get_usage_analytics(
     except Exception as e:
         logger.error(f"Error getting usage analytics: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting usage analytics: {str(e)}")
+
+
+# =============================================================================
+# DOCUMENT RE-PROCESSING ENDPOINTS (Phase 4 - Better RAG)
+# =============================================================================
+
+@router.post("/{document_id}/reprocess")
+async def reprocess_document(
+    document_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Re-process a document with semantic chunking.
+    
+    Use after changing embedding models or to improve chunk quality.
+    """
+    try:
+        from modules.rag import get_rag_service
+        
+        rag_service = get_rag_service()
+        result = await rag_service.reprocess_document(document_id)
+        
+        if result.get("success"):
+            return {
+                "status": "success",
+                "message": f"Document {document_id} re-processed successfully",
+                "chunk_count": result.get("chunk_count", 0)
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=result.get("error", "Re-processing failed")
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error re-processing document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reprocess-all")
+async def reprocess_all_documents(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Re-process ALL documents with semantic chunking.
+    
+    ⚠️ Use after:
+    - Changing embedding model/dimensions
+    - Updating chunking strategy
+    - Migrating to new vector store
+    
+    Runs in background - check status via /status endpoint.
+    """
+    try:
+        from modules.rag import get_rag_service
+        
+        # Run in background
+        async def run_reprocessing():
+            rag_service = get_rag_service()
+            result = await rag_service.reprocess_all_documents()
+            logger.info(f"Batch re-processing complete: {result}")
+        
+        import asyncio
+        background_tasks.add_task(lambda: asyncio.run(run_reprocessing()))
+        
+        return {
+            "status": "started",
+            "message": "Re-processing started in background. This may take several minutes.",
+            "note": "Check document status via GET /api/documents/ to monitor progress"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting batch re-processing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reprocess-status")
+async def get_reprocess_status(db: Session = Depends(get_db)):
+    """
+    Get status of document re-processing.
+    
+    Shows how many documents are pending, processing, completed.
+    """
+    try:
+        from sqlalchemy import text
+        
+        status_query = text("""
+            SELECT 
+                status,
+                COUNT(*) as count
+            FROM documents
+            GROUP BY status
+        """)
+        
+        result = db.execute(status_query)
+        status_counts = {row.status: row.count for row in result}
+        
+        total = sum(status_counts.values())
+        completed = status_counts.get('completed', 0)
+        pending = status_counts.get('pending', 0) + status_counts.get('pending_reprocess', 0)
+        processing = status_counts.get('processing', 0)
+        
+        return {
+            "total_documents": total,
+            "status_breakdown": status_counts,
+            "summary": {
+                "completed": completed,
+                "pending": pending,
+                "processing": processing,
+                "progress_percent": round((completed / total * 100) if total > 0 else 0, 1)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting re-process status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

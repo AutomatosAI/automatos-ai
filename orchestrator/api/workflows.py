@@ -17,18 +17,121 @@ import asyncio
 import logging
 import json
 
-from database.database import get_db
-from models import (
+from core.database.database import get_db
+from core.models import (
     Workflow, WorkflowExecution, Agent, workflow_agents,
     WorkflowCreate, WorkflowUpdate, WorkflowResponse,
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
-from services.websocket_manager import manager
-from services.workspace_manager import WorkspaceManager
+# websocket_manager removed - using AI SDK SSE streaming
+from core.services.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
+
+
+class WorkflowStageTracker:
+    """Track 9-stage workflow execution with SSE events"""
+    STAGES = {
+        1: "Task Decomposition",
+        2: "Agent Selection",
+        3: "Context Engineering",
+        4: "Agent Execution",
+        5: "Result Aggregation",
+        6: "Learning Update",
+        7: "Quality Assessment",
+        8: "Memory Storage",
+        9: "Response Generation"
+    }
+    
+    def __init__(self, execution_id: int, redis_client=None, stream_manager=None):
+        self.execution_id = execution_id
+        self.redis = redis_client
+        self.stream_manager = stream_manager
+        self.current_stage = 0
+        self.stage_start_times = {}
+    
+    async def start_stage(self, stage_num: int):
+        """Mark stage as started, emit SSE event"""
+        self.current_stage = stage_num
+        self.stage_start_times[stage_num] = datetime.now()
+        
+        logger.info(f"🎯 STAGE {stage_num} START: {self.STAGES[stage_num]}")
+        
+        # Emit SSE event DIRECTLY to stream manager for instant UI updates
+        if self.stream_manager:
+            try:
+                await self.stream_manager.broadcast_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_start",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to broadcast stage_start event: {e}")
+        
+        # Also publish to Redis for logging/monitoring (optional)
+        if self.redis:
+            try:
+                self.redis.publish_workflow_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_start",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to publish stage_start to Redis: {e}")
+    
+    async def complete_stage(self, stage_num: int, result: dict = None):
+        """Mark stage as complete, emit SSE event"""
+        duration_ms = 0
+        if stage_num in self.stage_start_times:
+            duration_ms = int((datetime.now() - self.stage_start_times[stage_num]).total_seconds() * 1000)
+        
+        logger.info(f"✅ STAGE {stage_num} COMPLETE: {self.STAGES[stage_num]} ({duration_ms}ms)")
+        
+        # Emit SSE event DIRECTLY to stream manager for instant UI updates
+        if self.stream_manager:
+            try:
+                await self.stream_manager.broadcast_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_complete",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "result": result or {},
+                        "duration_ms": duration_ms,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to broadcast stage_complete event: {e}")
+        
+        # Also publish to Redis for logging/monitoring (optional)
+        if self.redis:
+            try:
+                self.redis.publish_workflow_event(
+                    execution_id=self.execution_id,
+                    event_type="stage_complete",
+                    data={
+                        "stage": stage_num,
+                        "stage_name": self.STAGES[stage_num],
+                        "result": result or {},
+                        "duration_ms": duration_ms,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to publish stage_complete to Redis: {e}")
+
+
 
 @router.get("")
 async def list_workflows(
@@ -274,7 +377,7 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from models import workflow_agents
+            from core.models import workflow_agents
             from sqlalchemy import delete
             db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id == workflow_id))
         except Exception as e:
@@ -330,7 +433,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         
         # Delete workflow_agents associations first (foreign key constraint)
         try:
-            from models import workflow_agents
+            from core.models import workflow_agents
             from sqlalchemy import delete
             db.execute(delete(workflow_agents).where(workflow_agents.c.workflow_id.in_(workflow_ids)))
         except Exception as e:
@@ -409,6 +512,12 @@ async def create_workflow(
             "agents": agents,
             "version": "1.0"
         }
+        
+        # Store goal and context in workflow_definition (9-stage workflow fields)
+        if goal:
+            workflow_definition["goal"] = goal
+        if context:
+            workflow_definition["context"] = context
 
         # Create workflow record
         import json as json_lib
@@ -419,8 +528,6 @@ async def create_workflow(
         workflow = Workflow(
             name=name,
             description=description,
-            goal=goal,
-            context=json_lib.dumps(context) if context else None,  # Convert dict to JSON string
             tags=tags,
             workflow_definition=workflow_definition,
             status=status,
@@ -828,7 +935,6 @@ async def execute_workflow_advanced(
 async def execute_workflow(
     workflow_id: int,
     execution_data: Dict[str, Any],
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """Execute workflow (simplified version for journey tests)"""
@@ -1038,7 +1144,7 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
     logger.info(f"🚀 Starting SSE stream for execution {execution_id}")
     
     try:
-        from services.workflow_streaming_service import stream_workflow_execution
+        from consumers.workflows.streaming import stream_workflow_execution
         
         return StreamingResponse(
             stream_workflow_execution(execution_id),
@@ -1053,6 +1159,106 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
     except Exception as e:
         logger.error(f"❌ Error creating SSE stream for execution {execution_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
+@router.get("/executions/{execution_id}/stream/aisdk")
+async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db)):
+    """
+    AI SDK stream for real-time workflow execution updates.
+    
+    Uses Vercel AI SDK Data Stream Protocol:
+    - 0:"text" -> Text delta
+    - d:{"key":"val"} -> Data payload
+    - e:{"err":"msg"} -> Error
+    
+    Usage (Frontend with @ai-sdk/react):
+        const { messages, data } = useChat({
+            api: '/api/workflow/stream',
+            body: { executionId }
+        })
+    """
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    
+    logger.info(f"🚀 Starting AI SDK stream for execution {execution_id}")
+    
+    try:
+        from consumers.workflows.streaming import stream_workflow_as_aisdk
+        
+        return StreamingResponse(
+            stream_workflow_as_aisdk(execution_id),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Transfer-Encoding": "chunked",  # Force chunked transfer
+                "x-vercel-ai-data-stream": "v1",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating AI SDK stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
+
+@router.post("/stream")
+async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    """
+    AI SDK compatible streaming endpoint for useChat hook.
+    
+    This endpoint is designed to work with Vercel AI SDK's useChat hook:
+    
+    Frontend Usage:
+        const { messages, data } = useChat({
+            api: '/api/workflows/stream',
+            body: { executionId: 123 }
+        })
+    
+    Accepts:
+        { executionId: number }
+    
+    Returns:
+        AI SDK Data Stream Protocol (text/plain with x-vercel-ai-data-stream header)
+        - 0:"text" -> Text deltas for stage updates
+        - d:{...}  -> Data payloads for structured info
+        - e:{...}  -> Error events
+    """
+    # Extract execution ID from request body
+    execution_id = request.get("executionId")
+    if not execution_id:
+        raise HTTPException(status_code=400, detail="executionId is required in request body")
+    
+    # Verify execution exists
+    execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id}")
+    
+    try:
+        from consumers.workflows.streaming import stream_workflow_as_aisdk
+        
+        return StreamingResponse(
+            stream_workflow_as_aisdk(execution_id),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "Transfer-Encoding": "chunked",  # Force chunked transfer
+                "x-vercel-ai-data-stream": "v1",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ Error creating AI SDK chat stream for execution {execution_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+
 
 
 @router.get("/executions/{execution_id}/results")
@@ -1079,17 +1285,19 @@ async def get_execution_results(execution_id: int, db: Session = Depends(get_db)
 
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
-    from database.database import get_db_session
-    from core.real_task_decomposer import RealTaskDecomposer
-    from core.llm.llm_agent_selector import LLMAgentSelector  # ALWAYS use LLM selector
-    from core.context_engineering_integrator import ContextEngineeringIntegrator
-    from core.agent_execution_manager import AgentExecutionManager
-    from core.result_aggregator import ResultAggregator
-    from core.learning_system_updater import LearningSystemUpdater
-    from core.workflow_memory_integrator import WorkflowMemoryIntegrator
-    from services.memory_knowledge_system import HierarchicalMemorySystem
-    from services.workspace_manager import WorkspaceManager  # Unique workspace per execution
-    from utils.model_usage_tracker import ModelUsageTracker  # PRD-15
+    from core.database.database import get_db_session
+    from modules.orchestrator.stages import (
+        RealTaskDecomposer,
+        ContextEngineeringIntegrator,
+        ResultAggregator,
+        WorkflowMemoryIntegrator,
+    )
+    from modules.orchestrator.llm import LLMAgentSelector  # ALWAYS use LLM selector
+    from modules.agents import AgentExecutionManager
+    from modules.learning import LearningSystemUpdater
+    from modules.memory.storage import HierarchicalMemorySystem
+    from core.services.workspace_manager import WorkspaceManager  # Unique workspace per execution
+    from consumers.workflows import ModelUsageTracker  # PRD-15
     import os
     
     # Create unique workspace for this execution
@@ -1114,7 +1322,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             db.commit()
             
             # Publish execution start to Redis
-            from core.redis_client import get_redis_client
+            from core.redis.client import get_redis_client
             redis_client = get_redis_client()
             if redis_client:
                 redis_client.publish_workflow_event(
@@ -1130,9 +1338,20 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             else:
                 logger.warning("Redis client not initialized for execution_started event")
             
+            # Initialize SSE stream manager for instant UI updates
+            from consumers.workflows.streaming import get_stream_manager
+            stream_manager = get_stream_manager()
+            
+            # Initialize stage tracker for 9-stage workflow with stream manager
+            stage_tracker = WorkflowStageTracker(execution_id, redis_client, stream_manager=stream_manager)
+
+            
             # Check if workflow already has explicit tasks defined
             workflow_def = workflow.workflow_definition or {}
             predefined_tasks = workflow_def.get("tasks", [])
+            
+            # ========== STAGE 1: TASK DECOMPOSITION ==========
+            await stage_tracker.start_stage(1)
             
             if predefined_tasks and len(predefined_tasks) > 0:
                 # Use predefined tasks instead of decomposing
@@ -1152,12 +1371,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 decomposer = RealTaskDecomposer()
                 
                 # Get task description from workflow (prioritize goal > description > name)
-                task_description = workflow.goal or workflow.description or workflow.name
+                # goal and context are stored in workflow_definition for 9-stage workflows
+                goal = workflow_def.get("goal")
+                task_description = goal or workflow.description or workflow.name
                 task_type = workflow_def.get("category", "general")
                 complexity = workflow_def.get("priority", "medium")
                 
                 # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
-                workflow_context = workflow.context or {}
+                workflow_context = workflow_def.get("context", {})
                 
                 logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
                 
@@ -1200,14 +1421,20 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         {"description": "Finalize results", "estimated_duration": "20 seconds", "agent_type": "orchestrator"}
                     ]
             
+            await stage_tracker.complete_stage(1, {"subtasks": len(steps)})
+            
+            # ========== STAGE 2: AGENT SELECTION ==========
+            await stage_tracker.start_stage(2)
             # INTELLIGENT AGENT SELECTION
+
             logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
             
             # Check if we should use smart grouping
             use_smart_selection = True  # Enable smart selection by default
-            if workflow and workflow.context:
+            workflow_ctx = workflow_def.get("context")
+            if workflow_ctx:
                 try:
-                    ctx = json.loads(workflow.context) if isinstance(workflow.context, str) else workflow.context
+                    ctx = json.loads(workflow_ctx) if isinstance(workflow_ctx, str) else workflow_ctx
                     use_smart_selection = ctx.get("use_smart_selection", True)
                 except:
                     pass
@@ -1217,6 +1444,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 task.get("required_agent_id") for task in steps
             ) if isinstance(steps, list) else False
             
+            agent_assignments = {}
             try:
                 logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
                 
@@ -1276,7 +1504,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             # Get the agent details
                             agent = db.query(Agent).filter(Agent.id == required_agent_id).first()
                             if agent:
-                                from core.intelligent_agent_selector import AgentMatch
+                                from modules.orchestrator.llm import AgentMatch
                                 agent_assignments[subtask_id] = [
                                     AgentMatch(
                                         agent_id=agent.id,
@@ -1370,6 +1598,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                             "match_score": best_match.match_score
                         }
                 
+                await stage_tracker.complete_stage(2, {
+                    "agents_assigned": len(agent_assignments),
+                    "avg_match_score": selection_summary.get('avg_match_score', 0)
+                })
+            
             except Exception as e:
                 logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
                 logger.error(f"❌ Full traceback:", exc_info=True)
@@ -1377,28 +1610,20 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     "is_real": False,
                     "error": str(e)
                 }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                # Initialize empty assignments to prevent error
-                agent_assignments = {}
+                
+                await stage_tracker.complete_stage(2, {"agents_assigned": len(agent_assignments)})
             
             # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
             logger.info(f"🧠 Initializing memory system...")
             memory_integrator = None
             memory_retrieval_results = {}
             try:
-                # Initialize memory system using centralized clients
-                from services.credential_resolver import get_credential_resolver
-                from config import config
+                # Initialize memory system using centralized embedding manager
+                from modules.memory.storage import HierarchicalMemorySystem
+                from modules.orchestrator.stages import WorkflowMemoryIntegrator
                 
-                resolver = get_credential_resolver()
-                openai_key = resolver.get_credential_field("development_openai", "api_key")
-                
-                # Use centralized Redis and Postgres clients (no hardcoded values!)
-                memory_system = HierarchicalMemorySystem(
-                    openai_api_key=openai_key
-                    # redis_client and postgres_url will use centralized defaults
-                )
+                # Memory system uses centralized embedding manager internally
+                memory_system = HierarchicalMemorySystem()
                 
                 memory_integrator = WorkflowMemoryIntegrator(memory_system)
                 logger.info(f"✅ Memory system initialized")
@@ -1453,9 +1678,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 # Ensure memory_integrator is None so we know it's not available
                 memory_integrator = None
             
-            # CONTEXT ENGINEERING INTEGRATION (LLM-Decided)
-            # PRD-17: Only run context engineering if LLM determined it's needed
-            subtasks_needing_context = [s for s in steps if s.get("requires_context", False)]
+            # ========== STAGE 3: CONTEXT ENGINEERING ==========
+            await stage_tracker.start_stage(3)
+            
+            # CONTEXT ENGINEERING INTEGRATION (FORCED FOR ALL SUBTASKS)
+            # FIX: Force all subtasks to get context engineering (was being skipped by LLM)
+            subtasks_needing_context = steps  # All subtasks get context
             
             try:
                 if subtasks_needing_context:
@@ -1464,7 +1692,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     
                     # Get workflow tags and context for CodeGraph project selection
                     workflow_tags = workflow.tags if workflow and hasattr(workflow, 'tags') and workflow.tags else []
-                    workflow_ctx = workflow.context if workflow and hasattr(workflow, 'context') else None
+                    workflow_ctx = workflow_def.get("context")
                     
                     # If context is a JSON string, parse it
                     if isinstance(workflow_ctx, str):
@@ -1509,7 +1737,12 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     # Merge enhanced subtasks back into steps (preserve order)
                     for i, step in enumerate(steps):
                         if step.get("subtask_id") in context_enhancements:
-                            steps[i]["context_enhancement"] = context_enhancements[step["subtask_id"]]
+                            enh = context_enhancements[step["subtask_id"]]
+                            # Convert to dict and add context_quality alias for frontend compatibility
+                            from dataclasses import asdict
+                            enh_dict = asdict(enh)
+                            enh_dict["context_quality"] = enh.context_quality_score  # Add alias
+                            steps[i]["context_enhancement"] = enh_dict
                 else:
                     logger.info(f"⚡ Skipping context engineering - LLM determined no subtasks need external context (token savings!)")
                     context_enhancements = {}
@@ -1524,6 +1757,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 db.commit()
                 # Initialize empty context_enhancements if error occurred
                 context_enhancements = {}
+            
+            await stage_tracker.complete_stage(3, {
+                "enhanced_subtasks": len(context_enhancements),
+                "avg_context_quality": execution.input_data.get("context_engineering", {}).get("summary", {}).get("avg_context_quality", 0)
+            })
+            
+            # ========== STAGE 4: AGENT EXECUTION ==========
+            await stage_tracker.start_stage(4)
             
             # DEBUG: Check what we have before agent execution
             logger.info(f"🔍 DEBUG: About to start agent execution")
@@ -1553,7 +1794,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 
                 # Get workflow definition and context
                 workflow_def = workflow.workflow_definition or {}
-                workflow_context = workflow.context
+                workflow_context = workflow_def.get("context")
                 
                 # Check workflow definition first
                 if workflow_def.get("execution_strategy"):
@@ -1567,15 +1808,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         execution_strategy = workflow_context.get("execution_mode", "parallel")
                 
                 logger.info(f"📊 Using execution strategy: {execution_strategy}")
-                
-                # Debug: Log agent_assignments structure
-                logger.info(f"🔍 DEBUG: agent_assignments type: {type(agent_assignments)}")
-                logger.info(f"🔍 DEBUG: agent_assignments keys: {list(agent_assignments.keys()) if agent_assignments else 'None'}")
-                if agent_assignments:
-                    for k, v in list(agent_assignments.items())[:2]:  # Log first 2
-                        logger.info(f"🔍 DEBUG: {k} -> type: {type(v)}, value: {v}")
-                        if isinstance(v, list) and v:
-                            logger.info(f"🔍 DEBUG:   First item type: {type(v[0])}, hasattr agent_id: {hasattr(v[0], 'agent_id') if v else False}")
                 
                 # Execute all subtasks with real agents
                 subtask_results = await execution_manager.execute_workflow_subtasks(
@@ -1672,6 +1904,15 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     }
                     await asyncio.sleep(3)
             
+            await stage_tracker.complete_stage(4, {
+                "subtasks_executed": len(subtask_results) if 'subtask_results' in locals() else 0,
+                "success_rate": execution_summary.get("success_rate", 0) if 'execution_summary' in locals() else 0,
+                "total_tokens": execution_summary.get("total_tokens_used", 0) if 'execution_summary' in locals() else 0
+            })
+            
+            # ========== STAGE 5: RESULT AGGREGATION ==========
+            await stage_tracker.start_stage(5)
+            
             # RESULT AGGREGATION & QUALITY SCORING
             logger.info(f"📊 Aggregating results and calculating quality scores...")
             try:
@@ -1732,6 +1973,127 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
+            await stage_tracker.complete_stage(5, {
+                "overall_quality": aggregated_results.quality_scores.overall if 'aggregated_results' in locals() else 0,
+                "total_tokens": aggregated_results.total_tokens_used if 'aggregated_results' in locals() else 0
+            })
+            
+            # ========== STAGE 6: LEARNING UPDATE ==========
+            await stage_tracker.start_stage(6)
+            
+            # LEARNING SYSTEM UPDATE
+            logger.info(f"🎓 Updating learning system...")
+            try:
+                learning_updater = LearningSystemUpdater(db_session=db)
+                learning_updates = await learning_updater.update_from_execution(
+                    workflow_id=execution.workflow_id,
+                    execution_id=execution_id,
+                    aggregated_results=aggregated_results if 'aggregated_results' in locals() else None,
+                    subtask_executions=subtask_results if execution.input_data.get("agent_execution", {}).get("is_real") else {},
+                    decomposition_metadata=execution.input_data.get("decomposition", {}),
+                    context_metadata=execution.input_data.get("context_engineering", {})
+                )
+                
+                # Store learning updates
+                execution.input_data["learning_system"] = {
+                    "is_real": True,
+                    "updates": learning_updates,
+                    "summary": learning_updater.get_learning_summary()
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                
+                logger.info(
+                    f"✅ Learning system updated: {learning_updates['total_updates']} updates, "
+                    f"{len(learning_updates['agent_performance_updates'])} agents improved"
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Learning system update failed: {e}")
+                execution.input_data["learning_system"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+            
+            await stage_tracker.complete_stage(6, {
+                "total_updates": learning_updates.get("total_updates", 0) if 'learning_updates' in locals() else 0
+            })
+            
+            # ========== STAGE 7: QUALITY ASSESSMENT ==========
+            await stage_tracker.start_stage(7)
+            
+            # QUALITY ASSESSMENT
+            logger.info(f"🎯 Assessing workflow output quality...")
+            try:
+                from modules.orchestrator.stages import OutputQualityAssessor, OutputType
+                
+                quality_assessor = OutputQualityAssessor(
+                    llm_client=None,  # Will use heuristic assessment
+                    use_llm=False
+                )
+                
+                # Build output summary for assessment
+                output_summary = f"""Workflow Execution Summary:
+- Subtasks: {len(steps)}
+- Success Rate: {execution_summary.get('success_rate', 0):.0%} if 'execution_summary' in locals() else 'N/A'
+- Overall Quality: {aggregated_results.quality_scores.overall:.0%} if 'aggregated_results' in locals() else 'N/A'
+- Total Tokens: {aggregated_results.total_tokens_used if 'aggregated_results' in locals() else 0}
+
+Subtask Results:
+{chr(10).join([f"- {step.get('description', 'Unknown')}: {step.get('execution_result', {}).get('status', 'unknown')}" for step in steps[:10]])}
+"""
+                
+                # Assess quality
+                quality_assessment = await quality_assessor.assess_quality(
+                    output=output_summary,
+                    requirements=task_description,
+                    output_type=OutputType.GENERAL,
+                    quality_threshold=0.7
+                )
+                
+                # Store quality assessment
+                execution.input_data["quality_assessment"] = {
+                    "is_real": True,
+                    "overall_score": quality_assessment.overall_score,
+                    "passes_threshold": quality_assessment.passes_threshold,
+                    "dimensions": {
+                        name: {
+                            "score": dim.score,
+                            "feedback": dim.feedback
+                        }
+                        for name, dim in quality_assessment.dimensions.items()
+                    },
+                    "strengths": quality_assessment.strengths,
+                    "weaknesses": quality_assessment.weaknesses,
+                    "improvement_suggestions": quality_assessment.improvement_suggestions
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+                
+                logger.info(
+                    f"✅ Quality assessment complete: {quality_assessment.overall_score:.0%} overall score "
+                    f"({'PASS' if quality_assessment.passes_threshold else 'FAIL'})"
+                )
+                
+            except Exception as e:
+                logger.error(f"❌ Quality assessment failed: {e}")
+                execution.input_data["quality_assessment"] = {
+                    "is_real": False,
+                    "error": str(e)
+                }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
+            
+            await stage_tracker.complete_stage(7, {
+                "quality_score": quality_assessment.overall_score if 'quality_assessment' in locals() else 0,
+                "passes_threshold": quality_assessment.passes_threshold if 'quality_assessment' in locals() else False
+            })
+            
+            # ========== STAGE 8: MEMORY STORAGE ==========
+            await stage_tracker.start_stage(8)
+            
             # MEMORY STORAGE (Store experiences in agent memory)
             logger.info(f"💾 Storing execution experiences...")
             memory_storage_results = {}
@@ -1767,41 +2129,6 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
-            # LEARNING SYSTEM UPDATE
-            logger.info(f"🎓 Updating learning system...")
-            try:
-                learning_updater = LearningSystemUpdater(db_session=db)
-                learning_updates = await learning_updater.update_from_execution(
-                    workflow_id=execution.workflow_id,
-                    execution_id=execution_id,
-                    aggregated_results=aggregated_results,
-                    subtask_executions=subtask_results if execution.input_data.get("agent_execution", {}).get("is_real") else {},
-                    decomposition_metadata=execution.input_data.get("decomposition", {}),
-                    context_metadata=execution.input_data.get("context_engineering", {})
-                )
-                
-                # Store learning updates
-                execution.input_data["learning_system"] = {
-                    "is_real": True,
-                    "updates": learning_updates,
-                    "summary": learning_updater.get_learning_summary()
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-                
-                logger.info(
-                    f"✅ Learning system updated: {learning_updates['total_updates']} updates, "
-                    f"{len(learning_updates['agent_performance_updates'])} agents improved"
-                )
-                
-            except Exception as e:
-                logger.error(f"❌ Learning system update failed: {e}")
-                execution.input_data["learning_system"] = {
-                    "is_real": False,
-                    "error": str(e)
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
             
             # MEMORY CONSOLIDATION (Consolidate learnings to long-term memory)
             logger.info(f"🧠 Consolidating learnings to long-term memory...")
@@ -1849,6 +2176,14 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
             
+            await stage_tracker.complete_stage(8, {
+                "experiences_stored": memory_storage_results.get('total_experiences', 0) if 'memory_storage_results' in locals() else 0,
+                "patterns_extracted": memory_consolidation_results.get('patterns_extracted', 0) if 'memory_consolidation_results' in locals() else 0
+            })
+            
+            # ========== STAGE 9: RESPONSE GENERATION ==========
+            await stage_tracker.start_stage(9)
+            
             # PRD-15: Save model usage summary to execution
             usage_summary = model_tracker.get_usage_summary()
             execution.models_used = usage_summary.get("records", [])
@@ -1861,6 +2196,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             # Complete execution with COMPLETE orchestration pipeline data
             execution.status = ExecutionStatus.COMPLETED.value
             execution.completed_at = datetime.now()
+            
+            await stage_tracker.complete_stage(9, {
+                "status": "completed",
+                "total_cost": usage_summary.get("total_cost", 0)
+            })
             
             # Update workflow status and last_execution
             workflow.status = "completed"
@@ -1977,8 +2317,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             
             # Record workflow analytics for monitoring
             try:
-                from services.workflow_analytics_service import WorkflowAnalyticsService
-                from services.orchestration_tracker import orchestration_tracker
+                from consumers.workflows.analytics import WorkflowAnalyticsService
+                from modules.orchestrator import orchestration_tracker
                 analytics_service = WorkflowAnalyticsService(db)
                 analytics = analytics_service.record_workflow_analytics(execution)
                 logger.info(
@@ -2022,7 +2362,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 logger.error(f"❌ Failed to save results or cleanup workspace: {cleanup_err}")
             
             # Publish execution completion to Redis
-            from core.redis_client import get_redis_client
+            from core.redis.client import get_redis_client
             redis_client = get_redis_client()
             if redis_client:
                 redis_client.publish_workflow_event(
@@ -2039,6 +2379,26 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 )
             else:
                 logger.warning("Redis client not initialized for execution_completed event")
+            
+            # CRITICAL: Broadcast workflow_complete to SSE stream for UI
+            if stream_manager:
+                try:
+                    await stream_manager.broadcast_event(
+                        execution_id=execution_id,
+                        event_type="workflow_complete",
+                        data={
+                            "status": "completed",
+                            "execution_time": f"{total_duration:.1f}s",
+                            "quality_score": execution.input_data.get("result_aggregation", {}).get("quality_scores", {}).get("overall", 0),
+                            "stages_completed": len(stages_completed),
+                            "total_tokens": usage_summary.get("total_tokens", 0),
+                            "total_cost": usage_summary.get("total_cost", 0),
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    )
+                    logger.info(f"✅ Broadcast workflow_complete to SSE stream for execution {execution_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast workflow_complete: {e}")
             
     except Exception as e:
         import traceback
@@ -2096,7 +2456,7 @@ async def get_execution_results_files(execution_id: int, db: Session = Depends(g
     Returns metadata about all files created during execution that are available for download.
     """
     try:
-        from services.workspace_manager import WorkspaceManager
+        from core.services.workspace_manager import WorkspaceManager
         
         # Verify execution exists
         execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()

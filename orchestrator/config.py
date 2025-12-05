@@ -40,6 +40,19 @@ class Config:
     REDIS_PORT: str = os.getenv("REDIS_PORT")
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD")
     
+    @property
+    def REDIS_URL(self) -> str:
+        """Get Redis URL from env or construct from parts"""
+        url = os.getenv("REDIS_URL")
+        if url:
+            return url
+        
+        if self.REDIS_HOST and self.REDIS_PORT:
+            auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+            return f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        
+        return None
+    
     # =============================================================================
     # API SECURITY
     # =============================================================================
@@ -57,25 +70,26 @@ class Config:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
     
-    # LLM settings - loaded from database system_settings (fallback to env vars)
+    # LLM settings - loaded from database system_settings (NO hardcoded defaults)
     @property
     def LLM_PROVIDER(self) -> str:
         """Get LLM provider from system settings (database) or environment"""
         try:
-            from services.llm_provider.manager import get_system_setting
-            return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER", "openai"))
+            from core.llm.manager import get_system_setting
+            # Get from database settings, fallback to env var only (NO hardcoded default)
+            return get_system_setting("orchestrator_llm", "provider", os.getenv("LLM_PROVIDER"))
         except Exception:
-            return os.getenv("LLM_PROVIDER", "openai")
+            return os.getenv("LLM_PROVIDER")  # No hardcoded default - must be set in settings or env
     
     @property
     def LLM_MODEL(self) -> str:
         """Get LLM model from system settings (database) or environment"""
         try:
-            from services.llm_provider.manager import get_system_setting
-            # Get from database settings, fallback to env var, then hardcoded default
-            return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL", "gpt-4o"))
+            from core.llm.manager import get_system_setting
+            # Get from database settings, fallback to env var only (NO hardcoded default)
+            return get_system_setting("orchestrator_llm", "model", os.getenv("LLM_MODEL"))
         except Exception:
-            return os.getenv("LLM_MODEL", "gpt-4o")  # Default to gpt-4o (128K context) instead of gpt-4 (8K)
+            return os.getenv("LLM_MODEL")  # No hardcoded default - must be set in settings or env
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2000"))
@@ -117,6 +131,39 @@ class Config:
     # RAG / KNOWLEDGE SERVICES API
     # =============================================================================
     KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")
+    
+    # =============================================================================
+    # RAG SETTINGS - Centralized similarity thresholds (loaded from system_settings)
+    # =============================================================================
+    @property
+    def RAG_MIN_SIMILARITY(self) -> float:
+        """Get min similarity threshold from system settings (default: 0.65)"""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "min_similarity", "0.65")
+            return float(val) if val else 0.65
+        except Exception:
+            return float(os.getenv("RAG_MIN_SIMILARITY", "0.65"))
+    
+    @property
+    def RAG_TOP_K(self) -> int:
+        """Get default top_k results from system settings (default: 5)"""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "top_k", "5")
+            return int(val) if val else 5
+        except Exception:
+            return int(os.getenv("RAG_TOP_K", "5"))
+    
+    @property
+    def RAG_RERANK_ENABLED(self) -> bool:
+        """Get rerank enabled from system settings (default: False)"""
+        try:
+            from core.llm.manager import get_system_setting
+            val = get_system_setting("rag", "rerank_enabled", "false")
+            return str(val).lower() == "true" if val else False
+        except Exception:
+            return os.getenv("RAG_RERANK_ENABLED", "false").lower() == "true"
     
     def validate(self) -> bool:
         """
