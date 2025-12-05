@@ -83,7 +83,7 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
         "rag": "rag",
         "embeddings": "embeddings",
         "memory_integration": "memory_integration",
-        "nl_to_sql": "nl_to_sql"
+        "nl2sql": "nl2sql"
     }
     
     category = category_map.get(service_name, "orchestrator_llm")
@@ -148,7 +148,7 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             "rag": "rag",
             "embeddings": "embeddings",
             "memory_integration": "memory_integration",
-            "nl_to_sql": "nl_to_sql"
+            "nl2sql": "nl2sql"
         }
         
         category = settings_category_map.get(service_name, "orchestrator_llm")
@@ -463,7 +463,7 @@ class LLMManager:
             "rag": "rag",
             "embeddings": "embeddings",
             "memory_integration": "memory_integration",
-            "nl_to_sql": "nl_to_sql"
+            "nl2sql": "nl2sql"
         }
         category = category_map.get(service_name, "orchestrator_llm")
         

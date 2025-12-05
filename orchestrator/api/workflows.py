@@ -339,13 +339,8 @@ async def update_workflow(
         
         logger.info(f"Workflow {workflow_id} updated successfully")
         
-        # Send WebSocket update
-        await manager.broadcast({
-            "type": "workflow_updated",
-            "workflow_id": workflow.id,
-            "name": workflow.name,
-            "status": workflow.status
-        })
+        # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
+        # Legacy WebSocket broadcast removed
         
         return {
             "id": workflow.id,
@@ -392,12 +387,8 @@ async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
         
         logger.info(f"Workflow {workflow_id} ({workflow_name}) deleted successfully")
         
-        # Send WebSocket update
-        await manager.broadcast({
-            "type": "workflow_deleted",
-            "workflow_id": workflow_id,
-            "name": workflow_name
-        })
+        # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
+        # Legacy WebSocket broadcast removed
         
         return {
             "message": "Workflow deleted successfully",
@@ -449,12 +440,8 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
         
         logger.info(f"Deleted {deleted_count} workflows older than {days} days")
         
-        # Send WebSocket update
-        await manager.broadcast({
-            "type": "workflows_cleaned",
-            "deleted_count": deleted_count,
-            "days": days
-        })
+        # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
+        # Legacy WebSocket broadcast removed
         
         return {
             "message": f"Successfully deleted {deleted_count} workflows",
@@ -554,13 +541,8 @@ async def create_workflow(
                 workflow.agents.extend(agent_objects)
                 db.commit()
 
-        # Send real-time update
-        await manager.broadcast({
-            "type": "workflow_created",
-            "workflow_id": workflow.id,
-            "name": workflow.name,
-            "status": workflow.status
-        })
+        # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
+        # Legacy WebSocket broadcast removed
 
         return {
             "id": workflow.id,
@@ -629,14 +611,8 @@ async def duplicate_workflow(
         db.commit()
         db.refresh(duplicate)
         
-        # Send real-time update
-        await manager.broadcast({
-            "type": "workflow_duplicated",
-            "original_id": workflow_id,
-            "duplicate_id": duplicate.id,
-            "name": duplicate.name,
-            "status": duplicate.status
-        })
+        # Real-time updates now handled via SSE/AI SDK streaming (stream_manager)
+        # Legacy WebSocket broadcast removed
         
         return {
             "id": duplicate.id,
@@ -1112,6 +1088,53 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
     except Exception as e:
         logger.error(f"Error getting execution status {execution_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting execution status: {str(e)}")
+
+@router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
+    """Cancel a running workflow execution"""
+    try:
+        execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        
+        # Check if execution is cancellable (running or pending)
+        if execution.status not in [ExecutionStatus.RUNNING.value, ExecutionStatus.PENDING.value]:
+            return {
+                "message": f"Execution is already {execution.status}, cannot cancel",
+                "execution_id": execution_id,
+                "status": execution.status
+            }
+        
+        # Update execution status to cancelled
+        execution.status = ExecutionStatus.CANCELLED.value
+        execution.completed_at = datetime.now()
+        
+        # Add cancellation metadata to output_data
+        if not execution.output_data:
+            execution.output_data = {}
+        execution.output_data["cancellation"] = {
+            "cancelled_at": datetime.now().isoformat(),
+            "reason": "User requested cancellation"
+        }
+        
+        db.commit()
+        db.refresh(execution)
+        
+        logger.info(f"⏹️  Execution {execution_id} cancelled successfully")
+        
+        return {
+            "message": "Execution cancelled successfully",
+            "execution_id": execution_id,
+            "status": execution.status,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling execution {execution_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error cancelling execution: {str(e)}")
 
 
 @router.get("/executions/{execution_id}/stream")
@@ -1785,7 +1808,7 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 )
                 logger.info(f"🔍 DEBUG: AgentExecutionManager created successfully")
                 logger.info(f"📁 Using workspace: {workspace_path}")
-                execution_manager.websocket_manager = manager
+                # websocket_manager assignment removed - using SSE/AI SDK streaming instead
                 
                 logger.info(f"🔍 DEBUG: About to call execute_workflow_subtasks...")
                 
@@ -1952,17 +1975,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     f"Coherence: {aggregated_results.quality_scores.coherence:.0%})"
                 )
                 
-                # Broadcast quality scores via WebSocket
-                await manager.broadcast({
-                    "type": "quality_scores",
-                    "data": {
-                        "execution_id": execution_id,
-                        "workflow_id": execution.workflow_id,
-                        "quality_scores": aggregated_results.quality_scores.to_dict(),
-                        "recommendations": aggregated_results.recommendations,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                })
+                # Quality scores now streamed via SSE/AI SDK (stream_manager)
+                # Legacy WebSocket broadcast removed
                 
             except Exception as e:
                 logger.error(f"❌ Result aggregation failed: {e}")
@@ -2434,17 +2448,8 @@ Subtask Results:
                     execution.error_message = str(e)
                     db.commit()
                     
-                    # Send error notification
-                    await manager.broadcast({
-                        "type": "execution_failed",
-                        "data": {
-                            "execution_id": execution_id,
-                            "workflow_id": execution.workflow_id,
-                            "status": "failed",
-                            "error": str(e),
-                            "timestamp": datetime.now().isoformat()
-                        }
-                    })
+                    # Error notifications now streamed via SSE/AI SDK (stream_manager)
+                    # Legacy WebSocket broadcast removed
         except Exception as inner_e:
             logger.error(f"Error updating failed execution {execution_id}: {inner_e}")
 

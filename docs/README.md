@@ -8,6 +8,8 @@ cover: .gitbook/assets/hero-banner.png
 
 *Welcome to the comprehensive documentation for the world's most advanced open-source multi-agent orchestration platform*
 
+![Automatos AI Dashboard](assets/images/main_dashboard.png)
+
 ---
 
 ## 🎯 Quick Navigation
@@ -61,6 +63,8 @@ cover: .gitbook/assets/hero-banner.png
 - **Advanced Execution**: Conditional, parallel, and sequential workflow patterns
 
 ### 📊 **Analytics & Monitoring**
+
+![Analytics Dashboard](assets/images/analytics_dashboard.png)
 - **Real-time Dashboards**: Live system and agent performance metrics
 - **Business Intelligence**: ROI tracking and optimization insights
 - **Predictive Analytics**: AI-powered performance forecasting
@@ -84,9 +88,11 @@ Essential documentation for understanding and deploying the platform.
 
 | Document | Description | Audience |
 |----------|-------------|----------|
-| [System Architecture](architecture.md) | Complete system design and components | 🏗️ Architects |
-| [API Documentation](api.md) | REST API reference and examples | 💻 Developers |
-| [Deployment Guide](deployment.md) | Production deployment instructions | 🚀 DevOps |
+| [Architecture Overview](ARCHITECTURE_OVERVIEW.md) | 4-layer modular architecture (NEW) | 🏗️ Architects |
+| [API Structure](API_STRUCTURE.md) | 52 endpoints + SSE streaming (NEW) | 💻 Developers |
+| [System Architecture](architecture.md) | Legacy architecture reference | 🏗️ Reference |
+| [API Reference](API_REFERENCE.md) | Detailed API documentation | 💻 Developers |
+| [Deployment Guide](DEPLOYMENT_GUIDE.md) | Production deployment instructions | 🚀 DevOps |
 | [Security Configuration](security.md) | Enterprise security setup | 🔐 Security |
 
 ### **Advanced Features**
@@ -94,9 +100,12 @@ Deep-dive documentation for advanced users and enterprise deployments.
 
 | Document | Description | Complexity |
 |----------|-------------|------------|
-| [Context Engineering](CONTEXT_ENGINEERING_IMPLEMENTATION.md) | RAG system and knowledge management | 🔥 Advanced |
-| [Multi-Agent Field Theory](MULTI_AGENT_FIELD_THEORY_IMPLEMENTATION.md) | Mathematical foundations | 🔥 Expert |
-| [MCP Integration](mcp-integration.md) | IDE and tool integrations | 🔥 Advanced |
+| [Context Engineering](CONTEXT_ENGINEERING_GUIDE.md) | RAG system and knowledge management | 🔥 Advanced |
+| [Workflow System](WORKFLOW_SYSTEM_GUIDE.md) | Workflow orchestration engine | 🔥 Advanced |
+| [Agent System](AGENT_SYSTEM_GUIDE.md) | Multi-agent coordination | 🔥 Advanced |
+| [Tools Integration](TOOLS_INTEGRATION_GUIDE.md) | Tool registry + MCP protocol | 🔥 Advanced |
+| [CodeGraph](CODEGRAPH_GUIDE.md) | Code intelligence system | 🔥 Advanced |
+| [MCP Integration](MCP_INTEGRATION.md) | IDE and tool integrations | 🔥 Advanced |
 | [Flow Diagrams](FLOW_DIAGRAMS.md) | Visual system workflows | 📊 Intermediate |
 
 ### **Development**
@@ -168,17 +177,17 @@ Revolutionary approach to AI context management using mathematical field theory.
 - **Knowledge Graphs**: Dynamic relationship mapping
 - **Continuous Learning**: Adaptive context improvement
 
-**Dive deeper**: [Context Engineering Implementation](CONTEXT_ENGINEERING_IMPLEMENTATION.md)
+**Dive deeper**: [Context Engineering Guide](CONTEXT_ENGINEERING_GUIDE.md)
 
 ### **🤖 Multi-Agent Coordination**
-Intelligent agents that collaborate to solve complex deployment challenges.
+Intelligent agents that collaborate to solve complex challenges.
 
-- **Strategy Agent**: Repository analysis and planning
-- **Security Agent**: Compliance and vulnerability assessment  
-- **Execution Agent**: Deployment orchestration
-- **Monitor Agent**: Performance tracking and optimization
+- **Modular Architecture**: API/Core/Modules/Consumers layers
+- **Tool Registry**: Unified tool execution system
+- **SSE Streaming**: Real-time updates and progress tracking
+- **MCP Integration**: IDE and development tool connectivity
 
-**Explore**: [Multi-Agent Field Theory](MULTI_AGENT_FIELD_THEORY_IMPLEMENTATION.md)
+**Explore**: [Agent System Guide](AGENT_SYSTEM_GUIDE.md) | [Architecture Overview](ARCHITECTURE_OVERVIEW.md)
 
 ### **📊 Real-time Analytics**
 Comprehensive monitoring and business intelligence.

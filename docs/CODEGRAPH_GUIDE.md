@@ -46,45 +46,32 @@ CodeGraph indexes **customer/user codebases** to enable:
 
 ### How It Works
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CODEGRAPH SYSTEM                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  INPUT SOURCES                                               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
-│  │Local Dir │  │GitHub URL│  │GitLab URL│                  │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘                  │
-│       │             │              │                         │
-│       └─────────────┴──────────────┘                        │
-│                     │                                        │
-│              ┌──────▼──────┐                                │
-│              │   INDEXER   │                                │
-│              │ (tree-sitter)│                                │
-│              └──────┬──────┘                                │
-│                     │                                        │
-│       ┌─────────────┴─────────────┐                        │
-│       │                           │                         │
-│  ┌────▼─────┐              ┌─────▼────┐                   │
-│  │ Symbols  │              │Relations │                   │
-│  │  Graph   │◄─────────────┤  Graph   │                   │
-│  └────┬─────┘              └─────┬────┘                   │
-│       │                           │                         │
-│       └─────────────┬─────────────┘                        │
-│                     │                                        │
-│              ┌──────▼──────┐                                │
-│              │  POSTGRES   │                                │
-│              │ + pgvector  │                                │
-│              └──────┬──────┘                                │
-│                     │                                        │
-│       ┌─────────────┴─────────────┐                        │
-│       │                           │                         │
-│  ┌────▼─────┐              ┌─────▼────┐                   │
-│  │Workflows │              │ Chatbot  │                   │
-│  │ (Agents) │              │   API    │                   │
-│  └──────────┘              └──────────┘                   │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
+### How It Works
+
+```mermaid
+graph TD
+    subgraph "Input Sources"
+        Local[Local Dir]
+        GitHub[GitHub URL]
+        GitLab[GitLab URL]
+    end
+    
+    Local --> Indexer
+    GitHub --> Indexer
+    GitLab --> Indexer
+    
+    Indexer[Indexer<br>(tree-sitter)]
+    
+    Indexer --> Symbols[Symbols Graph]
+    Indexer --> Relations[Relations Graph]
+    
+    Symbols <--> Relations
+    
+    Symbols --> PG[(PostgreSQL + pgvector)]
+    Relations --> PG
+    
+    PG --> Workflows[Workflows / Agents]
+    PG --> Chatbot[Chatbot API]
 ```
 
 ---
@@ -568,7 +555,7 @@ export function CodeQueryChat() {
 
 🤖 Bot: Based on your codebase, here's how to create a new agent type:
 
-1. **Define Agent Class** (orchestrator/agents/your_agent.py):
+1. **Define Agent Class** (orchestrator/modules/agents/custom/your_agent.py):
    ```python
    class YourAgent(BaseAgent):
        def __init__(self, config):
@@ -580,7 +567,7 @@ export function CodeQueryChat() {
            return {"result": "success"}
    ```
 
-2. **Register in AgentFactory** (orchestrator/services/agent_factory.py:67):
+2. **Register in AgentFactory** (orchestrator/modules/agents/factory.py:67):
    ```python
    AGENT_TYPES = {
        "code_architect": CodeArchitect,
@@ -607,9 +594,9 @@ export function CodeQueryChat() {
    ```
 
 📎 **References:**
-- orchestrator/agents/code_architect_agent.py (lines 12-45)
-- orchestrator/services/agent_factory.py (line 67)
-- tests/test_agents.py (lines 20-35)
+- orchestrator/modules/agents/specialized/code_architect.py (lines 12-45)
+- orchestrator/modules/agents/factory.py (line 67)
+- tests/modules/agents/test_agents.py (lines 20-35)
 
 Need help with any specific step?
 ```

@@ -309,7 +309,7 @@ async def test_rag_config(
     try:
         # Import and use real RAG service
         from modules.rag import get_rag_service
-        rag_service = await get_rag_service()
+        rag_service = get_rag_service()
         
         # Use real RAG testing
         result = await rag_service.test_rag_config(config_id, query, db)
@@ -335,10 +335,143 @@ async def get_system_health(db: Session = Depends(get_db)):
         
         # Check database connection
         db_status = "healthy"
+        db_metrics = {}
         try:
             db.execute("SELECT 1")
-        except Exception:
+            db_metrics = {"connection": "active"}
+        except Exception as e:
             db_status = "unhealthy"
+            db_metrics = {"connection": "failed", "error": str(e)}
+        
+        # Check Redis connection
+        redis_status = "healthy"
+        redis_metrics = {}
+        redis_check_time = datetime.now()
+        try:
+            from core.database.redis_client import get_redis_client
+            import time
+            
+            start = time.time()
+            redis_client = get_redis_client()
+            
+            # Perform PING
+            if redis_client.ping():
+                latency_ms = (time.time() - start) * 1000
+                redis_metrics = {
+                    "ping": "success",
+                    "latency_ms": round(latency_ms, 2),
+                    "connection": "active"
+                }
+            else:
+                redis_status = "unhealthy"
+                redis_metrics = {"ping": "failed", "error": "PING returned false"}
+        except Exception as e:
+            redis_status = "unhealthy"
+            redis_metrics = {"ping": "failed", "error": str(e), "connection": "failed"}
+        
+        # Check API health (internal readiness)
+        api_status = "healthy"
+        api_metrics = {}
+        api_check_time = datetime.now()
+        try:
+            # Simple internal readiness check - verify critical services
+            import time
+            start = time.time()
+            
+            # Check if we can query the database (already done above)
+            # Check if we can load core modules
+            from core.llm.manager import get_llm_manager
+            from modules.rag import get_rag_service
+            
+            llm_manager = get_llm_manager()
+            rag_service = get_rag_service()
+            
+            latency_ms = (time.time() - start) * 1000
+            api_metrics = {
+                "readiness": "ready",
+                "latency_ms": round(latency_ms, 2),
+                "core_modules": "loaded"
+            }
+        except Exception as e:
+            api_status = "unhealthy"
+            api_metrics = {
+                "readiness": "not_ready",
+                "error": str(e),
+                "core_modules": "failed"
+            }
+        
+        # Check document processor health
+        doc_processor_status = "healthy"
+        doc_processor_metrics = {}
+        doc_processor_check_time = datetime.now()
+        try:
+            import time
+            start = time.time()
+            
+            # Verify document processing queue/worker health
+            # Check if we can access document processing functions
+            from consumers.document_processor import process_document
+            from modules.rag import get_rag_service
+            
+            # Check if RAG service (used by doc processor) is accessible
+            rag_service = get_rag_service()
+            
+            # Verify we can query documents table
+            from core.models import Document
+            doc_count = db.query(Document).count()
+            
+            latency_ms = (time.time() - start) * 1000
+            doc_processor_metrics = {
+                "status": "operational",
+                "latency_ms": round(latency_ms, 2),
+                "documents_in_db": doc_count,
+                "worker": "accessible"
+            }
+        except Exception as e:
+            doc_processor_status = "unhealthy"
+            doc_processor_metrics = {
+                "status": "error",
+                "error": str(e),
+                "worker": "unavailable"
+            }
+        
+        # Check RAG system health
+        rag_status = "healthy"
+        rag_metrics = {}
+        rag_check_time = datetime.now()
+        try:
+            import time
+            start = time.time()
+            
+            # Verify RAG service and its database connectivity
+            from modules.rag import get_rag_service
+            rag_service = get_rag_service()
+            
+            # Verify we can access RAG configurations
+            from core.models import RAGConfiguration
+            rag_config_count = db.query(RAGConfiguration).count()
+            
+            # Verify we can access document chunks (if table exists)
+            try:
+                chunk_count = db.execute("SELECT COUNT(*) FROM document_chunks").scalar()
+            except:
+                chunk_count = 0
+            
+            latency_ms = (time.time() - start) * 1000
+            rag_metrics = {
+                "status": "operational",
+                "latency_ms": round(latency_ms, 2),
+                "rag_configs": rag_config_count,
+                "document_chunks": chunk_count,
+                "service": "accessible"
+            }
+        except Exception as e:
+            rag_status = "unhealthy"
+            rag_metrics = {
+                "status": "error",
+                "error": str(e),
+                "service": "unavailable"
+            }
         
         # Check services status - convert to ComponentHealth format
         from core.models import ComponentHealth
@@ -347,31 +480,31 @@ async def get_system_health(db: Session = Depends(get_db)):
                 name="database",
                 status=db_status,
                 last_check=datetime.now(),
-                metrics={"connection": "active" if db_status == "healthy" else "failed"}
+                metrics=db_metrics
             ),
             ComponentHealth(
                 name="redis",
-                status="healthy",
-                last_check=datetime.now(),
-                metrics={}
+                status=redis_status,
+                last_check=redis_check_time,
+                metrics=redis_metrics
             ),
             ComponentHealth(
                 name="api",
-                status="healthy",
-                last_check=datetime.now(),
-                metrics={}
+                status=api_status,
+                last_check=api_check_time,
+                metrics=api_metrics
             ),
             ComponentHealth(
                 name="document_processor",
-                status="healthy",
-                last_check=datetime.now(),
-                metrics={}
+                status=doc_processor_status,
+                last_check=doc_processor_check_time,
+                metrics=doc_processor_metrics
             ),
             ComponentHealth(
                 name="rag_system",
-                status="healthy",
-                last_check=datetime.now(),
-                metrics={}
+                status=rag_status,
+                last_check=rag_check_time,
+                metrics=rag_metrics
             )
         ]
         

@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db
 from core.models import Tool, ToolCredentials, ToolConfiguration, ToolUsageLog
-from core.models import Tool, ToolCredentials, ToolConfiguration, ToolUsageLog
 from core.utils.logging_adapter import set_request_id
 import uuid
 

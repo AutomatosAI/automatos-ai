@@ -1,218 +1,113 @@
 # Automatos AI 🤖
 
-**Advanced AI Agent Management Platform for Enterprise Automation**
+> **"From Atoms to Organisms: The Future of Multi-Agent Orchestration"**
 
-Automatos AI is a powerful, enterprise-grade platform for creating, managing, and orchestrating AI agents across your organization. Built with modern technologies and designed for scalability, security, and performance.
+![Automatos AI Dashboard](docs/assets/images/main_dashboard.png)
 
-## 🚀 Features
+**Automatos AI** is an enterprise-grade platform for creating, managing, and orchestrating intelligent AI agents. It goes beyond simple "chains" to create **autonomous software teams** that can plan, reason, collaborate, and execute complex workflows.
 
-### 🎯 **Agent Management**
-- **Multi-type AI Agents**: Code architects, security experts, performance optimizers, data analysts
-- **Dynamic Agent Orchestration**: Auto-scaling and load balancing
-- **Real-time Status Monitoring**: Live agent health and performance metrics
-- **Bulk Operations**: Create and manage multiple agents efficiently
+---
 
-### 🧠 **Context Engineering**
-- **RAG (Retrieval Augmented Generation)**: Advanced document processing and retrieval
-- **Vector Embeddings**: Semantic search and knowledge extraction
-- **Document Processing**: PDF, DOCX, and text analysis
-- **Intelligent Chunking**: Optimized content segmentation
+## 🚀 Why Automatos?
 
-### 🏗️ **Enterprise Architecture**
-- **FastAPI Backend**: High-performance async API
-- **PostgreSQL + pgvector**: Vector database for AI operations
-- **Redis**: High-speed caching and session management
-- **Docker**: Containerized deployment
-- **Next.js Frontend**: Modern, responsive web interface
+### 🧠 **True Multi-Agent Intelligence**
+Agents don't just follow scripts. They **collaborate**.
+- **Consensus Protocols**: Agents debate and vote on solutions.
+- **Dynamic Teams**: The system assembles the right team for the job.
+- **Self-Correction**: Agents monitor each other and fix errors in real-time.
 
-### 🔧 **Developer Experience**
-- **OpenAPI Documentation**: Auto-generated API docs
-- **Type Safety**: Full TypeScript/Python type coverage
-- **Database Migrations**: Alembic-powered schema management
-- **Testing Framework**: Comprehensive test suite
-- **Code Quality**: Black, isort, pytest integration
+![Workflow Execution](docs/assets/images/workflow_execution.png)
 
-## 🛠️ Quick Start
+### 📊 **Real-Time Analytics & Streaming**
+Watch your agents think in real-time with our SSE-powered streaming architecture.
+- **Live Execution Theater**: See every step, thought, and tool call.
+- **Performance Metrics**: Track cost, latency, and success rates.
+- **Predictive Insights**: AI forecasts potential bottlenecks.
 
-Get Automatos AI running in 3 simple steps:
+![Analytics Dashboard](docs/assets/images/analytics_dashboard.png)
+
+### 🕸️ **CodeGraph Intelligence**
+Your agents aren't blind. They see your entire codebase as a knowledge graph.
+- **Semantic Search**: "Find where we handle authentication."
+- **Symbol Resolution**: "Show me the `User` class hierarchy."
+- **Impact Analysis**: "What breaks if I change this function?"
+
+![CodeGraph Interface](docs/assets/images/chat_interface.png)
+
+---
+
+## 🏗️ The 4-Layer Architecture
+
+Automatos is built on a modular, scalable foundation:
+
+1.  **🔵 API Layer**: 52+ REST endpoints, SSE streaming, OpenAPI specs.
+2.  **🟡 Modules Layer**: Self-contained domains (`agents`, `tools`, `codegraph`, `orchestrator`).
+3.  **🔴 Consumers Layer**: Async workers for heavy lifting (RAG, workflows).
+4.  **🟢 Core Layer**: The bedrock (PostgreSQL, Redis, LLM Gateway).
+
+[👉 Read the Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)
+
+---
+
+## ⚡ Quick Start
+
+Get running in **5 minutes**.
 
 ### Prerequisites
-- **Docker** & **Docker Compose** (latest versions)
-- **Git**
-- Optional: OpenAI API key ([get one here](https://platform.openai.com/api-keys))
+- Docker & Docker Compose
+- OpenAI / Anthropic API Key
 
-### 1️⃣ Clone & Configure
+### 1. Clone & Configure
 ```bash
 git clone https://github.com/AutomatosAI/automatos-ai.git
 cd automatos-ai
 cp .env.example .env
-# Optional: Edit .env and add your OPENAI_API_KEY
+# Edit .env to add your API keys
 ```
 
-### 2️⃣ Start Everything
+### 2. Launch
 ```bash
 docker-compose up
 ```
-⏳ First startup takes 2-3 minutes (building images, loading seed data)
 
-### 3️⃣ Access the Platform
-- **🌐 Frontend**: http://localhost:3000
-- **📚 API Docs**: http://localhost:8000/docs
-- **❤️ Health Check**: http://localhost:8000/health
+### 3. Explore
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-**That's it!** 🎉 The platform is ready to use.
-
-### Optional: Monitoring & Admin Tools
-```bash
-# Add admin tools (Adminer for database management)
-docker-compose --profile all up
-
-# Add everything (includes Adminer for database management)
-docker-compose --profile all up
-```
-
-### Troubleshooting
-See [Quick Start Guide](docs/QUICKSTART.md) for detailed setup instructions and troubleshooting.
-
-## 📁 Project Structure
-
-```
-automatos-ai/
-├── orchestrator/          # Backend API & Services
-│   ├── src/              # Source code
-│   │   ├── api/          # FastAPI routes
-│   │   ├── database/     # Models & database
-│   │   └── services/     # Business logic
-│   ├── alembic/          # Database migrations
-│   ├── tests/            # Test suite
-│   └── main.py           # Application entry point
-├── frontend/             # Next.js web interface
-├── docs/                 # Documentation
-└── docker-compose.yml    # Container orchestration
-```
-
-## 🔌 API Endpoints
-
-### Core Operations
-- `GET /health` - System health check
-- `GET /api/agents` - List all agents
-- `POST /api/agents` - Create new agent
-- `GET /api/agents/{id}/status` - Agent status
-- `POST /api/agents/{id}/execute` - Execute agent
-
-### Management
-- `GET /api/agents/types` - Available agent types
-- `GET /api/agents/stats` - System statistics
-- `POST /api/agents/bulk` - Bulk operations
-
-### Context Engineering
-- `GET /api/context/stats` - RAG system metrics
-- `POST /api/documents` - Upload documents
-- `GET /api/skills` - Available skills
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-cd orchestrator
-python -m pytest
-
-# Run with coverage
-python -m pytest --cov=orchestrator
-
-# Async tests
-python -m pytest tests/test_agents.py -v
-```
-
-## 🚀 Deployment
-
-### Production Docker
-```bash
-# Build optimized images
-docker compose -f docker-compose.prod.yml build
-
-# Deploy with environment config
-docker compose -f docker-compose.prod.yml up -d
-```
-
-### Environment Variables
-```bash
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/automatos_ai
-POSTGRES_DB=automatos_ai
-POSTGRES_USER=automatos_user
-POSTGRES_PASSWORD=your_secure_password
-
-# API Keys
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-
-# Security
-SECRET_KEY=your_jwt_secret
-API_KEY=your_internal_api_key
-```
-
-## 📖 Documentation
-
-### Quick Start Guides
-- **[Quick Start Guide](docs/quickstart.md)**: Get started in 5 minutes
-- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Development setup and workflows
-- **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)**: Production deployment
-
-### Core Platform Guides
-- **[Agent System Guide](docs/AGENT_SYSTEM_GUIDE.md)**: Agent creation, multi-model support, LLM-driven orchestration
-- **[Workflow Orchestration Guide](docs/WORKFLOW_SYSTEM_GUIDE.md)**: 9-stage intelligent workflow pipeline
-- **[Context Engineering Guide](docs/CONTEXT_ENGINEERING_GUIDE.md)**: RAG, token optimization, mathematical foundations
-- **[Tools & Integration Guide](docs/TOOLS_INTEGRATION_GUIDE.md)**: 400+ MCP integrations, credential management
-- **[Memory & Knowledge Guide](docs/MEMORY_KNOWLEDGE_GUIDE.md)**: Hierarchical memory, knowledge graphs, multimodal KB
-
-### Advanced Features
-- **[Agent Communication Guide](docs/AGENT_COMMUNICATION_MONITORING_GUIDE.md)**: Inter-agent messaging and shared context
-- **[Playbooks Guide](docs/PLAYBOOKS_GUIDE.md)**: Automated pattern discovery and learning
-- **[CodeGraph Guide](docs/CODEGRAPH_GUIDE.md)**: Code understanding and semantic analysis
-- **[Credential System Guide](docs/CREDENTIAL_SYSTEM_GUIDE.md)**: Secure credential management
-
-### Reference
-- **[API Documentation](http://localhost:8000/docs)**: Interactive OpenAPI docs
-- **[Comprehensive Guide](docs/COMPREHENSIVE_GUIDE.md)**: Complete platform overview
-- **[Architecture](docs/architecture.md)**: System design and components
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-### Development Workflow
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and add tests
-4. Run the test suite: `python -m pytest`
-5. Commit your changes: `git commit -m 'Add amazing feature'`
-6. Push to the branch: `git push origin feature/amazing-feature`
-7. Open a Pull Request
-
-## 📄 License
-
-Copyright (c) 2025 Automatos AI
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-## 🏢 Enterprise Support
-
-For enterprise licensing, commercial support, and custom development:
-- **Website**: [https://automatos.ai](https://automatos.ai)
-- **Email**: enterprise@automatos.ai
-- **Documentation**: [https://docs.automatos.ai](https://docs.automatos.ai)
+[👉 Full Quickstart Guide](docs/quickstart.md)
 
 ---
 
-**Built with ❤️ by the Automatos AI Team**
+## 📚 Documentation
+
+### **Getting Started**
+- **[Quick Start](docs/quickstart.md)**: Zero to Hero in 5 mins.
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Local setup & contribution.
+- **[Deployment](docs/DEPLOYMENT_GUIDE.md)**: Production best practices.
+
+### **Core Modules**
+- **[Orchestrator](orchestrator/modules/orchestrator/README.md)**: The brain of the system.
+- **[Agents](docs/AGENT_SYSTEM_GUIDE.md)**: Lifecycle & coordination.
+- **[CodeGraph](orchestrator/modules/codegraph/README.md)**: Code intelligence.
+- **[Tools](docs/TOOLS_INTEGRATION_GUIDE.md)**: Registry & MCP.
+- **[NL2SQL](orchestrator/modules/nl2sql/README.md)**: Database interaction.
+
+---
+
+## 🤝 Contributing
+
+We are building the operating system for the agentic future. Join us!
+
+- **[Contributing Guide](docs/CONTRIBUTING.md)**
+- **[Discord Community](https://discord.gg/automatos)**
+- **[GitHub Discussions](https://github.com/AutomatosAI/automatos-ai/discussions)**
+
+---
+
+<div align="center">
+
+**[🌟 Star on GitHub](https://github.com/AutomatosAI/automatos-ai)** • **[📖 Read the Docs](https://docs.automatos.ai)** • **[💬 Join Discord](https://discord.gg/automatos)**
+
+*Built with ❤️ by the Automatos AI Team*
+
+</div>

@@ -67,64 +67,7 @@ Automatos AI approach: **Specialized experts** ✅
 
 ## Agent Factory Architecture
 
-### The Factory Pattern
 
-The Agent Factory implements the **Factory Design Pattern** to create fully-functional AI agents with real capabilities. It's not just creating database records - it's instantiating living, intelligent entities.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    AGENT CREATION PIPELINE                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  1. TEMPLATE SELECTION                                           │
-│     └─> Choose agent type (Code Architect, Security Expert...)  │
-│     └─> Load default configuration                              │
-│     └─> Set base system prompt                                  │
-│                                                                  │
-│  2. CONFIGURATION                                                │
-│     └─> Agent details (name, description)                       │
-│     └─> Model selection (GPT-4, Claude, etc.)                   │
-│     └─> Skills assignment                                       │
-│     └─> Tool permissions                                        │
-│                                                                  │
-│  3. LLM INITIALIZATION                                           │
-│     └─> Create LLM manager instance                             │
-│     └─> Configure provider (OpenAI/Anthropic)                   │
-│     └─> Set model parameters (temp, max_tokens)                 │
-│     └─> Verify API connection                                   │
-│                                                                  │
-│  4. SKILL ENHANCEMENT                                            │
-│     └─> Apply skill-specific prompting                          │
-│     └─> Add domain knowledge                                    │
-│     └─> Include example patterns                                │
-│     └─> Configure skill parameters                              │
-│                                                                  │
-│  5. TOOL ASSIGNMENT                                              │
-│     └─> Connect MCP servers                                     │
-│     └─> Assign file operations                                  │
-│     └─> Enable shell commands (if permitted)                    │
-│     └─> Set tool permissions                                    │
-│                                                                  │
-│  6. MEMORY INITIALIZATION                                        │
-│     └─> Create memory structures                                │
-│     └─> Set retention policies                                  │
-│     └─> Initialize working memory                               │
-│     └─> Connect to knowledge base                               │
-│                                                                  │
-│  7. RUNTIME CREATION                                             │
-│     └─> Create AgentRuntime object                              │
-│     └─> Register in active agents pool                          │
-│     └─> Set up performance tracking                             │
-│     └─> Enable communication channels                           │
-│                                                                  │
-│  8. VERIFICATION & ACTIVATION                                    │
-│     └─> Test LLM connection                                     │
-│     └─> Verify tool access                                      │
-│     └─> Run capability tests                                    │
-│     └─> Mark as ACTIVE                                          │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
 
 ### Agent Factory Components
 
@@ -475,44 +418,22 @@ model_config = ModelConfiguration(
 
 ### Model Selection Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MODEL REGISTRY SYSTEM                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  DATABASE: llm_models Table                                      │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Model Metadata:                                    │         │
-│  │ - Provider, model_id, display_name                 │         │
-│  │ - Context window, max output tokens                │         │
-│  │ - Cost per 1K tokens (input/output)                │         │
-│  │ - Capabilities (reasoning, coding, analysis)       │         │
-│  │ - Recommended use cases                            │         │
-│  │ - Support for functions, vision, streaming         │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         │                                        │
-│                         ▼                                        │
-│  MODEL REGISTRY SERVICE                                          │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Methods:                                           │         │
-│  │ - get_all_models(provider, status)                 │         │
-│  │ - get_model(model_id)                              │         │
-│  │ - get_recommended_models(task_type)                │         │
-│  │ - find_best_model(requirements)                    │         │
-│  │ - estimate_cost(model, input, output)              │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         │                                        │
-│                         ▼                                        │
-│  AGENT FACTORY                                                   │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Uses model_config to:                              │         │
-│  │ - Initialize correct LLM provider                  │         │
-│  │ - Configure model parameters                       │         │
-│  │ - Set up fallback models                           │         │
-│  │ - Track model usage and cost                       │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+### Model Selection Architecture
+
+```mermaid
+graph TD
+    DB[(Database: llm_models)] --> Registry[Model Registry Service]
+    Registry --> Factory[Agent Factory]
+    
+    subgraph "Model Registry Service"
+        Registry --> Methods[get_all_models<br>get_model<br>find_best_model]
+    end
+    
+    subgraph "Agent Factory"
+        Factory --> Config[Initialize Provider]
+        Factory --> Params[Configure Parameters]
+        Factory --> Cost[Track Usage]
+    end
 ```
 
 ---
@@ -796,49 +717,18 @@ class AgentPerformanceMetrics:
 
 Agents maintain hierarchical memory across sessions:
 
+```mermaid
+graph TD
+    Input[Experience/Learning] --> Working[Working Memory]
+    Working --> ShortTerm[Short Term Memory]
+    ShortTerm --> LongTerm[Long Term Memory]
+    
+    subgraph "Storage"
+        ShortTerm --> Redis[(Redis)]
+        LongTerm --> PG[(PostgreSQL + pgvector)]
+    end
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    AGENT MEMORY HIERARCHY                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  WORKING MEMORY (Redis) - 5 minute TTL                           │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ - Current task context                             │         │
-│  │ - Active tool results                              │         │
-│  │ - Conversation state                               │         │
-│  │ Capacity: 7 items (Miller's Law)                   │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         │                                        │
-│                         ▼                                        │
-│  SHORT-TERM MEMORY (PostgreSQL) - 24 hour window                │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ - Recent task executions                           │         │
-│  │ - Temporary knowledge                              │         │
-│  │ - Session interactions                             │         │
-│  │ Capacity: 100 items                                │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         │                                        │
-│                         ▼ Consolidation (during LEARNING)        │
-│  LONG-TERM MEMORY (PostgreSQL + pgvector) - Permanent           │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ - Learned patterns                                 │         │
-│  │ - Domain knowledge                                 │         │
-│  │ - Success strategies                               │         │
-│  │ - Skill enhancements                               │         │
-│  │ Capacity: Unlimited                                │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         │                                        │
-│                         ▼                                        │
-│  COLLECTIVE MEMORY (Shared across agents)                       │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ - Organizational knowledge                         │         │
-│  │ - Cross-agent patterns                             │         │
-│  │ - Best practices                                   │         │
-│  │ - Collaboration insights                           │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+
 
 ---
 
@@ -1354,6 +1244,8 @@ Creating agent...
 **Location**: Dashboard > Agents
 
 Displays all agents with real-time metrics:
+
+![Agent Management](assets/images/agent_management.png)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

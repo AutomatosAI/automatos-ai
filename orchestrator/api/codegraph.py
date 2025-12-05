@@ -340,12 +340,15 @@ async def reindex_project(
         )
         service.db.commit()
         
-        # Run indexing in background using asyncio task
+        # Store background tasks to prevent garbage collection
+        background_tasks: set = getattr(router, '_background_tasks', set())
+        if not hasattr(router, '_background_tasks'):
+            router._background_tasks = background_tasks
+        
         async def run_indexing():
-            db = None
+            from core.database.database import SessionLocal
+            db = SessionLocal()
             try:
-                # Create new service instance with new DB session for background task
-                db = next(get_db())
                 bg_service = CodeGraphService(db)
                 await bg_service.index_github_project(
                     project_name=project_name,
@@ -353,31 +356,21 @@ async def reindex_project(
                     branch=branch
                 )
             except Exception as e:
-                logger.error(f"Background indexing failed for project {project_id}: {e}", exc_info=True)
-                # Update status to failed
+                logger.exception(f"Background indexing failed for project {project_id}: {e}")
                 try:
-                    if db:
-                        db.execute(
-                            text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
-                            {"id": project_id}
-                        )
-                        db.commit()
-                    else:
-                        # Get new session if db wasn't created
-                        db = next(get_db())
-                        db.execute(
-                            text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
-                            {"id": project_id}
-                        )
-                        db.commit()
+                    db.execute(
+                        text("UPDATE codegraph_projects SET status = 'failed', updated_at = NOW() WHERE id = :id"),
+                        {"id": project_id}
+                    )
+                    db.commit()
                 except Exception as update_error:
-                    logger.error(f"Failed to update project status: {update_error}")
+                    logger.exception(f"Failed to update project status: {update_error}")
             finally:
-                if db:
-                    db.close()
+                db.close()
+                background_tasks.discard(task)
         
-        # Use asyncio.create_task for proper async background execution
-        asyncio.create_task(run_indexing())
+        task = asyncio.create_task(run_indexing())
+        background_tasks.add(task)
         
         return {
             "message": "Re-indexing started in background",

@@ -501,6 +501,7 @@ class ExecutionStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 # API Request/Response Models
 class AgentCreate(BaseModel):

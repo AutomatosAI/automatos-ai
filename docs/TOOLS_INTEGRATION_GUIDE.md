@@ -82,55 +82,31 @@ Result: Can handle ANY task type
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   CENTRALIZED TOOL REGISTRY                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  TOOL CATEGORIES                                                 │
-│  ┌────────────┬────────────┬────────────┬────────────┐         │
-│  │ Research   │ File Ops   │ Shell Cmds │ MCP Tools  │         │
-│  ├────────────┼────────────┼────────────┼────────────┤         │
-│  │ • RAG      │ • read     │ • execute  │ • GitHub   │         │
-│  │ • Semantic │ • write    │ • deploy   │ • AWS      │         │
-│  │ • CodeGraph│ • delete   │ • restart  │ • Slack    │         │
-│  │            │ • list     │            │ • 400+ more│         │
-│  └────────────┴────────────┴────────────┴────────────┘         │
-│                                                                  │
-│  TOOL METADATA                                                   │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Each tool has:                                     │         │
-│  │ - Name, description, category                      │         │
-│  │ - Capabilities (methods, features)                 │         │
-│  │ - Security level (safe, cautious, dangerous)       │         │
-│  │ - Credential requirements                          │         │
-│  │ - Usage permissions                                │         │
-│  │ - OpenAI function format                           │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-│  TASK-TO-TOOL MAPPING                                            │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ 25+ predefined mappings:                           │         │
-│  │ • code_review → [research, file_ops]               │         │
-│  │ • bug_fix → [research, file_ops, shell]            │         │
-│  │ • deployment → [shell, file_ops, mcp:aws]          │         │
-│  │ • security_audit → [research, file_ops, mcp]       │         │
-│  │ • data_analysis → [research, file_ops, mcp:db]     │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-│  UNIFIED EXECUTION                                               │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ All tools accessible through single interface:     │         │
-│  │ execute_tool(name, parameters)                     │         │
-│  │                                                    │         │
-│  │ Routes to appropriate executor:                    │         │
-│  │ - Research → AgentPlatformTools                    │         │
-│  │ - File Ops → ActionExecutor                        │         │
-│  │ - Shell → ActionExecutor (with safety checks)      │         │
-│  │ - MCP → MCPToolExecutor (with credentials)         │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+### Architecture
+
+```mermaid
+graph TD
+    subgraph "Tool Categories"
+        Research[Research]
+        FileOps[File Ops]
+        Shell[Shell Cmds]
+        MCP[MCP Tools]
+    end
+    
+    Research --> Registry
+    FileOps --> Registry
+    Shell --> Registry
+    MCP --> Registry
+    
+    Registry[Centralized Tool Registry]
+    
+    Registry --> Mapper[Task-to-Tool Mapping]
+    
+    Mapper --> Executor[Unified Executor]
+    
+    Executor --> AgentTools[AgentPlatformTools]
+    Executor --> ActionExec[ActionExecutor]
+    Executor --> MCPExec[MCPToolExecutor]
 ```
 
 ### Tool Registration
@@ -138,7 +114,7 @@ Result: Can handle ANY task type
 All tools are registered in the central registry:
 
 ```python
-from services.tool_registry import ToolRegistry
+from orchestrator.modules.tools.registry import ToolRegistry
 
 registry = ToolRegistry()
 
@@ -464,53 +440,29 @@ Automatos uses the **same credential architecture as ** - battle-tested by thous
 
 ### How It Works
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   CREDENTIAL MANAGEMENT FLOW                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  STEP 1: Create Credential                                       │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ User navigates to Settings > Credentials           │         │
-│  │ Clicks "Create Credential"                         │         │
-│  │ Selects type (e.g., "GitHub Credentials")          │         │
-│  │ Fills dynamic form (auto-generated from schema)    │         │
-│  │ Clicks "Test Connection"                           │         │
-│  │ Clicks "Save"                                      │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         ▼                                        │
-│  STEP 2: Encryption & Storage                                    │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Credential data encrypted (Fernet AES-128)         │         │
-│  │ Stored in database (encrypted_data column)         │         │
-│  │ Audit log created (who, when, what)                │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         ▼                                        │
-│  STEP 3: Auto-Activation                                         │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ System queries: Which MCP servers need GitHub?     │         │
-│  │ Finds 8 GitHub MCP servers                         │         │
-│  │ Updates status: inactive → active                  │         │
-│  │ WebSocket broadcast: "8 new tools available"       │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         ▼                                        │
-│  STEP 4: Tool Assignment                                         │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ User assigns GitHub tools to agent                 │         │
-│  │ Dropdown shows: "GitHub Org Account"               │         │
-│  │ Links: AgentToolAssignment.credential_id = 42      │         │
-│  └────────────────────────────────────────────────────┘         │
-│                         ▼                                        │
-│  STEP 5: Runtime Execution                                       │
-│  ┌────────────────────────────────────────────────────┐         │
-│  │ Agent executes: create_pr(...)                     │         │
-│  │ System resolves credential (decrypts)              │         │
-│  │ Injects credential into MCP tool call              │         │
-│  │ GitHub API authenticated automatically             │         │
-│  │ Audit log: tool used, by whom, when               │         │
-│  └────────────────────────────────────────────────────┘         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant DB
+    participant MCP
+    participant Agent
+    
+    User->>API: 1. Create Credential
+    API->>DB: 2. Encrypt & Store
+    
+    DB->>MCP: 3. Auto-Activate Tools
+    MCP-->>User: Notify New Tools
+    
+    User->>Agent: 4. Assign Tools
+    
+    Agent->>API: 5. Execute Tool
+    API->>DB: Resolve Credential
+    DB-->>API: Decrypted Data
+    API->>MCP: Inject Credential
+    MCP-->>Agent: Result
 ```
 
 ### Credential Types
