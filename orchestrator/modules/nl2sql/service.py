@@ -617,7 +617,8 @@ Rules:
         self,
         source_id: str,
         text: str,
-        user_id: str
+        user_id: str,
+        agent_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Intelligently route between SQL Query and Data Analysis.
@@ -629,4 +630,4 @@ Rules:
         if is_analysis:
             return await self.analyze_database(source_id, text, user_id)
         else:
-            return await self.query_database(source_id, text, user_id)
+            return await self.query_database(source_id, text, user_id, agent_id)

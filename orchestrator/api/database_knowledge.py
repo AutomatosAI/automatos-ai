@@ -164,9 +164,9 @@ async def query_database(
     service, cache, _ = get_services()
     
     try:
-        result = await service.query_database(
+        result = await service.smart_query(
             source_id=str(source_id),
-            natural_language_query=request.query,
+            text=request.query,
             user_id="1",  # TODO: Get from auth
             agent_id=None
         )

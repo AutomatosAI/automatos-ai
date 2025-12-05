@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import uuid
 import time
@@ -427,6 +428,9 @@ try:
     app.mount("/legacy", legacy_routes)
 except Exception as e:
     logger.warning(f"Could not mount legacy routes: {e}")
+
+# Mount exports directory for static file serving (charts, etc.)
+app.mount("/exports", StaticFiles(directory="exports"), name="exports")
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
