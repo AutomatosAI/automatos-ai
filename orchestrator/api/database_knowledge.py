@@ -42,7 +42,7 @@ def get_services():
         from core.llm import create_llm_manager
         from modules.rag import RAGService
         from modules.search.services.context_engineering_service import ContextEngineeringService
-        from services.audit_service import AuditService
+        from core.services.audit_service import AuditService
         
         db_service = DatabaseKnowledgeService(
             credential_resolver=get_credential_resolver(),
@@ -328,6 +328,39 @@ async def get_database_source(
         "last_introspected": source.last_introspected,
         "created_at": source.created_at
     }
+
+
+@router.delete("/{source_id}")
+async def delete_database_source(
+    source_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a database source and its associated schema/semantic data.
+    """
+    # Query database for source details
+    source = db.query(DatabaseKnowledgeSource).filter(
+        DatabaseKnowledgeSource.id == source_id
+    ).first()
+    
+    if not source:
+        raise HTTPException(status_code=404, detail="Database source not found")
+    
+    source_name = source.name
+    
+    try:
+        # Delete the source (cascade will handle related records)
+        db.delete(source)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Database source '{source_name}' deleted successfully",
+            "deleted_id": source_id
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete source: {str(e)}")
 
 
 @router.get("/templates/list")
