@@ -29,6 +29,9 @@ from pgvector.sqlalchemy import Vector
 
 from contextlib import asynccontextmanager
 
+# Import centralized vector operations
+from modules.search.vector_store import EnhancedVectorStore
+
 logger = logging.getLogger(__name__)
 
 # Database models for memory system
@@ -424,10 +427,11 @@ class HierarchicalMemorySystem:
         # Apply forgetting curve
         retention = math.exp(-time_since_access / (strength * 24))  # Decay over days
         
-        # Calculate similarity (FIXED: removed incorrect inversion)
+        # Calculate similarity using centralized method
         memory_embedding = np.array(memory.embedding)
-        similarity = np.dot(query_embedding, memory_embedding) / (
-            np.linalg.norm(query_embedding) * np.linalg.norm(memory_embedding)
+        similarity = EnhancedVectorStore.cosine_similarity(
+            query_embedding,
+            memory_embedding
         )
         
         # Combine retention and similarity
@@ -555,9 +559,10 @@ class HierarchicalMemorySystem:
                 if j <= i or j in used_indices:
                     continue
                 
-                # Calculate cosine similarity
-                similarity = np.dot(embeddings[i], embeddings[j]) / (
-                    np.linalg.norm(embeddings[i]) * np.linalg.norm(embeddings[j])
+                # Calculate cosine similarity using centralized method
+                similarity = EnhancedVectorStore.cosine_similarity(
+                    embeddings[i],
+                    embeddings[j]
                 )
                 
                 if similarity > similarity_threshold:
