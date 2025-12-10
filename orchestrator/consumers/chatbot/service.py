@@ -275,10 +275,12 @@ class StreamingChatService:
             # Generate response via shared.llm
             response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
             
-            # Handle tool calls from LLM
+            # Handle tool calls from LLM (supports multi-turn)
             if response.tool_calls:
                 full_response, tool_data = await self._handle_tool_calls(
-                    response, llm_manager, llm_messages, tool_data
+                    response, llm_manager, llm_messages, tool_data,
+                    tools=use_tools,  # Allow multi-turn tool calls
+                    max_iterations=5  # Max 5 rounds of tool use
                 )
                 if tool_data:
                     yield self.streaming_handler.format_aisdk_tool_data(tool_data)
@@ -455,37 +457,81 @@ class StreamingChatService:
         response,
         llm_manager,
         llm_messages: List[Dict],
-        tool_data: Dict
+        tool_data: Dict,
+        tools: Optional[List[Any]] = None,
+        max_iterations: int = 5
     ) -> tuple:
-        """Handle tool calls from LLM response."""
-        logger.info(f"LLM requested {len(response.tool_calls)} tool calls")
-        tool_results = []
+        """
+        Handle tool calls from LLM response with multi-turn support.
         
-        for tool_call in response.tool_calls:
-            tool_name = tool_call.get('function', {}).get('name')
-            tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
-            tool_id = tool_call.get('id')
+        Allows the LLM to call tools multiple times (ReAct pattern).
+        Stops when:
+        - LLM generates text without tool calls
+        - Max iterations reached
+        """
+        import asyncio
+        
+        iteration = 0
+        current_response = response
+        
+        while current_response.tool_calls and iteration < max_iterations:
+            iteration += 1
+            logger.info(f"Tool iteration {iteration}: LLM requested {len(current_response.tool_calls)} tool calls")
             
-            logger.info(f"Executing tool: {tool_name}")
-            result = await self.tool_router.execute_and_format(tool_name, tool_args)
+            tool_results = []
             
-            if result['success']:
-                tool_data.update(result['frontend_data'])
+            # Execute tools in parallel when possible
+            async def execute_single_tool(tool_call):
+                tool_name = tool_call.get('function', {}).get('name')
+                tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
+                tool_id = tool_call.get('id')
+                
+                logger.info(f"Executing tool: {tool_name}")
+                result = await self.tool_router.execute_and_format(tool_name, tool_args)
+                
+                return {
+                    "tool_call_id": tool_id,
+                    "role": "tool", 
+                    "content": result['llm_context'],
+                    "frontend_data": result.get('frontend_data', {}),
+                    "success": result['success']
+                }
             
-            tool_results.append({
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "content": result['llm_context']
+            # Execute all tools in parallel
+            results = await asyncio.gather(*[
+                execute_single_tool(tc) for tc in current_response.tool_calls
+            ])
+            
+            # Collect results
+            for r in results:
+                if r['success']:
+                    tool_data.update(r['frontend_data'])
+                tool_results.append({
+                    "tool_call_id": r['tool_call_id'],
+                    "role": "tool",
+                    "content": r['content']
+                })
+            
+            # Add assistant message with tool calls and results
+            llm_messages.append({
+                "role": "assistant",
+                "content": current_response.content or "",
+                "tool_calls": current_response.tool_calls
             })
+            llm_messages.extend(tool_results)
+            
+            # Get next response - allow more tool calls if needed
+            # Only pass tools if we haven't hit max iterations
+            allow_more_tools = iteration < max_iterations - 1
+            current_response = await llm_manager.generate_response(
+                messages=llm_messages,
+                tools=tools if allow_more_tools else None
+            )
+            
+            logger.info(f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}")
         
-        # Get final response with tool results
-        llm_messages.append({
-            "role": "assistant",
-            "content": response.content or "",
-            "tool_calls": response.tool_calls
-        })
-        llm_messages.extend(tool_results)
+        if iteration >= max_iterations and current_response.tool_calls:
+            logger.warning(f"Hit max tool iterations ({max_iterations}). Forcing final response.")
         
-        final_response = await llm_manager.generate_response(messages=llm_messages, tools=None)
-        return final_response.content or "", tool_data
+        return current_response.content or "", tool_data
 

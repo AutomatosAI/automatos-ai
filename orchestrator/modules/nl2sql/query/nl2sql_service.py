@@ -111,6 +111,16 @@ CRITICAL RULES:
 6. Consider performance - use indexes when available
 7. Return results in a user-friendly format with clear column aliases
 
+SMART QUERY INTERPRETATION:
+- If user asks about data "over", "in", or "during" a time period, they likely want a TIME-SERIES breakdown (GROUP BY date/day)
+- If user asks "how many" or "count", decide based on context:
+  - "how many total" → single count
+  - "how many per day/week/month" → grouped by time
+  - "how many X happened in last N days" → likely want daily breakdown to see trends
+- If user asks for "details", "breakdown", "trend", or "history" → GROUP BY the relevant dimension
+- If user asks for a simple total or count without time context → return aggregate
+- When in doubt about grouping, prefer showing MORE granular data (users can always aggregate, but can't disaggregate)
+
 Database Dialect: {dialect}
 """)
         

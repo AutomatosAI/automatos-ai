@@ -638,6 +638,71 @@ class ToolRegistry:
             metadata={"supports_pandas_ai": True, "added_in": "unified_tools"}
         ))
         
+        # Smart Database Query (with intelligence features)
+        self.register_tool(ToolSpec(
+            name="smart_query_database",
+            category=ToolCategory.DATABASE_TOOLS,
+            description="""Intelligent database query with advanced features:
+- Query Clarification: Asks for more details when query is ambiguous
+- Query Rephrasing: Improves vague queries for better SQL generation
+- Result Explanation: Explains what the data means in plain English
+- Visualization Suggestions: Recommends chart types based on data
+- Multi-turn Support: Maintains conversation context
+
+Use this for complex queries or when you want AI-powered assistance.""",
+            executor_class="UnifiedToolExecutor",
+            executor_method="_execute_smart_database_tool",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Natural language query (e.g., 'Show me sales trends', 'Compare revenue by region')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="database_name",
+                    type="string",
+                    description="Specific database/knowledge source to query (optional)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="skip_clarification",
+                    type="boolean",
+                    description="Skip clarification questions and attempt direct query (default: false)",
+                    required=False,
+                    default=False
+                ),
+                ToolParameter(
+                    name="clarification_answers",
+                    type="object",
+                    description="Answers to previous clarification questions (for multi-turn)",
+                    required=False
+                ),
+                ToolParameter(
+                    name="include_visualization",
+                    type="boolean",
+                    description="Include visualization suggestions (default: true)",
+                    required=False,
+                    default=True
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={"read": True},
+            examples=[
+                {"action": "smart_query_database", "params": {"query": "Show me sales trends"}},
+                {"action": "smart_query_database", "params": {"query": "Compare performance", "skip_clarification": False}},
+                {"action": "smart_query_database", "params": {"query": "Show me sales", "clarification_answers": {"time_period": "last 30 days", "group_by": "region"}}}
+            ],
+            metadata={
+                "supports_pandas_ai": True,
+                "supports_clarification": True,
+                "supports_rephrasing": True,
+                "supports_explanation": True,
+                "supports_visualization": True,
+                "added_in": "nl2sql_intelligence"
+            }
+        ))
+        
         # ==========================================
         # FILE OPERATIONS (from ActionExecutor)
         # ==========================================

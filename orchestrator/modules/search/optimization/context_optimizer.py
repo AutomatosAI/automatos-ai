@@ -408,7 +408,7 @@ class ContextOptimizer:
         # Select first example (most similar to task)
         similarities = []
         for ex in remaining:
-            sim = self._cosine_similarity(task_embedding, ex.embedding)
+            sim = VectorOperations.cosine_similarity(task_embedding, ex.embedding)
             # Weight by quality score
             weighted_sim = sim * ex.quality_score
             similarities.append(weighted_sim)
@@ -424,12 +424,12 @@ class ContextOptimizer:
             
             for candidate in remaining:
                 # Relevance to task
-                relevance = self._cosine_similarity(task_embedding, candidate.embedding)
+                relevance = VectorOperations.cosine_similarity(task_embedding, candidate.embedding)
                 relevance *= candidate.quality_score
                 
                 # Maximum similarity to already selected examples
                 max_sim = max([
-                    self._cosine_similarity(candidate.embedding, s.embedding)
+                    VectorOperations.cosine_similarity(candidate.embedding, s.embedding)
                     for s in selected
                 ])
                 
@@ -443,7 +443,7 @@ class ContextOptimizer:
         
         # Sort selected examples by relevance for better prompt flow
         selected.sort(
-            key=lambda ex: self._cosine_similarity(task_embedding, ex.embedding),
+            key=lambda ex: VectorOperations.cosine_similarity(task_embedding, ex.embedding),
             reverse=True
         )
         
@@ -607,7 +607,7 @@ class ContextOptimizer:
                 # Use embedding similarity as proxy for mutual information
                 # (Real MI calculation would require joint distribution)
                 if info_metrics[i]['embedding'] and info_metrics[j]['embedding']:
-                    similarity = self._cosine_similarity(
+                    similarity = VectorOperations.cosine_similarity(
                         info_metrics[i]['embedding'],
                         info_metrics[j]['embedding']
                     )
@@ -728,7 +728,7 @@ class ContextOptimizer:
                 # Find minimum distance to selected items
                 min_distance = float('inf')
                 for sel_idx in selected:
-                    distance = 1 - self._cosine_similarity(
+                    distance = 1 - VectorOperations.cosine_similarity(
                         info_metrics[idx]['embedding'],
                         info_metrics[sel_idx]['embedding']
                     )
@@ -859,7 +859,7 @@ class ContextOptimizer:
         for i in range(len(embeddings)):
             for j in range(i + 1, len(embeddings)):
                 # Use cosine distance (1 - similarity)
-                distance = 1 - self._cosine_similarity(embeddings[i], embeddings[j])
+                distance = 1 - VectorOperations.cosine_similarity(embeddings[i], embeddings[j])
                 distances.append(distance)
         
         if not distances:
@@ -873,32 +873,8 @@ class ContextOptimizer:
         
         return diversity_score
     
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """
-        Calculate cosine similarity between two vectors.
-        
-        Args:
-            vec1: First vector
-            vec2: Second vector
-            
-        Returns:
-            Cosine similarity (-1 to 1)
-        """
-        if not vec1 or not vec2 or len(vec1) != len(vec2):
-            return 0.0
-        
-        v1 = np.array(vec1)
-        v2 = np.array(vec2)
-        
-        dot_product = np.dot(v1, v2)
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        similarity = dot_product / (norm1 * norm2)
-        return float(np.clip(similarity, -1, 1))
+    # REMOVED: Duplicate _cosine_similarity - now using VectorOperations.cosine_similarity()
+    # See core/math/vector_operations.py for centralized implementation
     
     async def _get_embedding(self, text: str) -> List[float]:
         """

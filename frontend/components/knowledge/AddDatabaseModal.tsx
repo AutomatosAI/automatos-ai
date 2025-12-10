@@ -132,9 +132,15 @@ export function AddDatabaseModal({ isOpen, onClose, onSuccess }: AddDatabaseModa
       
       toast.success('Database source created successfully!')
       
-      // Introspect the schema
-      setStep(3)
-      await introspectSchema(source.id)
+      // Introspect the schema - API returns source_id, not id
+      const sourceId = source.source_id || source.id
+      if (sourceId) {
+        setStep(3)
+        await introspectSchema(sourceId)
+      } else {
+        console.error('No source ID returned from create API:', source)
+        toast.error('Source created but introspection failed - no ID returned')
+      }
       
       onSuccess()
       handleClose()

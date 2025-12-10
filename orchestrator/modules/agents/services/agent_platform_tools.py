@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
 from modules.codegraph import CodeGraphService
-from modules.tools.formatting.result_formatter import ToolResultFormatter
+# LAZY IMPORT: ToolResultFormatter imported inside methods to avoid circular dependency
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -147,6 +147,7 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter - NO MORE DUPLICATE LOGIC
+                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_documents(raw_results)
                 
                 self.logger.info(f"  ✅ Returning {len(formatted)} formatted results")
@@ -184,6 +185,7 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter
+                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_documents(raw_results)
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} semantic results")
@@ -234,6 +236,7 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter
+                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_code(raw_results)
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} code results")
@@ -285,6 +288,7 @@ class AgentPlatformTools:
                 continue
             
             # Use unified formatter for LLM context
+            from modules.tools.formatting.result_formatter import ToolResultFormatter
             llm_context = ToolResultFormatter.format_for_llm(result, tool_name, max_chars=1500)
             context_parts.append(f"### Tool Call {idx}:")
             context_parts.append(llm_context)

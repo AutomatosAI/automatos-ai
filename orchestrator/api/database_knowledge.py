@@ -174,6 +174,9 @@ async def query_database(
         return result
     
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"API query_database failed: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 

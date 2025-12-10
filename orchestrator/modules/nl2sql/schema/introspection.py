@@ -100,21 +100,23 @@ class DatabaseIntrospectionService:
                             data_type_lower = (data_type or "").lower()
                             if "json" in data_type_lower or "array" in data_type_lower:
                                 col["samples"] = []
-                                columns.append(col)
-                                continue
-                            try:
-                                sample_sql = text(f'SELECT DISTINCT "{col_name}" FROM "{schema}"."{table}" WHERE "{col_name}" IS NOT NULL LIMIT :lim')
-                                samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
-                                col["samples"] = [r[0] for r in samples]
-                            except SQLAlchemyError:
-                                logger.warning(
-                                    f"Failed to sample column {col_name} in {table}",
-                                    exc_info=True
-                                )
+                            else:
                                 try:
-                                    conn.rollback()
+                                    sample_sql = text(f'SELECT DISTINCT "{col_name}" FROM "{schema}"."{table}" WHERE "{col_name}" IS NOT NULL LIMIT :lim')
+                                    samples = conn.execute(sample_sql, {"lim": sample_limit}).fetchall()
+                                    col["samples"] = [make_json_serializable(r[0]) for r in samples]
                                 except SQLAlchemyError:
-                                    logger.debug("Rollback failed or unnecessary", exc_info=True)
+                                    logger.warning(
+                                        f"Failed to sample column {col_name} in {table}",
+                                        exc_info=True
+                                    )
+                                    col["samples"] = []
+                                    try:
+                                        conn.rollback()
+                                    except SQLAlchemyError:
+                                        logger.debug("Rollback failed or unnecessary", exc_info=True)
+                        # Always append the column regardless of sampling success
+                        columns.append(col)
                     # Row count
                     try:
                         cnt = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{table}"'))

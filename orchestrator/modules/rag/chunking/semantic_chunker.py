@@ -50,7 +50,7 @@ class SemanticChunk:
     summary: Optional[str] = None
 
 class SemanticChunker:
-    """Advanced semantic chunking implementation"""
+    """Advanced semantic chunking implementation with REAL embedding-based similarity"""
     
     def __init__(
         self,
@@ -72,6 +72,11 @@ class SemanticChunker:
         self.info_theory = InformationTheory()
         self.vector_ops = VectorOperations()
         self.stats = StatisticalAnalysis()
+        
+        # Embedding manager for REAL semantic similarity
+        self._embedding_manager = None
+        self._embedding_cache: Dict[str, List[float]] = {}
+        self._use_embeddings = True  # Can be disabled for performance
         
         # Patterns for sentence boundaries
         self.sentence_patterns = [
@@ -325,11 +330,70 @@ class SemanticChunker:
         
         return sentences
     
-    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Calculate similarity between two text segments"""
+    def _get_embedding_manager(self):
+        """Lazy initialization of embedding manager"""
+        if self._embedding_manager is None:
+            try:
+                from core.llm import create_embedding_manager
+                self._embedding_manager = create_embedding_manager()
+                logger.info("SemanticChunker initialized with embedding-based similarity")
+            except Exception as e:
+                logger.warning(f"Could not initialize embedding manager: {e}. Falling back to keyword similarity.")
+                self._use_embeddings = False
+        return self._embedding_manager
+    
+    def _get_embedding(self, text: str) -> Optional[List[float]]:
+        """Get embedding for text with caching"""
+        # Use hash of first 200 chars as cache key (sufficient for similarity)
+        cache_key = text[:200]
         
-        # Simple keyword-based similarity for now
-        # In production, this would use embeddings
+        if cache_key in self._embedding_cache:
+            return self._embedding_cache[cache_key]
+        
+        manager = self._get_embedding_manager()
+        if manager is None:
+            return None
+        
+        try:
+            # Use sync version for chunking (avoid async complexity)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context - use thread pool
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    embedding = pool.submit(
+                        lambda: asyncio.run(manager.generate_embedding(text))
+                    ).result(timeout=10)
+            else:
+                embedding = loop.run_until_complete(manager.generate_embedding(text))
+            
+            self._embedding_cache[cache_key] = embedding
+            return embedding
+        except Exception as e:
+            logger.debug(f"Embedding generation failed for text: {e}")
+            return None
+    
+    # REMOVED: Duplicate _cosine_similarity - now using VectorOperations.cosine_similarity()
+    # See core/math/vector_operations.py for centralized implementation
+    
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """
+        Calculate similarity between two text segments using embeddings.
+        
+        Uses REAL embedding-based cosine similarity for accurate semantic comparison.
+        Falls back to keyword overlap only if embeddings are unavailable.
+        """
+        # Try embedding-based similarity first (MUCH more accurate)
+        if self._use_embeddings:
+            emb1 = self._get_embedding(text1)
+            emb2 = self._get_embedding(text2)
+            
+            if emb1 is not None and emb2 is not None:
+                # Use centralized VectorOperations.cosine_similarity
+                return VectorOperations.cosine_similarity(emb1, emb2)
+        
+        # Fallback: keyword-based similarity (less accurate but fast)
         words1 = set(text1.lower().split())
         words2 = set(text2.lower().split())
         

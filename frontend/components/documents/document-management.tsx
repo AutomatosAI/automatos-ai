@@ -109,7 +109,8 @@ export function DocumentManagement() {
     deleteSource,
     executeQuery,
     syncSchema,
-    getCacheStats 
+    getCacheStats,
+    fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
   
   // Type the documents array properly
@@ -655,6 +656,7 @@ export function DocumentManagement() {
                 <DatabaseQueryExplorer 
                   selectedSource={databaseSources?.[0]}
                   sources={databaseSources || []}
+                  onSourceDeleted={refreshDatabaseSources}
                 />
               </TabsContent>
               

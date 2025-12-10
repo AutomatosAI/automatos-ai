@@ -74,6 +74,20 @@ class CodeGraphService:
         self.embedding_manager = create_embedding_manager()
         logger.info(f"CodeGraphService using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
+        # NEW: Initialize EnhancedVectorStore for centralized vector search
+        self._vector_store = None
+        try:
+            from modules.search import EnhancedVectorStore
+            import os
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            self._vector_store = EnhancedVectorStore(
+                database_url=db_url,
+                table_name="codegraph_symbols"  # Use CodeGraph's existing table
+            )
+            logger.info("✅ CodeGraphService using EnhancedVectorStore for semantic search")
+        except Exception as e:
+            logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
+        
         # Supported file extensions
         self.language_extensions = {
             'python': ['.py'],
@@ -1074,7 +1088,10 @@ class CodeGraphService:
         limit: int = 10
     ) -> Dict[str, Any]:
         """
-        Semantic search using vector similarity
+        Semantic search using centralized EnhancedVectorStore.
+        
+        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
+        Old SQL-based implementation kept below for rollback if needed.
         """
         start_time = time.time()
         
@@ -1091,6 +1108,86 @@ class CodeGraphService:
         
         # Generate query embedding
         query_embedding = await self.embedding_manager.generate_embedding(query)
+        
+        # Use centralized EnhancedVectorStore if available
+        if self._vector_store:
+            try:
+                from modules.search import SearchMode, RankingStrategy, SearchFilter
+                
+                # Initialize vector store if needed
+                if not self._vector_store.pool:
+                    await self._vector_store.initialize()
+                
+                logger.info(f"🔎 Using EnhancedVectorStore for semantic search: limit={limit}")
+                
+                # Create filter for this project
+                search_filter = SearchFilter(
+                    metadata_filters={"project_id": str(project_id)}
+                )
+                
+                # Perform search using centralized vector store
+                search_results = await self._vector_store.search(
+                    query_embedding=query_embedding,
+                    mode=SearchMode.SEMANTIC,
+                    ranking_strategy=RankingStrategy.SIMILARITY,
+                    limit=limit,
+                    search_filter=search_filter,
+                    query_text=query
+                )
+                
+                # Convert SearchResult objects to CodeGraph's expected format
+                symbols = []
+                for result in search_results:
+                    doc = result.document
+                    symbols.append({
+                        "id": doc.metadata.get('id', doc.id),
+                        "symbol_type": doc.metadata.get('symbol_type', ''),
+                        "name": doc.metadata.get('name', ''),
+                        "qualified_name": doc.metadata.get('qualified_name', ''),
+                        "file_path": doc.metadata.get('file_path', ''),
+                        "line_number": doc.metadata.get('line_number', 0),
+                        "signature": doc.metadata.get('signature', ''),
+                        "docstring": doc.metadata.get('docstring', ''),
+                        "code_snippet": doc.content,
+                        "similarity": float(result.similarity_score)
+                    })
+                
+                execution_time = (time.time() - start_time) * 1000
+                prompt_block = self._format_prompt_block(symbols, query)
+                
+                # Log query
+                self.db.execute(
+                    text("""
+                        INSERT INTO codegraph_query_logs
+                        (project_id, query_type, query_text, results_count, execution_time_ms)
+                        VALUES (:project_id, 'semantic', :query, :count, :time)
+                    """),
+                    {
+                        "project_id": project_id,
+                        "query": query,
+                        "count": len(symbols),
+                        "time": execution_time
+                    }
+                )
+                self.db.commit()
+                
+                logger.info(f"✅ Retrieved {len(symbols)} symbols using EnhancedVectorStore")
+                
+                return {
+                    "project": project_name,
+                    "query": query,
+                    "count": len(symbols),
+                    "results": symbols,
+                    "prompt_block": prompt_block,
+                    "execution_time_ms": round(execution_time, 2)
+                }
+                
+            except Exception as e:
+                logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
+                # Fall through to SQL fallback below
+        
+        # FALLBACK: Original SQL-based implementation (kept for rollback)
+        logger.info("Using fallback SQL-based semantic search")
         embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
         
         # Semantic search
@@ -1154,6 +1251,8 @@ class CodeGraphService:
             }
         )
         self.db.commit()
+        
+        logger.info(f"✅ Retrieved {len(symbols)} symbols with SQL fallback")
         
         return {
             "project": project_name,

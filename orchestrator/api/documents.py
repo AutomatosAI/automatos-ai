@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, text
 
@@ -185,6 +186,95 @@ async def upload_document(
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
         raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
+
+@router.get("/download")
+async def download_document(path: str = Query(..., description="Full path to document")):
+    """
+    Download a document from storage.
+    
+    Args:
+        path: Full path to document (e.g., /var/automatos/documents/filename.md)
+    
+    Returns:
+        FileResponse with the document
+    """
+    try:
+        # Security: Only allow files from /var/automatos/documents/
+        if not path.startswith("/var/automatos/documents/"):
+            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
+        
+        # Check if file exists
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get filename
+        filename = os.path.basename(path)
+        
+        # Determine media type
+        media_type = "application/octet-stream"
+        if path.endswith('.pdf'):
+            media_type = "application/pdf"
+        elif path.endswith('.md'):
+            media_type = "text/markdown"
+        elif path.endswith('.txt'):
+            media_type = "text/plain"
+        elif path.endswith('.json'):
+            media_type = "application/json"
+        
+        logger.info(f"Serving document: {filename}")
+        
+        return FileResponse(
+            path=path,
+            filename=filename,
+            media_type=media_type
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading document: {e}")
+        raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
+
+@router.get("/content")
+async def get_document_content(path: str = Query(..., description="Full path to document")):
+    """
+    Get document content as text for artifact viewer.
+    
+    Args:
+        path: Full path to document (e.g., /var/automatos/documents/filename.md)
+    
+    Returns:
+        JSON with document content
+    """
+    try:
+        # Security: Only allow files from /var/automatos/documents/
+        if not path.startswith("/var/automatos/documents/"):
+            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
+        
+        # Check if file exists
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Read file content
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        filename = os.path.basename(path)
+        logger.info(f"Serving content for: {filename}")
+        
+        return {
+            "filename": filename,
+            "content": content,
+            "path": path
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reading document: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
+
+
 
 @router.get("/analytics")
 async def get_document_analytics(db: Session = Depends(get_db)):
@@ -939,21 +1029,26 @@ async def get_queue_status(db: Session = Depends(get_db)):
 async def rag_retrieve(
     query: str = Query(..., description="Query string for RAG context retrieval"),
     max_chunks: int = Query(5, ge=1, le=20, description="Maximum number of chunks to retrieve"),
-    max_tokens: int = Query(2000, ge=100, le=8000, description="Maximum tokens for context"),
-    diversity: float = Query(0.3, ge=0.0, le=1.0, description="Diversity parameter (0=relevance, 1=diversity)"),
+    max_tokens: Optional[int] = Query(None, ge=100, le=8000, description="Maximum tokens (uses system_settings if not provided)"),
+    diversity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Diversity parameter (uses system_settings if not provided)"),
+    min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity (uses system_settings if not provided)"),
     db: Session = Depends(get_db)
 ):
     """
     Retrieve optimized RAG context for LLM augmentation
     
-    Uses Maximal Marginal Relevance (MMR) for diverse, relevant chunks.
-    Returns formatted context ready for LLM consumption.
+    Uses the enhanced RAGService with:
+    - Query enhancement (HyDE, decomposition)
+    - Reciprocal Rank Fusion for hybrid search
+    - Knapsack optimization for token budget
+    - MMR for diversity
     
     Args:
         query: Search query
         max_chunks: Maximum chunks to return (1-20)
-        max_tokens: Token budget for context (100-8000)
-        diversity: 0.0 = max relevance, 1.0 = max diversity
+        max_tokens: Token budget for context (100-8000), defaults to system_settings
+        diversity: 0.0 = max relevance, 1.0 = max diversity, defaults to system_settings
+        min_similarity: Minimum similarity threshold, defaults to system_settings
         
     Returns:
         {
@@ -967,213 +1062,61 @@ async def rag_retrieve(
     """
     try:
         import time
+        from typing import Optional
         start_time = time.time()
         
-        # Step 1: Get more candidates than needed for diversity selection
-        candidate_limit = max_chunks * 3
+        # Use the improved RAGService with all optimizations
+        from modules.rag import RAGService, RAGConfig
         
-        # Generate query embedding using centralized embedding manager
-        from core.llm import create_embedding_manager
+        # Create config - only override if explicitly provided
+        config_kwargs = {}
+        if max_tokens is not None:
+            config_kwargs['max_tokens'] = max_tokens
+        if diversity is not None:
+            config_kwargs['diversity'] = diversity
+        if min_similarity is not None:
+            config_kwargs['min_similarity'] = min_similarity
         
-        embedding_manager = create_embedding_manager()
-        query_embedding = await embedding_manager.generate_embedding(query)
-        
-        # Step 2: Semantic search for candidates
-        from sqlalchemy import text
-        
-        # Format embedding as PostgreSQL array string for pgvector
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
-        
-        search_query = text(f"""
-            SELECT 
-                dc.id,
-                dc.document_id,
-                dc.chunk_index,
-                dc.content,
-                dc.metadata,
-                dc.embedding,
-                d.filename,
-                d.file_type,
-                d.file_size,
-                d.upload_date,
-                1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE dc.embedding IS NOT NULL
-            ORDER BY dc.embedding <=> '{embedding_str}'::vector
-            LIMIT :limit
-        """)
-        
-        result = db.execute(
-            search_query,
-            {
-                "limit": candidate_limit
-            }
+        config = RAGConfig(
+            enable_query_enhancement=True,
+            enable_rrf_fusion=True,
+            enable_reranking=False,  # Disabled by default for speed
+            **config_kwargs
         )
         
-        candidates = result.fetchall()
-        
-        if not candidates:
-            return {
-                "query": query,
-                "chunks": [],
-                "context": "",
-                "total_tokens": 0,
-                "diversity_score": 0.0,
-                "execution_time_ms": int((time.time() - start_time) * 1000)
-            }
-        
-        # Step 3: Apply MMR for diversity
-        def parse_pgvector(embedding_str):
-            """Parse pgvector string format to Python list of floats"""
-            import json
-            import numpy as np
-            if isinstance(embedding_str, str):
-                # Remove brackets and split by comma
-                embedding_str = embedding_str.strip('[]')
-                return np.array([float(x) for x in embedding_str.split(',')])
-            elif isinstance(embedding_str, (list, np.ndarray)):
-                return np.array(embedding_str)
-            else:
-                raise ValueError(f"Unexpected embedding type: {type(embedding_str)}")
-        
-        def cosine_similarity(vec1, vec2):
-            """Calculate cosine similarity between two vectors"""
-            import numpy as np
-            # Parse embeddings if they're strings from pgvector
-            v1 = parse_pgvector(vec1)
-            v2 = parse_pgvector(vec2)
-            return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-        
-        def estimate_tokens(text: str) -> int:
-            """Rough token estimation (1 token ≈ 4 characters)"""
-            return len(text) // 4
-        
-        # MMR selection
-        selected_indices = []
-        candidate_list = list(candidates)
-        lambda_param = 1.0 - diversity  # High diversity = low lambda
-        
-        # Select first chunk (highest similarity)
-        selected_indices.append(0)
-        
-        # Greedily select remaining chunks using MMR
-        while len(selected_indices) < max_chunks and len(selected_indices) < len(candidate_list):
-            best_score = -float('inf')
-            best_idx = None
-            
-            for i, candidate in enumerate(candidate_list):
-                if i in selected_indices:
-                    continue
-                
-                # Relevance to query
-                query_sim = candidate.similarity
-                
-                # Maximum similarity to already selected chunks
-                max_selected_sim = 0.0
-                if len(selected_indices) > 0:
-                    for selected_idx in selected_indices:
-                        selected_embedding = candidate_list[selected_idx].embedding
-                        current_embedding = candidate.embedding
-                        sim = cosine_similarity(selected_embedding, current_embedding)
-                        max_selected_sim = max(max_selected_sim, sim)
-                
-                # MMR score
-                mmr_score = lambda_param * query_sim - (1 - lambda_param) * max_selected_sim
-                
-                if mmr_score > best_score:
-                    best_score = mmr_score
-                    best_idx = i
-            
-            if best_idx is not None:
-                selected_indices.append(best_idx)
-            else:
-                break
-        
-        # Step 4: Apply token budget
-        selected_chunks = []
-        total_tokens = 0
-        
-        for idx in selected_indices:
-            chunk = candidate_list[idx]
-            chunk_tokens = estimate_tokens(chunk.content)
-            
-            # Check if adding this chunk would exceed budget
-            if total_tokens + chunk_tokens > max_tokens:
-                # Try to truncate chunk to fit
-                remaining_tokens = max_tokens - total_tokens
-                if remaining_tokens > 50:  # Only include if we can fit at least 50 tokens
-                    truncated_content = chunk.content[:remaining_tokens * 4] + "..."
-                    chunk_tokens = estimate_tokens(truncated_content)
-                    selected_chunks.append({
-                        "chunk_id": chunk.id,
-                        "document_id": chunk.document_id,
-                        "chunk_index": chunk.chunk_index,
-                        "content": truncated_content,
-                        "similarity": float(chunk.similarity),
-                        "source": {
-                            "filename": chunk.filename,
-                            "file_type": chunk.file_type,
-                            "chunk_index": chunk.chunk_index
-                        },
-                        "tokens": chunk_tokens,
-                        "truncated": True
-                    })
-                    total_tokens += chunk_tokens
-                break
-            
-            selected_chunks.append({
-                "chunk_id": chunk.id,
-                "document_id": chunk.document_id,
-                "chunk_index": chunk.chunk_index,
-                "content": chunk.content,
-                "similarity": float(chunk.similarity),
-                "source": {
-                    "filename": chunk.filename,
-                    "file_type": chunk.file_type,
-                    "chunk_index": chunk.chunk_index
-                },
-                "tokens": chunk_tokens,
-                "truncated": False
-            })
-            total_tokens += chunk_tokens
-        
-        # Step 5: Calculate diversity score
-        diversity_score = 0.0
-        if len(selected_chunks) > 1:
-            similarities = []
-            for i in range(len(selected_indices)):
-                for j in range(i + 1, len(selected_indices)):
-                    emb1 = candidate_list[selected_indices[i]].embedding
-                    emb2 = candidate_list[selected_indices[j]].embedding
-                    sim = cosine_similarity(emb1, emb2)
-                    similarities.append(sim)
-            
-            if similarities:
-                avg_similarity = sum(similarities) / len(similarities)
-                diversity_score = 1.0 - avg_similarity  # Lower similarity = higher diversity
-        
-        # Step 6: Format context for LLM
-        context_parts = ["# Retrieved Context\n"]
-        context_parts.append(f"Query: {query}\n")
-        context_parts.append(f"Retrieved {len(selected_chunks)} relevant chunks:\n")
-        
-        for i, chunk in enumerate(selected_chunks, 1):
-            context_parts.append(f"\n## Source {i}: {chunk['source']['filename']} (Chunk {chunk['source']['chunk_index']})")
-            context_parts.append(f"Relevance: {chunk['similarity']:.1%}")
-            if chunk['truncated']:
-                context_parts.append("[Content truncated to fit token budget]")
-            context_parts.append(f"\n{chunk['content']}\n")
-            context_parts.append("---")
-        
-        formatted_context = "\n".join(context_parts)
+        rag_service = RAGService(config)
+        result = await rag_service.retrieve(
+            query=query,
+            max_chunks=max_chunks,
+            max_tokens=max_tokens,  # Pass through (can be None)
+            diversity=diversity  # Pass through (can be None)
+        )
         
         execution_time_ms = int((time.time() - start_time) * 1000)
         
-        logger.info(f"RAG retrieval: query='{query[:50]}', chunks={len(selected_chunks)}, tokens={total_tokens}, diversity={diversity_score:.2f}, time={execution_time_ms}ms")
+        # Format chunks for API response
+        formatted_chunks = []
+        for chunk in result.chunks:
+            formatted_chunks.append({
+                "chunk_id": chunk.get("id"),
+                "document_id": chunk.get("document_id"),
+                "chunk_index": chunk.get("chunk_index", 0),
+                "content": chunk.get("content", ""),
+                "similarity": chunk.get("similarity", 0.0),
+                "source": {
+                    "filename": chunk.get("source_file", chunk.get("filename", "unknown")),
+                    "file_type": chunk.get("file_type", "unknown"),
+                    "chunk_index": chunk.get("chunk_index", 0)
+                },
+                "tokens": chunk.get("token_count", len(chunk.get("content", "")) // 4),
+                "truncated": False
+            })
+        
+        logger.info(f"RAG retrieval: query='{query[:50]}', chunks={len(formatted_chunks)}, tokens={result.total_tokens}, diversity={result.diversity_score:.2f}, min_sim={min_similarity}, time={execution_time_ms}ms")
         
         # Track RAG query for analytics
         try:
+            from sqlalchemy import text
             tracking_query = text("""
                 INSERT INTO document_usage (event_type, query, results_count, execution_time_ms, metadata, timestamp)
                 VALUES ('rag_query', :query, :results_count, :execution_time_ms, :metadata, :timestamp)
@@ -1182,14 +1125,16 @@ async def rag_retrieve(
                 tracking_query,
                 {
                     "query": query,
-                    "results_count": len(selected_chunks),
+                    "results_count": len(formatted_chunks),
                     "execution_time_ms": execution_time_ms,
                     "metadata": json.dumps({
                         "max_chunks": max_chunks,
                         "max_tokens": max_tokens,
                         "diversity": diversity,
-                        "total_tokens": total_tokens,
-                        "diversity_score": round(diversity_score, 3)
+                        "min_similarity": min_similarity,
+                        "total_tokens": result.total_tokens,
+                        "diversity_score": round(result.diversity_score, 3),
+                        "information_gain": round(result.information_gain, 3)
                     }),
                     "timestamp": datetime.now()
                 }
@@ -1201,16 +1146,17 @@ async def rag_retrieve(
         
         return {
             "query": query,
-            "chunks": selected_chunks,
-            "context": formatted_context,
-            "total_tokens": total_tokens,
-            "diversity_score": round(diversity_score, 3),
+            "chunks": formatted_chunks,
+            "context": result.formatted_context,
+            "total_tokens": result.total_tokens,
+            "diversity_score": round(result.diversity_score, 3),
+            "information_gain": round(result.information_gain, 3),
             "execution_time_ms": execution_time_ms,
             "settings": {
                 "max_chunks": max_chunks,
-                "max_tokens": max_tokens,
-                "diversity": diversity,
-                "lambda": round(lambda_param, 2)
+                "max_tokens": config.max_tokens,  # Use actual config value
+                "diversity": config.diversity,     # Use actual config value
+                "min_similarity": config.min_similarity  # Use actual config value
             }
         }
         
