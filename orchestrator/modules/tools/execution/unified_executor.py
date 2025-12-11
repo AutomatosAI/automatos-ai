@@ -58,6 +58,7 @@ class UnifiedToolExecutor:
             
             # Database tools (natural language SQL)
             'query_database': self._execute_database_tool,
+            'smart_query_database': self._execute_smart_database_tool,
             
             # Multimodal search
             'search_multimodal': self._execute_multimodal_tool,
@@ -418,6 +419,128 @@ class UnifiedToolExecutor:
             return tool_result
         except Exception as e:
             logger.error(f"Direct DB query error: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_smart_database_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Execute smart database query using SmartNL2SQLAgent.
+        
+        Features:
+        - Query clarification (returns questions if query is ambiguous)
+        - Query rephrasing (improves vague queries)
+        - Result explanation (explains what the data means)
+        - Visualization suggestions (recommends chart types)
+        - Multi-turn conversation support
+        """
+        from core.llm import create_llm_manager
+        from modules.nl2sql import SmartNL2SQLAgent, get_schema_provider
+        from modules.tools.services.pandas_ai_service import get_pandasai_service
+        from sqlalchemy import text
+        
+        query = parameters.get('query', '')
+        skip_clarification = parameters.get('skip_clarification', False)
+        clarification_answers = parameters.get('clarification_answers')
+        database_name = parameters.get('database_name')
+        include_visualization = parameters.get('include_visualization', True)
+        
+        logger.info(f"🧠 Smart DB Query: {query[:50]}...")
+        
+        try:
+            # Get schema
+            schema_provider = get_schema_provider(self.db)
+            schema_metadata = schema_provider.get_schema_metadata()
+            
+            # Get LLM
+            llm_manager = create_llm_manager(service_name="nl2sql")
+            
+            # Create smart agent
+            agent = SmartNL2SQLAgent(
+                llm_provider=llm_manager,
+                schema_metadata=schema_metadata,
+                auto_clarify=not skip_clarification,
+                auto_rephrase=True,
+                auto_explain=True,
+                auto_visualize=include_visualization,
+            )
+            
+            # Define SQL executor - use fresh session to avoid transaction conflicts
+            async def execute_sql(sql: str):
+                from core.database.database import SessionLocal
+                session = SessionLocal()
+                try:
+                    result = session.execute(text(sql))
+                    columns = list(result.keys())
+                    rows = result.fetchall()
+                    data = []
+                    for row in rows[:1000]:
+                        row_dict = {}
+                        for i, col in enumerate(columns):
+                            val = row[i]
+                            if hasattr(val, 'isoformat'):
+                                val = val.isoformat()
+                            elif hasattr(val, '__float__'):
+                                val = float(val)
+                            row_dict[col] = val
+                        data.append(row_dict)
+                    return data
+                finally:
+                    session.close()
+            
+            # Execute smart query
+            result = await agent.query(
+                natural_language_query=query,
+                clarification_answers=clarification_answers,
+                skip_clarification=skip_clarification,
+                execute_sql=True,
+                db_executor=execute_sql,
+            )
+            
+            # Handle clarification needed
+            if result.get('status') == 'needs_clarification':
+                return {
+                    "success": True,
+                    "status": "needs_clarification",
+                    "clarifications": result.get('clarifications', []),
+                    "message": "Please provide more details to complete the query.",
+                    "original_query": query,
+                }
+            
+            # Add PandasAI insight if not already present
+            if result.get('data') and not result.get('pandas_ai'):
+                pandasai = get_pandasai_service()
+                if pandasai:
+                    insight = pandasai.generate_insight(query, result['data'], list(result['data'][0].keys()) if result['data'] else [])
+                    if insight:
+                        result['pandas_ai'] = insight
+            
+            # Debug: Log what we're returning
+            return_data = result.get('data', [])
+            logger.info(f"📊 Smart query returning {len(return_data)} rows")
+            if return_data:
+                logger.info(f"📊 Sample row: {return_data[0] if return_data else 'EMPTY'}")
+            
+            return {
+                "success": True,
+                "database": database_name or "automatos_main",
+                "sql": result.get('sql', ''),
+                "row_count": len(return_data),
+                "data": return_data,
+                "columns": list(return_data[0].keys()) if return_data else [],
+                "execution_time_ms": 0,
+                "explanation": result.get('explanation', ''),
+                "rephrased_query": result.get('rephrased_query'),
+                "visualization": result.get('visualization'),
+                "follow_up_questions": result.get('follow_up_questions', []),
+                "pandas_ai": result.get('pandas_ai'),
+            }
+            
+        except Exception as e:
+            logger.error(f"Smart DB query error: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
     
     async def _execute_multimodal_tool(

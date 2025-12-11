@@ -155,7 +155,7 @@ class AgentRegistry:
             
             executions = self.db.query(WorkflowExecution).filter(
                 WorkflowExecution.agent_id == agent_id,
-                WorkflowExecution.created_at >= thirty_days_ago
+                WorkflowExecution.started_at >= thirty_days_ago
             ).all()
             
             if not executions:

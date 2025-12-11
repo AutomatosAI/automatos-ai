@@ -213,7 +213,7 @@ Security Domain Context:
                 "SELECT * FROM workflow_executions WHERE status = 'running'",
                 "SELECT COUNT(*) FROM workflows WHERE created_at > NOW() - INTERVAL '7 days'",
                 "SELECT agent_id, AVG(performance_score) FROM agent_performance GROUP BY agent_id",
-                "SELECT * FROM workflow_executions ORDER BY created_at DESC LIMIT 10",
+                "SELECT * FROM workflow_executions ORDER BY started_at DESC LIMIT 10",
             ],
 
             'agent': [
@@ -259,7 +259,7 @@ Security Domain Context:
         """Fallback schema when database inspection fails"""
         return """
 PostgreSQL Database Schema (Fallback):
-- workflow_executions(id, workflow_id, status, created_at, updated_at, result)
+- workflow_executions(id, workflow_id, status, started_at, completed_at, error_message)
 - workflows(id, name, description, created_by, created_at, config)
 - agents(id, name, skills, status, created_at, performance_score)
 - agent_performance(agent_id, workflow_id, execution_time, success_rate, quality_score)
@@ -275,6 +275,83 @@ Common Relationships:
 - document_chunks.document_id -> knowledge_documents.id
 - tool_usage_logs.agent_id -> agents.id
 """
+
+    def get_schema_metadata(self) -> Dict[str, Any]:
+        """
+        Get schema metadata in structured format for SmartNL2SQLAgent.
+        
+        Returns:
+            Dict with 'tables' array containing table definitions
+        """
+        try:
+            inspector = inspect(self.db.bind)
+            tables = []
+            
+            for table_name in inspector.get_table_names():
+                columns = []
+                for col in inspector.get_columns(table_name):
+                    columns.append({
+                        'name': col['name'],
+                        'type': str(col['type']),
+                        'nullable': col.get('nullable', True),
+                        'primary_key': False,  # Will be updated below
+                    })
+                
+                # Mark primary keys
+                pk_constraint = inspector.get_pk_constraint(table_name)
+                pk_columns = pk_constraint.get('constrained_columns', []) if pk_constraint else []
+                for col in columns:
+                    if col['name'] in pk_columns:
+                        col['primary_key'] = True
+                
+                tables.append({
+                    'name': table_name,
+                    'columns': columns,
+                })
+            
+            # Get relationships
+            relationships = []
+            for table_name in inspector.get_table_names():
+                for fk in inspector.get_foreign_keys(table_name):
+                    relationships.append({
+                        'from_table': table_name,
+                        'from_column': fk['constrained_columns'][0] if fk['constrained_columns'] else '',
+                        'to_table': fk['referred_table'],
+                        'to_column': fk['referred_columns'][0] if fk['referred_columns'] else '',
+                        'type': 'foreign_key'
+                    })
+            
+            return {
+                'tables': tables,
+                'relationships': relationships,
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get schema metadata: {e}")
+            # Return minimal fallback
+            return {
+                'tables': [
+                    {'name': 'workflow_executions', 'columns': [
+                        {'name': 'id', 'type': 'INTEGER', 'primary_key': True},
+                        {'name': 'workflow_id', 'type': 'INTEGER'},
+                        {'name': 'status', 'type': 'VARCHAR'},
+                        {'name': 'started_at', 'type': 'TIMESTAMP'},
+                        {'name': 'completed_at', 'type': 'TIMESTAMP'},
+                    ]},
+                    {'name': 'chats', 'columns': [
+                        {'name': 'id', 'type': 'UUID', 'primary_key': True},
+                        {'name': 'user_id', 'type': 'INTEGER'},
+                        {'name': 'title', 'type': 'VARCHAR'},
+                        {'name': 'created_at', 'type': 'TIMESTAMP'},
+                    ]},
+                    {'name': 'agents', 'columns': [
+                        {'name': 'id', 'type': 'INTEGER', 'primary_key': True},
+                        {'name': 'name', 'type': 'VARCHAR'},
+                        {'name': 'status', 'type': 'VARCHAR'},
+                    ]},
+                ],
+                'relationships': [],
+            }
 
     def invalidate_cache(self):
         """Invalidate all caches (useful after schema changes)"""

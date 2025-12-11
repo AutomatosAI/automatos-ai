@@ -10,8 +10,24 @@ NO DUPLICATE IMPLEMENTATIONS - uses what's already built.
 """
 
 import logging
+import json
+import os
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+
+# Accurate token counting
+try:
+    import tiktoken
+    _encoding = tiktoken.encoding_for_model("gpt-4")
+except:
+    import tiktoken
+    _encoding = tiktoken.get_encoding("cl100k_base")
+
+def _count_tokens(text: str) -> int:
+    """Accurate token count using tiktoken"""
+    if not text:
+        return 0
+    return len(_encoding.encode(text))
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +44,72 @@ class RAGResult:
     information_gain: float = 0.0
 
 
+def _get_rag_setting_int(key: str, default: int) -> int:
+    """Get RAG setting from system_settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
+def _get_rag_setting_float(key: str, default: float) -> float:
+    """Get RAG setting from system_settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+            if setting and setting.value:
+                return float(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
 @dataclass
 class RAGConfig:
-    """Configuration for RAG service"""
-    chunk_size: int = 500
-    min_chunk_size: int = 100
-    max_chunk_size: int = 1500
-    max_tokens: int = 2000
-    diversity: float = 0.3
+    """Configuration for RAG service - reads from system_settings"""
+    chunk_size: int = None
+    min_chunk_size: int = None
+    max_chunk_size: int = None
+    max_tokens: int = None
+    diversity: float = None
+    min_similarity: float = None
+    
+    # Phase 2: Advanced retrieval options
+    enable_query_enhancement: bool = True
+    enable_rrf_fusion: bool = True
+    enable_reranking: bool = False
+    rrf_k: int = 60
+    
+    def __post_init__(self):
+        """Load from system_settings if not provided"""
+        if self.chunk_size is None:
+            self.chunk_size = _get_rag_setting_int("chunk_size", 500)
+        if self.min_chunk_size is None:
+            self.min_chunk_size = _get_rag_setting_int("min_chunk_size", 100)
+        if self.max_chunk_size is None:
+            self.max_chunk_size = _get_rag_setting_int("max_chunk_size", 1500)
+        if self.max_tokens is None:
+            self.max_tokens = _get_rag_setting_int("max_tokens", 2000)
+        if self.diversity is None:
+            self.diversity = _get_rag_setting_float("diversity_factor", 0.3)
+        if self.min_similarity is None:
+            self.min_similarity = _get_rag_setting_float("min_similarity", 0.5)
+        
+        logger.info(f"RAGConfig loaded: max_tokens={self.max_tokens}, diversity={self.diversity}, min_similarity={self.min_similarity}")
 
 
 class RAGService:
@@ -52,6 +126,8 @@ class RAGService:
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
+        self._query_enhancer = None
+        self._vector_store = None # Initialize here for consistency
         self._initialized = False
         
     def _ensure_initialized(self):
@@ -59,15 +135,40 @@ class RAGService:
         if self._initialized:
             return
             
-        # Import from modules.search
+        # Initialize components
+        self._context_optimizer = None
+        self._embedding_manager = None
+        self._vector_store = None  # NEW: Centralized vector store
+        
+        # Try to use existing ContextOptimizer from modules/search
         try:
             from modules.search import ContextOptimizer, ContextItem
             self._context_optimizer = ContextOptimizer()
-            self._ContextItem = ContextItem
+            self._ContextItem = ContextItem # Keep this for ContextOptimizer usage
             logger.info("✅ Using modules.search.ContextOptimizer (Knapsack, MMR, Entropy)")
-        except ImportError as e:
+        except Exception as e:
             logger.warning(f"ContextOptimizer not available: {e}")
-            self._context_optimizer = None
+        
+        # Lazy initialization of embedding manager
+        try:
+            from core.llm import create_embedding_manager
+            self._embedding_manager = create_embedding_manager()
+            logger.info(f"✅ Using {self._embedding_manager.get_provider_info()['provider']} embeddings")
+        except Exception as e:
+            logger.error(f"Failed to initialize embedding manager: {e}")
+        
+        # NEW: Initialize EnhancedVectorStore for centralized vector search
+        try:
+            from modules.search import EnhancedVectorStore
+            import os
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+            self._vector_store = EnhancedVectorStore(
+                database_url=db_url,
+                table_name="document_chunks"  # Use RAG's existing table
+            )
+            logger.info("✅ Using modules.search.EnhancedVectorStore for vector search")
+        except Exception as e:
+            logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
             
         try:
             from modules.rag.chunking import SemanticChunker, ChunkingStrategy
@@ -88,6 +189,15 @@ class RAGService:
             self._embedding_manager = create_embedding_manager()
         except Exception as e:
             logger.warning(f"Embedding manager not available: {e}")
+        
+        # Query enhancer for HyDE and decomposition
+        try:
+            from modules.rag.query_enhancer import create_query_enhancer
+            self._query_enhancer = create_query_enhancer()
+            logger.info("✅ Using QueryEnhancer (HyDE, decomposition, concept extraction)")
+        except ImportError as e:
+            logger.warning(f"QueryEnhancer not available: {e}")
+            self._query_enhancer = None
             
         self._initialized = True
         
@@ -103,17 +213,51 @@ class RAGService:
         Retrieve optimized RAG context using existing ContextOptimizer.
         
         Uses:
+        - Query Enhancement (HyDE, decomposition) for better recall
+        - Reciprocal Rank Fusion for hybrid search
         - Knapsack optimization for token budget
         - MMR for diversity
         - Information theory for quality
         """
         self._ensure_initialized()
         
-        max_tokens = max_tokens or self.config.max_tokens
+        # Calculate token budget to accommodate requested chunks
+        # Estimate ~500 tokens per chunk to ensure max_chunks can fit
+        if max_tokens is None:
+            estimated_tokens_per_chunk = 500
+            max_tokens = max(self.config.max_tokens, max_chunks * estimated_tokens_per_chunk)
+        
         diversity = diversity if diversity is not None else self.config.diversity
         
-        # Get candidates from database
-        candidates = await self._get_candidates(query, limit=max_chunks * 3)
+        # Phase 2: Enhance query with HyDE and decomposition
+        queries_to_search = [query]
+        if self.config.enable_query_enhancement and self._query_enhancer:
+            try:
+                enhanced = await self._query_enhancer.enhance_query(
+                    query,
+                    use_hyde=True,
+                    use_decomposition=True,
+                    use_expansion=True
+                )
+                queries_to_search = enhanced.get_all_queries()
+                logger.info(f"Enhanced query into {len(queries_to_search)} variations")
+            except Exception as e:
+                logger.warning(f"Query enhancement failed, using original: {e}")
+        
+        # Multi-query retrieval with RRF fusion
+        if len(queries_to_search) > 1 and self.config.enable_rrf_fusion:
+            candidates = await self._multi_query_retrieval_with_rrf(
+                queries_to_search,
+                limit_per_query=max_chunks * 2,
+                min_similarity=self.config.min_similarity
+            )
+        else:
+            # Single query retrieval
+            candidates = await self._get_candidates(
+                query, 
+                limit=max_chunks * 3,
+                min_similarity=self.config.min_similarity
+            )
         
         if not candidates:
             return RAGResult(
@@ -124,14 +268,108 @@ class RAGService:
                 query=query
             )
         
+        # Optional: Cross-encoder re-ranking for higher precision
+        if self.config.enable_reranking:
+            candidates = await self._rerank_with_cross_encoder(query, candidates)
+        
         # Use existing ContextOptimizer if available
         if self._context_optimizer:
             return await self._optimize_with_context_optimizer(
-                query, candidates, max_tokens, diversity
+                query, candidates, max_chunks, max_tokens, diversity
             )
         else:
             # Fallback to basic retrieval
             return self._basic_retrieval(query, candidates, max_chunks, max_tokens)
+    
+    async def _multi_query_retrieval_with_rrf(
+        self,
+        queries: List[str],
+        limit_per_query: int = 20,
+        min_similarity: float = 0.5
+    ) -> List[Dict]:
+        """
+        Perform multi-query retrieval with Reciprocal Rank Fusion.
+        
+        RRF score: sum(1 / (k + rank_i)) for each query where document appears
+        This is the standard approach from Context-Engineering research.
+        """
+        from collections import defaultdict
+        
+        # Collect results from each query variation
+        all_results = defaultdict(lambda: {"ranks": [], "doc": None})
+        
+        for query in queries[:5]:  # Max 5 query variations
+            try:
+                results = await self._get_candidates(
+                    query,
+                    limit=limit_per_query,
+                    min_similarity=min_similarity
+                )
+                
+                for rank, doc in enumerate(results):
+                    doc_id = doc.get("id", doc.get("content", "")[:100])
+                    all_results[doc_id]["ranks"].append(rank)
+                    all_results[doc_id]["doc"] = doc
+                    
+            except Exception as e:
+                logger.debug(f"Query variation failed: {e}")
+                continue
+        
+        # Calculate RRF scores
+        k = self.config.rrf_k  # Standard RRF constant (usually 60)
+        rrf_scored = []
+        
+        for doc_id, data in all_results.items():
+            if data["doc"]:
+                rrf_score = sum(1.0 / (k + rank) for rank in data["ranks"])
+                doc = data["doc"].copy()
+                doc["rrf_score"] = rrf_score
+                doc["query_count"] = len(data["ranks"])  # Appears in N queries
+                rrf_scored.append(doc)
+        
+        # Sort by RRF score (higher is better)
+        rrf_scored.sort(key=lambda x: x["rrf_score"], reverse=True)
+        
+        logger.info(f"RRF fusion: {len(rrf_scored)} unique docs from {len(queries)} queries")
+        return rrf_scored
+    
+    async def _rerank_with_cross_encoder(
+        self,
+        query: str,
+        candidates: List[Dict],
+        top_k: int = 10
+    ) -> List[Dict]:
+        """
+        Re-rank candidates using cross-encoder for higher precision.
+        
+        Cross-encoders are more accurate than bi-encoders but slower.
+        Only use for final re-ranking of top candidates.
+        """
+        try:
+            # Try to use sentence-transformers cross-encoder
+            from sentence_transformers import CrossEncoder
+            
+            model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            
+            # Score each candidate
+            pairs = [(query, c.get("content", "")[:512]) for c in candidates[:20]]
+            scores = model.predict(pairs)
+            
+            # Add scores and re-sort
+            for i, score in enumerate(scores):
+                candidates[i]["rerank_score"] = float(score)
+            
+            candidates.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
+            logger.info("Cross-encoder re-ranking applied")
+            
+            return candidates[:top_k]
+            
+        except ImportError:
+            logger.debug("Cross-encoder not available, skipping re-ranking")
+            return candidates
+        except Exception as e:
+            logger.warning(f"Re-ranking failed: {e}")
+            return candidates
     
     # Alias for backward compatibility (used by agent_platform_tools)
     async def retrieve_context(
@@ -151,57 +389,209 @@ class RAGService:
             diversity=0.3
         )
     
+    
     async def _optimize_with_context_optimizer(
         self,
         query: str,
         candidates: List[Dict],
+        max_chunks: int,
         max_tokens: int,
         diversity: float
     ) -> RAGResult:
-        """Use existing ContextOptimizer for mathematical optimization"""
+        """Use REAL 0/1 knapsack DP algorithm with content quality and source diversity"""
         
-        # Convert to ContextItems
+        logger.info(f"🔍 Starting optimization: {len(candidates)} candidates, max_chunks={max_chunks}, max_tokens={max_tokens}")
+        
+        # Convert to ContextItems with accurate token counting
         context_items = []
-        for c in candidates:
+        source_counts = {}
+        
+        for i, c in enumerate(candidates):
+            content = c.get("content", "")
+            source = c.get("source_file", c.get("filename", "unknown"))
+            
+            # Calculate content quality
+            quality_score = self._calculate_content_quality(content)
+            
+            # Track source distribution
+            source_counts[source] = source_counts.get(source, 0) + 1
+            
+            # Apply source diversity penalty (prefer diverse sources)
+            source_penalty = 1.0
+            if source_counts[source] > 1:
+                source_penalty = 0.7 ** (source_counts[source] - 1)  # Exponential penalty
+            
+            # Combine relevance, quality, and diversity
+            base_relevance = c.get("similarity", 0.5)
+            adjusted_score = base_relevance * quality_score * source_penalty
+            
             item = self._ContextItem(
-                content=c.get("content", ""),
-                source=c.get("source_file", c.get("filename", "unknown")),
+                content=content,
+                source=source,
                 context_type="documentation",
-                relevance_score=c.get("similarity", 0.5),
-                token_count=len(c.get("content", "")) // 4
+                relevance_score=adjusted_score,  # Use quality-adjusted score
+                token_count=_count_tokens(content)
             )
             context_items.append(item)
+            
+            # Log first 3 candidates for debugging
+            if i < 3:
+                preview = content[:100].replace('\n', ' ')
+                logger.info(f"  Candidate {i+1}: base={base_relevance:.3f}, quality={quality_score:.2f}, source_penalty={source_penalty:.2f}, final={adjusted_score:.3f}, tokens={item.token_count}, source={source}, preview='{preview}...'")
         
-        # Use existing optimize_context method (has Knapsack + MMR)
-        objective = "maximize_diversity" if diversity > 0.5 else "maximize_information"
+        # Calculate information value for each chunk
+        values = [item.relevance_score for item in context_items]
+        weights = [item.token_count for item in context_items]
         
-        optimized = await self._context_optimizer.optimize_context(
-            available_context=context_items,
-            max_tokens=max_tokens,
-            objective=objective
-        )
+        logger.info(f"📊 Value range: {min(values):.3f} - {max(values):.3f}, Weight range: {min(weights)} - {max(weights)} tokens")
+        
+        # Apply REAL 0/1 Knapsack Dynamic Programming
+        logger.info(f"🎯 Running 0/1 Knapsack DP algorithm with quality-adjusted scores...")
+        selected_indices = self._knapsack_dp(values, weights, max_tokens, max_chunks)
+        
+        logger.info(f"✅ Knapsack selected {len(selected_indices)} items: {selected_indices}")
+        
+        # Get selected contexts
+        selected_contexts = [context_items[i] for i in selected_indices]
+        
+        # Log selected chunks
+        for i, idx in enumerate(selected_indices):
+            ctx = context_items[idx]
+            preview = ctx.content[:80].replace('\n', ' ')
+            logger.info(f"  Selected {i+1}: idx={idx}, score={ctx.relevance_score:.3f}, tokens={ctx.token_count}, source={ctx.source}, preview='{preview}...'")
         
         # Format results
         chunks = []
-        for ctx in optimized.contexts:
+        total_tokens = 0
+        final_source_counts = {}
+        for ctx in selected_contexts:
             chunks.append({
                 "content": ctx.content,
                 "source_file": ctx.source,
                 "similarity": ctx.relevance_score,
                 "tokens": ctx.token_count
             })
+            total_tokens += ctx.token_count
+            final_source_counts[ctx.source] = final_source_counts.get(ctx.source, 0) + 1
         
+        # Calculate diversity score
+        diversity_score = len(final_source_counts) / len(chunks) if chunks else 0.0
+        
+        logger.info(f"📈 Results: {len(chunks)} chunks, {total_tokens} tokens, source_diversity={diversity_score:.2f}")
+        logger.info(f"📁 Source distribution: {final_source_counts}")
+        
+        # Format context
         formatted_context = self._format_context(chunks, query)
+        
+        info_gain = sum(values[i] for i in selected_indices) / len(values) if values else 0.0
+        logger.info(f"💡 Information gain: {info_gain:.3f}")
         
         return RAGResult(
             chunks=chunks,
             formatted_context=formatted_context,
-            total_tokens=optimized.total_tokens,
+            total_tokens=total_tokens,
             sources=list(set(c["source_file"] for c in chunks)),
             query=query,
-            diversity_score=optimized.diversity_score,
-            information_gain=optimized.information_gain
+            diversity_score=diversity_score,
+            information_gain=info_gain
         )
+    
+    def _calculate_content_quality(self, text: str) -> float:
+        """
+        Calculate content quality score (0.0 - 1.0)
+        Penalizes ASCII art and prefers actual prose
+        """
+        if not text or len(text) < 20:
+            return 0.3  # Too short
+        
+        # Detect ASCII art characters
+        ascii_art_chars = '│─┌└┐┘├┤┬┴┼▼▲►◄║═╔╗╚╝╠╣╦╩╬'
+        special_char_count = sum(1 for c in text if c in ascii_art_chars)
+        ascii_art_ratio = special_char_count / len(text)
+        
+        # Heavy penalty for ASCII art
+        if ascii_art_ratio > 0.15:  # More than 15% special chars
+            logger.debug(f"  ⚠️ High ASCII art ratio: {ascii_art_ratio:.2%}")
+            return 0.2  # Very low quality
+        elif ascii_art_ratio > 0.05:  # More than 5%
+            return 0.5  # Medium quality
+        
+        # Check for actual prose content
+        words = text.split()
+        word_count = len(words)
+        
+        if word_count < 10:
+            return 0.4  # Too few words
+        
+        # Prefer longer, more substantive content
+        if word_count > 50:
+            return 1.0  # Good quality prose
+        elif word_count > 20:
+            return 0.8  # Decent quality
+        else:
+            return 0.6  # Minimal quality
+    
+    
+    def _knapsack_dp(
+        self,
+        values: List[float],
+        weights: List[int],
+        capacity: int,
+        max_items: int
+    ) -> List[int]:
+        """
+        REAL 0/1 Knapsack with Dynamic Programming
+        
+        Finds optimal subset of items that:
+        1. Maximizes total value
+        2. Stays within weight capacity
+        3. Respects max_items constraint
+        
+        Time: O(n * capacity * max_items)
+        Space: O(n * capacity * max_items)
+        """
+        n = len(values)
+        if n == 0 or capacity <= 0 or max_items <= 0:
+            logger.warning(f"⚠️ Knapsack: invalid params n={n}, capacity={capacity}, max_items={max_items}")
+            return []
+        
+        logger.info(f"🎒 Knapsack DP: n={n} items, capacity={capacity} tokens, max_items={max_items}")
+        
+        # DP table: dp[i][w][k] = max value using first i items, weight w, k items selected
+        # For memory efficiency, use 2D table and track item count separately
+        dp = [[0.0 for _ in range(capacity + 1)] for _ in range(n + 1)]
+        item_count = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
+        
+        # Build DP table
+        for i in range(1, n + 1):
+            for w in range(capacity + 1):
+                # Option 1: Don't include item i-1
+                dp[i][w] = dp[i-1][w]
+                item_count[i][w] = item_count[i-1][w]
+                
+                # Option 2: Include item i-1 (if it fits and we haven't hit max_items)
+                if weights[i-1] <= w and item_count[i-1][w - weights[i-1]] < max_items:
+                    value_with_item = dp[i-1][w - weights[i-1]] + values[i-1]
+                    
+                    if value_with_item > dp[i][w]:
+                        dp[i][w] = value_with_item
+                        item_count[i][w] = item_count[i-1][w - weights[i-1]] + 1
+        
+        # Backtrack to find selected items
+        selected = []
+        w = capacity
+        for i in range(n, 0, -1):
+            # Check if item i-1 was included
+            if dp[i][w] != dp[i-1][w]:
+                selected.append(i-1)
+                w -= weights[i-1]
+        
+        final_value = dp[n][capacity]
+        final_weight = sum(weights[i] for i in selected)
+        logger.info(f"✅ Knapsack result: {len(selected)} items, total_value={final_value:.3f}, total_weight={final_weight} tokens")
+        
+        return list(reversed(selected))
+    
     
     def _basic_retrieval(
         self,
@@ -223,11 +613,12 @@ class RAGService:
         total_tokens = 0
         
         for c in sorted_candidates:
-            chunk_tokens = len(c.get("content", "")) // 4
+            content = c.get("content", "")
+            chunk_tokens = _count_tokens(content)  # Use tiktoken for accuracy
             if total_tokens + chunk_tokens > max_tokens:
                 break
             chunks.append({
-                "content": c.get("content", ""),
+                "content": content,
                 "source_file": c.get("source_file", c.get("filename", "unknown")),
                 "similarity": c.get("similarity", 0),
                 "tokens": chunk_tokens
@@ -244,50 +635,153 @@ class RAGService:
             query=query
         )
     
-    async def _get_candidates(self, query: str, limit: int = 20) -> List[Dict]:
-        """Get candidate chunks from database"""
+    async def _get_candidates(self, query: str, limit: int = 20, min_similarity: float = 0.5) -> List[Dict]:
+        """
+        Get candidate chunks from database using centralized EnhancedVectorStore.
         
+        MIGRATED: Now uses modules.search.EnhancedVectorStore for consistent vector search.
+        Old SQL-based implementation kept below for rollback if needed.
+        """
         if not self._embedding_manager:
             return []
-            
+        
         try:
-            import psycopg2
-            from psycopg2.extras import RealDictCursor
-            from core.database.database import get_database_url
-            
             # Generate query embedding
             query_embedding = await self._embedding_manager.generate_embedding(query)
+            
+            # Use centralized EnhancedVectorStore if available
+            if self._vector_store:
+                try:
+                    from modules.search import SearchMode, RankingStrategy
+                    
+                    # Initialize vector store if needed
+                    if not self._vector_store.pool:
+                        await self._vector_store.initialize()
+                    
+                    logger.info(f"🔎 Using EnhancedVectorStore: min_similarity={min_similarity}, limit={limit}")
+                    
+                    # Perform search using centralized vector store
+                    search_results = await self._vector_store.search(
+                        query_embedding=query_embedding,
+                        mode=SearchMode.VECTOR_ONLY,  # Pure vector search for RAG
+                        ranking_strategy=RankingStrategy.SIMILARITY,
+                        limit=limit,
+                        query_text=query
+                    )
+                    
+                    # Convert SearchResult objects to RAG's expected format
+                    candidates = []
+                    source_file_counts = {}
+                    similarity_scores = []
+                    
+                    for result in search_results:
+                        doc = result.document
+                        similarity = result.similarity_score
+                        
+                        # Filter by minimum similarity
+                        if similarity < min_similarity:
+                            continue
+                        
+                        # Extract source file from metadata or source field
+                        source_file = doc.metadata.get('filename', doc.source or 'unknown')
+                        
+                        # Track source distribution
+                        source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
+                        similarity_scores.append(similarity)
+                        
+                        candidates.append({
+                            "id": doc.id,
+                            "content": doc.content,
+                            "source_file": source_file,
+                            "document_id": doc.metadata.get('document_id', doc.id),
+                            "file_type": doc.metadata.get('file_type', ''),
+                            "similarity": similarity,
+                            "metadata": doc.metadata,
+                            "parent_content": None,
+                            "headers": {}
+                        })
+                    
+                    logger.info(f"📁 Candidate sources: {source_file_counts}")
+                    if similarity_scores:
+                        logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
+                    logger.info(f"✅ Retrieved {len(candidates)} candidates using EnhancedVectorStore")
+                    
+                    return candidates
+                    
+                except Exception as e:
+                    logger.warning(f"EnhancedVectorStore search failed, falling back to SQL: {e}")
+                    # Fall through to SQL fallback below
+            
+            # FALLBACK: Original SQL-based implementation (kept for rollback)
+            logger.info("Using fallback SQL-based vector search")
             embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
             
-            conn = psycopg2.connect(get_database_url())
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            import asyncpg
+            import os
             
-            cursor.execute(f"""
-                SELECT 
-                    dc.id,
-                    dc.content,
-                    dc.parent_content,
-                    dc.headers,
-                    dc.metadata,
-                    d.filename as source_file,
-                    d.id as document_id,
-                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
-                FROM document_chunks dc
-                JOIN documents d ON d.id = dc.document_id
-                WHERE dc.embedding IS NOT NULL
-                    AND d.status = 'completed'
-                ORDER BY dc.embedding <=> '{embedding_str}'::vector
-                LIMIT %s
-            """, (limit,))
+            db_url = os.getenv("DATABASE_URL", "")
+            if not db_url:
+                db_url = "postgresql://postgres:postgres@localhost:5432/automatos"
             
-            results = cursor.fetchall()
-            cursor.close()
-            conn.close()
+            conn = await asyncpg.connect(db_url)
             
-            return [dict(r) for r in results]
+            try:
+                logger.info(f"🔎 Executing SQL vector similarity search: min_similarity={min_similarity}, limit={limit}")
+                results = await conn.fetch("""
+                    SELECT 
+                        dc.id,
+                        dc.content,
+                        d.filename as source_file,
+                        d.id as document_id,
+                        d.file_type,
+                        1 - (dc.embedding <=> $1::vector) as similarity,
+                        dc.metadata
+                    FROM document_chunks dc
+                    JOIN documents d ON dc.document_id = d.id
+                    WHERE 1 - (dc.embedding <=> $1::vector) >= $2
+                    ORDER BY dc.embedding <=> $1::vector
+                    LIMIT $3
+                """, embedding_str, min_similarity, limit)
+                
+                logger.info(f"📊 Database returned {len(results)} results")
+                
+                candidates = []
+                source_file_counts = {}
+                similarity_scores = []
+                
+                for r in results:
+                    source_file = r["source_file"]
+                    similarity = r["similarity"]
+                    
+                    source_file_counts[source_file] = source_file_counts.get(source_file, 0) + 1
+                    similarity_scores.append(similarity)
+                    
+                    candidates.append({
+                        "id": r["id"],
+                        "content": r["content"],
+                        "source_file": source_file,
+                        "document_id": r["document_id"],
+                        "file_type": r["file_type"],
+                        "similarity": similarity,
+                        "metadata": json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {}),
+                        "parent_content": None,
+                        "headers": {}
+                    })
+                
+                logger.info(f"📁 Candidate sources: {source_file_counts}")
+                if similarity_scores:
+                    logger.info(f"📈 Similarity range: {min(similarity_scores):.3f} - {max(similarity_scores):.3f}")
+                logger.info(f"✅ Retrieved {len(candidates)} candidates with SQL fallback")
+                
+                return candidates
+                
+            finally:
+                await conn.close()
             
         except Exception as e:
             logger.error(f"Error getting candidates: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _format_context(self, chunks: List[Dict], query: str) -> str:

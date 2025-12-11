@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
 from modules.codegraph import CodeGraphService
-from modules.tools.formatting.result_formatter import ToolResultFormatter
+# LAZY IMPORT: ToolResultFormatter imported inside methods to avoid circular dependency
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,9 @@ class AgentPlatformTools:
         Returns:
             Tool execution results
         """
-        
+        # Lazy import to avoid circular dependency at module import time
+        from modules.tools.formatting.result_formatter import ToolResultFormatter
+
         self.logger.info(f"🔧 Agent {agent_id} calling tool: {tool_name}")
         self.logger.info(f"  Parameters: {parameters}")
         
@@ -272,6 +274,9 @@ class AgentPlatformTools:
         """
         if not tool_results:
             return ""
+
+        # Lazy import to avoid circular dependency at module import time
+        from modules.tools.formatting.result_formatter import ToolResultFormatter
         
         context_parts = ["## Research Results from Your Tool Calls:", ""]
         

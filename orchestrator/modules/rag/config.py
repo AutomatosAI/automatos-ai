@@ -29,6 +29,44 @@ def _get_system_dimension() -> int:
     return 1024  # Fallback if DB unavailable
 
 
+def _get_system_setting_int(key: str, default: int) -> int:
+    """Get integer setting from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == key
+            ).first()
+            if setting and setting.value:
+                return int(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
+def _get_system_setting_float(key: str, default: float) -> float:
+    """Get float setting from system settings"""
+    try:
+        from core.database.database import SessionLocal
+        from core.models.system_settings import SystemSetting
+        db = SessionLocal()
+        try:
+            setting = db.query(SystemSetting).filter(
+                SystemSetting.key == key
+            ).first()
+            if setting and setting.value:
+                return float(setting.value)
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return default
+
+
 class ChunkingStrategy(Enum):
     """Available chunking strategies"""
     FIXED_SIZE = "fixed_size"
@@ -40,11 +78,11 @@ class ChunkingStrategy(Enum):
 
 @dataclass
 class ChunkingConfig:
-    """Configuration for chunking"""
+    """Configuration for chunking - reads from system settings"""
     strategy: ChunkingStrategy = ChunkingStrategy.ADAPTIVE
-    target_size: int = 500
-    min_size: int = 100
-    max_size: int = 1500
+    target_size: int = field(default_factory=lambda: _get_system_setting_int("chunk_size", 500))
+    min_size: int = field(default_factory=lambda: _get_system_setting_int("min_chunk_size", 100))
+    max_size: int = field(default_factory=lambda: _get_system_setting_int("max_chunk_size", 1500))
     overlap_ratio: float = 0.1
     preserve_sentences: bool = True
     preserve_paragraphs: bool = True
@@ -62,11 +100,11 @@ class EmbeddingConfig:
 
 @dataclass
 class RetrievalConfig:
-    """Configuration for retrieval"""
-    default_top_k: int = 8
-    max_tokens: int = 2000
-    min_similarity: float = 0.5
-    diversity_factor: float = 0.3
+    """Configuration for retrieval - reads from system settings"""
+    default_top_k: int = field(default_factory=lambda: _get_system_setting_int("rag_default_top_k", 8))
+    max_tokens: int = field(default_factory=lambda: _get_system_setting_int("max_tokens", 2000))
+    min_similarity: float = field(default_factory=lambda: _get_system_setting_float("min_similarity", 0.5))
+    diversity_factor: float = field(default_factory=lambda: _get_system_setting_float("diversity_factor", 0.3))
     rerank: bool = False
     rerank_model: Optional[str] = None
 

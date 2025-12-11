@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from modules.tools import ToolRegistry, ToolCategory, SecurityLevel
+from modules.tools.registry.tool_registry import ToolSpec, ToolParameter
 from modules.tools.services.tool_capability_mapper import ToolCapabilityMapper
 from core.models.database_knowledge import DatabaseKnowledgeSource
 
@@ -240,13 +241,32 @@ class DatabaseToolIntegration:
         Register tool with the ToolRegistry from PRD-17.
         """
         try:
-            # Add to ToolRegistry
-            self.tool_registry.register_tool(
+            # Convert parameters dict to ToolParameter list
+            params = []
+            for param_name, param_def in tool_def.get("parameters", {}).items():
+                params.append(ToolParameter(
+                    name=param_name,
+                    type=param_def.get("type", "string"),
+                    description=param_def.get("description", ""),
+                    required=param_def.get("required", False),
+                    default=param_def.get("default"),
+                    enum=param_def.get("enum")
+                ))
+            
+            # Create ToolSpec
+            tool_spec = ToolSpec(
                 name=tool_def["name"],
                 category=tool_def["category"],
-                executor=self._create_tool_executor(tool_def, source),
-                metadata=tool_def
+                description=tool_def.get("description", ""),
+                executor_class="DatabaseToolIntegration",
+                executor_method=f"execute_{tool_def['name']}",
+                parameters=params,
+                security_level=tool_def.get("security_level", SecurityLevel.SAFE),
+                metadata=tool_def.get("metadata", {})
             )
+            
+            # Add to ToolRegistry
+            self.tool_registry.register_tool(tool_spec)
             
             logger.debug(f"Registered tool '{tool_def['name']}' with ToolRegistry")
             
@@ -326,18 +346,26 @@ class DatabaseToolIntegration:
         ]
         
         # Update mappings in ToolCapabilityMapper
+        # Uses the correct signature: task_type, required_categories, optional_categories, specific_tools, confidence
         for task_type in database_task_types:
-            self.capability_mapper.add_custom_mapping(
-                task_type=task_type,
-                tool_names=database_tool_names,
-                source=f"database_{source.id}"
-            )
+            try:
+                self.capability_mapper.add_custom_mapping(
+                    task_type=task_type,
+                    required_categories=["database"],
+                    optional_categories=None,
+                    specific_tools=database_tool_names,
+                    confidence=0.9
+                )
+            except Exception as e:
+                logger.warning(f"Could not add task mapping for {task_type}: {e}")
         
         logger.info(f"Updated task mappings for {len(database_task_types)} task types")
     
     def remove_database_tools(self, source_id: int, source_name: str) -> int:
         """
         Remove tools when a database source is deleted.
+        Note: ToolRegistry doesn't support unregister yet - tools will be orphaned
+        but won't cause issues since source is gone.
         """
         tool_names = [
             f"query_{self._sanitize_name(source_name)}_database",
@@ -347,15 +375,13 @@ class DatabaseToolIntegration:
         
         removed = 0
         for tool_name in tool_names:
-            if self.tool_registry.unregister_tool(tool_name):
+            # Remove from registry if it exists
+            if tool_name in self.tool_registry.tools:
+                del self.tool_registry.tools[tool_name]
                 removed += 1
                 logger.debug(f"Removed tool '{tool_name}'")
         
-        # Also remove from task mappings
-        self.capability_mapper.remove_custom_mappings(
-            source=f"database_{source_id}"
-        )
-        
+        # Task mappings are ephemeral - will be rebuilt on next agent task
         logger.info(f"Removed {removed} tools for database source {source_id}")
         return removed
     

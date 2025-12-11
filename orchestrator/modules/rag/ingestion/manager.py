@@ -410,9 +410,21 @@ class DocumentManager:
             if filename is None:
                 filename = os.path.basename(file_path)
             
-            file_size = os.path.getsize(file_path)
-            file_hash = self._calculate_file_hash(file_path)
-            file_type = self.processor.detect_file_type(file_path)
+            # NEW: Copy file to persistent storage
+            storage_dir = "/var/automatos/documents"
+            os.makedirs(storage_dir, exist_ok=True)
+            
+            persistent_path = os.path.join(storage_dir, filename)
+            
+            # Copy file if not already in storage
+            if os.path.abspath(file_path) != os.path.abspath(persistent_path):
+                import shutil
+                shutil.copy2(file_path, persistent_path)
+                logger.info(f"Copied document to {persistent_path}")
+            
+            file_size = os.path.getsize(persistent_path)
+            file_hash = self._calculate_file_hash(persistent_path)
+            file_type = self.processor.detect_file_type(persistent_path)
             
             # Check if document already exists
             conn = psycopg2.connect(**self.db_config)
@@ -452,8 +464,8 @@ class DocumentManager:
             document_id = cursor.fetchone()[0]
             conn.commit()
             
-            # Process document asynchronously
-            await self._process_document(document_id, file_path, file_type)
+            # Process document asynchronously (use persistent path)
+            await self._process_document(document_id, persistent_path, file_type)
             
             cursor.close()
             conn.close()
@@ -674,10 +686,11 @@ class DocumentManager:
                 logger.warning(f"Multimodal processing encountered errors for document {document_id}: {e}")
                 # Continue processing even if multimodal extraction fails
             
-            # Create chunks
+            # Create chunks with file_path metadata
             chunks = self.processor.chunk_document(text, file_type, {
                 'document_id': document_id,
-                'source_file': os.path.basename(file_path)
+                'source_file': os.path.basename(file_path),
+                'file_path': file_path  # NEW: Add full path for downloads
             })
             
             # Generate embeddings and save chunks

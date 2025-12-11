@@ -140,6 +140,23 @@ export function useDatabaseKnowledge() {
     }
   }
 
+  // Delete a database source
+  const deleteSource = async (sourceId: number) => {
+    setLoading(true)
+    try {
+      await apiClient.request(`/api/knowledge/sources/database/${sourceId}`, {
+        method: 'DELETE',
+      })
+      toast.success('Database source deleted')
+      await fetchSources()
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete database source')
+      toast.error(err.message || 'Failed to delete database source')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Get schema metadata
   const getSchemaMetadata = async (sourceId: number) => {
     try {
@@ -251,6 +268,7 @@ export function useDatabaseKnowledge() {
     // Actions
     fetchSources,
     createSource,
+    deleteSource,
     executeQuery,
     syncSchema,
     getSchemaMetadata,

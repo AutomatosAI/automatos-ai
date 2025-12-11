@@ -106,9 +106,11 @@ export function DocumentManagement() {
     templates,
     loading: dbLoading,
     createSource,
+    deleteSource,
     executeQuery,
     syncSchema,
-    getCacheStats 
+    getCacheStats,
+    fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
   
   // Type the documents array properly
@@ -620,6 +622,18 @@ export function DocumentManagement() {
                           >
                             Sync Schema
                           </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                            onClick={() => {
+                              if (window.confirm(`Delete database source "${source.name}"? This cannot be undone.`)) {
+                                deleteSource(source.id)
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -642,6 +656,7 @@ export function DocumentManagement() {
                 <DatabaseQueryExplorer 
                   selectedSource={databaseSources?.[0]}
                   sources={databaseSources || []}
+                  onSourceDeleted={refreshDatabaseSources}
                 />
               </TabsContent>
               

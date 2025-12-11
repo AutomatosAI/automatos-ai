@@ -248,13 +248,80 @@ class ToolResultFormatter:
         frontend_data = {}
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            frontend_data['documents'] = standardized['results']
+            # Group documents by source file
+            docs_by_source = {}
+            for doc in standardized['results']:
+                source = doc.get('filename', doc.get('source', 'Unknown'))
+                content = doc.get('content', '')
+                excerpt = doc.get('excerpt', '')
+                similarity = doc.get('similarity', 0.0)
+                
+                # Use the source (filename) directly - this is the actual file on disk
+                # Build correct path
+                file_path = f"/var/automatos/documents/{source}"
+                
+                if source not in docs_by_source:
+                    docs_by_source[source] = {
+                        'source': source,
+                        'file_path': file_path,
+                        'chunks': [],
+                        'max_similarity': 0.0,
+                        'title': source.replace('.md', '').replace('.pdf', '').replace('-', ' ').replace('_', ' ').title()
+                    }
+                
+                docs_by_source[source]['chunks'].append({
+                    'content': content,
+                    'excerpt': excerpt
+                })
+                docs_by_source[source]['max_similarity'] = max(
+                    docs_by_source[source]['max_similarity'],
+                    similarity
+                )
+            
+            # Sort by relevance and convert to list
+            grouped_docs = sorted(
+                docs_by_source.values(),
+                key=lambda d: d['max_similarity'],
+                reverse=True
+            )
+            
+            # Format for frontend display
+            frontend_data['documents'] = [
+                {
+                    'filename': doc['source'],
+                    'title': doc['title'],
+                    'file_path': doc['file_path'],
+                    'relevance': int(doc['max_similarity'] * 100),
+                    'chunk_count': len(doc['chunks']),
+                    'preview': doc['chunks'][0]['excerpt'] if doc['chunks'] else '',
+                    'download_url': f"/api/documents/download?path={doc['file_path']}",
+                    # NEW: Add full content for artifact viewer
+                    'full_content': '\n\n'.join([chunk['content'] for chunk in doc['chunks']])
+                }
+                for doc in grouped_docs
+            ]
         
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
         
         elif tool_name == 'query_database':
-            frontend_data['database_results'] = standardized
+            # Frontend expects database_results as an array with pandas_ai inside
+            db_result = {
+                'database': result.get('database', 'Database'),
+                'sql': result.get('sql', ''),
+                'row_count': result.get('row_count', 0),
+                'execution_time_ms': result.get('execution_time_ms', 0),
+                'data': result.get('data', []),
+                'columns': result.get('columns', []),
+            }
+            
+            # Include PandasAI visualization inside the result
+            pandas_ai = result.get('pandas_ai', {})
+            if pandas_ai:
+                db_result['pandas_ai'] = pandas_ai
+            
+            # Frontend expects an array of results
+            frontend_data['database_results'] = [db_result]
         
         return frontend_data
     
@@ -288,10 +355,21 @@ class ToolResultFormatter:
                 summary_parts.append(f"```{code.get('language', 'python')}\n{code.get('code', '')[:400]}\n```")
         
         elif tool_name == 'query_database':
-            summary_parts.append(f"\n🗄️ SQL: {standardized.get('sql', '')[:200]}")
-            summary_parts.append(f"Rows: {standardized.get('row_count', 0)}")
-            data_preview = standardized.get('data', [])[:3]
-            summary_parts.append(f"Data preview: {json.dumps(data_preview, default=str)[:500]}")
+            summary_parts.append(f"\n🗄️ SQL: {standardized.get('sql', '')[:300]}")
+            summary_parts.append(f"Total Rows: {standardized.get('row_count', 0)}")
+            
+            # Include ALL data (already limited at query level) - don't truncate here
+            all_data = standardized.get('data', [])
+            if all_data:
+                summary_parts.append(f"Complete data ({len(all_data)} rows):")
+                summary_parts.append(json.dumps(all_data, default=str, indent=2)[:2000])
+            
+            # Include PandasAI insight if available
+            pandas_insight = standardized.get('pandas_ai', {})
+            if pandas_insight:
+                summary_parts.append(f"\n📊 AI Analysis: {pandas_insight.get('summary', '')}")
+                if pandas_insight.get('charts'):
+                    summary_parts.append("(Chart generated - see visualization)")
         
         full_summary = "\n".join(summary_parts)
         

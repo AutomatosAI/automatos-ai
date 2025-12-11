@@ -10,6 +10,16 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Search,
   Play,
   Database,
@@ -24,7 +34,9 @@ import {
   Maximize2,
   History,
   Send,
-  FileDown
+  FileDown,
+  Trash2,
+  RefreshCw
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -34,17 +46,71 @@ import { SimpleDataVisualization } from './SimpleDataVisualization'
 interface DatabaseQueryExplorerProps {
   selectedSource: any
   sources: any[]
+  onSourceDeleted?: () => void  // Callback to refresh sources list after delete
 }
 
-export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQueryExplorerProps) {
+export function DatabaseQueryExplorer({ selectedSource, sources, onSourceDeleted }: DatabaseQueryExplorerProps) {
   const [query, setQuery] = useState('')
   const [generatedSQL, setGeneratedSQL] = useState('')
   const [queryResult, setQueryResult] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [validationResult, setValidationResult] = useState<any>(null)
   const [queryHistory, setQueryHistory] = useState<any[]>([])
-  const [selectedSourceId, setSelectedSourceId] = useState(selectedSource?.id || '')
+  const [selectedSourceId, setSelectedSourceId] = useState(selectedSource?.id?.toString() || '')
   const [showVisualization, setShowVisualization] = useState(false)
+
+  // Get the selected source name for the delete dialog
+  const selectedSourceName = sources.find(s => s.id.toString() === selectedSourceId)?.name || 'this database'
+
+  const handleDeleteClick = () => {
+    console.log('[Delete] Button clicked, selectedSourceId:', selectedSourceId)
+    if (!selectedSourceId) {
+      toast.error('No database selected')
+      return
+    }
+    setShowDeleteDialog(true)
+  }
+
+  const handleConfirmDelete = async () => {
+    console.log('[Delete] Confirming delete for source:', selectedSourceId)
+    setShowDeleteDialog(false)
+    setIsDeleting(true)
+    
+    try {
+      const response = await fetch(`/api/knowledge/sources/database/${selectedSourceId}`, {
+        method: 'DELETE'
+      })
+
+      console.log('[Delete] Response status:', response.status)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('[Delete] Success:', data)
+        toast.success(data.message || 'Database source deleted successfully')
+        
+        // Clear current selection and results
+        setSelectedSourceId('')
+        setGeneratedSQL('')
+        setQueryResult(null)
+        setValidationResult(null)
+        setQuery('')
+        
+        // Notify parent to refresh sources list
+        onSourceDeleted?.()
+      } else {
+        const error = await response.json()
+        console.error('[Delete] Error response:', error)
+        toast.error(error.detail || 'Failed to delete database source')
+      }
+    } catch (error) {
+      console.error('[Delete] Exception:', error)
+      toast.error('Failed to delete database source')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   const handleVisualize = () => {
     if (!queryResult || queryResult.length === 0) {
@@ -208,7 +274,7 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Database Selection */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <Select
               value={selectedSourceId}
               onValueChange={setSelectedSourceId}
@@ -227,6 +293,23 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
                 ))}
               </SelectContent>
             </Select>
+            
+            {selectedSourceId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDeleteClick}
+                disabled={isDeleting}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                title="Delete this database source"
+              >
+                {isDeleting ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+              </Button>
+            )}
             
             <Badge variant="outline" className="py-2">
               Three-tier validation active
@@ -424,6 +507,51 @@ export function DatabaseQueryExplorer({ selectedSource, sources }: DatabaseQuery
         onClose={() => setShowVisualization(false)}
         data={queryResult || []}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="sm:max-w-[425px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              Delete Database Source
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Are you sure you want to delete <span className="font-semibold text-foreground">"{selectedSourceName}"</span>?
+              </p>
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm">
+                <p className="font-medium text-destructive mb-1">This action cannot be undone.</p>
+                <ul className="text-muted-foreground space-y-1 ml-4 list-disc">
+                  <li>Schema metadata will be permanently removed</li>
+                  <li>Query history will be deleted</li>
+                  <li>Semantic layer definitions will be lost</li>
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Database
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

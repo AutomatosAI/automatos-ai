@@ -60,12 +60,12 @@ async def get_agent_success_rate(db: Session = Depends(get_db)) -> Dict[str, Any
         # Calculate 7-day trend
         week_ago = datetime.now() - timedelta(days=7)
         week_total = db.query(WorkflowExecution).filter(
-            WorkflowExecution.created_at >= week_ago
+            WorkflowExecution.started_at >= week_ago
         ).count()
         week_successful = db.query(WorkflowExecution).filter(
             and_(
                 WorkflowExecution.status == 'completed',
-                WorkflowExecution.created_at >= week_ago
+                WorkflowExecution.started_at >= week_ago
             )
         ).count()
         
@@ -190,7 +190,7 @@ async def get_queue_depth(db: Session = Depends(get_db)) -> Dict[str, Any]:
         high_priority = db.query(WorkflowExecution).filter(
             and_(
                 WorkflowExecution.status.in_(['pending', 'queued']),
-                WorkflowExecution.created_at >= datetime.now() - timedelta(hours=1)
+                WorkflowExecution.started_at >= datetime.now() - timedelta(hours=1)
             )
         ).count()
         
@@ -234,12 +234,12 @@ async def get_efficiency_score(db: Session = Depends(get_db)) -> Dict[str, Any]:
         
         # Workflow completion efficiency
         recent_executions = db.query(WorkflowExecution).filter(
-            WorkflowExecution.created_at >= datetime.now() - timedelta(hours=24)
+            WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
         ).count()
         completed = db.query(WorkflowExecution).filter(
             and_(
                 WorkflowExecution.status == 'completed',
-                WorkflowExecution.created_at >= datetime.now() - timedelta(hours=24)
+                WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
             )
         ).count()
         

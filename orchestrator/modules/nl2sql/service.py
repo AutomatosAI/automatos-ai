@@ -36,6 +36,7 @@ from core.services.audit_service import AuditService
 # Module-internal imports
 from .query.nl2sql_service import NaturalLanguageToSQLService
 from .query.validator import SQLValidator
+from modules.tools.services.pandas_ai_service import get_pandasai_service
 
 
 class DatabaseDialect(Enum):
@@ -92,6 +93,7 @@ class DatabaseKnowledgeService:
         self.audit_service = audit_service
         self.schema_cache = {}
         self.query_cache = {}
+        self.analytics_engine = get_pandasai_service()
     
     async def _get_source(self, source_id: str) -> 'DatabaseKnowledgeSource':
         """Fetch database source by ID"""
@@ -549,3 +551,83 @@ Rules:
                 tables.append(str(token))
         return tables
 
+    async def analyze_database(
+        self,
+        source_id: str,
+        natural_language_query: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Perform advanced analytics/visualization on database data.
+        1. Convert NL -> SQL to fetch raw data
+        2. Pass data -> Pandas Engine for analysis/plotting
+        """
+        # 1. Fetch Data (using existing SQL pipeline)
+        # We append "Return all relevant columns for analysis" to prompt implicitly
+        # by asking for a broad SQL query first.
+        
+        # For analysis, we often need more data than a simple answer.
+        # We'll ask the SQL generator to get the raw data first.
+        
+        # Heuristic: Ask LLM to generate a SQL query that fetches the DATA needed for the analysis
+        fetch_query_prompt = f"Generate a SQL query to fetch the raw data needed to answer this analysis question: '{natural_language_query}'. Do not aggregate yet if the analysis requires raw data points (like scatter plots)."
+        
+        sql_result = await self.query_database(source_id, fetch_query_prompt, user_id)
+        
+        if not sql_result['success']:
+            return sql_result
+            
+        data = sql_result['data']
+        
+        # 2. Analyze with Pandas
+        if not self.analytics_engine:
+            return {
+                "success": False,
+                "error": "PandasAI service is not enabled or configured."
+            }
+
+        analysis_result = self.analytics_engine.generate_insight(
+            question=natural_language_query,
+            rows=data,
+            columns=sql_result.get('columns')
+        )
+        
+        if not analysis_result:
+             return {
+                "success": False,
+                "error": "Failed to generate analysis."
+            }
+
+        # Extract first chart if available
+        chart_base64 = None
+        if analysis_result.get('charts'):
+            chart_base64 = analysis_result['charts'][0].get('base64')
+
+        return {
+            "success": True,
+            "type": "analysis",
+            "sql": sql_result['sql'],
+            "insight": analysis_result.get('summary', ''),
+            "chart_base64": chart_base64,
+            "code": None, # PandasAIService doesn't expose code by default
+            "row_count": len(data)
+        }
+
+    async def smart_query(
+        self,
+        source_id: str,
+        text: str,
+        user_id: str,
+        agent_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Intelligently route between SQL Query and Data Analysis.
+        """
+        # Simple heuristic router (could be LLM-based)
+        analysis_keywords = ['plot', 'chart', 'graph', 'trend', 'correlation', 'visualize', 'compare', 'forecast']
+        is_analysis = any(keyword in text.lower() for keyword in analysis_keywords)
+        
+        if is_analysis:
+            return await self.analyze_database(source_id, text, user_id)
+        else:
+            return await self.query_database(source_id, text, user_id, agent_id)

@@ -43,7 +43,7 @@ export function Message({
   const handleCopy = async () => {
     const textParts = message.parts?.filter(p => p.type === 'text').map(p => 'text' in p ? p.text : '')
     const content = textParts?.join('\n') || message.content || ''
-    
+
     if (await copyToClipboard(content)) {
       toast.success('Copied to clipboard')
     }
@@ -201,15 +201,13 @@ export function Message({
       animate={{ opacity: 1, y: 0 }}
       className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
     >
-      <div className={`flex items-start space-x-3 max-w-[85%] ${
-        message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-      }`}>
-        {/* Avatar */}
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-          message.role === 'user' 
-            ? 'bg-blue-600' 
-            : 'bg-gradient-to-br from-orange-500 to-red-500'
+      <div className={`flex items-start space-x-3 max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
         }`}>
+        {/* Avatar */}
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.role === 'user'
+          ? 'bg-blue-600'
+          : 'bg-gradient-to-br from-orange-500 to-red-500'
+          }`}>
           {message.role === 'user' ? (
             <User className="w-5 h-5 text-white" />
           ) : (
@@ -221,7 +219,7 @@ export function Message({
         <div className="flex-1 space-y-3">
           <div className="space-y-2">
             {renderMessageContent()}
-            
+
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (
               <div className="mt-3 pt-3 border-t border-gray-700/50 flex items-center justify-between text-xs">
@@ -271,39 +269,78 @@ export function Message({
           {message.documents && message.documents.length > 0 && (
             <div className="space-y-2">
               {message.documents.map((doc, idx) => {
+                // Support both old and new format
+                const title = doc.title || doc.filename || 'Unknown Document'
+                const relevance = doc.relevance !== undefined ? doc.relevance : (doc.similarity ? doc.similarity * 100 : 0)
+                const preview = doc.preview || doc.excerpt || ''
+                const chunkCount = doc.chunk_count
+                const downloadUrl = doc.download_url
+                const fullContent = doc.full_content
+
                 return (
-                <button
-                  key={idx}
-                  onClick={() => onDocumentSelect?.(doc)}
-                  className="w-full text-left rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 hover:border-blue-400/60 hover:bg-blue-500/10 transition-all group"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4 text-blue-400" />
-                      <span className="text-sm text-gray-300">{doc.filename || 'Unknown Document'}</span>
-                      <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
-                        {(doc.similarity * 100).toFixed(0)}%
-                      </Badge>
+                  <button
+                    key={idx}
+                    onClick={async () => {
+                      // Fetch full document content from API
+                      if (doc.file_path && onArtifactSelect) {
+                        try {
+                          const response = await fetch(`/api/documents/content?path=${encodeURIComponent(doc.file_path)}`)
+                          if (response.ok) {
+                            const data = await response.json()
+                            onArtifactSelect({
+                              title: title,
+                              kind: 'text',
+                              language: 'markdown',
+                              content: data.content,
+                              metadata: {
+                                source: data.filename,
+                                relevance: relevance,
+                                chunk_count: chunkCount,
+                                download_url: downloadUrl
+                              }
+                            })
+                          } else {
+                            console.error('Failed to fetch document:', response.statusText)
+                          }
+                        } catch (error) {
+                          console.error('Error fetching document:', error)
+                        }
+                      } else if (onDocumentSelect) {
+                        onDocumentSelect(doc)
+                      }
+                    }}
+                    className="w-full text-left rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 hover:border-blue-400/60 hover:bg-blue-500/10 transition-all group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <FileText className="w-4 h-4 text-blue-400" />
+                        <span className="text-sm font-medium text-gray-200">{title}</span>
+                        <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
+                          {relevance.toFixed(0)}%
+                        </Badge>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
-                  </div>
-                  {doc.excerpt && (
-                    <p className="mt-2 line-clamp-3 text-sm text-gray-200 opacity-90">
-                      {doc.excerpt}
-                    </p>
-                  )}
-                  {doc.chunk_count !== undefined && (
-                    <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
-                      <span>{doc.chunk_count} chunks indexed</span>
-                      {doc.chunk_index !== undefined && (
-                        <span className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] uppercase tracking-wide text-blue-200">
-                          match @ chunk {doc.chunk_index}
-                        </span>
-                      )}
+
+                    {chunkCount !== undefined && (
+                      <div className="mt-2 text-xs text-gray-400">
+                        {chunkCount} relevant section{chunkCount !== 1 ? 's' : ''} found
+                      </div>
+                    )}
+
+                    {preview && (
+                      <p className="mt-2 line-clamp-2 text-sm text-gray-300 opacity-90">
+                        {preview}
+                      </p>
+                    )}
+
+                    <div className="mt-3 text-xs text-blue-400 flex items-center gap-1">
+                      <span>📖</span>
+                      <span>Click to view full document</span>
                     </div>
-                  )}
-                </button>
-              )})}
+                  </button>
+                )
+              })}
             </div>
           )}
 
@@ -371,16 +408,15 @@ export function Message({
             >
               <Copy className="w-3 h-3" />
             </Button>
-            
+
             {message.role === 'assistant' && !isReadonly && (
               <>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => handleVote(true)}
-                  className={`p-1 h-auto ${
-                    isUpvoted === true ? 'text-green-400' : 'text-gray-500 hover:text-green-400'
-                  }`}
+                  className={`p-1 h-auto ${isUpvoted === true ? 'text-green-400' : 'text-gray-500 hover:text-green-400'
+                    }`}
                 >
                   <ThumbsUp className="w-3 h-3" />
                 </Button>
@@ -388,9 +424,8 @@ export function Message({
                   variant="ghost"
                   size="sm"
                   onClick={() => handleVote(false)}
-                  className={`p-1 h-auto ${
-                    isUpvoted === false ? 'text-red-400' : 'text-gray-500 hover:text-red-400'
-                  }`}
+                  className={`p-1 h-auto ${isUpvoted === false ? 'text-red-400' : 'text-gray-500 hover:text-red-400'
+                    }`}
                 >
                   <ThumbsDown className="w-3 h-3" />
                 </Button>
@@ -404,7 +439,7 @@ export function Message({
                 </Button>
               </>
             )}
-            
+
             <span className="text-xs text-gray-500">
               {formatTimestamp(message.createdAt || new Date().toISOString())}
             </span>

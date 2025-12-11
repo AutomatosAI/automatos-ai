@@ -25,7 +25,9 @@ def get_system_setting(key: str, default_value: Optional[str] = None) -> Optiona
     """Get system setting from database"""
     try:
         import sys
-        if 'database.database' not in sys.modules:
+        # Check if database module is loaded (use correct module path)
+        if 'core.database.database' not in sys.modules:
+            logger.debug(f"Database module not loaded yet, returning default for {key}")
             return default_value
         
         from core.database.database import SessionLocal
@@ -83,7 +85,7 @@ class EmbeddingManager:
     
     def __init__(self):
         self.provider: Optional[BaseEmbeddingProvider] = None
-        self._load_provider()
+        self._provider_loaded = False
     
     def _load_provider(self):
         """Load embedding provider from system settings"""
@@ -93,6 +95,20 @@ class EmbeddingManager:
             model = get_system_setting("embedding_model")
             cache_dir = get_system_setting("embedding_cache_dir") or "./model_cache"
             dimension_str = get_system_setting("vector_store_dimensions") or "1024"
+            
+            logger.info(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
+            
+            # Fallback to environment variables if DB settings failed
+            import os
+            if not provider_type:
+                provider_type = os.getenv("EMBEDDING_PROVIDER")
+            
+            if not model:
+                model = os.getenv("EMBEDDING_MODEL")
+                
+            if dimension_str == "1024": # If default was used
+                dimension_str = os.getenv("VECTOR_STORE_DIMENSIONS", "1024")
+                
             dimension = int(dimension_str)
             
             if not provider_type or provider_type == "disabled":
@@ -104,6 +120,20 @@ class EmbeddingManager:
             api_key = None
             if provider_type != "huggingface_local":
                 api_key = get_credential_field(provider_type)
+                
+                # Fallback to environment variables
+                if not api_key:
+                    import os
+                    env_map = {
+                        "openai": "OPENAI_API_KEY",
+                        "google": "GOOGLE_API_KEY",
+                        "cohere": "COHERE_API_KEY",
+                        "huggingface_api": "HUGGINGFACE_API_KEY"
+                    }
+                    env_var = env_map.get(provider_type)
+                    if env_var:
+                        api_key = os.getenv(env_var)
+                
                 if not api_key:
                     logger.warning(
                         f"No API key found for {provider_type} embedding provider. "
@@ -145,6 +175,12 @@ class EmbeddingManager:
             logger.warning(f"Unsupported embedding provider: {config.provider}. Using fallback.")
             return DeterministicEmbeddingProvider(config.dimension)
     
+    def _ensure_provider(self):
+        """Lazy-load provider on first use (when database is ready)"""
+        if not self._provider_loaded:
+            self._load_provider()
+            self._provider_loaded = True
+    
     async def generate_embedding(self, text: str) -> List[float]:
         """
         Generate embedding for text using configured provider.
@@ -155,6 +191,8 @@ class EmbeddingManager:
         Returns:
             Embedding vector
         """
+        self._ensure_provider()  # Lazy-load on first use
+        
         if self.provider is None:
             raise ValueError("Embedding provider not initialized")
         
@@ -170,6 +208,8 @@ class EmbeddingManager:
         Returns:
             Embedding vector
         """
+        self._ensure_provider()  # Lazy-load on first synchronous use
+
         if self.provider is None:
             raise ValueError("Embedding provider not initialized")
         

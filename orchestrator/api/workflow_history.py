@@ -34,7 +34,7 @@ async def get_workflow_executions(
     try:
         executions = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
-            .order_by(desc(WorkflowExecution.created_at))\
+            .order_by(desc(WorkflowExecution.started_at))\
             .limit(limit)\
             .offset(offset)\
             .all()
@@ -146,7 +146,7 @@ async def get_live_progress(
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
-            .order_by(desc(WorkflowExecution.created_at))\
+            .order_by(desc(WorkflowExecution.started_at))\
             .first()
         
         if not execution:
@@ -235,7 +235,7 @@ async def store_orchestration_event(
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
-            .order_by(desc(WorkflowExecution.created_at))\
+            .order_by(desc(WorkflowExecution.started_at))\
             .first()
         
         if not execution:
