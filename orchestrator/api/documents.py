@@ -200,31 +200,36 @@ async def download_document(path: str = Query(..., description="Full path to doc
     """
     try:
         # Security: Only allow files from /var/automatos/documents/
-        if not path.startswith("/var/automatos/documents/"):
+        allowed_base = Path("/var/automatos/documents").resolve()
+        requested_path = Path(path).resolve()
+
+        try:
+            requested_path.relative_to(allowed_base)
+        except ValueError:
             raise HTTPException(status_code=403, detail="Access denied: Invalid path")
         
         # Check if file exists
-        if not os.path.exists(path):
+        if not os.path.exists(requested_path):
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Get filename
-        filename = os.path.basename(path)
+        filename = os.path.basename(requested_path)
         
         # Determine media type
         media_type = "application/octet-stream"
-        if path.endswith('.pdf'):
+        if str(requested_path).endswith('.pdf'):
             media_type = "application/pdf"
-        elif path.endswith('.md'):
+        elif str(requested_path).endswith('.md'):
             media_type = "text/markdown"
-        elif path.endswith('.txt'):
+        elif str(requested_path).endswith('.txt'):
             media_type = "text/plain"
-        elif path.endswith('.json'):
+        elif str(requested_path).endswith('.json'):
             media_type = "application/json"
         
         logger.info(f"Serving document: {filename}")
         
         return FileResponse(
-            path=path,
+            path=str(requested_path),
             filename=filename,
             media_type=media_type
         )
@@ -248,24 +253,29 @@ async def get_document_content(path: str = Query(..., description="Full path to 
     """
     try:
         # Security: Only allow files from /var/automatos/documents/
-        if not path.startswith("/var/automatos/documents/"):
+        allowed_base = Path("/var/automatos/documents").resolve()
+        requested_path = Path(path).resolve()
+
+        try:
+            requested_path.relative_to(allowed_base)
+        except ValueError:
             raise HTTPException(status_code=403, detail="Access denied: Invalid path")
         
         # Check if file exists
-        if not os.path.exists(path):
+        if not os.path.exists(requested_path):
             raise HTTPException(status_code=404, detail="Document not found")
         
         # Read file content
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(requested_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        filename = os.path.basename(path)
+        filename = os.path.basename(requested_path)
         logger.info(f"Serving content for: {filename}")
         
         return {
             "filename": filename,
             "content": content,
-            "path": path
+            "path": str(requested_path)
         }
         
     except HTTPException:

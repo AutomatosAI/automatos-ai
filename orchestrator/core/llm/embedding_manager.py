@@ -208,6 +208,8 @@ class EmbeddingManager:
         Returns:
             Embedding vector
         """
+        self._ensure_provider()  # Lazy-load on first synchronous use
+
         if self.provider is None:
             raise ValueError("Embedding provider not initialized")
         

@@ -115,7 +115,9 @@ class AgentPlatformTools:
         Returns:
             Tool execution results
         """
-        
+        # Lazy import to avoid circular dependency at module import time
+        from modules.tools.formatting.result_formatter import ToolResultFormatter
+
         self.logger.info(f"🔧 Agent {agent_id} calling tool: {tool_name}")
         self.logger.info(f"  Parameters: {parameters}")
         
@@ -147,7 +149,6 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter - NO MORE DUPLICATE LOGIC
-                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_documents(raw_results)
                 
                 self.logger.info(f"  ✅ Returning {len(formatted)} formatted results")
@@ -185,7 +186,6 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter
-                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_documents(raw_results)
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} semantic results")
@@ -236,7 +236,6 @@ class AgentPlatformTools:
                     })
                 
                 # Use unified formatter
-                from modules.tools.formatting.result_formatter import ToolResultFormatter
                 formatted = ToolResultFormatter.format_code(raw_results)
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} code results")
@@ -275,6 +274,9 @@ class AgentPlatformTools:
         """
         if not tool_results:
             return ""
+
+        # Lazy import to avoid circular dependency at module import time
+        from modules.tools.formatting.result_formatter import ToolResultFormatter
         
         context_parts = ["## Research Results from Your Tool Calls:", ""]
         
@@ -288,7 +290,6 @@ class AgentPlatformTools:
                 continue
             
             # Use unified formatter for LLM context
-            from modules.tools.formatting.result_formatter import ToolResultFormatter
             llm_context = ToolResultFormatter.format_for_llm(result, tool_name, max_chars=1500)
             context_parts.append(f"### Tool Call {idx}:")
             context_parts.append(llm_context)

@@ -254,6 +254,7 @@ class ToolResultFormatter:
                 source = doc.get('filename', doc.get('source', 'Unknown'))
                 content = doc.get('content', '')
                 excerpt = doc.get('excerpt', '')
+                similarity = doc.get('similarity', 0.0)
                 
                 # Use the source (filename) directly - this is the actual file on disk
                 # Build correct path

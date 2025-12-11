@@ -23,10 +23,6 @@ SIMPLE_PATTERNS = [
 
 # Tool intent indicators
 TOOL_INDICATORS = {
-    'search_codebase': [
-        'code', 'function', 'class', 'method', 'implement', 'how does', 'works',
-        'agentfactory', 'factory', 'service', 'model'
-    ],
     'search_knowledge': [
         'document', 'doc', 'guide', 'how to', 'tutorial', 'architecture',
         'design', 'readme', 'help'
@@ -43,7 +39,6 @@ TOOL_INDICATORS = {
 # Explicit tool request patterns (for models without native tool calling)
 EXPLICIT_TOOL_PATTERNS = {
     'search_knowledge': ['search doc', 'find doc', 'show me doc', 'in the doc'],
-    'search_codebase': ['show code', 'show me code', 'search code', 'find code'],
     'query_database': ['query database', 'from database', 'sql', 'how many']
 }
 
@@ -198,9 +193,6 @@ You have powerful tools - USE THEM proactively:
    
 2. **search_knowledge** - Search documents, PDFs, uploaded files
    - For finding information in the knowledge base
-   
-3. **search_codebase** - Search code repositories
-   - For code examples, implementations, technical details
 
 ## 🎯 REASONING APPROACH (ReAct Pattern)
 For complex requests, THINK step by step:
