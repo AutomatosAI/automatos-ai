@@ -292,7 +292,7 @@ export function PerformanceAnalytics() {
         {performanceMetrics.map((metric, index) => (
           <motion.div
             key={metric.label}
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 relative"
+            className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300 relative"
             initial={{ opacity: 0, y: 20 }}
             animate={inView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.8, delay: index * 0.1 }}
@@ -305,21 +305,25 @@ export function PerformanceAnalytics() {
                 </Badge>
               </div>
             )}
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <metric.icon className={`w-5 h-5 ${metric.color}`} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <metric.icon className={`w-5 h-5 ${metric.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{metric.value}</div>
+                  <div className="text-sm font-medium truncate">{metric.label}</div>
+                  <div className="text-xs text-muted-foreground truncate">{metric.description}</div>
+                </div>
               </div>
-              <div className={`flex items-center space-x-1 text-sm ${
-                metric.trend === 'up' ? 'text-green-400' : 'text-red-400'
-              }`}>
+              <div
+                className={`shrink-0 flex items-center space-x-1 text-sm ${
+                  metric.trend === 'up' ? 'text-green-400' : 'text-red-400'
+                }`}
+              >
                 <TrendingUp className={`w-4 h-4 ${metric.trend === 'down' ? 'rotate-180' : ''}`} />
                 <span>{metric.change}</span>
               </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{metric.value}</h3>
-              <p className="text-sm font-medium">{metric.label}</p>
-              <p className="text-xs text-muted-foreground">{metric.description}</p>
             </div>
           </motion.div>
         ))}

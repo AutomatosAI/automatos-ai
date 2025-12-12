@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Logo Test</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial;
+            padding: 20px;
+        }
+
+        .logo-test {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .logo-item {
+            text-align: center;
+        }
+
+        img {
+            width: 64px;
+            height: 64px;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Logo Loading Test</h1>
+    <div class="logo-test">
+        <div class="logo-item">
+            <img src="/logos/github_com.png" alt="GitHub" onerror="this.style.border='2px solid red'">
+            <p>GitHub</p>
+        </div>
+        <div class="logo-item">
+            <img src="/logos/discord_com.png" alt="Discord" onerror="this.style.border='2px solid red'">
+            <p>Discord</p>
+        </div>
+        <div class="logo-item">
+            <img src="/logos/aws_amazon_com.png" alt="AWS" onerror="this.style.border='2px solid red'">
+            <p>AWS</p>
+        </div>
+        <div class="logo-item">
+            <img src="/logos/azure_microsoft_com.png" alt="Azure" onerror="this.style.border='2px solid red'">
+            <p>Azure</p>
+        </div>
+    </div>
+    <p style="margin-top: 40px;">If logos show = files are accessible. If red border = 404 error.</p>
+</body>
+
+</html>

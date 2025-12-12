@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Bot, User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight } from 'lucide-react'
+import { User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight, Wrench, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { voteMessage } from '@/lib/chat/api'
 import { copyToClipboard, formatTimestamp } from '@/lib/utils'
-import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, UseChatHelpers } from '@/types'
+import type { ChatMessage, Artifact, CodeSnippet, DocumentReference, DatabaseResult, ToolCall, UseChatHelpers } from '@/types'
 import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -61,7 +61,7 @@ export function Message({
 
   const markdownComponents = useMemo(() => ({
     p: ({ children }: any) => (
-      <p className="text-gray-200 leading-relaxed">{children}</p>
+      <p className="text-gray-100 leading-relaxed tracking-[0.01em]">{children}</p>
     ),
     strong: ({ children }: any) => (
       <strong className="text-gray-100 font-semibold">{children}</strong>
@@ -133,7 +133,7 @@ export function Message({
       return (
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          className="prose prose-invert prose-sm max-w-none space-y-3"
+          className="prose prose-invert prose-sm md:prose-base max-w-none space-y-4 prose-headings:text-gray-100 prose-p:text-gray-100 prose-a:text-orange-300"
           components={markdownComponents}
         >
           {message.content}
@@ -154,7 +154,7 @@ export function Message({
               <ReactMarkdown
                 key={index}
                 remarkPlugins={[remarkGfm]}
-                className="prose prose-invert prose-sm max-w-none space-y-3"
+                className="prose prose-invert prose-sm md:prose-base max-w-none space-y-4 prose-headings:text-gray-100 prose-p:text-gray-100 prose-a:text-orange-300"
                 components={markdownComponents}
               >
                 {part.text}
@@ -195,6 +195,103 @@ export function Message({
     )
   }
 
+  const renderAssistantState = () => {
+    if (message.role !== 'assistant') return null
+
+    // Only show state for the actively streaming assistant message (the one passed isLoading)
+    if (isLoading) {
+      return (
+        <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1 text-xs text-orange-200">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span className="font-medium">Thinking</span>
+          <span className="opacity-70">…</span>
+        </div>
+      )
+    }
+
+    // When finished, keep it subtle (only show if this message has any content)
+    const hasText =
+      (typeof message.content === 'string' && message.content.trim().length > 0) ||
+      (Array.isArray(message.parts) && message.parts.some((p: any) => p?.type === 'text' && p?.text))
+
+    if (!hasText) return null
+
+    return (
+      <div className="inline-flex items-center gap-2 rounded-full border border-gray-800/60 bg-gray-900/30 px-3 py-1 text-xs text-gray-300">
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+        <span className="font-medium">Completed</span>
+      </div>
+    )
+  }
+
+  const renderToolCalls = () => {
+    if (message.role !== 'assistant') return null
+    const toolCalls = message.toolCalls || []
+    if (toolCalls.length === 0) return null
+
+    const getStatus = (toolCall: ToolCall) => {
+      if (toolCall.state === 'running') {
+        return { label: 'Running', icon: <Loader2 className="w-4 h-4 animate-spin" />, className: 'bg-orange-500/10 border-orange-500/30 text-orange-200' }
+      }
+      if (toolCall.state === 'error') {
+        return { label: 'Error', icon: <XCircle className="w-4 h-4 text-red-400" />, className: 'bg-red-500/10 border-red-500/30 text-red-200' }
+      }
+      return { label: 'Completed', icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />, className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' }
+    }
+
+    return (
+      <div className="space-y-2">
+        {toolCalls.map((tc) => {
+          const status = getStatus(tc)
+          const durationText = typeof tc.durationMs === 'number' ? `${tc.durationMs.toFixed(0)}ms` : null
+
+          return (
+            <details
+              key={tc.toolCallId}
+              className="rounded-xl border border-gray-800/60 bg-gray-900/30"
+              open={tc.state === 'running'}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Wrench className="w-4 h-4 text-muted-foreground" />
+                  <span className="truncate text-sm font-medium text-gray-200">{tc.toolName}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {durationText && (
+                    <span className="text-xs text-gray-500 font-mono">{durationText}</span>
+                  )}
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${status.className}`}
+                  >
+                    {status.icon}
+                    <span>{status.label}</span>
+                  </span>
+                </div>
+              </summary>
+
+              <div className="space-y-3 border-t border-gray-800/60 px-4 py-3">
+                {tc.input && (
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-gray-500">Parameters</div>
+                    <pre className="mt-2 overflow-x-auto rounded-lg border border-gray-800/60 bg-gray-900/60 p-3 text-xs text-gray-200">
+                      {JSON.stringify(tc.input, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {tc.error && (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                    {tc.error}
+                  </div>
+                )}
+              </div>
+            </details>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -206,12 +303,17 @@ export function Message({
         {/* Avatar */}
         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.role === 'user'
           ? 'bg-blue-600'
-          : 'bg-gradient-to-br from-orange-500 to-red-500'
+          : 'bg-gradient-to-br from-orange-500/40 to-red-500/30 ring-1 ring-orange-500/25'
           }`}>
           {message.role === 'user' ? (
             <User className="w-5 h-5 text-white" />
           ) : (
-            <Bot className="w-5 h-5 text-white" />
+            <img
+              src="/brand/automatos-mark-white.png"
+              alt="Automatos"
+              className="w-5 h-5 object-contain"
+              draggable={false}
+            />
           )}
         </div>
 
@@ -219,6 +321,12 @@ export function Message({
         <div className="flex-1 space-y-3">
           <div className="space-y-2">
             {renderMessageContent()}
+
+            {/* Assistant state (Thinking / Completed) */}
+            {renderAssistantState()}
+
+            {/* Tool calls (lifecycle transparency) */}
+            {renderToolCalls()}
 
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (
@@ -276,18 +384,39 @@ export function Message({
                 const chunkCount = doc.chunk_count
                 const downloadUrl = doc.download_url
                 const fullContent = doc.full_content
+                const chunks = doc.chunks
 
                 return (
                   <button
                     key={idx}
                     onClick={async () => {
-                      // Fetch full document content from API
+                      // Prefer streaming/tool payloads (fast) before fetching
+                      if (onArtifactSelect && (fullContent || (chunks && chunks.length > 0))) {
+                        onArtifactSelect({
+                          id: `doc-${Date.now()}-${idx}`,
+                          title,
+                          kind: 'text',
+                          language: 'markdown',
+                          content: fullContent || preview || doc.excerpt || '',
+                          metadata: {
+                            source: doc.filename,
+                            relevance,
+                            chunk_count: chunkCount,
+                            download_url: downloadUrl,
+                            chunks,
+                          },
+                        })
+                        return
+                      }
+
+                      // Fallback: fetch full document content from API by file_path
                       if (doc.file_path && onArtifactSelect) {
                         try {
                           const response = await fetch(`/api/documents/content?path=${encodeURIComponent(doc.file_path)}`)
                           if (response.ok) {
                             const data = await response.json()
                             onArtifactSelect({
+                              id: `doc-${Date.now()}-${idx}`,
                               title: title,
                               kind: 'text',
                               language: 'markdown',
@@ -364,34 +493,55 @@ export function Message({
                     <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-green-300" />
                   </div>
 
-                  <div className="mt-2 p-2 bg-gray-900/50 rounded text-xs font-mono text-gray-300 overflow-x-auto">
-                    {dbResult.sql.substring(0, 100)}{dbResult.sql.length > 100 ? '...' : ''}
-                  </div>
-
-                  {dbResult.pandas_ai?.summary && (
-                    <div className="mt-3 text-sm text-gray-200 bg-gray-900/40 border border-gray-800/60 rounded p-3 text-left">
-                      {dbResult.pandas_ai.summary}
+                  {dbResult.sql && (
+                    <div className="mt-2 p-2 bg-gray-900/50 rounded text-xs font-mono text-gray-300 overflow-x-auto">
+                      {dbResult.sql.substring(0, 100)}{dbResult.sql.length > 100 ? '...' : ''}
                     </div>
                   )}
 
-                  {dbResult.pandas_ai?.charts && dbResult.pandas_ai.charts.length > 0 && (
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
-                      {dbResult.pandas_ai.charts.slice(0, 2).map((chart, chartIdx) => (
-                        <div
-                          key={`${chart.filename}-${chartIdx}`}
-                          className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-2 flex flex-col items-center"
-                        >
-                          <img
-                            src={`data:${chart.mime_type};base64,${chart.base64}`}
-                            alt={chart.filename}
-                            className="rounded-md border border-gray-800/40 max-h-32 object-contain"
-                          />
-                          <span className="mt-1 text-xs text-gray-500 truncate w-full text-center">
-                            {chart.filename}
-                          </span>
-                        </div>
-                      ))}
+                  {dbResult.status === 'needs_clarification' && dbResult.clarifications && dbResult.clarifications.length > 0 ? (
+                    <div className="mt-3 rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-left">
+                      <div className="text-sm font-semibold text-orange-200">Clarification needed</div>
+                      {dbResult.message && (
+                        <div className="mt-1 text-sm text-orange-100/80">{dbResult.message}</div>
+                      )}
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-orange-100/90">
+                        {dbResult.clarifications.slice(0, 3).map((q, qIdx) => (
+                          <li key={qIdx}>{q}</li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 text-xs text-orange-100/70">
+                        Click to open the Data Explorer and copy questions.
+                      </div>
                     </div>
+                  ) : (
+                    <>
+                      {dbResult.pandas_ai?.summary && (
+                        <div className="mt-3 text-sm text-gray-200 bg-gray-900/40 border border-gray-800/60 rounded p-3 text-left">
+                          {dbResult.pandas_ai.summary}
+                        </div>
+                      )}
+
+                      {dbResult.pandas_ai?.charts && dbResult.pandas_ai.charts.length > 0 && (
+                        <div className="mt-3 grid gap-2 md:grid-cols-2">
+                          {dbResult.pandas_ai.charts.slice(0, 2).map((chart, chartIdx) => (
+                            <div
+                              key={`${chart.filename}-${chartIdx}`}
+                              className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-2 flex flex-col items-center"
+                            >
+                              <img
+                                src={`data:${chart.mime_type};base64,${chart.base64}`}
+                                alt={chart.filename}
+                                className="rounded-md border border-gray-800/40 max-h-32 object-contain"
+                              />
+                              <span className="mt-1 text-xs text-gray-500 truncate w-full text-center">
+                                {chart.filename}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </button>
               ))}

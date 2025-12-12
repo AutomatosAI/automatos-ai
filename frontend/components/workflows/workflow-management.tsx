@@ -526,20 +526,24 @@ export function WorkflowManagement() {
         {workflowStats.map((stat, index) => (
           <motion.div
             key={stat.label}
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300"
             initial={{ opacity: 0, y: 20 }}
             animate={inView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.8, delay: index * 0.1 }}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <stat.icon className={`w-5 h-5 ${stat.color}`} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{stat.value}</div>
+                  <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stat.value}</h3>
-              <p className="text-muted-foreground text-sm">{stat.label}</p>
-              <p className="text-xs text-green-400">{stat.change}</p>
+              <div className="shrink-0 text-right text-xs text-green-400">
+                {stat.change}
+              </div>
             </div>
           </motion.div>
         ))}

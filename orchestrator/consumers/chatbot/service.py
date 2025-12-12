@@ -15,6 +15,7 @@ Components:
 import json
 import logging
 import uuid
+import re
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -250,6 +251,7 @@ class StreamingChatService:
             assistant_parts = []
             full_response = ""
             tool_data = {}
+            documents_tool_used = False
             
             # Inject memory context via modules.memory
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
@@ -277,16 +279,200 @@ class StreamingChatService:
             
             # Handle tool calls from LLM (supports multi-turn)
             if response.tool_calls:
-                full_response, tool_data = await self._handle_tool_calls(
-                    response, llm_manager, llm_messages, tool_data,
-                    tools=use_tools,  # Allow multi-turn tool calls
-                    max_iterations=5  # Max 5 rounds of tool use
-                )
-                if tool_data:
+                # Emit tool lifecycle events + stream tool-data incrementally
+                import time
+
+                max_iterations = 5
+                iteration = 0
+                current_response = response
+                sent_tool_data = False
+
+                while current_response.tool_calls and iteration < max_iterations:
+                    iteration += 1
+                    logger.info(
+                        f"Tool iteration {iteration}: LLM requested {len(current_response.tool_calls)} tool calls"
+                    )
+
+                    # Emit tool-start for all requested tools
+                    start_times: Dict[str, float] = {}
+                    tool_calls_prepared = []
+
+                    for tool_call in current_response.tool_calls:
+                        tool_name = tool_call.get("function", {}).get("name") or "unknown_tool"
+                        tool_args_raw = tool_call.get("function", {}).get("arguments", "{}")
+                        tool_id = tool_call.get("id") or str(uuid.uuid4())
+
+                        try:
+                            tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
+                        except Exception:
+                            tool_args = {"raw": tool_args_raw}
+
+                        start_times[tool_id] = time.time()
+                        tool_calls_prepared.append((tool_id, tool_name, tool_args))
+
+                        yield self.streaming_handler.format_aisdk_tool_start(
+                            tool_call_id=tool_id,
+                            tool_name=tool_name,
+                            tool_input=tool_args,
+                        )
+                        await asyncio.sleep(0)
+
+                    # Execute all tools in parallel
+                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any]):
+                        logger.info(f"Executing tool: {tool_name}")
+                        result = await self.tool_router.execute_and_format(tool_name, tool_args)
+                        return {
+                            "tool_call_id": tool_id,
+                            "tool_name": tool_name,
+                            "tool_args": tool_args,
+                            "role": "tool",
+                            "content": result.get("llm_context", ""),
+                            "frontend_data": result.get("frontend_data", {}),
+                            "success": bool(result.get("success")),
+                            "error": (result.get("raw_result", {}) or {}).get("error"),
+                        }
+
+                    results = await asyncio.gather(*[
+                        execute_single_tool(tool_id, tool_name, tool_args)
+                        for (tool_id, tool_name, tool_args) in tool_calls_prepared
+                    ])
+
+                    tool_results = []
+
+                    # Emit tool-end + stream tool-data for each tool
+                    for r in results:
+                        tool_id = r["tool_call_id"]
+                        tool_name = r["tool_name"]
+                        duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
+
+                        yield self.streaming_handler.format_aisdk_tool_end(
+                            tool_call_id=tool_id,
+                            tool_name=tool_name,
+                            success=r["success"],
+                            error=r.get("error"),
+                            duration_ms=duration_ms,
+                        )
+                        await asyncio.sleep(0)
+
+                        if r["success"] and r.get("frontend_data"):
+                            tool_data.update(r["frontend_data"])
+                            if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
+                                documents_tool_used = True
+                            yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
+                            sent_tool_data = True
+                            await asyncio.sleep(0)
+
+                        tool_results.append({
+                            "tool_call_id": tool_id,
+                            "role": "tool",
+                            "content": r.get("content", ""),
+                        })
+
+                    # Add assistant message with tool calls and results
+                    llm_messages.append({
+                        "role": "assistant",
+                        "content": current_response.content or "",
+                        "tool_calls": current_response.tool_calls,
+                    })
+                    llm_messages.extend(tool_results)
+
+                    # Get next response - allow more tool calls if needed
+                    allow_more_tools = iteration < max_iterations - 1
+                    current_response = await llm_manager.generate_response(
+                        messages=llm_messages,
+                        tools=use_tools if allow_more_tools else None,
+                    )
+
+                    logger.info(
+                        f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}"
+                    )
+
+                if iteration >= max_iterations and current_response.tool_calls:
+                    logger.warning(f"Hit max tool iterations ({max_iterations}). Forcing final response.")
+
+                full_response = current_response.content or ""
+
+                # Safety: if we aggregated but never streamed tool-data incrementally
+                if tool_data and not sent_tool_data:
                     yield self.streaming_handler.format_aisdk_tool_data(tool_data)
                     await asyncio.sleep(0)
             else:
                 full_response = response.content or ""
+
+            # ------------------------------------------------------------------
+            # Document-answer shaping (prevent filename/link dumps in chat text)
+            # ------------------------------------------------------------------
+            def _infer_doc_topic(user_text: str) -> str:
+                tl = (user_text or "").lower()
+                if "agentfactory" in tl or "agent factory" in tl:
+                    return "AgentFactory"
+                cleaned = re.sub(
+                    r"^(show|give|list|find|search)\s+(me\s+)?(the\s+)?(docs|documents)\s+(for|about)\s+",
+                    "",
+                    (user_text or "").strip(),
+                    flags=re.I,
+                )
+                cleaned = cleaned.strip().strip("?.!")
+                return cleaned[:60] if cleaned else "this topic"
+
+            def _enforce_documents_shape(text: str, topic: str) -> str:
+                """
+                Enforce:
+                - short plain-text summary (no 1./2./3. lists)
+                - then exactly: "Here are some documents that discuss <topic>:"
+                - stop (no filename list; UI cards below are the list)
+                """
+                text = (text or "").strip()
+                lines = text.splitlines()
+                out_lines: List[str] = []
+
+                filename_re = re.compile(r"\b[\w\-. ]+\.(md|pdf|txt|docx?)\b", re.I)
+                ordered_re = re.compile(r"^\s*\d+\.\s+")
+                bullet_re = re.compile(r"^\s*[-*]\s+")
+                md_link_re = re.compile(r"\[[^\]]+\]\([^)]+\)")
+
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        out_lines.append("")
+                        continue
+
+                    # Drop ordered/bulleted list items (removes the 1/2/3 sections)
+                    if ordered_re.match(stripped) or bullet_re.match(stripped):
+                        # If it's clearly a filename/link list item, drop it
+                        if filename_re.search(stripped) or md_link_re.search(stripped):
+                            continue
+                        # Otherwise drop anyway for doc answers (keep summary plain text)
+                        continue
+
+                    # Drop standalone filename-ish lines (prevents echoed file lists)
+                    if filename_re.fullmatch(stripped) or (filename_re.search(stripped) and len(stripped) <= 90):
+                        continue
+
+                    out_lines.append(line)
+
+                cleaned = "\n".join(out_lines).strip()
+                header = f"Here are some documents that discuss {topic}:"
+
+                # Truncate at the first occurrence of the header intent if present
+                m = re.search(r"here are some documents that discuss[^:]*:", cleaned, flags=re.I)
+                if m:
+                    before = cleaned[: m.start()].strip()
+                    before = before.split("\n\n")[0].strip()  # first paragraph only
+                    return (before + "\n\n" + header).strip()
+
+                summary = cleaned.split("\n\n")[0].strip()
+                if len(summary) > 700:
+                    summary = summary[:700].rsplit(" ", 1)[0].strip() + "…"
+                return (summary + "\n\n" + header).strip()
+
+            if tool_data.get("documents") and (
+                documents_tool_used
+                or ("doc" in (latest_text or "").lower())
+                or ("document" in (latest_text or "").lower())
+            ):
+                topic = _infer_doc_topic(latest_text)
+                full_response = _enforce_documents_shape(full_response, topic)
             
             # Stream text response
             async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
@@ -437,7 +623,17 @@ class StreamingChatService:
     ) -> AsyncGenerator[str, None]:
         """Execute pre-triggered tools and inject results."""
         for tool_name in detected_tools:
+            import time
+            tool_call_id = str(uuid.uuid4())
+            start_time = time.time()
+
             logger.info(f"Pre-triggering {tool_name}")
+            yield self.streaming_handler.format_aisdk_tool_start(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_input={"query": query},
+            )
+
             result = await self.tool_router.execute_and_format(tool_name, {"query": query})
             
             if result['success']:
@@ -451,6 +647,21 @@ class StreamingChatService:
                 # Send tool data to frontend
                 if result['frontend_data']:
                     yield self.streaming_handler.format_aisdk_tool_data(result['frontend_data'])
+
+                yield self.streaming_handler.format_aisdk_tool_end(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    success=True,
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
+            else:
+                yield self.streaming_handler.format_aisdk_tool_end(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    success=False,
+                    error=(result.get("raw_result", {}) or {}).get("error") if isinstance(result, dict) else "Tool failed",
+                    duration_ms=int((time.time() - start_time) * 1000),
+                )
     
     async def _handle_tool_calls(
         self,

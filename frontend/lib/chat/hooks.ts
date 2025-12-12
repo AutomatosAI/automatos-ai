@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import type { ChatMessage, AppUsage } from '@/types'
+import type { ChatMessage, AppUsage, ToolCall } from '@/types'
+import { toast } from 'sonner'
 
 export function useChat({
   id,
@@ -72,6 +73,10 @@ export function useChat({
       try {
         abortControllerRef.current = new AbortController()
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        const outgoingParts =
+          Array.isArray(messageObj.parts) && messageObj.parts.length > 0
+            ? messageObj.parts
+            : [{ type: 'text', text: messageObj.content || '' }]
 
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -83,7 +88,7 @@ export function useChat({
             id: chatId || '',
             message: {
               role: 'user',
-              parts: [{ type: 'text', text: messageObj.content || '' }],
+              parts: outgoingParts,
             },
             selectedChatModel: selectedModelId,
             selectedVisibilityType: 'private',
@@ -92,13 +97,34 @@ export function useChat({
         })
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
+          let errorText = ''
+          try {
+            errorText = await response.text()
+          } catch (e) {
+            // ignore
+          }
+          // Remove the empty assistant placeholder to avoid "blank bot bubbles"
+          setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId))
+          setIsLoading(false)
+          setStatus('error')
+          toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
+          return
         }
 
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
         let accumulatedContent = ''
+
+        const upsertToolCall = (current: ToolCall[] | undefined, next: ToolCall): ToolCall[] => {
+          const list = current ? [...current] : []
+          const idx = list.findIndex((t) => t.toolCallId === next.toolCallId)
+          if (idx >= 0) {
+            list[idx] = { ...list[idx], ...next }
+            return list
+          }
+          return [...list, next]
+        }
 
         while (reader) {
           const { done, value } = await reader.read()
@@ -141,6 +167,51 @@ export function useChat({
                 if (data.type === 'chat-id' && data.chatId) {
                   setChatId(data.chatId)
                   if (onChatIdUpdate) onChatIdUpdate(data.chatId)
+                } else if (data.type === 'tool-start' && data.data?.toolCallId) {
+                  const now = new Date().toISOString()
+                  const toolCall: ToolCall = {
+                    toolCallId: data.data.toolCallId,
+                    toolName: data.data.toolName || 'tool',
+                    state: 'running',
+                    input: data.data.input,
+                    startedAt: now,
+                  }
+
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                            ...m,
+                            toolCalls: upsertToolCall(m.toolCalls, toolCall),
+                          }
+                        : m
+                    )
+                  )
+
+                  if (onData) onData({ type: 'tool-start', data: data.data })
+                } else if (data.type === 'tool-end' && data.data?.toolCallId) {
+                  const now = new Date().toISOString()
+                  const toolCall: ToolCall = {
+                    toolCallId: data.data.toolCallId,
+                    toolName: data.data.toolName || 'tool',
+                    state: data.data.success ? 'completed' : 'error',
+                    error: data.data.error,
+                    durationMs: data.data.durationMs,
+                    endedAt: now,
+                  }
+
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                            ...m,
+                            toolCalls: upsertToolCall(m.toolCalls, toolCall),
+                          }
+                        : m
+                    )
+                  )
+
+                  if (onData) onData({ type: 'tool-end', data: data.data })
                 } else if (data.type === 'tool-data' && data.data) {
                 setMessages(prev => 
                   prev.map(m => 
@@ -167,6 +238,53 @@ export function useChat({
             } catch (e) {
                 // Skip parse errors
               }
+            } else if (line.startsWith('data:')) {
+              // Legacy SSE fallback (some backends send `data: {json}\n\n`)
+              try {
+                const payload = JSON.parse(line.replace(/^data:\s*/, ''))
+
+                if (payload.type === 'text-delta' && payload.delta) {
+                  accumulatedContent += payload.delta
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                            ...m,
+                            content: accumulatedContent,
+                            parts: [{ type: 'text', text: accumulatedContent }],
+                          }
+                        : m
+                    )
+                  )
+                } else if (payload.type === 'tool-data' && payload.data) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                            ...m,
+                            database_results: payload.data.database_results || m.database_results,
+                            documents: payload.data.documents || m.documents,
+                            codeSnippets: payload.data.code_snippets || m.codeSnippets,
+                          }
+                        : m
+                    )
+                  )
+                  if (onData) onData({ type: 'tool-data', data: payload.data })
+                } else if (payload.type === 'data-usage' && payload.data) {
+                  setUsage({
+                    promptTokens: payload.data.promptTokens || 0,
+                    completionTokens: payload.data.completionTokens || 0,
+                    totalTokens: payload.data.totalTokens || 0,
+                  })
+                  if (onData) onData({ type: 'data-usage', data: payload.data })
+                } else if (payload.type === 'error') {
+                  setStatus('error')
+                } else if (payload.type === 'done') {
+                  setStatus('idle')
+                }
+              } catch (e) {
+                // Skip parse errors
+              }
             } else if (line.startsWith('e:')) {
               // Error
               console.error('[Chat] Error:', line.slice(2))
@@ -181,7 +299,10 @@ export function useChat({
         if (error.name !== 'AbortError') {
           console.error('[Chat] Error:', error)
           setStatus('error')
+          toast.error(error?.message || 'Chat failed')
         }
+        // Remove the empty assistant placeholder to avoid "blank bot bubbles"
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId))
         setIsLoading(false)
       }
     },

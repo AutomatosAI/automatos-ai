@@ -39,7 +39,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.620413"
+    "updated_at": "2025-10-21T08:13:25.620413",
+    "logo": "/logos/OpenAI.png"
   },
   {
     "id": 22,
@@ -83,7 +84,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:21.151172"
+    "updated_at": "2025-10-21T08:13:21.151172",
+    "logo": "/logos/Anthropic.png"
   },
   {
     "id": 23,
@@ -127,7 +129,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:24.251716"
+    "updated_at": "2025-10-21T08:13:24.251716",
+    "logo": "/logos/HuggingFace.png"
   },
   {
     "id": 24,
@@ -188,7 +191,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.874035"
+    "updated_at": "2025-10-21T08:13:25.874035",
+    "logo": "/logos/PostgreSQL.png"
   },
   {
     "id": 25,
@@ -249,7 +253,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.341690"
+    "updated_at": "2025-10-21T08:13:25.341690",
+    "logo": "/logos/MySQL.png"
   },
   {
     "id": 26,
@@ -292,7 +297,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.275013"
+    "updated_at": "2025-10-21T08:13:25.275013",
+    "logo": "/logos/MongoDB.png"
   },
   {
     "id": 27,
@@ -343,7 +349,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.135646"
+    "updated_at": "2025-10-21T08:13:26.135646",
+    "logo": "/logos/Redis.png"
   },
   {
     "id": 28,
@@ -389,7 +396,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:22.961206"
+    "updated_at": "2025-10-21T08:13:22.961206",
+    "logo": "/logos/Elasticsearch.png"
   },
   {
     "id": 29,
@@ -443,7 +451,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:21.269013"
+    "updated_at": "2025-10-21T08:13:21.269013",
+    "logo": "/logos/AWS.png"
   },
   {
     "id": 30,
@@ -498,7 +507,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:21.284340"
+    "updated_at": "2025-10-21T08:13:21.284340",
+    "logo": "/logos/Azure.png"
   },
   {
     "id": 31,
@@ -541,7 +551,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:23.628764"
+    "updated_at": "2025-10-21T08:13:23.628764",
+    "logo": "/logos/GoogleCloud.png"
   },
   {
     "id": 32,
@@ -583,7 +594,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.559696"
+    "updated_at": "2025-10-21T08:13:26.559696",
+    "logo": "/logos/Slack.png"
   },
   {
     "id": 33,
@@ -625,7 +637,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:22.263417"
+    "updated_at": "2025-10-21T08:13:22.263417",
+    "logo": "/logos/Discord.png"
   },
   {
     "id": 34,
@@ -667,7 +680,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.956115"
+    "updated_at": "2025-10-21T08:13:26.956115",
+    "logo": "/logos/Telegram.png"
   },
   {
     "id": 35,
@@ -714,7 +728,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:27.170496"
+    "updated_at": "2025-10-21T08:13:27.170496",
+    "logo": "/logos/Twilio.png"
   },
   {
     "id": 36,
@@ -756,7 +771,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.328606"
+    "updated_at": "2025-10-21T08:13:26.328606",
+    "logo": "/logos/SendGrid.png"
   },
   {
     "id": 37,
@@ -798,7 +814,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:23.381077"
+    "updated_at": "2025-10-21T08:13:23.381077",
+    "logo": "/logos/GitHub.png"
   },
   {
     "id": 38,
@@ -844,7 +861,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:23.425338"
+    "updated_at": "2025-10-21T08:13:23.425338",
+    "logo": "/logos/GitLab.png"
   },
   {
     "id": 39,
@@ -900,7 +918,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.731939"
+    "updated_at": "2025-10-21T08:13:26.731939",
+    "logo": "/logos/SSH.png"
   },
   {
     "id": 40,
@@ -944,7 +963,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:22.841006"
+    "updated_at": "2025-10-21T08:13:22.841006",
+    "logo": "/logos/Docker.png"
   },
   {
     "id": 41,
@@ -986,7 +1006,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:24.558302"
+    "updated_at": "2025-10-21T08:13:24.558302",
+    "logo": "/logos/Kubernetes.png"
   },
   {
     "id": 42,
@@ -1028,7 +1049,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.852483"
+    "updated_at": "2025-10-21T08:13:26.852483",
+    "logo": "/logos/Stripe.png"
   },
   {
     "id": 43,
@@ -1075,7 +1097,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.758060"
+    "updated_at": "2025-10-21T08:13:25.758060",
+    "logo": "/logos/Paypal.png"
   },
   {
     "id": 44,
@@ -1132,7 +1155,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.220359"
+    "updated_at": "2025-10-21T08:13:26.220359",
+    "logo": "/logos/Salesforce.png"
   },
   {
     "id": 45,
@@ -1174,7 +1198,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:24.194073"
+    "updated_at": "2025-10-21T08:13:24.194073",
+    "logo": "/logos/Hubspot.png"
   },
   {
     "id": 46,
@@ -1221,7 +1246,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:22.164006"
+    "updated_at": "2025-10-21T08:13:22.164006",
+    "logo": "/logos/Datadog.png"
   },
   {
     "id": 47,
@@ -1274,7 +1300,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-22T17:41:25.009753"
+    "updated_at": "2025-10-22T17:41:25.009753",
+    "logo": "/logos/Amazon.png"
   },
   {
     "id": 48,
@@ -1325,7 +1352,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:26.163753"
+    "updated_at": "2025-10-21T08:13:26.163753",
+    "logo": "/logos/REST.png"
   },
   {
     "id": 49,
@@ -1382,7 +1410,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:25.541143"
+    "updated_at": "2025-10-21T08:13:25.541143",
+    "logo": "/logos/Oauth2.png"
   },
   {
     "id": 50,
@@ -1428,7 +1457,8 @@
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
-    "updated_at": "2025-10-21T08:13:24.164944"
+    "updated_at": "2025-10-21T08:13:24.164944",
+    "logo": "/logos/HTTP.png"
   },
   {
     "id": 51,
@@ -1478,7 +1508,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.812988"
+    "updated_at": "2025-10-21T08:13:26.812988",
+    "logo": "/logos/Strapi.png"
   },
   {
     "id": 52,
@@ -1524,7 +1555,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.294918"
+    "updated_at": "2025-10-21T08:13:23.294918",
+    "logo": "/logos/Freshworks.png"
   },
   {
     "id": 53,
@@ -1566,7 +1598,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.807471"
+    "updated_at": "2025-10-21T08:13:22.807471",
+    "logo": "/logos/Disqus.png"
   },
   {
     "id": 54,
@@ -1612,7 +1645,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.831190"
+    "updated_at": "2025-10-21T08:13:21.831190",
+    "logo": "/logos/Cockpit.png"
   },
   {
     "id": 55,
@@ -1681,7 +1715,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.790457"
+    "updated_at": "2025-10-21T08:13:23.790457",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 56,
@@ -1723,7 +1758,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.654765"
+    "updated_at": "2025-10-21T08:13:23.654765",
+    "logo": "/logos/GoogleCloud.png"
   },
   {
     "id": 57,
@@ -1765,7 +1801,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.797428"
+    "updated_at": "2025-10-21T08:13:21.797428",
+    "logo": "/logos/Clockify.png"
   },
   {
     "id": 58,
@@ -1857,7 +1894,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.288401"
+    "updated_at": "2025-10-21T08:13:25.288401",
+    "logo": "/logos/MongoDB.png"
   },
   {
     "id": 59,
@@ -1903,7 +1941,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.304848"
+    "updated_at": "2025-10-21T08:13:27.304848",
+    "logo": "/logos/Venafi.png"
   },
   {
     "id": 60,
@@ -1949,7 +1988,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.464444"
+    "updated_at": "2025-10-21T08:13:25.464444",
+    "logo": "/logos/Nocodb.png"
   },
   {
     "id": 61,
@@ -1991,7 +2031,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.071610"
+    "updated_at": "2025-10-21T08:13:21.071610",
+    "logo": "/logos/Airtable.png"
   },
   {
     "id": 62,
@@ -2041,7 +2082,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.739980"
+    "updated_at": "2025-10-21T08:13:27.739980",
+    "logo": "/logos/Zulip.png"
   },
   {
     "id": 63,
@@ -2083,7 +2125,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.370916"
+    "updated_at": "2025-10-21T08:13:21.370916",
+    "logo": "/logos/Bannerbear.png"
   },
   {
     "id": 64,
@@ -2125,7 +2168,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:20.999953"
+    "updated_at": "2025-10-21T08:13:20.999953",
+    "logo": "/logos/Affinity.png"
   },
   {
     "id": 65,
@@ -2171,7 +2215,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:20.978833"
+    "updated_at": "2025-10-21T08:13:20.978833",
+    "logo": "/logos/Adalo.png"
   },
   {
     "id": 66,
@@ -2217,7 +2262,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.675201"
+    "updated_at": "2025-10-21T08:13:26.675201",
+    "logo": "/logos/Spontit.png"
   },
   {
     "id": 67,
@@ -2292,7 +2338,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.298055"
+    "updated_at": "2025-10-21T08:13:22.298055",
+    "logo": "/logos/Discord.png"
   },
   {
     "id": 68,
@@ -2359,7 +2406,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.197732"
+    "updated_at": "2025-10-21T08:13:25.197732",
+    "logo": "/logos/Miro.png"
   },
   {
     "id": 69,
@@ -2401,7 +2449,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.327744"
+    "updated_at": "2025-10-21T08:13:25.327744",
+    "logo": "/logos/Msg91.png"
   },
   {
     "id": 70,
@@ -2462,7 +2511,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.717513"
+    "updated_at": "2025-10-21T08:13:26.717513",
+    "logo": "/logos/SSH.png"
   },
   {
     "id": 71,
@@ -2516,7 +2566,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.956321"
+    "updated_at": "2025-10-21T08:13:21.956321",
+    "logo": "/logos/Crowd.dev.png"
   },
   {
     "id": 72,
@@ -2558,7 +2609,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.184521"
+    "updated_at": "2025-10-21T08:13:25.184521",
+    "logo": "/logos/Mindee.png"
   },
   {
     "id": 73,
@@ -2603,7 +2655,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.995591"
+    "updated_at": "2025-10-21T08:13:25.995591",
+    "logo": "/logos/Query.png"
   },
   {
     "id": 74,
@@ -2670,7 +2723,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.045992"
+    "updated_at": "2025-10-21T08:13:26.045992",
+    "logo": "/logos/Quickbooks.png"
   },
   {
     "id": 75,
@@ -2720,7 +2774,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.894012"
+    "updated_at": "2025-10-21T08:13:24.894012",
+    "logo": "/logos/Mattermost.png"
   },
   {
     "id": 76,
@@ -2783,7 +2838,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.023551"
+    "updated_at": "2025-10-21T08:13:23.023551",
+    "logo": "/logos/Erpnext.png"
   },
   {
     "id": 77,
@@ -2849,7 +2905,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.121109"
+    "updated_at": "2025-10-21T08:13:23.121109",
+    "logo": "/logos/Facebook.png"
   },
   {
     "id": 78,
@@ -2891,7 +2948,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.581060"
+    "updated_at": "2025-10-21T08:13:23.581060",
+    "logo": "/logos/GoogleBooks.png"
   },
   {
     "id": 79,
@@ -2937,7 +2995,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.408024"
+    "updated_at": "2025-10-21T08:13:26.408024",
+    "logo": "/logos/Sentry.io.png"
   },
   {
     "id": 80,
@@ -2979,7 +3038,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.967506"
+    "updated_at": "2025-10-21T08:13:25.967506",
+    "logo": "/logos/Qradar.png"
   },
   {
     "id": 81,
@@ -3027,7 +3087,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.938198"
+    "updated_at": "2025-10-21T08:13:23.938198",
+    "logo": "/logos/Grafana.png"
   },
   {
     "id": 82,
@@ -3073,7 +3134,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.358535"
+    "updated_at": "2025-10-21T08:13:26.358535",
+    "logo": "/logos/Sendy.png"
   },
   {
     "id": 83,
@@ -3123,7 +3185,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.212782"
+    "updated_at": "2025-10-21T08:13:25.212782",
+    "logo": "/logos/MISP.png"
   },
   {
     "id": 84,
@@ -3165,7 +3228,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.023579"
+    "updated_at": "2025-10-21T08:13:27.023579",
+    "logo": "/logos/Todoist.png"
   },
   {
     "id": 85,
@@ -3211,7 +3275,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.236885"
+    "updated_at": "2025-10-21T08:13:27.236885",
+    "logo": "/logos/Unleashed.png"
   },
   {
     "id": 86,
@@ -3258,7 +3323,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.469168"
+    "updated_at": "2025-10-21T08:13:21.469168",
+    "logo": "/logos/Bitbucket.png"
   },
   {
     "id": 87,
@@ -3300,7 +3366,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.107598"
+    "updated_at": "2025-10-21T08:13:26.107598",
+    "logo": "/logos/Recorded.png"
   },
   {
     "id": 88,
@@ -3342,7 +3409,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.613068"
+    "updated_at": "2025-10-21T08:13:23.613068",
+    "logo": "/logos/GoogleCalendar.png"
   },
   {
     "id": 89,
@@ -3384,7 +3452,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.899384"
+    "updated_at": "2025-10-21T08:13:25.899384",
+    "logo": "/logos/Postmark.png"
   },
   {
     "id": 90,
@@ -3426,7 +3495,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.675604"
+    "updated_at": "2025-10-21T08:13:23.675604",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 91,
@@ -3468,7 +3538,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.228906"
+    "updated_at": "2025-10-21T08:13:22.228906",
+    "logo": "/logos/DHL.png"
   },
   {
     "id": 92,
@@ -3514,7 +3585,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.280254"
+    "updated_at": "2025-10-21T08:13:23.280254",
+    "logo": "/logos/Freshservice.png"
   },
   {
     "id": 93,
@@ -3558,7 +3630,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.943605"
+    "updated_at": "2025-10-21T08:13:26.943605",
+    "logo": "/logos/Tapfiliate.png"
   },
   {
     "id": 94,
@@ -3620,7 +3693,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.011134"
+    "updated_at": "2025-10-21T08:13:26.011134",
+    "logo": "/logos/Questdb.png"
   },
   {
     "id": 95,
@@ -3666,7 +3740,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.436278"
+    "updated_at": "2025-10-21T08:13:24.436278",
+    "logo": "/logos/Jira.png"
   },
   {
     "id": 96,
@@ -3737,7 +3812,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.023327"
+    "updated_at": "2025-10-21T08:13:24.023327",
+    "logo": "/logos/Halopsa.png"
   },
   {
     "id": 97,
@@ -3778,7 +3854,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.573618"
+    "updated_at": "2025-10-21T08:13:21.573618",
+    "logo": "/logos/Brevo.png"
   },
   {
     "id": 98,
@@ -3832,7 +3909,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.271615"
+    "updated_at": "2025-10-21T08:13:26.271615",
+    "logo": "/logos/Seatable.png"
   },
   {
     "id": 99,
@@ -3899,7 +3977,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:20.960860"
+    "updated_at": "2025-10-21T08:13:20.960860",
+    "logo": "/logos/Acuityscheduling.png"
   },
   {
     "id": 100,
@@ -3969,7 +4048,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.528529"
+    "updated_at": "2025-10-21T08:13:25.528529",
+    "logo": "/logos/Oauth1.png"
   },
   {
     "id": 101,
@@ -4016,7 +4096,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.888264"
+    "updated_at": "2025-10-21T08:13:22.888264",
+    "logo": "/logos/Dropbox.png"
   },
   {
     "id": 102,
@@ -4058,7 +4139,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.137012"
+    "updated_at": "2025-10-21T08:13:23.137012",
+    "logo": "/logos/Figma.png"
   },
   {
     "id": 103,
@@ -4108,7 +4190,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.182307"
+    "updated_at": "2025-10-21T08:13:26.182307",
+    "logo": "/logos/Rocket.png"
   },
   {
     "id": 104,
@@ -4174,7 +4257,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.833704"
+    "updated_at": "2025-10-21T08:13:25.833704",
+    "logo": "/logos/Pipedrive.png"
   },
   {
     "id": 105,
@@ -4223,7 +4307,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.912523"
+    "updated_at": "2025-10-21T08:13:21.912523",
+    "logo": "/logos/Copper.png"
   },
   {
     "id": 106,
@@ -4290,7 +4375,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.149412"
+    "updated_at": "2025-10-21T08:13:26.149412",
+    "logo": "/logos/Redis.png"
   },
   {
     "id": 107,
@@ -4336,7 +4422,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.226379"
+    "updated_at": "2025-10-21T08:13:25.226379",
+    "logo": "/logos/Mist.png"
   },
   {
     "id": 108,
@@ -4378,7 +4465,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.647877"
+    "updated_at": "2025-10-21T08:13:25.647877",
+    "logo": "/logos/Opencti.png"
   },
   {
     "id": 109,
@@ -4423,7 +4511,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.585089"
+    "updated_at": "2025-10-21T08:13:27.585089",
+    "logo": "/logos/Yourls.png"
   },
   {
     "id": 110,
@@ -4504,7 +4593,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.133296"
+    "updated_at": "2025-10-21T08:13:25.133296",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 111,
@@ -4556,7 +4646,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.113840"
+    "updated_at": "2025-10-21T08:13:27.113840",
+    "logo": "/logos/Trello.png"
   },
   {
     "id": 112,
@@ -4608,7 +4699,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.350668"
+    "updated_at": "2025-10-21T08:13:27.350668",
+    "logo": "/logos/Vertica.png"
   },
   {
     "id": 113,
@@ -4658,7 +4750,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.909181"
+    "updated_at": "2025-10-21T08:13:24.909181",
+    "logo": "/logos/Mautic.png"
   },
   {
     "id": 114,
@@ -4712,7 +4805,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.201147"
+    "updated_at": "2025-10-21T08:13:23.201147",
+    "logo": "/logos/Form.io.png"
   },
   {
     "id": 115,
@@ -4762,7 +4856,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.311322"
+    "updated_at": "2025-10-21T08:13:21.311322",
+    "logo": "/logos/Azure.png"
   },
   {
     "id": 116,
@@ -4805,7 +4900,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.684688"
+    "updated_at": "2025-10-21T08:13:21.684688",
+    "logo": "/logos/Circleci.png"
   },
   {
     "id": 117,
@@ -4847,7 +4943,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.277203"
+    "updated_at": "2025-10-21T08:13:27.277203",
+    "logo": "/logos/Uptime.png"
   },
   {
     "id": 118,
@@ -4895,7 +4992,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.071457"
+    "updated_at": "2025-10-21T08:13:27.071457",
+    "logo": "/logos/TOTP.png"
   },
   {
     "id": 119,
@@ -4954,7 +5052,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.972473"
+    "updated_at": "2025-10-21T08:13:21.972473",
+    "logo": "/logos/Crowdstrike.png"
   },
   {
     "id": 120,
@@ -4997,7 +5096,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.724596"
+    "updated_at": "2025-10-21T08:13:23.724596",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 121,
@@ -5043,7 +5143,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.263968"
+    "updated_at": "2025-10-21T08:13:27.263968",
+    "logo": "/logos/Uproc.png"
   },
   {
     "id": 122,
@@ -5085,7 +5186,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.843713"
+    "updated_at": "2025-10-21T08:13:24.843713",
+    "logo": "/logos/Mandrill.png"
   },
   {
     "id": 123,
@@ -5131,7 +5233,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.699315"
+    "updated_at": "2025-10-21T08:13:24.699315",
+    "logo": "/logos/Magento.png"
   },
   {
     "id": 124,
@@ -5173,7 +5276,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.758796"
+    "updated_at": "2025-10-21T08:13:26.758796",
+    "logo": "/logos/Stackby.png"
   },
   {
     "id": 125,
@@ -5215,7 +5319,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.146623"
+    "updated_at": "2025-10-21T08:13:25.146623",
+    "logo": "/logos/MicrosoftTeams.png"
   },
   {
     "id": 126,
@@ -5261,7 +5366,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.366051"
+    "updated_at": "2025-10-21T08:13:23.366051",
+    "logo": "/logos/Ghost.png"
   },
   {
     "id": 127,
@@ -5303,7 +5409,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.288365"
+    "updated_at": "2025-10-21T08:13:26.288365",
+    "logo": "/logos/Securityscorecard.png"
   },
   {
     "id": 128,
@@ -5349,7 +5456,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.926802"
+    "updated_at": "2025-10-21T08:13:21.926802",
+    "logo": "/logos/Cortex.png"
   },
   {
     "id": 129,
@@ -5391,7 +5499,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.953896"
+    "updated_at": "2025-10-21T08:13:25.953896",
+    "logo": "/logos/Pushover.png"
   },
   {
     "id": 130,
@@ -5433,7 +5542,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.201099"
+    "updated_at": "2025-10-21T08:13:27.201099",
+    "logo": "/logos/Typeform.png"
   },
   {
     "id": 131,
@@ -5475,7 +5585,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.037584"
+    "updated_at": "2025-10-21T08:13:21.037584",
+    "logo": "/logos/Airtable.png"
   },
   {
     "id": 132,
@@ -5517,7 +5628,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.672687"
+    "updated_at": "2025-10-21T08:13:21.672687",
+    "logo": "/logos/Chat.png"
   },
   {
     "id": 133,
@@ -5630,7 +5742,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.671991"
+    "updated_at": "2025-10-21T08:13:25.671991",
+    "logo": "/logos/Oracle.png"
   },
   {
     "id": 134,
@@ -5676,7 +5789,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.259131"
+    "updated_at": "2025-10-21T08:13:26.259131",
+    "logo": "/logos/Salesmate.png"
   },
   {
     "id": 135,
@@ -5731,7 +5845,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.572349"
+    "updated_at": "2025-10-21T08:13:27.572349",
+    "logo": "/logos/X.png"
   },
   {
     "id": 136,
@@ -5777,7 +5892,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.054573"
+    "updated_at": "2025-10-21T08:13:27.054573",
+    "logo": "/logos/Toggl.png"
   },
   {
     "id": 137,
@@ -5840,7 +5956,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.683792"
+    "updated_at": "2025-10-21T08:13:27.683792",
+    "logo": "/logos/Zoho.png"
   },
   {
     "id": 138,
@@ -5882,7 +5999,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.685858"
+    "updated_at": "2025-10-21T08:13:24.685858",
+    "logo": "/logos/Lonescale.png"
   },
   {
     "id": 139,
@@ -5924,7 +6042,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.365640"
+    "updated_at": "2025-10-21T08:13:27.365640",
+    "logo": "/logos/Virustotal.png"
   },
   {
     "id": 140,
@@ -5966,7 +6085,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.439855"
+    "updated_at": "2025-10-21T08:13:21.439855",
+    "logo": "/logos/Beeminder.png"
   },
   {
     "id": 141,
@@ -6008,7 +6128,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.384720"
+    "updated_at": "2025-10-21T08:13:25.384720",
+    "logo": "/logos/NASA.png"
   },
   {
     "id": 142,
@@ -6059,7 +6180,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.879102"
+    "updated_at": "2025-10-21T08:13:26.879102",
+    "logo": "/logos/Surveymonkey.png"
   },
   {
     "id": 143,
@@ -6106,7 +6228,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.238131"
+    "updated_at": "2025-10-21T08:13:25.238131",
+    "logo": "/logos/Mocean.png"
   },
   {
     "id": 144,
@@ -6169,7 +6292,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.917328"
+    "updated_at": "2025-10-21T08:13:23.917328",
+    "logo": "/logos/Gotowebinar.png"
   },
   {
     "id": 145,
@@ -6211,7 +6335,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.867441"
+    "updated_at": "2025-10-21T08:13:23.867441",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 146,
@@ -6253,7 +6378,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.821678"
+    "updated_at": "2025-10-21T08:13:23.821678",
+    "logo": "/logos/GoogleSheets.png"
   },
   {
     "id": 147,
@@ -6297,7 +6423,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.279976"
+    "updated_at": "2025-10-21T08:13:22.279976",
+    "logo": "/logos/Discord.png"
   },
   {
     "id": 148,
@@ -6351,7 +6478,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.418028"
+    "updated_at": "2025-10-21T08:13:25.418028",
+    "logo": "/logos/Netscaler.png"
   },
   {
     "id": 149,
@@ -6401,7 +6529,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.662236"
+    "updated_at": "2025-10-21T08:13:26.662236",
+    "logo": "/logos/Splunk.png"
   },
   {
     "id": 150,
@@ -6443,7 +6572,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.343819"
+    "updated_at": "2025-10-21T08:13:26.343819",
+    "logo": "/logos/SendGrid.png"
   },
   {
     "id": 151,
@@ -6489,7 +6619,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.520548"
+    "updated_at": "2025-10-21T08:13:27.520548",
+    "logo": "/logos/Workable.png"
   },
   {
     "id": 152,
@@ -6531,7 +6662,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.555028"
+    "updated_at": "2025-10-21T08:13:21.555028",
+    "logo": "/logos/Brandfetch.png"
   },
   {
     "id": 153,
@@ -6597,7 +6729,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.262822"
+    "updated_at": "2025-10-21T08:13:25.262822",
+    "logo": "/logos/Monday.com.png"
   },
   {
     "id": 154,
@@ -6643,7 +6776,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.647288"
+    "updated_at": "2025-10-21T08:13:21.647288",
+    "logo": "/logos/Carbon.png"
   },
   {
     "id": 155,
@@ -6693,7 +6827,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.388000"
+    "updated_at": "2025-10-21T08:13:21.388000",
+    "logo": "/logos/Baserow.png"
   },
   {
     "id": 156,
@@ -6741,7 +6876,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.647618"
+    "updated_at": "2025-10-21T08:13:26.647618",
+    "logo": "/logos/Solarwinds.png"
   },
   {
     "id": 157,
@@ -6796,7 +6932,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.492433"
+    "updated_at": "2025-10-21T08:13:27.492433",
+    "logo": "/logos/Woocommerce.png"
   },
   {
     "id": 158,
@@ -6859,7 +6996,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.711295"
+    "updated_at": "2025-10-21T08:13:27.711295",
+    "logo": "/logos/Zoom.png"
   },
   {
     "id": 159,
@@ -6919,7 +7057,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.158889"
+    "updated_at": "2025-10-21T08:13:27.158889",
+    "logo": "/logos/Twilio.png"
   },
   {
     "id": 160,
@@ -6961,7 +7100,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.217456"
+    "updated_at": "2025-10-21T08:13:23.217456",
+    "logo": "/logos/Formstack.png"
   },
   {
     "id": 161,
@@ -7027,7 +7167,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.453529"
+    "updated_at": "2025-10-21T08:13:21.453529",
+    "logo": "/logos/Beeminder.png"
   },
   {
     "id": 162,
@@ -7090,7 +7231,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.077881"
+    "updated_at": "2025-10-21T08:13:26.077881",
+    "logo": "/logos/Raindrop.png"
   },
   {
     "id": 163,
@@ -7132,7 +7274,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.938188"
+    "updated_at": "2025-10-21T08:13:25.938188",
+    "logo": "/logos/Pushcut.png"
   },
   {
     "id": 164,
@@ -7225,7 +7368,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.314768"
+    "updated_at": "2025-10-21T08:13:25.314768",
+    "logo": "/logos/MQTT.png"
   },
   {
     "id": 165,
@@ -7291,7 +7435,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.237579"
+    "updated_at": "2025-10-21T08:13:24.237579",
+    "logo": "/logos/Hubspot.png"
   },
   {
     "id": 166,
@@ -7335,7 +7480,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.087482"
+    "updated_at": "2025-10-21T08:13:21.087482",
+    "logo": "/logos/Airtop.png"
   },
   {
     "id": 167,
@@ -7377,7 +7523,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.008205"
+    "updated_at": "2025-10-21T08:13:23.008205",
+    "logo": "/logos/Emelia.png"
   },
   {
     "id": 168,
@@ -7428,7 +7575,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.397471"
+    "updated_at": "2025-10-21T08:13:23.397471",
+    "logo": "/logos/GitHub.png"
   },
   {
     "id": 169,
@@ -7470,7 +7618,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.529738"
+    "updated_at": "2025-10-21T08:13:26.529738",
+    "logo": "/logos/Shuffler.png"
   },
   {
     "id": 170,
@@ -7536,7 +7685,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.782898"
+    "updated_at": "2025-10-21T08:13:21.782898",
+    "logo": "/logos/Clickup.png"
   },
   {
     "id": 171,
@@ -7599,7 +7749,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.733252"
+    "updated_at": "2025-10-21T08:13:25.733252",
+    "logo": "/logos/Pagerduty.png"
   },
   {
     "id": 172,
@@ -7662,7 +7813,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.617955"
+    "updated_at": "2025-10-21T08:13:21.617955",
+    "logo": "/logos/Calendly.png"
   },
   {
     "id": 173,
@@ -7704,7 +7856,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.400808"
+    "updated_at": "2025-10-21T08:13:25.400808",
+    "logo": "/logos/Netlify.png"
   },
   {
     "id": 174,
@@ -7754,7 +7907,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.102841"
+    "updated_at": "2025-10-21T08:13:25.102841",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 175,
@@ -7800,7 +7954,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.184528"
+    "updated_at": "2025-10-21T08:13:23.184528",
+    "logo": "/logos/Flow.png"
   },
   {
     "id": 176,
@@ -7842,7 +7997,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.372979"
+    "updated_at": "2025-10-21T08:13:26.372979",
+    "logo": "/logos/Sentry.io.png"
   },
   {
     "id": 177,
@@ -7909,7 +8065,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.824425"
+    "updated_at": "2025-10-21T08:13:26.824425",
+    "logo": "/logos/Strava.png"
   },
   {
     "id": 178,
@@ -7965,7 +8122,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.745473"
+    "updated_at": "2025-10-21T08:13:26.745473",
+    "logo": "/logos/SSL.png"
   },
   {
     "id": 179,
@@ -8028,7 +8186,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.546343"
+    "updated_at": "2025-10-21T08:13:27.546343",
+    "logo": "/logos/Xero.png"
   },
   {
     "id": 180,
@@ -8080,7 +8239,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.982357"
+    "updated_at": "2025-10-21T08:13:25.982357",
+    "logo": "/logos/Qualys.png"
   },
   {
     "id": 181,
@@ -8129,7 +8289,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.610168"
+    "updated_at": "2025-10-21T08:13:27.610168",
+    "logo": "/logos/Zabbix.png"
   },
   {
     "id": 182,
@@ -8191,7 +8352,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.558961"
+    "updated_at": "2025-10-21T08:13:27.558961",
+    "logo": "/logos/X.png"
   },
   {
     "id": 183,
@@ -8240,7 +8402,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.462105"
+    "updated_at": "2025-10-21T08:13:27.462105",
+    "logo": "/logos/Whatsapp.png"
   },
   {
     "id": 184,
@@ -8282,7 +8445,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.838323"
+    "updated_at": "2025-10-21T08:13:26.838323",
+    "logo": "/logos/Stripe.png"
   },
   {
     "id": 185,
@@ -8333,7 +8497,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.506863"
+    "updated_at": "2025-10-21T08:13:23.506863",
+    "logo": "/logos/Gong.png"
   },
   {
     "id": 186,
@@ -8375,7 +8540,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.773367"
+    "updated_at": "2025-10-21T08:13:26.773367",
+    "logo": "/logos/Storyblok.png"
   },
   {
     "id": 187,
@@ -8417,7 +8583,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.770216"
+    "updated_at": "2025-10-21T08:13:25.770216",
+    "logo": "/logos/Peekalink.png"
   },
   {
     "id": 188,
@@ -8473,7 +8640,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.704073"
+    "updated_at": "2025-10-21T08:13:26.704073",
+    "logo": "/logos/SSH.png"
   },
   {
     "id": 189,
@@ -8519,7 +8687,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.877071"
+    "updated_at": "2025-10-21T08:13:24.877071",
+    "logo": "/logos/Matrix.png"
   },
   {
     "id": 190,
@@ -8561,7 +8730,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.039576"
+    "updated_at": "2025-10-21T08:13:23.039576",
+    "logo": "/logos/Eventbrite.png"
   },
   {
     "id": 191,
@@ -8616,7 +8786,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.996711"
+    "updated_at": "2025-10-21T08:13:24.996711",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 192,
@@ -8686,7 +8857,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.689087"
+    "updated_at": "2025-10-21T08:13:26.689087",
+    "logo": "/logos/Spotify.png"
   },
   {
     "id": 193,
@@ -8733,7 +8905,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.440697"
+    "updated_at": "2025-10-21T08:13:23.440697",
+    "logo": "/logos/GitLab.png"
   },
   {
     "id": 194,
@@ -8777,7 +8950,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.168477"
+    "updated_at": "2025-10-21T08:13:23.168477",
+    "logo": "/logos/Filescan.png"
   },
   {
     "id": 195,
@@ -8819,7 +8993,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.126629"
+    "updated_at": "2025-10-21T08:13:24.126629",
+    "logo": "/logos/Highlevel.png"
   },
   {
     "id": 196,
@@ -8865,7 +9040,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.350611"
+    "updated_at": "2025-10-21T08:13:23.350611",
+    "logo": "/logos/Ghost.png"
   },
   {
     "id": 197,
@@ -8918,7 +9094,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.632714"
+    "updated_at": "2025-10-21T08:13:26.632714",
+    "logo": "/logos/Solarwinds.png"
   },
   {
     "id": 198,
@@ -8984,7 +9161,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.336248"
+    "updated_at": "2025-10-21T08:13:23.336248",
+    "logo": "/logos/Getresponse.png"
   },
   {
     "id": 199,
@@ -9026,7 +9204,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.104568"
+    "updated_at": "2025-10-21T08:13:23.104568",
+    "logo": "/logos/Facebook.png"
   },
   {
     "id": 200,
@@ -9080,7 +9259,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.521136"
+    "updated_at": "2025-10-21T08:13:21.521136",
+    "logo": "/logos/Bitwarden.png"
   },
   {
     "id": 201,
@@ -9122,7 +9302,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.600910"
+    "updated_at": "2025-10-21T08:13:21.600910",
+    "logo": "/logos/Calendly.png"
   },
   {
     "id": 202,
@@ -9207,7 +9388,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.618662"
+    "updated_at": "2025-10-21T08:13:26.618662",
+    "logo": "/logos/Snowflake.png"
   },
   {
     "id": 203,
@@ -9275,7 +9457,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.411598"
+    "updated_at": "2025-10-21T08:13:23.411598",
+    "logo": "/logos/GitHub.png"
   },
   {
     "id": 204,
@@ -9346,7 +9529,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.860142"
+    "updated_at": "2025-10-21T08:13:25.860142",
+    "logo": "/logos/Postgres.png"
   },
   {
     "id": 205,
@@ -9388,7 +9572,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.793782"
+    "updated_at": "2025-10-21T08:13:25.793782",
+    "logo": "/logos/Phantombuster.png"
   },
   {
     "id": 206,
@@ -9467,7 +9652,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.665001"
+    "updated_at": "2025-10-21T08:13:27.665001",
+    "logo": "/logos/Zendesk.png"
   },
   {
     "id": 207,
@@ -9509,7 +9695,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.637298"
+    "updated_at": "2025-10-21T08:13:24.637298",
+    "logo": "/logos/Lingvanex.png"
   },
   {
     "id": 208,
@@ -9572,7 +9759,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.055952"
+    "updated_at": "2025-10-21T08:13:21.055952",
+    "logo": "/logos/Airtable.png"
   },
   {
     "id": 209,
@@ -9615,7 +9803,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.708759"
+    "updated_at": "2025-10-21T08:13:23.708759",
+    "logo": "/logos/GoogleDrive.png"
   },
   {
     "id": 210,
@@ -9657,7 +9846,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.250090"
+    "updated_at": "2025-10-21T08:13:23.250090",
+    "logo": "/logos/Fortinet.png"
   },
   {
     "id": 211,
@@ -9699,7 +9889,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.806449"
+    "updated_at": "2025-10-21T08:13:23.806449",
+    "logo": "/logos/GoogleSheets.png"
   },
   {
     "id": 212,
@@ -9765,7 +9956,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.503474"
+    "updated_at": "2025-10-21T08:13:25.503474",
+    "logo": "/logos/Notion.png"
   },
   {
     "id": 213,
@@ -9821,7 +10013,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.977210"
+    "updated_at": "2025-10-21T08:13:22.977210",
+    "logo": "/logos/Elasticsearch.png"
   },
   {
     "id": 214,
@@ -9881,7 +10074,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.477690"
+    "updated_at": "2025-10-21T08:13:24.477690",
+    "logo": "/logos/JWT.png"
   },
   {
     "id": 215,
@@ -9939,7 +10133,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.587468"
+    "updated_at": "2025-10-21T08:13:21.587468",
+    "logo": "/logos/Bubble.png"
   },
   {
     "id": 216,
@@ -9982,7 +10177,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.811795"
+    "updated_at": "2025-10-21T08:13:21.811795",
+    "logo": "/logos/Cloudflare.png"
   },
   {
     "id": 217,
@@ -10024,7 +10220,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.782826"
+    "updated_at": "2025-10-21T08:13:25.782826",
+    "logo": "/logos/Perplexity.png"
   },
   {
     "id": 218,
@@ -10066,7 +10263,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.322577"
+    "updated_at": "2025-10-21T08:13:23.322577",
+    "logo": "/logos/Getresponse.png"
   },
   {
     "id": 219,
@@ -10132,7 +10330,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.925312"
+    "updated_at": "2025-10-21T08:13:25.925312",
+    "logo": "/logos/Pushbullet.png"
   },
   {
     "id": 220,
@@ -10182,7 +10381,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.777759"
+    "updated_at": "2025-10-21T08:13:24.777759",
+    "logo": "/logos/Mailgun.png"
   },
   {
     "id": 221,
@@ -10234,7 +10434,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.725034"
+    "updated_at": "2025-10-21T08:13:21.725034",
+    "logo": "/logos/Cisco.png"
   },
   {
     "id": 222,
@@ -10296,7 +10497,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.940659"
+    "updated_at": "2025-10-21T08:13:21.940659",
+    "logo": "/logos/Cratedb.png"
   },
   {
     "id": 223,
@@ -10338,7 +10540,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.341923"
+    "updated_at": "2025-10-21T08:13:24.341923",
+    "logo": "/logos/Intercom.png"
   },
   {
     "id": 224,
@@ -10414,7 +10617,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.208115"
+    "updated_at": "2025-10-21T08:13:24.208115",
+    "logo": "/logos/Hubspot.png"
   },
   {
     "id": 225,
@@ -10481,7 +10685,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.570328"
+    "updated_at": "2025-10-21T08:13:24.570328",
+    "logo": "/logos/LDAP.png"
   },
   {
     "id": 226,
@@ -10527,7 +10732,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.120137"
+    "updated_at": "2025-10-21T08:13:25.120137",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 227,
@@ -10580,7 +10786,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.517493"
+    "updated_at": "2025-10-21T08:13:24.517493",
+    "logo": "/logos/Kibana.png"
   },
   {
     "id": 228,
@@ -10646,7 +10853,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.392824"
+    "updated_at": "2025-10-21T08:13:26.392824",
+    "logo": "/logos/Sentry.io.png"
   },
   {
     "id": 229,
@@ -10712,7 +10920,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.233217"
+    "updated_at": "2025-10-21T08:13:23.233217",
+    "logo": "/logos/Formstack.png"
   },
   {
     "id": 230,
@@ -10760,7 +10969,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.099931"
+    "updated_at": "2025-10-21T08:13:27.099931",
+    "logo": "/logos/Trellix.png"
   },
   {
     "id": 231,
@@ -10802,7 +11012,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.251777"
+    "updated_at": "2025-10-21T08:13:27.251777",
+    "logo": "/logos/Uplead.png"
   },
   {
     "id": 232,
@@ -10881,7 +11092,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.514230"
+    "updated_at": "2025-10-21T08:13:26.514230",
+    "logo": "/logos/Shopify.png"
   },
   {
     "id": 233,
@@ -10923,7 +11135,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.062281"
+    "updated_at": "2025-10-21T08:13:25.062281",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 234,
@@ -10970,7 +11183,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.478342"
+    "updated_at": "2025-10-21T08:13:25.478342",
+    "logo": "/logos/Nocodb.png"
   },
   {
     "id": 235,
@@ -11036,7 +11250,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.652853"
+    "updated_at": "2025-10-21T08:13:24.652853",
+    "logo": "/logos/Linkedin.png"
   },
   {
     "id": 236,
@@ -11093,7 +11308,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.622279"
+    "updated_at": "2025-10-21T08:13:27.622279",
+    "logo": "/logos/Zammad.png"
   },
   {
     "id": 237,
@@ -11180,7 +11396,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.553737"
+    "updated_at": "2025-10-21T08:13:25.553737",
+    "logo": "/logos/Oauth2.png"
   },
   {
     "id": 238,
@@ -11222,7 +11439,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.660049"
+    "updated_at": "2025-10-21T08:13:25.660049",
+    "logo": "/logos/Openweathermap.png"
   },
   {
     "id": 239,
@@ -11277,7 +11495,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.898335"
+    "updated_at": "2025-10-21T08:13:23.898335",
+    "logo": "/logos/Gotify.png"
   },
   {
     "id": 240,
@@ -11319,7 +11538,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.290710"
+    "updated_at": "2025-10-21T08:13:27.290710",
+    "logo": "/logos/Urlscan.io.png"
   },
   {
     "id": 241,
@@ -11361,7 +11581,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.552575"
+    "updated_at": "2025-10-21T08:13:23.552575",
+    "logo": "/logos/GoogleAnalytics.png"
   },
   {
     "id": 242,
@@ -11406,7 +11627,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.369833"
+    "updated_at": "2025-10-21T08:13:25.369833",
+    "logo": "/logos/N8n.png"
   },
   {
     "id": 243,
@@ -11473,7 +11695,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.623853"
+    "updated_at": "2025-10-21T08:13:24.623853",
+    "logo": "/logos/Line.png"
   },
   {
     "id": 244,
@@ -11514,7 +11737,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.425749"
+    "updated_at": "2025-10-21T08:13:21.425749",
+    "logo": "/logos/Bearer.png"
   },
   {
     "id": 245,
@@ -11556,7 +11780,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.169509"
+    "updated_at": "2025-10-21T08:13:21.169509",
+    "logo": "/logos/Apitemplate.io.png"
   },
   {
     "id": 246,
@@ -11600,7 +11825,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.566330"
+    "updated_at": "2025-10-21T08:13:23.566330",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 247,
@@ -11650,7 +11876,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.651228"
+    "updated_at": "2025-10-21T08:13:27.651228",
+    "logo": "/logos/Zendesk.png"
   },
   {
     "id": 248,
@@ -11692,7 +11919,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.895058"
+    "updated_at": "2025-10-21T08:13:21.895058",
+    "logo": "/logos/Convertkit.png"
   },
   {
     "id": 249,
@@ -11734,7 +11962,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.596111"
+    "updated_at": "2025-10-21T08:13:23.596111",
+    "logo": "/logos/GoogleBusiness.png"
   },
   {
     "id": 250,
@@ -11776,7 +12005,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.967609"
+    "updated_at": "2025-10-21T08:13:24.967609",
+    "logo": "/logos/Messagebird.png"
   },
   {
     "id": 251,
@@ -11830,7 +12060,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.152696"
+    "updated_at": "2025-10-21T08:13:24.152696",
+    "logo": "/logos/Home.png"
   },
   {
     "id": 252,
@@ -11892,7 +12123,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.635136"
+    "updated_at": "2025-10-21T08:13:25.635136",
+    "logo": "/logos/OpenAI.png"
   },
   {
     "id": 253,
@@ -11949,7 +12181,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.233759"
+    "updated_at": "2025-10-21T08:13:26.233759",
+    "logo": "/logos/Salesforce.png"
   },
   {
     "id": 254,
@@ -12016,7 +12249,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.537705"
+    "updated_at": "2025-10-21T08:13:21.537705",
+    "logo": "/logos/Box.png"
   },
   {
     "id": 255,
@@ -12076,7 +12310,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.497605"
+    "updated_at": "2025-10-21T08:13:26.497605",
+    "logo": "/logos/Shopify.png"
   },
   {
     "id": 256,
@@ -12142,7 +12377,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.005268"
+    "updated_at": "2025-10-21T08:13:27.005268",
+    "logo": "/logos/Timescaledb.png"
   },
   {
     "id": 257,
@@ -12196,7 +12432,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.151640"
+    "updated_at": "2025-10-21T08:13:23.151640",
+    "logo": "/logos/Filemaker.png"
   },
   {
     "id": 258,
@@ -12250,7 +12487,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.022546"
+    "updated_at": "2025-10-21T08:13:22.022546",
+    "logo": "/logos/Datadog.png"
   },
   {
     "id": 259,
@@ -12292,7 +12530,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.809901"
+    "updated_at": "2025-10-21T08:13:24.809901",
+    "logo": "/logos/Mailjet.png"
   },
   {
     "id": 260,
@@ -12362,7 +12601,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.246223"
+    "updated_at": "2025-10-21T08:13:26.246223",
+    "logo": "/logos/Salesforce.png"
   },
   {
     "id": 261,
@@ -12414,7 +12654,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.421644"
+    "updated_at": "2025-10-21T08:13:24.421644",
+    "logo": "/logos/Jira.png"
   },
   {
     "id": 262,
@@ -12465,7 +12706,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.792901"
+    "updated_at": "2025-10-21T08:13:24.792901",
+    "logo": "/logos/Mailjet.png"
   },
   {
     "id": 263,
@@ -12511,7 +12753,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.632385"
+    "updated_at": "2025-10-21T08:13:21.632385",
+    "logo": "/logos/Cal.png"
   },
   {
     "id": 264,
@@ -12560,7 +12803,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.092824"
+    "updated_at": "2025-10-21T08:13:26.092824",
+    "logo": "/logos/Rapid7.png"
   },
   {
     "id": 265,
@@ -12610,7 +12854,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.146358"
+    "updated_at": "2025-10-21T08:13:27.146358",
+    "logo": "/logos/Twake.png"
   },
   {
     "id": 266,
@@ -12652,7 +12897,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.597847"
+    "updated_at": "2025-10-21T08:13:27.597847",
+    "logo": "/logos/Youtube.png"
   },
   {
     "id": 267,
@@ -12706,7 +12952,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.421523"
+    "updated_at": "2025-10-21T08:13:26.421523",
+    "logo": "/logos/Servicenow.png"
   },
   {
     "id": 268,
@@ -12773,7 +13020,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.923761"
+    "updated_at": "2025-10-21T08:13:24.923761",
+    "logo": "/logos/Mautic.png"
   },
   {
     "id": 269,
@@ -12815,7 +13063,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.250541"
+    "updated_at": "2025-10-21T08:13:25.250541",
+    "logo": "/logos/Monday.com.png"
   },
   {
     "id": 270,
@@ -12873,7 +13122,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.210391"
+    "updated_at": "2025-10-21T08:13:21.210391",
+    "logo": "/logos/Auth0.png"
   },
   {
     "id": 271,
@@ -12944,7 +13194,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.904979"
+    "updated_at": "2025-10-21T08:13:22.904979",
+    "logo": "/logos/Dropbox.png"
   },
   {
     "id": 272,
@@ -12986,7 +13237,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.584362"
+    "updated_at": "2025-10-21T08:13:24.584362",
+    "logo": "/logos/Lemlist.png"
   },
   {
     "id": 273,
@@ -13028,7 +13280,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.221778"
+    "updated_at": "2025-10-21T08:13:24.221778",
+    "logo": "/logos/Hubspot.png"
   },
   {
     "id": 274,
@@ -13070,7 +13323,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.860106"
+    "updated_at": "2025-10-21T08:13:22.860106",
+    "logo": "/logos/Drift.png"
   },
   {
     "id": 275,
@@ -13139,7 +13393,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.434218"
+    "updated_at": "2025-10-21T08:13:26.434218",
+    "logo": "/logos/Servicenow.png"
   },
   {
     "id": 276,
@@ -13181,7 +13436,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.334446"
+    "updated_at": "2025-10-21T08:13:27.334446",
+    "logo": "/logos/Vero.png"
   },
   {
     "id": 277,
@@ -13227,7 +13483,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.859274"
+    "updated_at": "2025-10-21T08:13:24.859274",
+    "logo": "/logos/Marketstack.png"
   },
   {
     "id": 278,
@@ -13284,7 +13541,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.567944"
+    "updated_at": "2025-10-21T08:13:25.567944",
+    "logo": "/logos/Odoo.png"
   },
   {
     "id": 279,
@@ -13329,7 +13587,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.079049"
+    "updated_at": "2025-10-21T08:13:24.079049",
+    "logo": "/logos/Header.png"
   },
   {
     "id": 280,
@@ -13371,7 +13630,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.835908"
+    "updated_at": "2025-10-21T08:13:23.835908",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 281,
@@ -13417,7 +13677,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.350749"
+    "updated_at": "2025-10-21T08:13:21.350749",
+    "logo": "/logos/Bamboohr.png"
   },
   {
     "id": 282,
@@ -13463,7 +13724,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.968479"
+    "updated_at": "2025-10-21T08:13:26.968479",
+    "logo": "/logos/Telegram.png"
   },
   {
     "id": 283,
@@ -13530,7 +13792,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.354905"
+    "updated_at": "2025-10-21T08:13:25.354905",
+    "logo": "/logos/MySQL.png"
   },
   {
     "id": 284,
@@ -13596,7 +13859,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.196655"
+    "updated_at": "2025-10-21T08:13:21.196655",
+    "logo": "/logos/Asana.png"
   },
   {
     "id": 285,
@@ -13648,7 +13912,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.636467"
+    "updated_at": "2025-10-21T08:13:27.636467",
+    "logo": "/logos/Zammad.png"
   },
   {
     "id": 286,
@@ -13719,7 +13984,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.747263"
+    "updated_at": "2025-10-21T08:13:24.747263",
+    "logo": "/logos/Mailchimp.png"
   },
   {
     "id": 287,
@@ -13761,7 +14027,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.172172"
+    "updated_at": "2025-10-21T08:13:25.172172",
+    "logo": "/logos/Mindee.png"
   },
   {
     "id": 288,
@@ -13809,7 +14076,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:43:38.564866"
+    "updated_at": "2025-10-21T08:43:38.564866",
+    "logo": "/logos/Acuity.png"
   },
   {
     "id": 289,
@@ -13875,7 +14143,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.059364"
+    "updated_at": "2025-10-21T08:13:24.059364",
+    "logo": "/logos/Harvest.png"
   },
   {
     "id": 290,
@@ -13922,7 +14191,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.741182"
+    "updated_at": "2025-10-21T08:13:23.741182",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 291,
@@ -13969,7 +14239,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.195879"
+    "updated_at": "2025-10-21T08:13:22.195879",
+    "logo": "/logos/Demio.png"
   },
   {
     "id": 292,
@@ -14015,7 +14286,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.515321"
+    "updated_at": "2025-10-21T08:13:25.515321",
+    "logo": "/logos/Npm.png"
   },
   {
     "id": 293,
@@ -14057,7 +14329,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.448206"
+    "updated_at": "2025-10-21T08:13:26.448206",
+    "logo": "/logos/Seven.png"
   },
   {
     "id": 294,
@@ -14103,7 +14376,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.866633"
+    "updated_at": "2025-10-21T08:13:26.866633",
+    "logo": "/logos/Supabase.png"
   },
   {
     "id": 295,
@@ -14145,7 +14419,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.697137"
+    "updated_at": "2025-10-21T08:13:21.697137",
+    "logo": "/logos/Cisco.png"
   },
   {
     "id": 296,
@@ -14199,7 +14474,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.506198"
+    "updated_at": "2025-10-21T08:13:27.506198",
+    "logo": "/logos/Wordpress.png"
   },
   {
     "id": 297,
@@ -14241,7 +14517,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.641892"
+    "updated_at": "2025-10-21T08:13:23.641892",
+    "logo": "/logos/GoogleCloud.png"
   },
   {
     "id": 298,
@@ -14308,7 +14585,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.317530"
+    "updated_at": "2025-10-21T08:13:27.317530",
+    "logo": "/logos/Venafi.png"
   },
   {
     "id": 299,
@@ -14374,7 +14652,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.218180"
+    "updated_at": "2025-10-21T08:13:27.218180",
+    "logo": "/logos/Typeform.png"
   },
   {
     "id": 300,
@@ -14439,7 +14718,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.491122"
+    "updated_at": "2025-10-21T08:13:24.491122",
+    "logo": "/logos/Kafka.png"
   },
   {
     "id": 301,
@@ -14481,7 +14761,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.074746"
+    "updated_at": "2025-10-21T08:13:25.074746",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 302,
@@ -14527,7 +14808,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.265681"
+    "updated_at": "2025-10-21T08:13:23.265681",
+    "logo": "/logos/Freshdesk.png"
   },
   {
     "id": 303,
@@ -14575,7 +14857,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.028697"
+    "updated_at": "2025-10-21T08:13:26.028697",
+    "logo": "/logos/Quick.png"
   },
   {
     "id": 304,
@@ -14621,7 +14904,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.180679"
+    "updated_at": "2025-10-21T08:13:22.180679",
+    "logo": "/logos/Deepl.png"
   },
   {
     "id": 305,
@@ -14672,7 +14956,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.391257"
+    "updated_at": "2025-10-21T08:13:24.391257",
+    "logo": "/logos/Jenkins.png"
   },
   {
     "id": 306,
@@ -14722,7 +15007,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.745196"
+    "updated_at": "2025-10-21T08:13:25.745196",
+    "logo": "/logos/Paypal.png"
   },
   {
     "id": 307,
@@ -14764,7 +15050,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.912067"
+    "updated_at": "2025-10-21T08:13:25.912067",
+    "logo": "/logos/Profitwell.png"
   },
   {
     "id": 308,
@@ -14806,7 +15093,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.684402"
+    "updated_at": "2025-10-21T08:13:25.684402",
+    "logo": "/logos/Orbit.png"
   },
   {
     "id": 309,
@@ -14848,7 +15136,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.265191"
+    "updated_at": "2025-10-21T08:13:24.265191",
+    "logo": "/logos/Humantic.png"
   },
   {
     "id": 310,
@@ -14890,7 +15179,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.607667"
+    "updated_at": "2025-10-21T08:13:25.607667",
+    "logo": "/logos/Onfleet.png"
   },
   {
     "id": 311,
@@ -14932,7 +15222,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.182872"
+    "updated_at": "2025-10-21T08:13:21.182872",
+    "logo": "/logos/Asana.png"
   },
   {
     "id": 312,
@@ -14977,7 +15268,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.404760"
+    "updated_at": "2025-10-21T08:13:21.404760",
+    "logo": "/logos/Basic.png"
   },
   {
     "id": 313,
@@ -15043,7 +15335,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.039445"
+    "updated_at": "2025-10-21T08:13:27.039445",
+    "logo": "/logos/Todoist.png"
   },
   {
     "id": 314,
@@ -15085,7 +15378,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.697061"
+    "updated_at": "2025-10-21T08:13:25.697061",
+    "logo": "/logos/Oura.png"
   },
   {
     "id": 315,
@@ -15144,7 +15438,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.756509"
+    "updated_at": "2025-10-21T08:13:23.756509",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 316,
@@ -15199,7 +15494,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.478908"
+    "updated_at": "2025-10-21T08:13:26.478908",
+    "logo": "/logos/Shopify.png"
   },
   {
     "id": 317,
@@ -15241,7 +15537,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.530109"
+    "updated_at": "2025-10-21T08:13:24.530109",
+    "logo": "/logos/Kitemaker.png"
   },
   {
     "id": 318,
@@ -15283,7 +15580,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.692248"
+    "updated_at": "2025-10-21T08:13:23.692248",
+    "logo": "/logos/GoogleDocs.png"
   },
   {
     "id": 319,
@@ -15328,7 +15626,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.470157"
+    "updated_at": "2025-10-21T08:13:23.470157",
+    "logo": "/logos/Git.png"
   },
   {
     "id": 320,
@@ -15374,7 +15673,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.660856"
+    "updated_at": "2025-10-21T08:13:21.660856",
+    "logo": "/logos/Chargebee.png"
   },
   {
     "id": 321,
@@ -15416,7 +15716,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.764293"
+    "updated_at": "2025-10-21T08:13:21.764293",
+    "logo": "/logos/Clickup.png"
   },
   {
     "id": 322,
@@ -15458,7 +15759,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.449253"
+    "updated_at": "2025-10-21T08:13:24.449253",
+    "logo": "/logos/Jira.png"
   },
   {
     "id": 323,
@@ -15525,7 +15827,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.808185"
+    "updated_at": "2025-10-21T08:13:25.808185",
+    "logo": "/logos/Philiphue.png"
   },
   {
     "id": 324,
@@ -15599,7 +15902,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.671313"
+    "updated_at": "2025-10-21T08:13:24.671313",
+    "logo": "/logos/Linkedin.png"
   },
   {
     "id": 325,
@@ -15641,7 +15945,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.302052"
+    "updated_at": "2025-10-21T08:13:26.302052",
+    "logo": "/logos/Segment.png"
   },
   {
     "id": 326,
@@ -15735,7 +16040,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.061210"
+    "updated_at": "2025-10-21T08:13:26.061210",
+    "logo": "/logos/Rabbitmq.png"
   },
   {
     "id": 327,
@@ -15809,7 +16115,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.611139"
+    "updated_at": "2025-10-21T08:13:24.611139",
+    "logo": "/logos/Linear.png"
   },
   {
     "id": 328,
@@ -15852,7 +16159,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.023939"
+    "updated_at": "2025-10-21T08:13:25.023939",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 329,
@@ -15894,7 +16202,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.850390"
+    "updated_at": "2025-10-21T08:13:23.850390",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 330,
@@ -15942,7 +16251,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.583847"
+    "updated_at": "2025-10-21T08:13:25.583847",
+    "logo": "/logos/Okta.png"
   },
   {
     "id": 331,
@@ -15984,7 +16294,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.721458"
+    "updated_at": "2025-10-21T08:13:25.721458",
+    "logo": "/logos/Pagerduty.png"
   },
   {
     "id": 332,
@@ -16055,7 +16366,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.449784"
+    "updated_at": "2025-10-21T08:13:25.449784",
+    "logo": "/logos/Nextcloud.png"
   },
   {
     "id": 333,
@@ -16097,7 +16409,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.597368"
+    "updated_at": "2025-10-21T08:13:24.597368",
+    "logo": "/logos/Linear.png"
   },
   {
     "id": 334,
@@ -16143,7 +16456,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.375236"
+    "updated_at": "2025-10-21T08:13:24.375236",
+    "logo": "/logos/Iterable.png"
   },
   {
     "id": 335,
@@ -16192,7 +16506,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.710177"
+    "updated_at": "2025-10-21T08:13:25.710177",
+    "logo": "/logos/Paddle.png"
   },
   {
     "id": 336,
@@ -16234,7 +16549,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.729708"
+    "updated_at": "2025-10-21T08:13:24.729708",
+    "logo": "/logos/Mailchimp.png"
   },
   {
     "id": 337,
@@ -16300,7 +16616,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.892212"
+    "updated_at": "2025-10-21T08:13:26.892212",
+    "logo": "/logos/Surveymonkey.png"
   },
   {
     "id": 338,
@@ -16342,7 +16659,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.224102"
+    "updated_at": "2025-10-21T08:13:21.224102",
+    "logo": "/logos/Automizy.png"
   },
   {
     "id": 339,
@@ -16388,7 +16706,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.760837"
+    "updated_at": "2025-10-21T08:13:24.760837",
+    "logo": "/logos/Mailer.png"
   },
   {
     "id": 340,
@@ -16431,7 +16750,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.128802"
+    "updated_at": "2025-10-21T08:13:27.128802",
+    "logo": "/logos/Twake.png"
   },
   {
     "id": 341,
@@ -16488,7 +16808,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.135286"
+    "updated_at": "2025-10-21T08:13:21.135286",
+    "logo": "/logos/AMQP.png"
   },
   {
     "id": 342,
@@ -16529,7 +16850,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.179633"
+    "updated_at": "2025-10-21T08:13:24.179633",
+    "logo": "/logos/Hubspot.png"
   },
   {
     "id": 343,
@@ -16595,7 +16917,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.738198"
+    "updated_at": "2025-10-21T08:13:21.738198",
+    "logo": "/logos/Cisco.png"
   },
   {
     "id": 344,
@@ -16637,7 +16960,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.396141"
+    "updated_at": "2025-10-21T08:13:27.396141",
+    "logo": "/logos/Webflow.png"
   },
   {
     "id": 345,
@@ -16730,7 +17054,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.255462"
+    "updated_at": "2025-10-21T08:13:21.255462",
+    "logo": "/logos/AWS.png"
   },
   {
     "id": 346,
@@ -16776,7 +17101,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.533413"
+    "updated_at": "2025-10-21T08:13:27.533413",
+    "logo": "/logos/Wufoo.png"
   },
   {
     "id": 347,
@@ -16822,7 +17148,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.903360"
+    "updated_at": "2025-10-21T08:13:26.903360",
+    "logo": "/logos/Syncromsp.png"
   },
   {
     "id": 348,
@@ -16869,7 +17196,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.545812"
+    "updated_at": "2025-10-21T08:13:24.545812",
+    "logo": "/logos/Kobotoolbox.png"
   },
   {
     "id": 349,
@@ -16918,7 +17246,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.049181"
+    "updated_at": "2025-10-21T08:13:25.049181",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 350,
@@ -16968,7 +17297,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.979881"
+    "updated_at": "2025-10-21T08:13:26.979881",
+    "logo": "/logos/The.png"
   },
   {
     "id": 351,
@@ -17034,7 +17364,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.112917"
+    "updated_at": "2025-10-21T08:13:24.112917",
+    "logo": "/logos/Helpscout.png"
   },
   {
     "id": 352,
@@ -17086,7 +17417,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.710707"
+    "updated_at": "2025-10-21T08:13:21.710707",
+    "logo": "/logos/Cisco.png"
   },
   {
     "id": 353,
@@ -17141,7 +17473,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.982078"
+    "updated_at": "2025-10-21T08:13:24.982078",
+    "logo": "/logos/Metabase.png"
   },
   {
     "id": 354,
@@ -17197,7 +17530,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.309437"
+    "updated_at": "2025-10-21T08:13:23.309437",
+    "logo": "/logos/FTP.png"
   },
   {
     "id": 355,
@@ -17273,7 +17607,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.951709"
+    "updated_at": "2025-10-21T08:13:24.951709",
+    "logo": "/logos/Medium.png"
   },
   {
     "id": 356,
@@ -17335,7 +17670,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.461505"
+    "updated_at": "2025-10-21T08:13:26.461505",
+    "logo": "/logos/SFTP.png"
   },
   {
     "id": 357,
@@ -17401,7 +17737,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.874773"
+    "updated_at": "2025-10-21T08:13:22.874773",
+    "logo": "/logos/Drift.png"
   },
   {
     "id": 358,
@@ -17467,7 +17804,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.055431"
+    "updated_at": "2025-10-21T08:13:23.055431",
+    "logo": "/logos/Eventbrite.png"
   },
   {
     "id": 359,
@@ -17518,7 +17856,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.478162"
+    "updated_at": "2025-10-21T08:13:27.478162",
+    "logo": "/logos/Wise.png"
   },
   {
     "id": 360,
@@ -17568,7 +17907,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.327702"
+    "updated_at": "2025-10-21T08:13:21.327702",
+    "logo": "/logos/Azure.png"
   },
   {
     "id": 361,
@@ -17631,7 +17971,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.992469"
+    "updated_at": "2025-10-21T08:13:22.992469",
+    "logo": "/logos/Elastic.png"
   },
   {
     "id": 362,
@@ -17681,7 +18022,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.019631"
+    "updated_at": "2025-10-21T08:13:21.019631",
+    "logo": "/logos/Agilecrm.png"
   },
   {
     "id": 363,
@@ -17723,7 +18065,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.989544"
+    "updated_at": "2025-10-21T08:13:23.989544",
+    "logo": "/logos/Gumroad.png"
   },
   {
     "id": 364,
@@ -17765,7 +18108,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.882588"
+    "updated_at": "2025-10-21T08:13:23.882588",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 365,
@@ -17833,7 +18177,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.454489"
+    "updated_at": "2025-10-21T08:13:23.454489",
+    "logo": "/logos/GitLab.png"
   },
   {
     "id": 366,
@@ -17879,7 +18224,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.886124"
+    "updated_at": "2025-10-21T08:13:25.886124",
+    "logo": "/logos/Posthog.png"
   },
   {
     "id": 367,
@@ -17933,7 +18279,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.930865"
+    "updated_at": "2025-10-21T08:13:26.930865",
+    "logo": "/logos/Taiga.png"
   },
   {
     "id": 368,
@@ -17976,7 +18323,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.315205"
+    "updated_at": "2025-10-21T08:13:22.315205",
+    "logo": "/logos/Discord.png"
   },
   {
     "id": 369,
@@ -18042,7 +18390,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.187450"
+    "updated_at": "2025-10-21T08:13:27.187450",
+    "logo": "/logos/Twist.png"
   },
   {
     "id": 370,
@@ -18084,7 +18433,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.293038"
+    "updated_at": "2025-10-21T08:13:24.293038",
+    "logo": "/logos/Hybrid.png"
   },
   {
     "id": 371,
@@ -18130,7 +18480,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.195518"
+    "updated_at": "2025-10-21T08:13:26.195518",
+    "logo": "/logos/Rundeck.png"
   },
   {
     "id": 372,
@@ -18185,7 +18536,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.427619"
+    "updated_at": "2025-10-21T08:13:27.427619",
+    "logo": "/logos/Wekan.png"
   },
   {
     "id": 373,
@@ -18227,7 +18579,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.820871"
+    "updated_at": "2025-10-21T08:13:25.820871",
+    "logo": "/logos/Pipedrive.png"
   },
   {
     "id": 374,
@@ -18275,7 +18628,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.325268"
+    "updated_at": "2025-10-21T08:13:24.325268",
+    "logo": "/logos/Imperva.png"
   },
   {
     "id": 375,
@@ -18317,7 +18671,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.787062"
+    "updated_at": "2025-10-21T08:13:26.787062",
+    "logo": "/logos/Storyblok.png"
   },
   {
     "id": 376,
@@ -18387,7 +18742,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.410387"
+    "updated_at": "2025-10-21T08:13:27.410387",
+    "logo": "/logos/Webflow.png"
   },
   {
     "id": 377,
@@ -18428,7 +18784,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.544856"
+    "updated_at": "2025-10-21T08:13:26.544856",
+    "logo": "/logos/SIGNL4.png"
   },
   {
     "id": 378,
@@ -18472,7 +18829,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.826712"
+    "updated_at": "2025-10-21T08:13:24.826712",
+    "logo": "/logos/Malcoreapi.png"
   },
   {
     "id": 379,
@@ -18524,7 +18882,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.036288"
+    "updated_at": "2025-10-21T08:13:25.036288",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 380,
@@ -18566,7 +18925,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.881277"
+    "updated_at": "2025-10-21T08:13:21.881277",
+    "logo": "/logos/Convertapi.png"
   },
   {
     "id": 381,
@@ -18609,7 +18969,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.445634"
+    "updated_at": "2025-10-21T08:13:27.445634",
+    "logo": "/logos/Whatsapp.png"
   },
   {
     "id": 382,
@@ -18674,7 +19035,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.604008"
+    "updated_at": "2025-10-21T08:13:26.604008",
+    "logo": "/logos/SMTP.png"
   },
   {
     "id": 383,
@@ -18716,7 +19078,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.596111"
+    "updated_at": "2025-10-21T08:13:25.596111",
+    "logo": "/logos/One.png"
   },
   {
     "id": 384,
@@ -18758,7 +19121,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.917275"
+    "updated_at": "2025-10-21T08:13:26.917275",
+    "logo": "/logos/Sysdig.png"
   },
   {
     "id": 385,
@@ -18817,7 +19181,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.088457"
+    "updated_at": "2025-10-21T08:13:25.088457",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 386,
@@ -18859,7 +19224,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.751116"
+    "updated_at": "2025-10-21T08:13:21.751116",
+    "logo": "/logos/Clearbit.png"
   },
   {
     "id": 387,
@@ -18901,7 +19267,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.159762"
+    "updated_at": "2025-10-21T08:13:25.159762",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 388,
@@ -18952,7 +19319,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.357592"
+    "updated_at": "2025-10-21T08:13:24.357592",
+    "logo": "/logos/Invoice.png"
   },
   {
     "id": 389,
@@ -18994,7 +19362,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.946325"
+    "updated_at": "2025-10-21T08:13:22.946325",
+    "logo": "/logos/E.png"
   },
   {
     "id": 390,
@@ -19047,7 +19416,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.866506"
+    "updated_at": "2025-10-21T08:13:21.866506",
+    "logo": "/logos/Contentful.png"
   },
   {
     "id": 391,
@@ -19098,7 +19468,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.435423"
+    "updated_at": "2025-10-21T08:13:25.435423",
+    "logo": "/logos/Nextcloud.png"
   },
   {
     "id": 392,
@@ -19140,7 +19511,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.405090"
+    "updated_at": "2025-10-21T08:13:24.405090",
+    "logo": "/logos/Jina.png"
   },
   {
     "id": 393,
@@ -19186,7 +19558,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.846369"
+    "updated_at": "2025-10-21T08:13:25.846369",
+    "logo": "/logos/Plivo.png"
   },
   {
     "id": 394,
@@ -19228,7 +19601,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.990278"
+    "updated_at": "2025-10-21T08:13:21.990278",
+    "logo": "/logos/Custom.png"
   },
   {
     "id": 395,
@@ -19282,7 +19656,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.799132"
+    "updated_at": "2025-10-21T08:13:26.799132",
+    "logo": "/logos/Strapi.png"
   },
   {
     "id": 396,
@@ -19329,7 +19704,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.574201"
+    "updated_at": "2025-10-21T08:13:26.574201",
+    "logo": "/logos/Slack.png"
   },
   {
     "id": 397,
@@ -19402,7 +19778,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.011169"
+    "updated_at": "2025-10-21T08:13:25.011169",
+    "logo": "/logos/Microsoft.png"
   },
   {
     "id": 398,
@@ -19444,7 +19821,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.697464"
+    "updated_at": "2025-10-21T08:13:27.697464",
+    "logo": "/logos/Zoom.png"
   },
   {
     "id": 399,
@@ -19486,7 +19864,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.489066"
+    "updated_at": "2025-10-21T08:13:23.489066",
+    "logo": "/logos/Gmail.png"
   },
   {
     "id": 400,
@@ -19549,7 +19928,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.504046"
+    "updated_at": "2025-10-21T08:13:24.504046",
+    "logo": "/logos/Keap.png"
   },
   {
     "id": 401,
@@ -19603,7 +19983,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.332105"
+    "updated_at": "2025-10-21T08:13:22.332105",
+    "logo": "/logos/Discourse.png"
   },
   {
     "id": 402,
@@ -19679,7 +20060,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.503812"
+    "updated_at": "2025-10-21T08:13:21.503812",
+    "logo": "/logos/Bitly.png"
   },
   {
     "id": 403,
@@ -19727,7 +20109,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:44:21.982826"
+    "updated_at": "2025-10-21T08:44:21.982826",
+    "logo": "/logos/Activecampaign.png"
   },
   {
     "id": 404,
@@ -19769,7 +20152,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.847840"
+    "updated_at": "2025-10-21T08:13:21.847840",
+    "logo": "/logos/Coda.png"
   },
   {
     "id": 405,
@@ -19814,7 +20198,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.247445"
+    "updated_at": "2025-10-21T08:13:22.247445",
+    "logo": "/logos/Digest.png"
   },
   {
     "id": 406,
@@ -19856,7 +20241,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.046001"
+    "updated_at": "2025-10-21T08:13:24.046001",
+    "logo": "/logos/Harvest.png"
   },
   {
     "id": 407,
@@ -19898,7 +20284,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.105106"
+    "updated_at": "2025-10-21T08:13:21.105106",
+    "logo": "/logos/Alienvault.png"
   },
   {
     "id": 408,
@@ -19959,7 +20346,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.308658"
+    "updated_at": "2025-10-21T08:13:24.308658",
+    "logo": "/logos/IMAP.png"
   },
   {
     "id": 409,
@@ -20001,7 +20389,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.279939"
+    "updated_at": "2025-10-21T08:13:24.279939",
+    "logo": "/logos/Hunter.png"
   },
   {
     "id": 410,
@@ -20043,7 +20432,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.490501"
+    "updated_at": "2025-10-21T08:13:25.490501",
+    "logo": "/logos/Notion.png"
   },
   {
     "id": 411,
@@ -20090,7 +20480,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.074532"
+    "updated_at": "2025-10-21T08:13:23.074532",
+    "logo": "/logos/F5.png"
   },
   {
     "id": 412,
@@ -20132,7 +20523,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.715148"
+    "updated_at": "2025-10-21T08:13:24.715148",
+    "logo": "/logos/Mailcheck.png"
   },
   {
     "id": 413,
@@ -20185,7 +20577,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.211355"
+    "updated_at": "2025-10-21T08:13:22.211355",
+    "logo": "/logos/DFIR.png"
   },
   {
     "id": 414,
@@ -20248,7 +20641,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.587716"
+    "updated_at": "2025-10-21T08:13:26.587716",
+    "logo": "/logos/Slack.png"
   },
   {
     "id": 415,
@@ -20311,7 +20705,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.122190"
+    "updated_at": "2025-10-21T08:13:26.122190",
+    "logo": "/logos/Reddit.png"
   },
   {
     "id": 416,
@@ -20365,7 +20760,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.992299"
+    "updated_at": "2025-10-21T08:13:26.992299",
+    "logo": "/logos/The.png"
   },
   {
     "id": 417,
@@ -20407,7 +20803,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.936984"
+    "updated_at": "2025-10-21T08:13:24.936984",
+    "logo": "/logos/Medium.png"
   },
   {
     "id": 418,
@@ -20453,7 +20850,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.463895"
+    "updated_at": "2025-10-21T08:13:24.463895",
+    "logo": "/logos/Jotform.png"
   },
   {
     "id": 419,
@@ -20519,7 +20917,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:24.138980"
+    "updated_at": "2025-10-21T08:13:24.138980",
+    "logo": "/logos/Highlevel.png"
   },
   {
     "id": 420,
@@ -20563,7 +20962,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.240340"
+    "updated_at": "2025-10-21T08:13:21.240340",
+    "logo": "/logos/Autopilot.png"
   },
   {
     "id": 421,
@@ -20606,7 +21006,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.085207"
+    "updated_at": "2025-10-21T08:13:27.085207",
+    "logo": "/logos/Travis.png"
   },
   {
     "id": 422,
@@ -20650,7 +21051,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.933481"
+    "updated_at": "2025-10-21T08:13:22.933481",
+    "logo": "/logos/Dynatraceapi.png"
   },
   {
     "id": 423,
@@ -20697,7 +21099,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.538986"
+    "updated_at": "2025-10-21T08:13:23.538986",
+    "logo": "/logos/GoogleAds.png"
   },
   {
     "id": 424,
@@ -20759,7 +21162,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.726153"
+    "updated_at": "2025-10-21T08:13:27.726153",
+    "logo": "/logos/Zscaler.png"
   },
   {
     "id": 425,
@@ -20801,7 +21205,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.315639"
+    "updated_at": "2025-10-21T08:13:26.315639",
+    "logo": "/logos/Sekoia.png"
   },
   {
     "id": 426,
@@ -20856,7 +21261,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.006525"
+    "updated_at": "2025-10-21T08:13:22.006525",
+    "logo": "/logos/Customer.io.png"
   },
   {
     "id": 427,
@@ -20913,7 +21319,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.961626"
+    "updated_at": "2025-10-21T08:13:23.961626",
+    "logo": "/logos/Grist.png"
   },
   {
     "id": 428,
@@ -20957,7 +21364,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:43:36.532229"
+    "updated_at": "2025-10-21T08:43:36.532229",
+    "logo": "/logos/Action.png"
   },
   {
     "id": 429,
@@ -20999,7 +21407,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:22.920468"
+    "updated_at": "2025-10-21T08:13:22.920468",
+    "logo": "/logos/Dropcontact.png"
   },
   {
     "id": 430,
@@ -21046,7 +21455,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:27.380329"
+    "updated_at": "2025-10-21T08:13:27.380329",
+    "logo": "/logos/Vonage.png"
   },
   {
     "id": 431,
@@ -21116,7 +21526,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.522347"
+    "updated_at": "2025-10-21T08:13:23.522347",
+    "logo": "/logos/Gong.png"
   },
   {
     "id": 432,
@@ -21158,7 +21569,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.088863"
+    "updated_at": "2025-10-21T08:13:23.088863",
+    "logo": "/logos/Facebook.png"
   },
   {
     "id": 433,
@@ -21200,7 +21612,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:23.774607"
+    "updated_at": "2025-10-21T08:13:23.774607",
+    "logo": "/logos/Google.png"
   },
   {
     "id": 434,
@@ -21250,7 +21663,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:25.300794"
+    "updated_at": "2025-10-21T08:13:25.300794",
+    "logo": "/logos/Monica.png"
   },
   {
     "id": 435,
@@ -21312,7 +21726,8 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:26.207422"
+    "updated_at": "2025-10-21T08:13:26.207422",
+    "logo": "/logos/S3.png"
   },
   {
     "id": 436,
@@ -21354,6 +21769,7 @@
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",
-    "updated_at": "2025-10-21T08:13:21.487596"
+    "updated_at": "2025-10-21T08:13:21.487596",
+    "logo": "/logos/Bitly.png"
   }
 ]

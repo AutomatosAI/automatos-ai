@@ -226,60 +226,76 @@ export function CodeGraphPanel() {
       {/* Header Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Projects</p>
-                <p className="text-2xl font-bold">{stats.totalProjects}</p>
-                <p className="text-xs text-blue-400 mt-1">Active repositories</p>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <Database className="w-5 h-5 text-blue-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{stats.totalProjects}</div>
+                  <div className="text-sm text-muted-foreground truncate">Projects</div>
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Database className="w-5 h-5 text-blue-400" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Files Indexed</p>
-                <p className="text-2xl font-bold">{stats.totalFiles.toLocaleString()}</p>
-                <p className="text-xs text-green-400 mt-1">Source files tracked</p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <FileCode className="w-5 h-5 text-green-400" />
+              <div className="shrink-0 text-right text-xs text-blue-400">
+                Active repositories
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Code Symbols</p>
-                <p className="text-2xl font-bold">{(stats.totalSymbols / 1000).toFixed(1)}K</p>
-                <p className="text-xs text-purple-400 mt-1">Functions & classes</p>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <FileCode className="w-5 h-5 text-green-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{stats.totalFiles.toLocaleString()}</div>
+                  <div className="text-sm text-muted-foreground truncate">Files Indexed</div>
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Code2 className="w-5 h-5 text-purple-400" />
+              <div className="shrink-0 text-right text-xs text-green-400">
+                Source files tracked
               </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="glass-card">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Relationships</p>
-                <p className="text-2xl font-bold">{(stats.totalRelationships / 1000).toFixed(1)}K</p>
-                <p className="text-xs text-orange-400 mt-1">Code connections</p>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <Code2 className="w-5 h-5 text-purple-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{(stats.totalSymbols / 1000).toFixed(1)}K</div>
+                  <div className="text-sm text-muted-foreground truncate">Code Symbols</div>
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <Network className="w-5 h-5 text-orange-400" />
+              <div className="shrink-0 text-right text-xs text-purple-400">
+                Functions &amp; classes
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="glass-card">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <Network className="w-5 h-5 text-orange-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{(stats.totalRelationships / 1000).toFixed(1)}K</div>
+                  <div className="text-sm text-muted-foreground truncate">Relationships</div>
+                </div>
+              </div>
+              <div className="shrink-0 text-right text-xs text-orange-400">
+                Code connections
               </div>
             </div>
           </CardContent>

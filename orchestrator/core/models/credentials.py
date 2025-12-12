@@ -34,6 +34,7 @@ class CredentialType(Base):
     display_name = Column(String(255), nullable=False)  # 'PostgreSQL', 'OpenAI API'
     category = Column(String(100), index=True)  # 'database', 'ai', 'infrastructure', 'api'
     icon = Column(String(50))  # Icon name for UI
+    logo = Column(String(255))  # Logo file path, e.g. "/logos/OpenAI.png"
     description = Column(Text)
     
     # Schema definition (JSON array of field definitions)
@@ -189,6 +190,7 @@ class CredentialTypeResponse(BaseModel):
     display_name: str
     category: Optional[str]
     icon: Optional[str]
+    logo: Optional[str]  # Logo file path
     description: Optional[str]
     schema_definition: Any = Field(..., description="Field definitions")
     test_endpoint: Optional[Dict[str, Any]]

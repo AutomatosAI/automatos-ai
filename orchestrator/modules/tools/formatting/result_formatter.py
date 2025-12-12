@@ -218,7 +218,7 @@ class ToolResultFormatter:
                 formatted_results = ToolResultFormatter.format_documents(raw_results)
             elif tool_name in ['search_codebase', 'search_code']:
                 formatted_results = ToolResultFormatter.format_code(raw_results)
-            elif tool_name == 'query_database':
+            elif tool_name in ['query_database', 'smart_query_database']:
                 return ToolResultFormatter.format_database(raw_result)
         
         # Return standardized structure
@@ -296,7 +296,9 @@ class ToolResultFormatter:
                     'preview': doc['chunks'][0]['excerpt'] if doc['chunks'] else '',
                     'download_url': f"/api/documents/download?path={doc['file_path']}",
                     # NEW: Add full content for artifact viewer
-                    'full_content': '\n\n'.join([chunk['content'] for chunk in doc['chunks']])
+                    'full_content': '\n\n'.join([chunk['content'] for chunk in doc['chunks']]),
+                    # NEW: Provide chunk list for RAG chunk inspector UI
+                    'chunks': doc['chunks'],
                 }
                 for doc in grouped_docs
             ]
@@ -304,15 +306,27 @@ class ToolResultFormatter:
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
         
-        elif tool_name == 'query_database':
+        elif tool_name in ['query_database', 'smart_query_database']:
             # Frontend expects database_results as an array with pandas_ai inside
+            status = result.get('status')
             db_result = {
                 'database': result.get('database', 'Database'),
+                'status': status,
                 'sql': result.get('sql', ''),
                 'row_count': result.get('row_count', 0),
                 'execution_time_ms': result.get('execution_time_ms', 0),
                 'data': result.get('data', []),
                 'columns': result.get('columns', []),
+                # Smart NL2SQL extras (when present)
+                'explanation': result.get('explanation'),
+                'rephrased_query': result.get('rephrased_query'),
+                'visualization': result.get('visualization'),
+                'follow_up_questions': result.get('follow_up_questions'),
+                # Clarification flow (when present)
+                'clarifications': result.get('clarifications'),
+                'clarification_answers': result.get('clarification_answers'),
+                'original_query': result.get('original_query'),
+                'message': result.get('message'),
             }
             
             # Include PandasAI visualization inside the result
@@ -345,16 +359,23 @@ class ToolResultFormatter:
         results = standardized['results'][:3]  # Top 3 only
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            for doc in results:
-                summary_parts.append(f"\n📄 {doc.get('filename', 'Document')} ({doc.get('similarity', 0)*100:.1f}%)")
-                summary_parts.append(doc.get('excerpt', '')[:300])
+            summary_parts.append(
+                "NOTE: The UI will render clickable document cards and chunk inspectors. "
+                "Do NOT list filenames/links in your final answer; use the excerpts below only to explain the topic."
+            )
+            for i, doc in enumerate(results, start=1):
+                excerpt = (doc.get('excerpt', '') or '')[:450]
+                score = float(doc.get('similarity', 0) or 0) * 100.0
+                # Avoid leaking filenames to the LLM (it tends to echo them back as a list)
+                summary_parts.append(f"\n[Source {i}] ({score:.1f}%)")
+                summary_parts.append(excerpt)
         
         elif tool_name in ['search_codebase', 'search_code']:
             for code in results:
                 summary_parts.append(f"\n💻 {code.get('symbol_name', 'Code')} ({code.get('file_path', 'unknown')})")
                 summary_parts.append(f"```{code.get('language', 'python')}\n{code.get('code', '')[:400]}\n```")
         
-        elif tool_name == 'query_database':
+        elif tool_name in ['query_database', 'smart_query_database']:
             summary_parts.append(f"\n🗄️ SQL: {standardized.get('sql', '')[:300]}")
             summary_parts.append(f"Total Rows: {standardized.get('row_count', 0)}")
             

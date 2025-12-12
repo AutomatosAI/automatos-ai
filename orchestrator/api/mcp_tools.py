@@ -76,6 +76,7 @@ async def list_mcp_tools(
                 "provider": t.provider,
                 "version": t.version,
                 "icon": t.icon,
+                "logo": t.logo,  # Logo path from metadata
                 "category": t.category,
                 "tags": t.tags or [],
                 "metadata": t.tool_metadata or {},  # Map tool_metadata -> metadata
@@ -120,6 +121,7 @@ async def get_mcp_tool(tool_id: int, db: Session = Depends(get_db)):
         "provider": tool.provider,
         "version": tool.version,
         "icon": tool.icon,
+        "logo": tool.logo,  # Logo path from metadata
         "category": tool.category,
         "tags": tool.tags or [],
         "metadata": tool.tool_metadata or {},

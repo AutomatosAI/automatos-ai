@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, MessageSquare, Search, Settings } from 'lucide-react'
+import { Plus, Search, Settings } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,7 +10,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { SidebarHistoryItem } from './sidebar-history-item'
 import { getChatHistory } from '@/lib/chat/api'
-import { generateUUID } from '@/lib/utils'
 import type { Chat } from '@/types'
 
 export interface AppSidebarProps {
@@ -49,6 +48,8 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
     if (onNewChat) {
       onNewChat()
     }
+    // refresh list so the most recent chat appears after first message
+    loadChatHistory().catch(() => {})
   }
 
   const handleChatDelete = (chatId: string) => {
@@ -93,16 +94,16 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
   })
 
   return (
-    <div className="flex flex-col h-full w-64 bg-transparent border-r border-orange-500/20 backdrop-blur-lg">
+    <div className="flex flex-col h-full w-full bg-transparent">
       {/* Header */}
       <div className="p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-white">Automatos AI</h2>
+          <h2 className="text-sm font-semibold text-white/90 uppercase tracking-wider">Chats</h2>
         </div>
 
         <Button
           onClick={handleNewChat}
-          className="w-full bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
+          className="w-full rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-[0_0_18px_rgba(249,115,22,0.25)]"
         >
           <Plus className="w-4 h-4 mr-2" />
           New Chat
@@ -115,7 +116,7 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search chats..."
-            className="pl-10 bg-gray-900/40 border-gray-800/20 text-white placeholder-gray-400"
+            className="pl-10 bg-gray-950/30 border-orange-500/15 focus-visible:ring-orange-500/20 text-white placeholder-gray-400 rounded-2xl"
           />
         </div>
       </div>

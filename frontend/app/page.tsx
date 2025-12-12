@@ -1,15 +1,8 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { MainLayout } from '@/components/layout/main-layout'
-import { Dashboard } from '@/components/dashboard/dashboard'
-import { usePageAPI } from '@/hooks/use-page-api'
-
-export default function Home() {
-  usePageAPI('dashboard')
-  
-  return (
-    <MainLayout>
-      <Dashboard />
-    </MainLayout>
-  )
-}
+ export default function Home() {
+  // New home is Chat
+  // Keep this as a server redirect to avoid rendering dashboard on "/"
+  // and to make "/dashboard" the dedicated dashboard route.
+  redirect('/chat')
+ }

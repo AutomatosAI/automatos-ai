@@ -1,7 +1,6 @@
 
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
@@ -16,6 +15,7 @@ import {
   ChevronLeft,
   Bot,
   MessageCircle,
+  PanelLeft,
   Wrench,
   Database,
   Lightbulb
@@ -29,11 +29,11 @@ interface SidebarProps {
 
 const navigationItems = [
   {
-    name: 'Dashboard',
-    href: '/',
-    icon: LayoutDashboard,
-    iconColor: 'text-blue-400',
-    description: 'System overview and metrics'
+    name: 'Chat',
+    href: '/chat',
+    icon: MessageCircle,
+    iconColor: 'text-orange-400',
+    description: 'Your AI workspace'
   },
   {
     name: 'Workflow Management',
@@ -77,22 +77,24 @@ const navigationItems = [
     iconColor: 'text-cyan-400',
     description: 'AI insights and system learning'
   },
+  // Move dashboard to bottom (near Settings)
   {
-    name: 'AI Assistant',
-    href: '/chat',
-    icon: MessageCircle,
-    iconColor: 'text-indigo-400',
-    description: 'Chat with AI assistant'
-  }
+    name: 'System Dashboard',
+    href: '/dashboard',
+    icon: LayoutDashboard,
+    iconColor: 'text-blue-400',
+    description: 'System overview and metrics'
+  },
 ]
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
+  const isChatPage = pathname.startsWith('/chat')
 
   return (
     <motion.div
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen glass-card border-r border-border/50 transition-all duration-300',
+        'fixed left-0 top-0 z-40 h-screen glass-card border-r border-orange-500/15 bg-background/25 backdrop-blur-xl shadow-[0_0_80px_rgba(249,115,22,0.06)] transition-all duration-300',
         collapsed ? 'w-16' : 'w-64'
       )}
       initial={false}
@@ -100,17 +102,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border/50">
+        {/* Keep header minimal (branding is in top banner/header) */}
         {!collapsed && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex items-center space-x-2"
+            className="flex items-center"
           >
-            <div className="w-8 h-8 rounded-lg icon-gradient flex items-center justify-center">
-              <Bot className="w-5 h-5 text-white" />
+            <div className="w-9 h-9 rounded-xl bg-secondary/30 border border-orange-500/15 flex items-center justify-center shadow-[0_0_18px_rgba(249,115,22,0.10)]">
+              <MessageCircle className="w-5 h-5 text-orange-400" />
             </div>
-            <span className="font-bold text-xl gradient-text">Automotas AI</span>
           </motion.div>
         )}
         
@@ -129,7 +131,51 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="p-4 space-y-2">
+        {/* Chat-only: toggle chat history panel */}
+        {isChatPage && (
+          <motion.div
+            key="chat-history-toggle"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.05 }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('automatos:chat-history-toggle'))
+                }
+              }}
+              className={cn('sidebar-item group relative')}
+              aria-label="Toggle chat history"
+            >
+              <div
+                className={cn(
+                  'w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200',
+                  'bg-secondary/30 group-hover:bg-secondary/50'
+                )}
+              >
+                <PanelLeft className={cn('w-5 h-5 transition-colors', collapsed ? 'text-orange-300' : 'text-orange-400')} />
+              </div>
+
+              {!collapsed && (
+                <div className="ml-3 flex-1">
+                  <p className="text-sm font-medium">Chat history</p>
+                  <p className="text-xs text-muted-foreground">Toggle previous chats</p>
+                </div>
+              )}
+
+              {collapsed && (
+                <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  Chat history
+                </div>
+              )}
+            </button>
+          </motion.div>
+        )}
+
         {navigationItems.map((item, index) => {
+          if (!item || !(item as any).href) return null
           const isActive = pathname === item.href
           const Icon = item.icon
 
@@ -142,26 +188,33 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             >
               <Link
                 href={item.href}
+                onClick={() => onToggle(true)}
                 className={cn(
                   'sidebar-item group relative',
                   isActive && 'active'
                 )}
               >
-                <div className={cn(
-                  'w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200',
-                  isActive 
-                    ? 'icon-gradient' 
-                    : 'bg-secondary/30 group-hover:bg-secondary/50'
-                )}>
-                  <Icon className={cn(
-                    'w-5 h-5 transition-colors',
-                    isActive ? 'text-white' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
-                  )} />
+                <div
+                  className={cn(
+                    'w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200',
+                    isActive ? 'icon-gradient' : 'bg-secondary/30 group-hover:bg-secondary/50'
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      'w-5 h-5 transition-colors',
+                      isActive ? 'text-white' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
+                    )}
+                  />
                 </div>
-                
+
                 {!collapsed && (
                   <div className="ml-3 flex-1">
-                    <p className="text-sm font-medium">{item.name}</p>
+                    {/* Icon inline with title (same row) */}
+                    <div className="flex items-center gap-3">
+                      <p className="text-sm font-medium">{item.name}</p>
+                    </div>
+                    {/* Description indented under the title */}
                     <p className="text-xs text-muted-foreground">{item.description}</p>
                   </div>
                 )}

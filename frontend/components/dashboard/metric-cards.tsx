@@ -31,32 +31,43 @@ interface MetricCardProps {
 function MetricCard({ title, value, change, changeType, icon: Icon, gradient, badge }: MetricCardProps) {
   return (
     <Card className="glass-card card-glow hover:border-primary/20 transition-all duration-300 overflow-hidden">
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-transparent">
-            <Icon className={`w-5 h-5 ${
-              gradient.includes('orange') ? 'text-orange-400' :
-              gradient.includes('blue') ? 'text-blue-400' :
-              gradient.includes('green') ? 'text-green-400' :
-              gradient.includes('purple') ? 'text-purple-400' :
-              'text-white'
-            }`} />
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+              <Icon className={`w-5 h-5 ${
+                gradient.includes('orange') ? 'text-orange-400' :
+                gradient.includes('blue') ? 'text-blue-400' :
+                gradient.includes('green') ? 'text-green-400' :
+                gradient.includes('purple') ? 'text-purple-400' :
+                'text-white'
+              }`} />
+            </div>
+
+            <div className="min-w-0">
+              <div className="text-2xl font-bold leading-none">{value}</div>
+              <div className="text-sm text-muted-foreground truncate">{title}</div>
+            </div>
           </div>
-        </div>
-        <div className="space-y-1">
-          <h3 className="text-2xl font-bold">{value}</h3>
-          <p className="text-muted-foreground text-sm">{title}</p>
-          {change && (
-            <p className={`text-xs ${
-              changeType === 'positive' 
-                ? 'text-green-400' 
-                : changeType === 'negative' 
-                ? 'text-red-400' 
-                : 'text-muted-foreground'
-            }`}>
-              {change}
-            </p>
-          )}
+
+          <div className="shrink-0 text-right">
+            {badge && (
+              <Badge variant="outline" className="mb-1 border-orange-500/25 bg-orange-500/10 text-orange-200">
+                {badge}
+              </Badge>
+            )}
+            {change && (
+              <div className={`text-xs ${
+                changeType === 'positive'
+                  ? 'text-green-400'
+                  : changeType === 'negative'
+                  ? 'text-red-400'
+                  : 'text-muted-foreground'
+              }`}>
+                {change}
+              </div>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -77,13 +88,19 @@ export function MetricCards() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[...Array(4)].map((_, index) => (
           <Card key={index} className="glass-card">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <Skeleton className="h-4 w-20 mb-2" />
-                  <Skeleton className="h-8 w-16" />
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 flex-1">
+                  <Skeleton className="w-10 h-10 rounded-2xl" />
+                  <div className="space-y-2">
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-3 w-28" />
+                  </div>
                 </div>
-                <Skeleton className="w-12 h-12 rounded-xl" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
               </div>
             </CardContent>
           </Card>

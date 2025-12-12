@@ -11,7 +11,7 @@ Handles:
 import json
 import logging
 import uuid
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,42 @@ class StreamingHandler:
     def format_aisdk_tool_data(self, tool_data: Dict[str, Any]) -> str:
         """Format tool-data event for AI SDK."""
         return f'd:{{"type":"tool-data","data":{json.dumps(tool_data)}}}\n'
+
+    def format_aisdk_tool_start(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        tool_input: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Format tool-start event for AI SDK (tool lifecycle UI)."""
+        return self.format_aisdk_data(
+            "tool-start",
+            {
+                "toolCallId": tool_call_id,
+                "toolName": tool_name,
+                "input": tool_input or {},
+            },
+        )
+
+    def format_aisdk_tool_end(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        success: bool,
+        error: Optional[str] = None,
+        duration_ms: Optional[int] = None
+    ) -> str:
+        """Format tool-end event for AI SDK (tool lifecycle UI)."""
+        payload: Dict[str, Any] = {
+            "toolCallId": tool_call_id,
+            "toolName": tool_name,
+            "success": bool(success),
+        }
+        if error:
+            payload["error"] = error
+        if duration_ms is not None:
+            payload["durationMs"] = int(duration_ms)
+        return self.format_aisdk_data("tool-end", payload)
     
     def format_aisdk_usage(self, prompt_tokens: int, completion_tokens: int, total_tokens: int) -> str:
         """Format usage data event."""

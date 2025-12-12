@@ -5,8 +5,6 @@ Comprehensive Credential Type Definitions
 Cloned from n8n's 400+ credential types.
 Each credential type defines the schema for dynamic form generation.
 
-Based on n8n repository:
-https://github.com/n8n-io/n8n/tree/master/packages/nodes-base/credentials
 """
 
 ALL_CREDENTIAL_TYPES = [
@@ -18,6 +16,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "OpenAI API",
         "category": "ai",
         "icon": "brain",
+        "logo": "/logos/OpenAI.png",
+        "domain": "openai.com",
         "description": "OpenAI API credentials for GPT models",
         "documentation_url": "https://platform.openai.com/docs/api-reference",
         "schema_definition": [
@@ -59,6 +59,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Anthropic API",
         "category": "ai",
         "icon": "brain",
+        "logo": "/logos/Anthropic.png",
+        "domain": "anthropic.com",
         "description": "Anthropic Claude API credentials",
         "documentation_url": "https://docs.anthropic.com/claude/reference",
         "schema_definition": [
@@ -93,6 +95,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Hugging Face API",
         "category": "ai",
         "icon": "brain",
+        "logo": "/logos/HuggingFace.png",
+        "domain": "huggingface.co",
         "description": "Hugging Face API credentials",
         "documentation_url": "https://huggingface.co/docs/api-inference",
         "schema_definition": [
@@ -121,6 +125,7 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "PostgreSQL",
         "category": "database",
         "icon": "database",
+        "domain": "postgresql.org",
         "description": "PostgreSQL database connection credentials",
         "documentation_url": "https://www.postgresql.org/docs/",
         "schema_definition": [
@@ -193,6 +198,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "MySQL",
         "category": "database",
         "icon": "database",
+        "logo": "/logos/MySQL.png",
+        "domain": "mysql.com",
         "description": "MySQL database connection credentials",
         "documentation_url": "https://dev.mysql.com/doc/",
         "schema_definition": [
@@ -248,6 +255,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "MongoDB",
         "category": "database",
         "icon": "database",
+        "logo": "/logos/MongoDB.png",
+        "domain": "mongodb.com",
         "description": "MongoDB connection credentials",
         "documentation_url": "https://docs.mongodb.com/",
         "schema_definition": [
@@ -316,6 +325,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Redis",
         "category": "database",
         "icon": "database",
+        "logo": "/logos/Redis.png",
+        "domain": "redis.io",
         "description": "Redis connection credentials",
         "documentation_url": "https://redis.io/docs/",
         "schema_definition": [
@@ -362,6 +373,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Elasticsearch",
         "category": "database",
         "icon": "database",
+        "logo": "/logos/Elasticsearch.png",
+        "domain": "elastic.co",
         "description": "Elasticsearch connection credentials",
         "schema_definition": [
             {
@@ -401,6 +414,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "AWS",
         "category": "cloud",
         "icon": "cloud",
+        "logo": "/logos/AWS.png",
+        "domain": "aws.amazon.com",
         "description": "Amazon Web Services credentials",
         "documentation_url": "https://docs.aws.amazon.com/",
         "schema_definition": [
@@ -457,6 +472,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Microsoft Azure",
         "category": "cloud",
         "icon": "cloud",
+        "logo": "/logos/Azure.png",
+        "domain": "azure.microsoft.com",
         "description": "Microsoft Azure credentials",
         "schema_definition": [
             {
@@ -500,6 +517,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Google Cloud",
         "category": "cloud",
         "icon": "cloud",
+        "logo": "/logos/GoogleCloud.png",
+        "domain": "cloud.google.com",
         "description": "Google Cloud Platform credentials",
         "schema_definition": [
             {
@@ -533,6 +552,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Slack",
         "category": "communication",
         "icon": "slack",
+        "logo": "/logos/Slack.png",
+        "domain": "slack.com",
         "description": "Slack API credentials",
         "documentation_url": "https://api.slack.com/",
         "schema_definition": [
@@ -559,6 +580,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Discord Webhook",
         "category": "communication",
         "icon": "message-square",
+        "logo": "/logos/Discord.png",
+        "domain": "discord.com",
         "description": "Discord webhook URL",
         "schema_definition": [
             {
@@ -583,6 +606,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Telegram",
         "category": "communication",
         "icon": "send",
+        "logo": "/logos/Telegram.png",
+        "domain": "telegram.org",
         "description": "Telegram Bot API credentials",
         "schema_definition": [
             {
@@ -606,6 +631,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Twilio",
         "category": "communication",
         "icon": "phone",
+        "logo": "/logos/Twilio.png",
+        "domain": "twilio.com",
         "description": "Twilio API credentials",
         "schema_definition": [
             {
@@ -634,6 +661,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "SendGrid",
         "category": "communication",
         "icon": "mail",
+        "logo": "/logos/SendGrid.png",
+        "domain": "sendgrid.com",
         "description": "SendGrid email API credentials",
         "schema_definition": [
             {
@@ -660,6 +689,8 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "GitHub",
         "category": "code",
         "icon": "github",
+        "logo": "/logos/GitHub.png",
+        "domain": "github.com",
         "description": "GitHub API credentials",
         "documentation_url": "https://docs.github.com/en/rest",
         "schema_definition": [
@@ -698,8 +729,10 @@ ALL_CREDENTIAL_TYPES = [
     {
         "name": "gitlab_api",
         "display_name": "GitLab",
+        "domain": "gitlab.com",
         "category": "code",
         "icon": "gitlab",
+        "logo": "/logos/GitLab.png",
         "description": "GitLab API credentials",
         "schema_definition": [
             {
@@ -871,6 +904,7 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Stripe",
         "category": "payment",
         "icon": "credit-card",
+        "logo": "/logos/Stripe.png",
         "description": "Stripe payment API credentials",
         "schema_definition": [
             {
@@ -953,6 +987,7 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Salesforce",
         "category": "crm",
         "icon": "briefcase",
+        "logo": "/logos/Salesforce.png",
         "description": "Salesforce OAuth2 credentials",
         "schema_definition": [
             {
@@ -989,6 +1024,7 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "HubSpot",
         "category": "crm",
         "icon": "briefcase",
+        "logo": "/logos/HubSpot.png",
         "description": "HubSpot API credentials",
         "schema_definition": [
             {
@@ -1015,6 +1051,7 @@ ALL_CREDENTIAL_TYPES = [
         "display_name": "Datadog",
         "category": "monitoring",
         "icon": "activity",
+        "logo": "/logos/Datadog.png",
         "description": "Datadog monitoring API credentials",
         "schema_definition": [
             {

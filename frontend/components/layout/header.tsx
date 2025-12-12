@@ -1,9 +1,8 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Menu, Search, Bell, User } from 'lucide-react'
+import { Menu, Bell, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 interface HeaderProps {
@@ -20,45 +19,45 @@ export function Header({ onMenuClick }: HeaderProps) {
             variant="ghost"
             size="icon"
             onClick={onMenuClick}
-            className="lg:hidden"
+            className="lg:hidden text-orange-400 hover:text-orange-300 hover:bg-orange-500/5"
           >
             <Menu className="w-5 h-5" />
           </Button>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search agents, workflows, documents..."
-              className="pl-10 w-64 bg-secondary/50 border-secondary focus:border-primary/50"
+          {/* Brand (replaces non-functional search) */}
+          <div className="flex items-center">
+            <img
+              src="/brand/automatos-logo.png"
+              alt="Automatos A.I."
+              className="h-8 w-auto opacity-95"
+              draggable={false}
             />
           </div>
         </div>
 
         {/* Right side */}
         <div className="flex items-center space-x-4">
-          {/* System Status */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="hidden md:flex items-center space-x-2 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/20"
-          >
-            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span className="text-xs text-green-400 font-medium">All Systems Operational</span>
-          </motion.div>
-
           {/* Theme Toggle */}
           <ThemeToggle />
 
           {/* Notifications */}
-          <Button variant="ghost" size="icon" className="relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative text-orange-400 hover:text-orange-300 hover:bg-orange-500/5"
+          >
             <Bell className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-3 h-3 bg-primary rounded-full text-xs flex items-center justify-center text-white">
+            <span className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full text-[10px] flex items-center justify-center text-black">
               3
             </span>
           </Button>
 
           {/* User Menu */}
-          <Button variant="ghost" size="icon" className="rounded-full">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full text-orange-400 hover:text-orange-300 hover:bg-orange-500/5"
+          >
             <User className="w-5 h-5" />
           </Button>
         </div>

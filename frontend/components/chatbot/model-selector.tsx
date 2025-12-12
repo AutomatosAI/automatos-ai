@@ -53,21 +53,21 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2 rounded-lg border border-orange-500/20 hover:border-orange-500/40 hover:bg-orange-500/5 text-muted-foreground text-xs gap-1"
+          className="h-8 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
         >
           {isLoading ? (
             <Loader2 className="w-3 h-3 animate-spin" />
           ) : (
-            <span className="truncate">
+            <span className="truncate max-w-[160px]">
               {selectedModel?.display_name || selectedModel?.name || 'Select Model'}
             </span>
           )}
-          <ChevronDown className="w-3 h-3" />
+          <ChevronDown className="w-3 h-3 text-orange-400" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent 
         align="start" 
-        className="w-[320px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-xl"
+        className="w-[340px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-2xl"
         style={{ maxHeight: '70vh' }}
       >
         {Object.entries(modelsByProvider).map(([provider, providerModels]) => (

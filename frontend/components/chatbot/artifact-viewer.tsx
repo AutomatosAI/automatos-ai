@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { copyToClipboard } from '@/lib/utils'
 import { CodeArtifact } from './code-artifact'
 import { TextArtifact } from './text-artifact'
+import { SheetArtifact } from './sheet-artifact'
 import type { Artifact } from '@/types'
 import { toast } from 'sonner'
 
@@ -111,6 +112,12 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           )}
           {artifact.kind === 'text' && (
             <TextArtifact
+              content={artifact.content}
+              metadata={artifact.metadata}
+            />
+          )}
+          {artifact.kind === 'sheet' && (
+            <SheetArtifact
               content={artifact.content}
               metadata={artifact.metadata}
             />

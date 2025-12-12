@@ -6,10 +6,11 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { EnhancedPagination } from '@/components/ui/pagination'
-import { 
+import {
   Database, Brain, Server, Mail, Code, Key, Cloud, CreditCard,
   Briefcase, Activity, Search, ExternalLink
 } from 'lucide-react'
+import { ToolLogo } from '@/components/ui/tool-logo'
 import {
   Dialog,
   DialogContent,
@@ -51,7 +52,7 @@ export function CredentialTypesTab() {
   const [searchTerm, setSearchTerm] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [selectedType, setSelectedType] = useState<CredentialType | null>(null)
-  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(20)
@@ -71,7 +72,7 @@ export function CredentialTypesTab() {
         }),
         getCredentialCategories()
       ])
-      
+
       setCredentialTypes(types)
       setCategories(cats)
     } catch (error) {
@@ -86,13 +87,13 @@ export function CredentialTypesTab() {
     type.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (type.description && type.description.toLowerCase().includes(searchTerm.toLowerCase()))
   )
-  
+
   // Client-side pagination
   const startIndex = (currentPage - 1) * pageSize
   const endIndex = startIndex + pageSize
   const paginatedTypes = filteredTypes.slice(startIndex, endIndex)
   const totalPages = Math.ceil(filteredTypes.length / pageSize)
-  
+
   const paginationData = {
     total: filteredTypes.length,
     skip: startIndex,
@@ -100,7 +101,7 @@ export function CredentialTypesTab() {
     pages: totalPages,
     current_page: currentPage
   }
-  
+
   // Reset to page 1 when search or filter changes
   useEffect(() => {
     setCurrentPage(1)
@@ -134,7 +135,7 @@ export function CredentialTypesTab() {
                 className="pl-10"
               />
             </div>
-            
+
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Category" />
@@ -159,64 +160,68 @@ export function CredentialTypesTab() {
         </div>
       ) : (
         <>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {paginatedTypes.map((type) => {
-            const IconComponent = getCategoryIcon(type.category)
-            
-            return (
-              <Card
-                key={type.id}
-                className="glass-card hover:border-primary/50 transition-all cursor-pointer"
-                onClick={() => setSelectedType(type)}
-              >
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <IconComponent className="w-5 h-5 text-primary" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {paginatedTypes.map((type) => {
+              const IconComponent = getCategoryIcon(type.category)
+
+              return (
+                <Card
+                  key={type.id}
+                  className="glass-card hover:border-primary/50 transition-all cursor-pointer"
+                  onClick={() => setSelectedType(type)}
+                >
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <ToolLogo
+                          logo={type.logo || undefined}
+                          name={type.display_name}
+                          size={40}
+                          fallbackIcon={type.icon || undefined}
+                          showBackground={true}
+                        />
+                        <div>
+                          <CardTitle className="text-lg">{type.display_name}</CardTitle>
+                          {type.category && (
+                            <Badge variant="outline" className="mt-1 text-xs">
+                              {type.category}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <CardTitle className="text-lg">{type.display_name}</CardTitle>
-                        {type.category && (
-                          <Badge variant="outline" className="mt-1 text-xs">
-                            {type.category}
-                          </Badge>
-                        )}
-                      </div>
+                      {type.is_system && (
+                        <Badge className="bg-blue-500/20 text-blue-400 text-xs">
+                          System
+                        </Badge>
+                      )}
                     </div>
-                    {type.is_system && (
-                      <Badge className="bg-blue-500/20 text-blue-400 text-xs">
-                        System
-                      </Badge>
+                  </CardHeader>
+
+                  <CardContent>
+                    {type.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                        {type.description}
+                      </p>
                     )}
-                  </div>
-                </CardHeader>
-                
-                <CardContent>
-                  {type.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                      {type.description}
-                    </p>
-                  )}
-                  
-                  <div className="text-xs text-muted-foreground">
-                    {type.schema_definition.length} field{type.schema_definition.length !== 1 && 's'}
-                    {type.test_endpoint && ' • Test available'}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-        
-        {/* Pagination */}
-        {filteredTypes.length > pageSize && (
-          <EnhancedPagination
-            data={paginationData}
-            onPageChange={(page) => setCurrentPage(page)}
-            className="mt-6"
-          />
-        )}
+
+                    <div className="text-xs text-muted-foreground">
+                      {type.schema_definition.length} field{type.schema_definition.length !== 1 && 's'}
+                      {type.test_endpoint && ' • Test available'}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+
+          {/* Pagination */}
+          {filteredTypes.length > pageSize && (
+            <EnhancedPagination
+              data={paginationData}
+              onPageChange={(page) => setCurrentPage(page)}
+              className="mt-6"
+            />
+          )}
         </>
       )}
 
@@ -238,10 +243,13 @@ export function CredentialTypesTab() {
           <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-3">
-                {(() => {
-                  const IconComponent = getCategoryIcon(selectedType.category)
-                  return <IconComponent className="w-6 h-6 text-primary" />
-                })()}
+                <ToolLogo
+                  logo={selectedType.logo || undefined}
+                  name={selectedType.display_name}
+                  size={24}
+                  fallbackIcon={selectedType.icon || undefined}
+                  showBackground={false}
+                />
                 {selectedType.display_name}
               </DialogTitle>
               <DialogDescription>
@@ -303,11 +311,11 @@ export function CredentialTypesTab() {
                           {field.type}
                         </Badge>
                       </div>
-                      
+
                       {field.description && (
                         <p className="text-sm text-muted-foreground mt-2">{field.description}</p>
                       )}
-                      
+
                       {field.default !== undefined && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Default: <code>{JSON.stringify(field.default)}</code>

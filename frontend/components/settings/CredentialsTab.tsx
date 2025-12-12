@@ -5,10 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { 
+import {
   Plus, Key, Trash2, Edit, TestTube, Eye, EyeOff, AlertCircle,
   CheckCircle2, XCircle, Clock, Database, Brain, Server, Mail, Code
 } from 'lucide-react'
+import { ToolLogo } from '@/components/ui/tool-logo'
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,7 @@ import {
   listCredentials,
   deleteCredential,
   testCredential,
+  getCredentialType,
   type Credential,
   type CredentialType,
   getCredentialCategories
@@ -55,13 +57,14 @@ const TEST_STATUS_BADGES = {
 
 export function CredentialsTab() {
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [credentialTypes, setCredentialTypes] = useState<Map<number, CredentialType>>(new Map())
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [environmentFilter, setEnvironmentFilter] = useState<string>('all')
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedCredential, setSelectedCredential] = useState<Credential | null>(null)
   const [testingCredential, setTestingCredential] = useState<number | null>(null)
-  
+
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(20)
@@ -84,6 +87,22 @@ export function CredentialsTab() {
     return () => clearTimeout(timeoutId)
   }, [searchTerm])
 
+  const loadCredentialTypes = async (creds: Credential[]) => {
+    const typeIds = [...new Set(creds.map(c => c.credential_type_id))]
+    const types = new Map<number, CredentialType>()
+
+    for (const typeId of typeIds) {
+      try {
+        const type = await getCredentialType(typeId)
+        types.set(typeId, type)
+      } catch (error) {
+        console.error(`Failed to load credential type ${typeId}:`, error)
+      }
+    }
+
+    setCredentialTypes(types)
+  }
+
   const loadCredentials = async () => {
     try {
       setLoading(true)
@@ -94,11 +113,13 @@ export function CredentialsTab() {
         limit: pageSize,
         search: searchTerm || undefined
       })
-      
+
       // Ensure data is an array
       if (Array.isArray(data)) {
         setCredentials(data)
         setPaginationData(null)
+        // Load credential types for logos
+        await loadCredentialTypes(data)
       } else if (data.items && Array.isArray(data.items)) {
         // Handle paginated response
         setCredentials(data.items)
@@ -109,6 +130,8 @@ export function CredentialsTab() {
           pages: data.pages,
           current_page: data.current_page
         })
+        // Load credential types for logos
+        await loadCredentialTypes(data.items)
       } else {
         // Fallback to empty array
         console.warn('Unexpected credentials response format:', data)
@@ -141,13 +164,13 @@ export function CredentialsTab() {
     try {
       setTestingCredential(credentialId)
       const result = await testCredential(credentialId)
-      
+
       if (result.success) {
         alert(`✅ Test Successful\n\n${result.message}`)
       } else {
         alert(`❌ Test Failed\n\n${result.message}`)
       }
-      
+
       await loadCredentials() // Refresh to show updated test status
     } catch (error) {
       console.error('Failed to test credential:', error)
@@ -170,7 +193,7 @@ export function CredentialsTab() {
             Manage encrypted credentials for services and integrations
           </p>
         </div>
-        
+
         <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
           <DialogTrigger asChild>
             <Button>
@@ -232,8 +255,8 @@ export function CredentialsTab() {
             <Key className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
             <h3 className="text-lg font-semibold mb-2">No Credentials Found</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              {searchTerm || environmentFilter !== 'all' 
-                ? 'Try adjusting your filters' 
+              {searchTerm || environmentFilter !== 'all'
+                ? 'Try adjusting your filters'
                 : 'Get started by adding your first credential'}
             </p>
             <Button onClick={() => setShowCreateDialog(true)}>
@@ -247,26 +270,35 @@ export function CredentialsTab() {
           {filteredCredentials.map((credential) => {
             const TestStatusBadge = TEST_STATUS_BADGES[credential.test_status || 'not_tested']
             const StatusIcon = TestStatusBadge.icon
-            
+            const credType = credentialTypes.get(credential.credential_type_id)
+
             return (
               <Card key={credential.id} className="glass-card hover:border-primary/50 transition-all">
                 <CardHeader>
                   <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Key className="w-4 h-4 text-primary" />
-                        {credential.name}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        {credential.credential_type_display_name}
-                      </CardDescription>
+                    <div className="flex items-center gap-3 flex-1">
+                      <ToolLogo
+                        logo={credType?.logo || undefined}
+                        name={credential.credential_type_display_name}
+                        size={40}
+                        fallbackIcon={credType?.icon || undefined}
+                        showBackground={true}
+                      />
+                      <div className="flex-1">
+                        <CardTitle className="text-lg">
+                          {credential.name}
+                        </CardTitle>
+                        <CardDescription className="mt-1">
+                          {credential.credential_type_display_name}
+                        </CardDescription>
+                      </div>
                     </div>
                     <Badge variant="outline" className="text-xs">
                       {credential.environment}
                     </Badge>
                   </div>
                 </CardHeader>
-                
+
                 <CardContent className="space-y-4">
                   {/* Description */}
                   {credential.description && (
@@ -316,7 +348,7 @@ export function CredentialsTab() {
                       <TestTube className="w-3 h-3 mr-1" />
                       {testingCredential === credential.id ? 'Testing...' : 'Test'}
                     </Button>
-                    
+
                     <Button
                       size="sm"
                       variant="outline"
@@ -324,7 +356,7 @@ export function CredentialsTab() {
                     >
                       <Edit className="w-3 h-3" />
                     </Button>
-                    
+
                     <Button
                       size="sm"
                       variant="destructive"

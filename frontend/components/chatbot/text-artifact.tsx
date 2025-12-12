@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
+import { ExternalLink, Copy } from 'lucide-react'
 
 export interface TextArtifactProps {
   content: string
@@ -24,6 +25,8 @@ interface PandasAIInsight {
 
 export function TextArtifact({ content, metadata }: TextArtifactProps) {
   const pandasAI = (metadata?.pandas_ai ?? null) as PandasAIInsight | null
+  const chunks = Array.isArray(metadata?.chunks) ? (metadata?.chunks as Array<{ content: string; excerpt?: string }>) : null
+  const downloadUrl = metadata?.download_url as string | undefined
 
   const renderMarkdown = (markdown: string) => (
     <ReactMarkdown
@@ -115,6 +118,17 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 {metadata.model}
               </span>
             )}
+            {downloadUrl && (
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-200 hover:bg-blue-500/20"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Download
+              </a>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-sm text-gray-300 md:grid-cols-2">
@@ -142,6 +156,54 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
                 <div className="text-base font-semibold text-gray-100">{metadata.document_id}</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* RAG chunk inspector (when provided) */}
+      {chunks && chunks.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
+            Relevant Chunks ({chunks.length})
+          </h4>
+          <div className="space-y-2">
+            {chunks.map((chunk, idx) => (
+              <details
+                key={idx}
+                className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-gray-200">
+                  Chunk {idx + 1}: {chunk.excerpt ? chunk.excerpt.slice(0, 120) : 'Open'}
+                  {chunk.excerpt && chunk.excerpt.length > 120 ? '…' : ''}
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center justify-end">
+                    <button
+                      className="inline-flex items-center gap-2 rounded border border-gray-700/60 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-300 hover:border-orange-400/60 hover:text-orange-300"
+                      onClick={async () => {
+                        if (!navigator.clipboard) {
+                          toast.error('Clipboard API is not available')
+                          return
+                        }
+                        try {
+                          await navigator.clipboard.writeText(chunk.content || '')
+                          toast.success('Chunk copied')
+                        } catch (error) {
+                          toast.error('Failed to copy chunk')
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy chunk
+                    </button>
+                  </div>
+                  <pre className="rounded-lg bg-gray-900/70 p-4 text-xs overflow-x-auto border border-gray-800/60 whitespace-pre-wrap">
+                    {chunk.content}
+                  </pre>
+                </div>
+              </details>
+            ))}
           </div>
         </div>
       )}
