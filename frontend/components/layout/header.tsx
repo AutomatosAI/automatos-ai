@@ -26,12 +26,16 @@ export function Header({ onMenuClick }: HeaderProps) {
 
           {/* Brand (replaces non-functional search) */}
           <div className="flex items-center">
+            {/* Brand lockup: orange ship always, wordmark color follows theme */}
             <img
-              src="/brand/automatos-logo.png"
-              alt="Automatos A.I."
+              src="/brand/automatos-mark-hi.png"
+              alt="Automatos ship mark"
               className="h-8 w-auto opacity-95"
               draggable={false}
             />
+            <span className="ml-3 text-lg font-semibold tracking-wide text-foreground dark:text-white">
+              AUTOMATOS A.I.
+            </span>
           </div>
         </div>
 

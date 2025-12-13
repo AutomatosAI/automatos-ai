@@ -450,10 +450,10 @@ export function Chat({
             <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
               {/* Hero header (dark-mode version of marketing header) */}
               <div className="w-full max-w-5xl text-center mb-8 md:mb-10">
-                <div className="text-xs uppercase tracking-[0.35em] text-orange-200/70">
+                <div className="text-xs uppercase tracking-[0.35em] text-muted-foreground dark:text-orange-200/70">
                   Future-Ready AI Agency
                 </div>
-                <h1 className="mt-3 text-4xl md:text-6xl font-semibold tracking-tight text-white leading-[1.05]">
+                <h1 className="mt-3 text-4xl md:text-6xl font-semibold tracking-tight text-foreground dark:text-white leading-[1.05]">
                   <span className="block">AI Services That</span>
                   <span className="block mt-2">
                     <span className="gradient-text">[Elevate]</span>{' '}

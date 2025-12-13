@@ -34,13 +34,13 @@ function MetricCard({ title, value, change, changeType, icon: Icon, gradient, ba
       <CardContent className="p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-2xl bg-foreground/5 border border-border/60 flex items-center justify-center shrink-0">
               <Icon className={`w-5 h-5 ${
                 gradient.includes('orange') ? 'text-orange-400' :
                 gradient.includes('blue') ? 'text-blue-400' :
                 gradient.includes('green') ? 'text-green-400' :
                 gradient.includes('purple') ? 'text-purple-400' :
-                'text-white'
+                'text-foreground'
               }`} />
             </div>
 
@@ -52,7 +52,7 @@ function MetricCard({ title, value, change, changeType, icon: Icon, gradient, ba
 
           <div className="shrink-0 text-right">
             {badge && (
-              <Badge variant="outline" className="mb-1 border-orange-500/25 bg-orange-500/10 text-orange-200">
+              <Badge variant="outline" className="mb-1 border-orange-500/25 bg-orange-500/10 text-orange-700 dark:text-orange-200">
                 {badge}
               </Badge>
             )}

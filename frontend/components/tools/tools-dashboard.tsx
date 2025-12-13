@@ -140,20 +140,12 @@ export function ToolsDashboard() {
   }, [viewMode])
 
   // Fetch real data from API with error handling, pagination, and search
-  // Look up the API name for the selected category directly from categoriesData
-  const selectedCat = categoriesData?.find((cat: any) => {
-    const catId = cat.id || cat.name?.toLowerCase().replace(/\s+/g, '_')
-    return catId === selectedCategory
-  })
-  const categoryParam = selectedCategory === 'all' ? undefined : (selectedCat?.name || selectedCat?.id)
-
+  const categoryParam = selectedCategory !== 'all' ? selectedCategory : undefined
   console.log('API call params:', {
     skip: (currentPage - 1) * pageSize,
     limit: pageSize,
     search: debouncedSearch,
-    category: categoryParam,
-    selectedCategoryId: selectedCategory,
-    foundCategory: selectedCat
+    category: categoryParam
   })
 
   const { data: mcpToolsData, isLoading: toolsLoading, error: toolsError } = useMCPTools({
@@ -179,7 +171,6 @@ export function ToolsDashboard() {
       {
         id: 'all',
         name: 'All Tools',
-        apiName: undefined, // No filter for "all"
         color: 'text-gray-400',
         count: paginationData.total || 0
       }
@@ -188,21 +179,15 @@ export function ToolsDashboard() {
     if (categoriesData && Array.isArray(categoriesData)) {
       console.log('Categories from API:', categoriesData)
       categoriesData.forEach((cat: any) => {
-        const categoryId = cat.id || cat.name?.toLowerCase().replace(/\s+/g, '_')
-        // Store the original name from API - this is what the backend expects
-        const apiName = cat.name || cat.id
-        console.log(`Category mapping: "${cat.name}" -> Display ID: "${categoryId}", API Name: "${apiName}"`)
         categories.push({
-          id: categoryId,
+          id: cat.id || cat.name?.toLowerCase().replace(/\s+/g, '_'),
           name: cat.name,
-          apiName: apiName, // This is what we'll send to the API
-          color: 'text-blue-400',
+          color: 'text-blue-400', // Default color
           count: cat.count || 0
         })
       })
     }
 
-    console.log('Final toolCategories:', categories)
     return categories
   }, [categoriesData, paginationData.total])
 
@@ -589,6 +574,26 @@ export function ToolsDashboard() {
         ))}
       </motion.div>
 
+      {/* Search and Filters */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.2 }}
+        className="flex flex-col sm:flex-row gap-4"
+      >
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+          <Input
+            placeholder="Search tools by name, provider, or tags..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
+          />
+        </div>
+
+
+      </motion.div>
+
       {/* Main Content */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -596,32 +601,42 @@ export function ToolsDashboard() {
         transition={{ duration: 0.6, delay: 0.3 }}
       >
         <Tabs defaultValue="marketplace" className="space-y-6">
-          {/* Tabs, Search, and View Controls in Single Row */}
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-            <TabsList className="bg-secondary/50">
-              <TabsTrigger value="marketplace" className="flex items-center space-x-2">
-                <Grid3X3 className="w-4 h-4" />
-                <span className="hidden sm:inline">Marketplace</span>
-              </TabsTrigger>
-              <TabsTrigger value="installed" className="flex items-center space-x-2">
-                <CheckCircle className="w-4 h-4" />
-                <span className="hidden sm:inline">Enabled ({stats.installed})</span>
-              </TabsTrigger>
-            </TabsList>
+          <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid bg-secondary/50">
+            <TabsTrigger value="marketplace" className="flex items-center space-x-2">
+              <Grid3X3 className="w-4 h-4" />
+              <span className="hidden sm:inline">Marketplace</span>
+            </TabsTrigger>
+            <TabsTrigger value="installed" className="flex items-center space-x-2">
+              <CheckCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">Enabled ({stats.installed})</span>
+            </TabsTrigger>
+            {/* Security tab hidden - not implemented yet */}
+            {/* <TabsTrigger value="security" className="flex items-center space-x-2">
+              <Shield className="w-4 h-4" />
+              <span className="hidden sm:inline">Security</span>
+            </TabsTrigger> */}
+          </TabsList>
 
-            <div className="flex flex-1 gap-4 items-center w-full lg:w-auto">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <Input
-                  placeholder="Search tools by name, provider, or tags..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
-                />
+          <TabsContent value="marketplace" className="space-y-6">
+            {/* Additional Filters and View Options */}
+            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+              <div className="flex flex-col md:flex-row gap-4 flex-1">
+                {/* Sort */}
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Sort by..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="name">Name</SelectItem>
+                    <SelectItem value="rating">Rating</SelectItem>
+                    <SelectItem value="usage">Usage</SelectItem>
+                    <SelectItem value="updated">Last Updated</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* View Mode Toggle */}
-              <div className="flex items-center space-x-2 bg-secondary/30 rounded-lg p-1 shrink-0">
+              <div className="flex items-center space-x-2 bg-secondary/30 rounded-lg p-1">
                 <Button
                   variant={viewMode === 'grid' ? 'default' : 'ghost'}
                   size="sm"
@@ -640,18 +655,15 @@ export function ToolsDashboard() {
                 </Button>
               </div>
             </div>
-          </div>
-
-          <TabsContent value="marketplace" className="space-y-6">
 
             {/* Categories */}
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-              {[...toolCategories].sort((a, b) => b.count - a.count).map((category) => (
+            <div className="flex flex-wrap gap-2">
+              {toolCategories.map((category) => (
                 <Button
                   key={category.id}
                   variant={selectedCategory === category.id ? 'default' : 'outline'}
                   onClick={() => setSelectedCategory(category.id)}
-                  className={`flex items-center space-x-2 whitespace-nowrap shrink-0 ${selectedCategory === category.id
+                  className={`flex items-center space-x-2 ${selectedCategory === category.id
                     ? 'bg-gray-800 border-orange-400/50 text-white'
                     : 'hover:border-orange-500/50'
                     }`}

@@ -5,6 +5,71 @@
 
 @layer base {
   :root {
+    /* Light theme (default) */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 16 100% 55%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 12%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 16 100% 55%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    /* Light mode: slightly stronger borders for clearer surface separation */
+    --border: 0 0% 82%;
+    --input: 0 0% 82%;
+    --ring: 16 100% 55%;
+
+    /* App surfaces */
+    --background-gradient-from: 0 0% 97%;
+    --background-gradient-to: 0 0% 92%;
+
+    /* Glass tuning */
+    --glass-card-alpha: 0.86;
+    --glass-panel-alpha: 0.95;
+    --glass-border-alpha: 0.18;
+    --glass-border-alpha-hover: 0.20;
+    --glass-glow-alpha: 0.10;
+    --glass-shadow-alpha: 0.10;
+    --glass-shadow-alpha-hover: 0.14;
+    --glass-border: var(--border);
+    --glass-border-hover: var(--primary);
+
+    /* Elevation / edge tuning (Light should feel crisp) */
+    --card-shadow-alpha: 0.14;
+    --card-shadow-alpha-hover: 0.18;
+    --card-accent-alpha: 0.07;
+    --card-accent-alpha-hover: 0.12;
+    --card-highlight-alpha: 0.08;
+
+    /* Charts (Tailwind chart palette tokens) */
+    --chart-1: 16 100% 55%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 160 84% 39%;
+    --chart-4: 271 91% 65%;
+    --chart-5: 43 96% 56%;
+    
+    /* Stage colors for 9-stage pipeline */
+    --stage-1: 187 100% 42%;
+    --stage-2: 330 81% 71%;
+    --stage-3: 43 96% 56%;
+    --stage-4: 271 91% 65%;
+    --stage-5: 160 84% 39%;
+    --stage-6: 24 95% 53%;
+    --stage-7: 217 91% 60%;
+    --stage-8: 330 81% 60%;
+    --stage-9: 160 84% 39%;
+  }
+
+  .dark {
+    /* Dark theme */
     --background: 0 0% 6%;
     --foreground: 0 0% 98%;
     --card: 0 0% 8%;
@@ -24,17 +89,31 @@
     --border: 0 0% 15%;
     --input: 0 0% 15%;
     --ring: 16 100% 60%;
-    
-    /* Stage colors for 9-stage pipeline */
-    --stage-1: 187 100% 42%;
-    --stage-2: 330 81% 71%;
-    --stage-3: 43 96% 56%;
-    --stage-4: 271 91% 65%;
-    --stage-5: 160 84% 39%;
-    --stage-6: 24 95% 53%;
-    --stage-7: 217 91% 60%;
-    --stage-8: 330 81% 60%;
-    --stage-9: 160 84% 39%;
+
+    --background-gradient-from: 0 0% 4%;
+    --background-gradient-to: 0 0% 10%;
+
+    --glass-card-alpha: 0.55;
+    --glass-panel-alpha: 0.92;
+    --glass-border-alpha: 0.12;
+    --glass-border-alpha-hover: 0.22;
+    --glass-glow-alpha: 0.16;
+    --glass-shadow-alpha: 0.45;
+    --glass-shadow-alpha-hover: 0.50;
+    --glass-border: var(--primary);
+    --glass-border-hover: var(--primary);
+
+    --card-shadow-alpha: 0.45;
+    --card-shadow-alpha-hover: 0.50;
+    --card-accent-alpha: 0.10;
+    --card-accent-alpha-hover: 0.16;
+    --card-highlight-alpha: 0.05;
+
+    --chart-1: 16 100% 60%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 160 84% 39%;
+    --chart-4: 271 91% 65%;
+    --chart-5: 43 96% 56%;
   }
 }
 
@@ -49,7 +128,11 @@
 
 @layer components {
   .gradient-bg {
-    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+    background: linear-gradient(
+      135deg,
+      hsl(var(--background-gradient-from)) 0%,
+      hsl(var(--background-gradient-to)) 100%
+    );
   }
   
   .gradient-accent {
@@ -64,23 +147,29 @@
   }
   
   .card-glow {
-    box-shadow: 0 0 20px rgba(255, 107, 53, 0.1);
+    box-shadow:
+      0 18px 45px hsla(0 0% 0% / var(--card-shadow-alpha)),
+      0 0 0 1px hsla(var(--primary) / var(--card-accent-alpha)),
+      0 0 24px hsla(var(--primary) / var(--card-accent-alpha));
   }
   
   .card-glow:hover {
-    box-shadow: 0 0 40px rgba(255, 107, 53, 0.2);
+    box-shadow:
+      0 22px 55px hsla(0 0% 0% / var(--card-shadow-alpha-hover)),
+      0 0 0 1px hsla(var(--primary) / var(--card-accent-alpha-hover)),
+      0 0 40px hsla(var(--primary) / var(--card-accent-alpha-hover));
   }
 
   /* Global glass card style (used across dashboards + chat) */
   .glass-card {
-    background: hsla(var(--card) / 0.55);
+    background: hsla(var(--card) / var(--glass-card-alpha));
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-    border: 1px solid rgba(255, 107, 53, 0.12);
+    border: 1px solid hsla(var(--glass-border) / var(--glass-border-alpha));
     border-radius: 1.5rem; /* matches rounded-2xl */
     box-shadow:
-      0 18px 45px rgba(0, 0, 0, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      0 18px 45px hsla(0 0% 0% / var(--glass-shadow-alpha)),
+      inset 0 1px 0 hsla(0 0% 100% / var(--card-highlight-alpha));
     transition:
       border-color 220ms ease,
       box-shadow 220ms ease,
@@ -88,17 +177,17 @@
   }
 
   .glass-card:hover {
-    border-color: rgba(255, 107, 53, 0.22);
+    border-color: hsla(var(--glass-border-hover) / var(--glass-border-alpha-hover));
     box-shadow:
-      0 0 46px rgba(255, 107, 53, 0.16),
-      0 18px 45px rgba(0, 0, 0, 0.5),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      0 0 46px hsla(var(--primary) / var(--glass-glow-alpha)),
+      0 18px 45px hsla(0 0% 0% / var(--glass-shadow-alpha-hover)),
+      inset 0 1px 0 hsla(0 0% 100% / 0.10);
   }
 
   /* Glass Mission Control - Execution Theater */
   
   .glass-panel {
-    background: hsla(var(--card) / 0.92);
+    background: hsla(var(--card) / var(--glass-panel-alpha));
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
     border: 1px solid hsla(var(--border) / 0.7);
@@ -134,8 +223,8 @@
   }
   
   .stage-pending {
-    background: rgba(20, 20, 25, 0.4);
-    border-color: rgba(60, 60, 70, 0.3);
+    background: hsla(var(--muted) / 0.4);
+    border-color: hsla(var(--border) / 0.5);
   }
 
   @keyframes stage-pulse {
@@ -230,9 +319,9 @@
   .flow-particle { animation: flow-right 1.5s ease-in-out infinite; }
 
   .theater-scrollbar::-webkit-scrollbar { width: 6px; }
-  .theater-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); border-radius: 3px; }
-  .theater-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
-  .theater-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
+  .theater-scrollbar::-webkit-scrollbar-track { background: hsla(var(--foreground) / 0.08); border-radius: 3px; }
+  .theater-scrollbar::-webkit-scrollbar-thumb { background: hsla(var(--foreground) / 0.18); border-radius: 3px; }
+  .theater-scrollbar::-webkit-scrollbar-thumb:hover { background: hsla(var(--foreground) / 0.28); }
 
   .agent-avatar {
     background: linear-gradient(135deg, rgba(255, 107, 53, 0.3) 0%, rgba(249, 115, 22, 0.3) 100%);

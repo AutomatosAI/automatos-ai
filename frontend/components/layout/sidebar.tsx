@@ -203,7 +203,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   <Icon
                     className={cn(
                       'w-5 h-5 transition-colors',
-                      isActive ? 'text-white' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
+                      isActive ? 'text-foreground' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
                     )}
                   />
                 </div>
