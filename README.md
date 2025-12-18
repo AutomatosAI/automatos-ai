@@ -1,6 +1,7 @@
 # Automatos AI 🤖
 
 > **"From Atoms to Organisms: The Future of Multi-Agent Orchestration"**
+> 🎓 **Research-Backed**: Implements [Context Engineering 2.0](RESEARCH.md) principles based on peer-reviewed research (SJTU/GAIR, 2025)
 
 ![Automatos AI Dashboard](docs/assets/images/main_dashboard.png)
 

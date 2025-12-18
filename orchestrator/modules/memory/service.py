@@ -2,8 +2,36 @@
 Memory Service
 ==============
 
-Main service class for Memory module.
+Main service class for Memory module implementing Context Engineering 2.0 principles.
 Coordinates hierarchical memory, augmentation, consolidation, and access optimization.
+
+Based on research from "Context Engineering 2.0: The Context of Context Engineering"
+(Hua et al., SJTU/SII/GAIR, 2025, arXiv:2510.26493)
+
+Architecture:
+- Hierarchical Memory: Immediate → Working → Short-term → Long-term → Archival
+- Memory Types: Episodic (events), Semantic (facts), Procedural (skills), Working (active)
+- Operations: Augmentation, Consolidation, Access Optimization
+
+Usage:
+    from modules.memory import MemoryService, MemoryType
+    
+    service = MemoryService()
+    
+    # Store episodic memory
+    await service.store(
+        session_id="user_123",
+        content={"event": "user completed task X"},
+        memory_type=MemoryType.EPISODIC,
+        importance=0.8
+    )
+    
+    # Retrieve relevant memories
+    memories = await service.retrieve(
+        session_id="user_123",
+        query="what tasks did user complete?",
+        use_optimization=True
+    )
 """
 
 import logging

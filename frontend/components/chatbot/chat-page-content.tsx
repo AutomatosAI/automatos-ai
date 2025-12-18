@@ -44,7 +44,7 @@ export function ChatPageContent() {
                     {/* Toggle button */}
                     <button
                         onClick={() => setIsSidebarVisible(!isSidebarVisible)}
-                        className="absolute top-4 left-4 z-10 p-2 rounded-lg bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 transition-all"
+                        className="absolute top-4 left-4 z-10 p-2 rounded-xl bg-secondary/50 hover:bg-secondary border border-border/60 transition-all text-foreground"
                         title={isSidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
                     >
                         <svg

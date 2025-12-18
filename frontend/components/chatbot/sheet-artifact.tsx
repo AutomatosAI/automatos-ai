@@ -88,13 +88,13 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       {/* Clarification flow */} 
       {status === 'needs_clarification' && clarifications && clarifications.length > 0 && (
         <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-4">
-          <div className="text-sm font-semibold text-orange-200">Clarification needed</div>
+          <div className="text-sm font-semibold text-orange-700 dark:text-orange-200">Clarification needed</div>
           {infoMessage && <div className="mt-1 text-sm text-orange-100/80">{infoMessage}</div>}
           <div className="mt-3 space-y-2">
             {clarifications.map((q, idx) => (
               <button
                 key={idx}
-                className="w-full rounded-lg border border-gray-800/60 bg-gray-900/40 px-3 py-2 text-left text-sm text-gray-200 hover:border-orange-400/40 hover:bg-orange-500/5"
+                className="w-full rounded-xl border border-border/60 bg-card/50 px-3 py-2 text-left text-sm text-foreground hover:border-orange-400/40 hover:bg-orange-500/5 dark:border-gray-800/60 dark:bg-gray-900/40 dark:text-gray-200"
                 onClick={async () => {
                   if (!navigator.clipboard) {
                     toast.error('Clipboard API is not available')
@@ -123,17 +123,17 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       {content && (
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          className="prose prose-invert prose-sm max-w-none"
+          className="prose prose-sm max-w-none dark:prose-invert"
         >
           {content}
         </ReactMarkdown>
       )}
 
       {/* Controls */}
-      <div className="flex flex-col gap-3 rounded-xl border border-gray-800/60 bg-gray-900/30 p-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card/50 p-4 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-gray-900/30">
         <div className="flex items-center gap-2">
           <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(e) => {
@@ -141,7 +141,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
                 setPage(1)
               }}
               placeholder="Search rows…"
-              className="pl-9 bg-gray-900/40 border-gray-800/40"
+              className="pl-9"
             />
           </div>
         </div>
@@ -173,10 +173,10 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-gray-800/60 bg-gray-900/40 overflow-hidden">
+      <div className="rounded-xl border border-border/60 bg-card/50 overflow-hidden dark:border-gray-800/60 dark:bg-gray-900/40">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-800/70 text-sm text-gray-100">
-            <thead className="bg-gray-900/60 text-xs uppercase tracking-wide text-gray-400">
+          <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
+            <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
               <tr>
                 {columns.map((col) => (
                   <th key={col} className="px-4 py-3 text-left font-semibold">
@@ -185,21 +185,21 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/70">
+            <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">
               {pageRows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-gray-400" colSpan={Math.max(columns.length, 1)}>
+                  <td className="px-4 py-6 text-muted-foreground" colSpan={Math.max(columns.length, 1)}>
                     No rows
                   </td>
                 </tr>
               ) : (
                 pageRows.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-gray-900/60 transition-colors">
+                  <tr key={idx} className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">
                     {columns.map((col) => {
                       const value = row?.[col]
                       const display = value === null || value === undefined ? '—' : String(value)
                       return (
-                        <td key={col} className="px-4 py-3 align-top text-gray-200">
+                        <td key={col} className="px-4 py-3 align-top text-foreground dark:text-gray-200">
                           <span className="block max-w-[420px] truncate" title={display}>
                             {display}
                           </span>
@@ -214,8 +214,8 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
         </div>
 
         {/* Pagination */}
-        <div className="flex flex-col gap-2 border-t border-gray-800/60 bg-gray-900/30 px-4 py-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-xs text-gray-400">
+        <div className="flex flex-col gap-2 border-t border-border/60 bg-card/50 px-4 py-3 md:flex-row md:items-center md:justify-between dark:border-gray-800/60 dark:bg-gray-900/30">
+          <div className="text-xs text-muted-foreground">
             Showing {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
           </div>
           <div className="flex items-center gap-2">
@@ -227,7 +227,7 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
             >
               Prev
             </Button>
-            <span className="text-xs text-gray-300 font-mono">
+            <span className="text-xs text-foreground/80 dark:text-gray-300 font-mono">
               {page}/{totalPages}
             </span>
             <Button
@@ -244,11 +244,11 @@ export function SheetArtifact({ content, metadata }: SheetArtifactProps) {
 
       {/* SQL */}
       {sql && (
-        <details className="rounded-xl border border-gray-800/60 bg-gray-900/30 p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-gray-200">
+        <details className="rounded-xl border border-border/60 bg-card/50 p-4 dark:border-gray-800/60 dark:bg-gray-900/30">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground dark:text-gray-200">
             View SQL
           </summary>
-          <pre className="mt-3 overflow-x-auto rounded-lg border border-gray-800/60 bg-gray-900/60 p-3 text-xs text-gray-200">
+          <pre className="mt-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/40 p-3 text-xs text-foreground dark:border-gray-800/60 dark:bg-gray-900/60 dark:text-gray-200">
             {sql}
           </pre>
         </details>

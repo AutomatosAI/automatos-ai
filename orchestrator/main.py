@@ -60,6 +60,7 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -396,6 +397,7 @@ app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
+app.include_router(context_summarization_router)  # Context Engineering 2.0: Self-baking
 
 # Include MISSING API routers
 app.include_router(orchestrator_router)

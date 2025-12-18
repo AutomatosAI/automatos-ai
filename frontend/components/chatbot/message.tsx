@@ -61,12 +61,12 @@ export function Message({
 
   const markdownComponents = useMemo(() => ({
     p: ({ children }: any) => (
-      <p className="text-gray-100 leading-relaxed tracking-[0.01em]">{children}</p>
+      <p className="text-foreground leading-relaxed tracking-[0.01em] dark:text-gray-100">{children}</p>
     ),
     strong: ({ children }: any) => (
-      <strong className="text-gray-100 font-semibold">{children}</strong>
+      <strong className="text-foreground font-semibold dark:text-gray-100">{children}</strong>
     ),
-    em: ({ children }: any) => <em className="text-gray-300 italic">{children}</em>,
+    em: ({ children }: any) => <em className="text-muted-foreground italic dark:text-gray-300">{children}</em>,
     a: ({ href, children }: any) => (
       <a
         href={href}
@@ -78,52 +78,52 @@ export function Message({
       </a>
     ),
     ul: ({ children }: any) => (
-      <ul className="list-disc pl-6 space-y-3 text-gray-100">{children}</ul>
+      <ul className="list-disc pl-6 space-y-3 text-foreground dark:text-gray-100">{children}</ul>
     ),
     ol: ({ children }: any) => (
-      <ol className="list-decimal pl-6 space-y-3 text-gray-100">{children}</ol>
+      <ol className="list-decimal pl-6 space-y-3 text-foreground dark:text-gray-100">{children}</ol>
     ),
     li: ({ children }: any) => (
-      <li className="bg-gray-900/40 border border-gray-800/60 rounded-lg px-4 py-3 shadow-sm">
-        <div className="space-y-1 text-gray-100">{children}</div>
+      <li className="bg-card/60 border border-border/60 rounded-lg px-4 py-3 shadow-sm dark:bg-gray-900/40 dark:border-gray-800/60">
+        <div className="space-y-1 text-foreground dark:text-gray-100">{children}</div>
       </li>
     ),
     code: ({ inline, children }: any) => (
       inline ? (
-        <code className="rounded bg-gray-900/60 px-1.5 py-0.5 text-xs text-orange-200">
+        <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-gray-900/60 dark:text-orange-200">
           {children}
         </code>
       ) : (
-        <pre className="rounded-lg bg-gray-900/70 p-4 text-xs overflow-x-auto border border-gray-800/60">
-          <code>{children}</code>
+        <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
+          <code className="text-inherit">{children}</code>
         </pre>
       )
     ),
     table: ({ children }: any) => (
-      <div className="overflow-x-auto rounded-xl border border-gray-800/60 bg-gray-900/40">
-        <table className="min-w-full divide-y divide-gray-800/70 text-sm text-gray-100">
+      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/40">
+        <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
           {children}
         </table>
       </div>
     ),
     thead: ({ children }: any) => (
-      <thead className="bg-gray-900/60 text-xs uppercase tracking-wide text-gray-400">
+      <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
         {children}
       </thead>
     ),
     tbody: ({ children }: any) => (
-      <tbody className="divide-y divide-gray-800/70">{children}</tbody>
+      <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
     ),
     tr: ({ children }: any) => (
-      <tr className="hover:bg-gray-900/60 transition-colors">{children}</tr>
+      <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">{children}</tr>
     ),
     th: ({ children }: any) => (
-      <th className="px-4 py-3 text-left font-semibold text-gray-300">
+      <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-gray-300">
         {children}
       </th>
     ),
     td: ({ children }: any) => (
-      <td className="px-4 py-3 align-top text-gray-200">{children}</td>
+      <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
     ),
   }), [])
 
@@ -133,7 +133,7 @@ export function Message({
       return (
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          className="prose prose-invert prose-sm md:prose-base max-w-none space-y-4 prose-headings:text-gray-100 prose-p:text-gray-100 prose-a:text-orange-300"
+          className="prose prose-sm md:prose-base max-w-none space-y-4 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
           components={markdownComponents}
         >
           {message.content}
@@ -154,7 +154,7 @@ export function Message({
               <ReactMarkdown
                 key={index}
                 remarkPlugins={[remarkGfm]}
-                className="prose prose-invert prose-sm md:prose-base max-w-none space-y-4 prose-headings:text-gray-100 prose-p:text-gray-100 prose-a:text-orange-300"
+                className="prose prose-sm md:prose-base max-w-none space-y-4 dark:prose-invert prose-headings:text-foreground dark:prose-headings:text-gray-100 prose-p:text-foreground dark:prose-p:text-gray-100 prose-a:text-orange-500 dark:prose-a:text-orange-300"
                 components={markdownComponents}
               >
                 {part.text}
@@ -164,9 +164,9 @@ export function Message({
 
           if (part.type === 'file' && 'filename' in part) {
             return (
-              <div key={index} className="flex items-center space-x-2 p-2 bg-gray-800/30 rounded">
+              <div key={index} className="flex items-center space-x-2 p-2 bg-secondary/30 rounded-lg">
                 <FileText className="w-4 h-4 text-blue-400" />
-                <span className="text-sm text-gray-400">{part.filename}</span>
+                <span className="text-sm text-muted-foreground">{part.filename}</span>
               </div>
             )
           }
@@ -176,11 +176,11 @@ export function Message({
               <button
                 key={index}
                 onClick={() => onArtifactSelect?.(part.artifact)}
-                className="w-full text-left p-3 rounded-lg bg-gray-800/30 border border-gray-700/50 hover:bg-gray-800/50 hover:border-gray-600 transition-all"
+                className="w-full text-left p-3 rounded-xl bg-secondary/30 border border-border/60 hover:bg-secondary/50 hover:border-border transition-all"
               >
                 <div className="flex items-center space-x-2">
                   <Code className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm text-gray-300">{part.artifact.title}</span>
+                  <span className="text-sm text-foreground/80 dark:text-gray-300">{part.artifact.title}</span>
                   <Badge variant="outline" className="bg-purple-500/10 border-purple-500/20 text-purple-400 text-xs">
                     {part.artifact.kind}
                   </Badge>
@@ -219,7 +219,7 @@ export function Message({
     return (
       <div className="inline-flex items-center gap-2 rounded-full border border-gray-800/60 bg-gray-900/30 px-3 py-1 text-xs text-gray-300">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-        <span className="font-medium">Completed</span>
+        <span className="font-medium text-muted-foreground dark:text-gray-300">Completed</span>
       </div>
     )
   }
@@ -248,17 +248,17 @@ export function Message({
           return (
             <details
               key={tc.toolCallId}
-              className="rounded-xl border border-gray-800/60 bg-gray-900/30"
+              className="rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/30"
               open={tc.state === 'running'}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
                 <div className="flex min-w-0 items-center gap-2">
                   <Wrench className="w-4 h-4 text-muted-foreground" />
-                  <span className="truncate text-sm font-medium text-gray-200">{tc.toolName}</span>
+                  <span className="truncate text-sm font-medium text-foreground dark:text-gray-200">{tc.toolName}</span>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {durationText && (
-                    <span className="text-xs text-gray-500 font-mono">{durationText}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{durationText}</span>
                   )}
                   <span
                     className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${status.className}`}
@@ -269,11 +269,11 @@ export function Message({
                 </div>
               </summary>
 
-              <div className="space-y-3 border-t border-gray-800/60 px-4 py-3">
+              <div className="space-y-3 border-t border-border/60 px-4 py-3 dark:border-gray-800/60">
                 {tc.input && (
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-gray-500">Parameters</div>
-                    <pre className="mt-2 overflow-x-auto rounded-lg border border-gray-800/60 bg-gray-900/60 p-3 text-xs text-gray-200">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Parameters</div>
+                    <pre className="mt-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-foreground dark:border-gray-800/60 dark:bg-gray-900/60 dark:text-gray-200">
                       {JSON.stringify(tc.input, null, 2)}
                     </pre>
                   </div>
@@ -330,8 +330,8 @@ export function Message({
 
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (
-              <div className="mt-3 pt-3 border-t border-gray-700/50 flex items-center justify-between text-xs">
-                <div className="flex items-center space-x-3 text-gray-400">
+              <div className="mt-3 pt-3 border-t border-border/50 flex items-center justify-between text-xs dark:border-gray-700/50">
+                <div className="flex items-center space-x-3 text-muted-foreground">
                   {message.metadata.source && (
                     <Badge variant="outline" className={`
                       ${message.metadata.source === 'codegraph' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : ''}
@@ -358,15 +358,15 @@ export function Message({
                 <button
                   key={idx}
                   onClick={() => onCodeSelect?.(snippet)}
-                  className="w-full text-left p-3 rounded-lg bg-gray-800/30 border border-gray-700/50 hover:bg-gray-800/50 hover:border-gray-600 transition-all group"
+                  className="w-full text-left p-3 rounded-xl bg-secondary/30 border border-border/60 hover:bg-secondary/50 hover:border-border transition-all group"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
                       <Code className="w-4 h-4 text-purple-400" />
-                      <span className="text-sm text-gray-300 font-mono">{snippet.symbol_name || 'Code'}</span>
-                      <span className="text-xs text-gray-500">{snippet.file_path}</span>
+                      <span className="text-sm text-foreground/80 dark:text-gray-300 font-mono">{snippet.symbol_name || 'Code'}</span>
+                      <span className="text-xs text-muted-foreground">{snippet.file_path}</span>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-gray-300" />
                   </div>
                 </button>
               ))}
@@ -443,22 +443,22 @@ export function Message({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <FileText className="w-4 h-4 text-blue-400" />
-                        <span className="text-sm font-medium text-gray-200">{title}</span>
+                        <span className="text-sm font-medium text-foreground dark:text-gray-200">{title}</span>
                         <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
                           {relevance.toFixed(0)}%
                         </Badge>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300" />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground/80 dark:group-hover:text-gray-300" />
                     </div>
 
                     {chunkCount !== undefined && (
-                      <div className="mt-2 text-xs text-gray-400">
+                      <div className="mt-2 text-xs text-muted-foreground">
                         {chunkCount} relevant section{chunkCount !== 1 ? 's' : ''} found
                       </div>
                     )}
 
                     {preview && (
-                      <p className="mt-2 line-clamp-2 text-sm text-gray-300 opacity-90">
+                      <p className="mt-2 line-clamp-2 text-sm text-foreground/80 dark:text-gray-300 opacity-90">
                         {preview}
                       </p>
                     )}
@@ -480,21 +480,21 @@ export function Message({
                 <button
                   key={idx}
                   onClick={() => onDatabaseSelect?.(dbResult)}
-                  className="w-full text-left p-4 rounded-lg bg-gradient-to-br from-green-900/20 to-emerald-900/20 border border-green-500/30 hover:border-green-500/50 transition-all group"
+                  className="w-full text-left p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/25 hover:border-emerald-500/40 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2">
                       <Database className="w-4 h-4 text-green-400" />
-                      <span className="text-sm font-medium text-green-300">{dbResult.database}</span>
+                      <span className="text-sm font-medium text-emerald-700 dark:text-green-300">{dbResult.database}</span>
                       <Badge variant="outline" className="bg-green-500/10 border-green-500/20 text-green-400 text-xs">
                         {dbResult.row_count} rows • {dbResult.execution_time_ms?.toFixed(0)}ms
                       </Badge>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-green-300" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-emerald-700 dark:group-hover:text-green-300" />
                   </div>
 
                   {dbResult.sql && (
-                    <div className="mt-2 p-2 bg-gray-900/50 rounded text-xs font-mono text-gray-300 overflow-x-auto">
+                    <div className="mt-2 p-2 bg-muted/40 rounded-lg text-xs font-mono text-foreground/80 dark:bg-gray-900/50 dark:text-gray-300 overflow-x-auto">
                       {dbResult.sql.substring(0, 100)}{dbResult.sql.length > 100 ? '...' : ''}
                     </div>
                   )}

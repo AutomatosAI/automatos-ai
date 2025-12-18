@@ -136,6 +136,11 @@ export function AgentManagement() {
         </div>
 
         <div className="flex items-center gap-3">
+          {agentsError && (
+            <Badge variant="outline" className="border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400">
+              Agents API error (HTTP {(agentsError as any)?.status || '500'})
+            </Badge>
+          )}
           <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
             {agentsLoading ? 'Loading...' : `${(agents as any[])?.length || 0} Agents`}
@@ -145,7 +150,7 @@ export function AgentManagement() {
             onClick={handleRefresh}
             variant="outline"
             size="sm"
-            disabled={agentsLoading}
+            disabled={agentsLoading && !agentsError}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${agentsLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -160,6 +165,22 @@ export function AgentManagement() {
           </Button>
         </div>
       </motion.div>
+
+      {agentsError && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+          <div className="text-sm font-semibold text-red-600 dark:text-red-400">
+            Agents failed to load (backend error)
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code> and <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/v1/skills</code>.
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Statistics Cards */}
       <motion.div
@@ -276,7 +297,7 @@ export function AgentManagement() {
           <TabsContent value="roster" className="space-y-6">
             <AgentRoster
               agents={agents as any[]}
-              loading={agentsLoading}
+              loading={agentsLoading && !agentsError}
               searchTerm={searchTerm}
               statusFilter={statusFilter}
               onAgentSelect={setSelectedAgentId}
