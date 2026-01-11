@@ -31,6 +31,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download NLTK data (punkt tokenizer, stopwords) for memory operations
+RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
+
 # =============================================================================
 # Development Stage - Hot Reload & Debugging
 # =============================================================================
