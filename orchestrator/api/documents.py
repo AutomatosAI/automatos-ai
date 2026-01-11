@@ -28,30 +28,45 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Initialize credential resolver
 from core.credentials.resolver import get_credential_resolver
+from urllib.parse import urlparse
 import os
 
-resolver = get_credential_resolver()
-
-# Try to get credentials, fallback to environment variables
-try:
-    postgres_creds = resolver.get_dict("development_db")
-except Exception:
-    # Fallback to environment variables
-    postgres_creds = {
-        'database': os.getenv('POSTGRES_DB', 'automatos'),
-        'user': os.getenv('POSTGRES_USER', 'postgres'),
-        'password': os.getenv('POSTGRES_PASSWORD', ''),
-        'host': os.getenv('POSTGRES_HOST', 'localhost'),
-        'port': os.getenv('POSTGRES_PORT', '5432')
+def parse_database_url(url: str) -> dict:
+    """Parse DATABASE_URL into psycopg2 connection dict format"""
+    parsed = urlparse(url)
+    return {
+        'host': parsed.hostname,
+        'port': parsed.port or 5432,
+        'database': parsed.path.lstrip('/'),
+        'user': parsed.username,
+        'password': parsed.password
     }
 
+# Try DATABASE_URL first (Railway, Heroku, etc.)
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    postgres_creds = parse_database_url(database_url)
+else:
+    # Try credential resolver
+    resolver = get_credential_resolver()
+    try:
+        postgres_creds = resolver.get_dict("development_db")
+    except Exception:
+        # Fallback to individual environment variables
+        postgres_creds = {
+            'database': os.getenv('POSTGRES_DB', 'automatos'),
+            'user': os.getenv('POSTGRES_USER', 'postgres'),
+            'password': os.getenv('POSTGRES_PASSWORD', ''),
+            'host': os.getenv('POSTGRES_HOST', 'localhost'),
+            'port': os.getenv('POSTGRES_PORT', '5432')
+        }
 
 db_config = {
     "database": postgres_creds.get('database', 'orchestrator_db'),
     "user": postgres_creds.get('user', 'postgres'),
     "password": postgres_creds.get('password', ''),
     "host": postgres_creds.get('host', 'localhost'),
-    "port": postgres_creds.get('port', 5432)
+    "port": int(postgres_creds.get('port', 5432))
 }
 
 # Document manager uses centralized embedding manager
