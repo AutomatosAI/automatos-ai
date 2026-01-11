@@ -67,8 +67,8 @@ services:
   # ===========================================================================
   backend:
     build:
-      context: .
-      dockerfile: orchestrator/Dockerfile
+      context: ..
+      dockerfile: automatos-ai/orchestrator/Dockerfile
       target: development
     container_name: automatos_backend
     restart: unless-stopped
@@ -124,8 +124,8 @@ services:
   # ===========================================================================
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ..
+      dockerfile: automatos-ai/frontend/Dockerfile
       target: development
     container_name: automatos_frontend
     restart: unless-stopped

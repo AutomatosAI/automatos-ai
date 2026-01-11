@@ -1,15 +1,10 @@
 # =============================================================================
-# Automatos AI - Backend Dockerfile (Multi-stage)
+# Railway Backend Dockerfile - Builds from repository root
 # =============================================================================
-# Stages:
-#   - base: Common dependencies
-#   - development: Hot-reload, debugging tools
-#   - production: Optimized, minimal image
+# This Dockerfile works when Railway's build context is the repo root
+# Use this if Railway Root Directory setting is not available
 # =============================================================================
 
-# =============================================================================
-# Base Stage - Common Dependencies
-# =============================================================================
 FROM python:3.11-slim as base
 
 WORKDIR /app
@@ -25,49 +20,21 @@ RUN apt-get update && apt-get install -y \
     ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements (works from repo root - Railway uses this)
+# Copy requirements (from automatos-ai/orchestrator)
 COPY automatos-ai/orchestrator/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # =============================================================================
-# Development Stage - Hot Reload & Debugging
+# Production Stage
 # =============================================================================
-FROM base as development
-
-# Copy entrypoint script (from automatos-ai root)
-COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+FROM base as production
 
 # Copy application code
 COPY automatos-ai/orchestrator/ .
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects
-
-# Expose port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Set entrypoint
-ENTRYPOINT ["docker-entrypoint.sh"]
-
-# Default command - can be overridden in docker-compose
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-# =============================================================================
-# Production Stage - Optimized & Minimal
-# =============================================================================
-FROM base as production
-
-# Copy application code only (no dev tools)
-COPY automatos-ai/orchestrator/ .
-
-# Copy entrypoint script (from automatos-ai root)
+# Copy entrypoint script
 COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
@@ -75,7 +42,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /app/logs /app/vector_stores /app/projects
 
 # Remove dev dependencies
-RUN pip uninstall -y pytest pytest-asyncio black isort
+RUN pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true
 
 # Create non-root user for security
 RUN useradd -m -u 1000 automatos && \
@@ -94,6 +61,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Production command - use PORT env var (Railway provides this)
-# Default to 8000 if PORT not set
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
-
