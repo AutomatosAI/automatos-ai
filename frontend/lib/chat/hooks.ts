@@ -1,18 +1,21 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
-import type { ChatMessage, AppUsage } from '@/types'
+import type { ChatMessage, AppUsage, ToolCall } from '@/types'
+import { toast } from 'sonner'
 
 export function useChat({
   id,
   initialMessages = [],
   selectedModelId = 'gpt-4',
+  selectedAgentId,
   onData,
   onChatIdUpdate,
 }: {
   id: string
   initialMessages?: ChatMessage[]
   selectedModelId?: string
+  selectedAgentId?: number | null
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
 }) {
@@ -72,6 +75,10 @@ export function useChat({
       try {
         abortControllerRef.current = new AbortController()
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        const outgoingParts =
+          Array.isArray(messageObj.parts) && messageObj.parts.length > 0
+            ? messageObj.parts
+            : [{ type: 'text', text: messageObj.content || '' }]
 
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -83,22 +90,44 @@ export function useChat({
             id: chatId || '',
             message: {
               role: 'user',
-              parts: [{ type: 'text', text: messageObj.content || '' }],
+              parts: outgoingParts,
             },
-            selectedChatModel: selectedModelId,
+            // PRD: Unified Agent-Chat System - Send agentId if selected
+            ...(selectedAgentId ? { agentId: selectedAgentId } : { selectedChatModel: selectedModelId }),
             selectedVisibilityType: 'private',
           }),
           signal: abortControllerRef.current.signal,
         })
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
+          let errorText = ''
+          try {
+            errorText = await response.text()
+          } catch (e) {
+            // ignore
+          }
+          // Remove the empty assistant placeholder to avoid "blank bot bubbles"
+          setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId))
+          setIsLoading(false)
+          setStatus('error')
+          toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
+          return
         }
 
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
         let accumulatedContent = ''
+
+        const upsertToolCall = (current: ToolCall[] | undefined, next: ToolCall): ToolCall[] => {
+          const list = current ? [...current] : []
+          const idx = list.findIndex((t) => t.toolCallId === next.toolCallId)
+          if (idx >= 0) {
+            list[idx] = { ...list[idx], ...next }
+            return list
+          }
+          return [...list, next]
+        }
 
         while (reader) {
           const { done, value } = await reader.read()
@@ -114,18 +143,18 @@ export function useChat({
             // AI SDK Data Stream format
             if (line.startsWith('0:')) {
               // Text chunk
-            try {
+              try {
                 const text = JSON.parse(line.slice(2))
                 accumulatedContent += text
-                
-                setMessages(prev => 
-                  prev.map(m => 
+
+                setMessages(prev =>
+                  prev.map(m =>
                     m.id === assistantMessageId
                       ? {
-                          ...m,
-                          content: accumulatedContent,
-                          parts: [{ type: 'text', text: accumulatedContent }],
-                        }
+                        ...m,
+                        content: accumulatedContent,
+                        parts: [{ type: 'text', text: accumulatedContent }],
+                      }
                       : m
                   )
                 )
@@ -136,25 +165,70 @@ export function useChat({
               // Data event
               try {
                 const data = JSON.parse(line.slice(2))
-                
+
                 // Handle chat-id event - critical for conversation continuity
                 if (data.type === 'chat-id' && data.chatId) {
                   setChatId(data.chatId)
                   if (onChatIdUpdate) onChatIdUpdate(data.chatId)
-                } else if (data.type === 'tool-data' && data.data) {
-                setMessages(prev => 
-                  prev.map(m => 
-                    m.id === assistantMessageId
-                      ? {
+                } else if (data.type === 'tool-start' && data.data?.toolCallId) {
+                  const now = new Date().toISOString()
+                  const toolCall: ToolCall = {
+                    toolCallId: data.data.toolCallId,
+                    toolName: data.data.toolName || 'tool',
+                    state: 'running',
+                    input: data.data.input,
+                    startedAt: now,
+                  }
+
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
                           ...m,
-                            database_results: data.data.database_results || m.database_results,
-                            documents: data.data.documents || m.documents,
-                            // Convert snake_case from backend to camelCase for frontend
-                            codeSnippets: data.data.code_snippets || m.codeSnippets,
+                          toolCalls: upsertToolCall(m.toolCalls, toolCall),
                         }
-                      : m
+                        : m
+                    )
                   )
-                )
+
+                  if (onData) onData({ type: 'tool-start', data: data.data })
+                } else if (data.type === 'tool-end' && data.data?.toolCallId) {
+                  const now = new Date().toISOString()
+                  const toolCall: ToolCall = {
+                    toolCallId: data.data.toolCallId,
+                    toolName: data.data.toolName || 'tool',
+                    state: data.data.success ? 'completed' : 'error',
+                    error: data.data.error,
+                    durationMs: data.data.durationMs,
+                    endedAt: now,
+                  }
+
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                          ...m,
+                          toolCalls: upsertToolCall(m.toolCalls, toolCall),
+                        }
+                        : m
+                    )
+                  )
+
+                  if (onData) onData({ type: 'tool-end', data: data.data })
+                } else if (data.type === 'tool-data' && data.data) {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === assistantMessageId
+                        ? {
+                          ...m,
+                          database_results: data.data.database_results || m.database_results,
+                          documents: data.data.documents || m.documents,
+                          // Convert snake_case from backend to camelCase for frontend
+                          codeSnippets: data.data.code_snippets || m.codeSnippets,
+                        }
+                        : m
+                    )
+                  )
                   if (onData) onData({ type: 'tool-data', data: data.data })
                 } else if (data.type === 'usage' && data.data) {
                   setUsage({
@@ -163,8 +237,55 @@ export function useChat({
                     totalTokens: data.data.totalTokens || 0,
                   })
                   if (onData) onData({ type: 'data-usage', data: data.data })
+                }
+              } catch (e) {
+                // Skip parse errors
               }
-            } catch (e) {
+            } else if (line.startsWith('data:')) {
+              // Legacy SSE fallback (some backends send `data: {json}\n\n`)
+              try {
+                const payload = JSON.parse(line.replace(/^data:\s*/, ''))
+
+                if (payload.type === 'text-delta' && payload.delta) {
+                  accumulatedContent += payload.delta
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                          ...m,
+                          content: accumulatedContent,
+                          parts: [{ type: 'text', text: accumulatedContent }],
+                        }
+                        : m
+                    )
+                  )
+                } else if (payload.type === 'tool-data' && payload.data) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === assistantMessageId
+                        ? {
+                          ...m,
+                          database_results: payload.data.database_results || m.database_results,
+                          documents: payload.data.documents || m.documents,
+                          codeSnippets: payload.data.code_snippets || m.codeSnippets,
+                        }
+                        : m
+                    )
+                  )
+                  if (onData) onData({ type: 'tool-data', data: payload.data })
+                } else if (payload.type === 'data-usage' && payload.data) {
+                  setUsage({
+                    promptTokens: payload.data.promptTokens || 0,
+                    completionTokens: payload.data.completionTokens || 0,
+                    totalTokens: payload.data.totalTokens || 0,
+                  })
+                  if (onData) onData({ type: 'data-usage', data: payload.data })
+                } else if (payload.type === 'error') {
+                  setStatus('error')
+                } else if (payload.type === 'done') {
+                  setStatus('idle')
+                }
+              } catch (e) {
                 // Skip parse errors
               }
             } else if (line.startsWith('e:')) {
@@ -181,7 +302,10 @@ export function useChat({
         if (error.name !== 'AbortError') {
           console.error('[Chat] Error:', error)
           setStatus('error')
+          toast.error(error?.message || 'Chat failed')
         }
+        // Remove the empty assistant placeholder to avoid "blank bot bubbles"
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId))
         setIsLoading(false)
       }
     },

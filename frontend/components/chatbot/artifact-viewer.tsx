@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { copyToClipboard } from '@/lib/utils'
 import { CodeArtifact } from './code-artifact'
 import { TextArtifact } from './text-artifact'
+import { SheetArtifact } from './sheet-artifact'
 import type { Artifact } from '@/types'
 import { toast } from 'sonner'
 
@@ -50,7 +51,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-6 py-4 bg-muted">
         <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-semibold text-white truncate">{artifact.title}</h3>
+          <h3 className="text-lg font-semibold text-foreground dark:text-white truncate">{artifact.title}</h3>
           <div className="flex items-center space-x-2 mt-1">
             <Badge variant="outline" className="bg-purple-500/10 border-purple-500/20 text-purple-400 text-xs">
               {artifact.kind}
@@ -68,7 +69,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            className="text-gray-400 hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
           >
             <Copy className="w-4 h-4" />
           </Button>
@@ -76,7 +77,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={handleDownload}
-            className="text-gray-400 hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
           >
             <Download className="w-4 h-4" />
           </Button>
@@ -84,7 +85,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="text-gray-400 hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
           >
             <Maximize2 className="w-4 h-4" />
           </Button>
@@ -92,7 +93,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-gray-400 hover:text-white"
+            className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
           >
             <X className="w-4 h-4" />
           </Button>
@@ -115,6 +116,12 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               metadata={artifact.metadata}
             />
           )}
+          {artifact.kind === 'sheet' && (
+            <SheetArtifact
+              content={artifact.content}
+              metadata={artifact.metadata}
+            />
+          )}
           {artifact.kind === 'image' && (
             <img src={artifact.content} alt={artifact.title} className="max-w-full h-auto" />
           )}
@@ -123,18 +130,18 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
 
       {/* Metadata */}
       {cleanedMetadata && Object.keys(cleanedMetadata).length > 0 && (
-        <div className="p-4 border-t border-gray-800">
+        <div className="p-4 border-t border-border">
           <div className="flex items-center justify-between mb-2">
             <div>
-              <h4 className="text-sm font-semibold text-gray-400">Metadata</h4>
-              <p className="text-xs text-gray-500">
+              <h4 className="text-sm font-semibold text-muted-foreground">Metadata</h4>
+              <p className="text-xs text-muted-foreground">
                 {Object.keys(cleanedMetadata).length} field{Object.keys(cleanedMetadata).length === 1 ? '' : 's'}
               </p>
             </div>
             <Button
               variant="ghost"
               size="sm"
-              className="text-gray-400 hover:text-white"
+              className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white"
               onClick={() => setShowMetadata((prev) => !prev)}
             >
               {showMetadata ? (
@@ -151,11 +158,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             </Button>
           </div>
           {showMetadata && (
-            <div className="space-y-1 text-xs text-gray-500">
+            <div className="space-y-1 text-xs text-muted-foreground">
               {Object.entries(cleanedMetadata).map(([key, value]) => (
                 <div key={key} className="flex justify-between gap-4">
                   <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
-                  <span className="text-gray-300 text-right">{String(value)}</span>
+                  <span className="text-foreground dark:text-gray-300 text-right">{String(value)}</span>
                 </div>
               ))}
             </div>

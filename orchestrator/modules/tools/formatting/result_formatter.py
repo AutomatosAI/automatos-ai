@@ -8,6 +8,8 @@ All services use this - NO MORE DUPLICATION.
 
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,67 @@ class ToolResultFormatter:
             excerpt += '...'
         
         return excerpt
+    
+    @staticmethod
+    def _fetch_document_content(file_path: str, max_size_kb: int = 500) -> str:
+        """
+        Fetch full document content from file system.
+        
+        Args:
+            file_path: Full path to document file
+            max_size_kb: Maximum file size to read (default 500KB)
+            
+        Returns:
+            Full document content or empty string if error
+        """
+        try:
+            # Security: Validate path is within allowed directory
+            allowed_base = Path("/var/automatos/documents").resolve()
+            requested_path = Path(file_path).resolve()
+            
+            try:
+                requested_path.relative_to(allowed_base)
+            except ValueError:
+                logger.warning(f"Access denied: {file_path} not in allowed directory")
+                return ""
+            
+            # Check file exists and size
+            if not os.path.exists(requested_path):
+                logger.warning(f"Document not found: {file_path}")
+                return ""
+            
+            file_size_kb = os.path.getsize(requested_path) / 1024
+            if file_size_kb > max_size_kb:
+                logger.warning(f"Document too large ({file_size_kb:.1f}KB): {file_path}")
+                return f"[Document too large to display: {file_size_kb:.1f}KB. Use download link instead.]"
+            
+            # Read file content
+            with open(requested_path, 'r', encoding='utf-8') as f:
+                return f.read()
+                
+        except Exception as e:
+            logger.error(f"Error reading document {file_path}: {e}")
+            return ""
+    
+    @staticmethod
+    def _detect_content_type(filename: str) -> str:
+        """Detect content type from filename for proper rendering."""
+        if not filename:
+            return 'text'
+        
+        filename_lower = filename.lower()
+        if filename_lower.endswith('.md'):
+            return 'markdown'
+        elif filename_lower.endswith('.pdf'):
+            return 'pdf'
+        elif filename_lower.endswith('.json'):
+            return 'json'
+        elif filename_lower.endswith(('.py', '.js', '.ts', '.tsx', '.jsx')):
+            return 'code'
+        elif filename_lower.endswith('.txt'):
+            return 'text'
+        else:
+            return 'text'
     
     @staticmethod
     def format_documents(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -218,7 +281,7 @@ class ToolResultFormatter:
                 formatted_results = ToolResultFormatter.format_documents(raw_results)
             elif tool_name in ['search_codebase', 'search_code']:
                 formatted_results = ToolResultFormatter.format_code(raw_results)
-            elif tool_name == 'query_database':
+            elif tool_name in ['query_database', 'smart_query_database']:
                 return ToolResultFormatter.format_database(raw_result)
         
         # Return standardized structure
@@ -295,8 +358,12 @@ class ToolResultFormatter:
                     'chunk_count': len(doc['chunks']),
                     'preview': doc['chunks'][0]['excerpt'] if doc['chunks'] else '',
                     'download_url': f"/api/documents/download?path={doc['file_path']}",
-                    # NEW: Add full content for artifact viewer
-                    'full_content': '\n\n'.join([chunk['content'] for chunk in doc['chunks']])
+                    # Fetch FULL document content from file system for artifact viewer
+                    'full_content': ToolResultFormatter._fetch_document_content(doc['file_path']),
+                    'has_full_content': True,  # Flag for frontend to know full content is loaded
+                    'content_type': ToolResultFormatter._detect_content_type(doc['source']),
+                    # Provide chunk list for RAG chunk inspector UI
+                    'chunks': doc['chunks'],
                 }
                 for doc in grouped_docs
             ]
@@ -304,15 +371,27 @@ class ToolResultFormatter:
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
         
-        elif tool_name == 'query_database':
+        elif tool_name in ['query_database', 'smart_query_database']:
             # Frontend expects database_results as an array with pandas_ai inside
+            status = result.get('status')
             db_result = {
                 'database': result.get('database', 'Database'),
+                'status': status,
                 'sql': result.get('sql', ''),
                 'row_count': result.get('row_count', 0),
                 'execution_time_ms': result.get('execution_time_ms', 0),
                 'data': result.get('data', []),
                 'columns': result.get('columns', []),
+                # Smart NL2SQL extras (when present)
+                'explanation': result.get('explanation'),
+                'rephrased_query': result.get('rephrased_query'),
+                'visualization': result.get('visualization'),
+                'follow_up_questions': result.get('follow_up_questions'),
+                # Clarification flow (when present)
+                'clarifications': result.get('clarifications'),
+                'clarification_answers': result.get('clarification_answers'),
+                'original_query': result.get('original_query'),
+                'message': result.get('message'),
             }
             
             # Include PandasAI visualization inside the result
@@ -326,7 +405,7 @@ class ToolResultFormatter:
         return frontend_data
     
     @staticmethod
-    def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 3000) -> str:
+    def format_for_llm(result: Dict[str, Any], tool_name: str, max_chars: int = 4500) -> str:
         """
         Format tool result for LLM context (truncated summary).
         
@@ -342,19 +421,27 @@ class ToolResultFormatter:
         summary_parts.append(f"Results: {standardized['metadata']['count']} items")
         
         # Add preview of results
-        results = standardized['results'][:3]  # Top 3 only
+        results = standardized['results'][:4]  # Top 4 to fit token limits
         
         if tool_name in ['search_knowledge', 'search_documents', 'semantic_search']:
-            for doc in results:
-                summary_parts.append(f"\n📄 {doc.get('filename', 'Document')} ({doc.get('similarity', 0)*100:.1f}%)")
-                summary_parts.append(doc.get('excerpt', '')[:300])
+            summary_parts.append(
+                "IMPORTANT: You have been provided with FULL CONTENT excerpts below (up to 800 chars each). "
+                "Use this content to write a comprehensive, synthesized response. Do NOT just say 'I found documents' - "
+                "actually use the content to answer the question thoroughly. The UI will show document cards separately."
+            )
+            for i, doc in enumerate(results, start=1):
+                excerpt = (doc.get('excerpt', '') or '')[:600]
+                score = float(doc.get('similarity', 0) or 0) * 100.0
+                # Avoid leaking filenames to the LLM (it tends to echo them back as a list)
+                summary_parts.append(f"\n[Source {i}] ({score:.1f}%)")
+                summary_parts.append(excerpt)
         
         elif tool_name in ['search_codebase', 'search_code']:
             for code in results:
                 summary_parts.append(f"\n💻 {code.get('symbol_name', 'Code')} ({code.get('file_path', 'unknown')})")
-                summary_parts.append(f"```{code.get('language', 'python')}\n{code.get('code', '')[:400]}\n```")
+                summary_parts.append(f"```{code.get('language', 'python')}\n{code.get('code', '')[:500]}\n```")
         
-        elif tool_name == 'query_database':
+        elif tool_name in ['query_database', 'smart_query_database']:
             summary_parts.append(f"\n🗄️ SQL: {standardized.get('sql', '')[:300]}")
             summary_parts.append(f"Total Rows: {standardized.get('row_count', 0)}")
             

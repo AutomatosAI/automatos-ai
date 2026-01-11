@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from modules.rag import RAGService
 from modules.codegraph import CodeGraphService
-# LAZY IMPORT: ToolResultFormatter imported inside methods to avoid circular dependency
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -33,6 +32,12 @@ class AgentPlatformTools:
     def __init__(self, db_session: Session):
         self.db = db_session
         self.rag_service = RAGService()
+        # RAG config (min_similarity etc.) from modules.rag (DB-backed)
+        try:
+            from modules.rag.config import RAGModuleConfig
+            self.rag_config = RAGModuleConfig()
+        except Exception:
+            self.rag_config = None
         # CodeGraphService uses centralized embedding manager
         self.code_graph = CodeGraphService(db_session)
         self.logger = logger
@@ -115,7 +120,7 @@ class AgentPlatformTools:
         Returns:
             Tool execution results
         """
-        # Lazy import to avoid circular dependency at module import time
+        # Import once at function start to avoid UnboundLocalError when exceptions happen
         from modules.tools.formatting.result_formatter import ToolResultFormatter
 
         self.logger.info(f"🔧 Agent {agent_id} calling tool: {tool_name}")
@@ -129,10 +134,17 @@ class AgentPlatformTools:
                 self.logger.info(f"  🔍 Searching knowledge base: '{query}' (limit: {limit})")
                 
                 # Call RAG service retrieve_context method
+                min_similarity = 0.65
+                try:
+                    if self.rag_config is not None:
+                        min_similarity = float(self.rag_config.retrieval.min_similarity)
+                except Exception:
+                    pass
+
                 rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=config.RAG_MIN_SIMILARITY
+                    min_similarity=min_similarity
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
@@ -155,9 +167,9 @@ class AgentPlatformTools:
                 if formatted:
                     self.logger.info(f"  📄 Sample: {formatted[0].get('excerpt', '')[:100]}...")
                 
-                # Return standardized format
+                # Return standardized format (empty results are still success)
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             
@@ -167,10 +179,17 @@ class AgentPlatformTools:
                 limit = parameters.get("limit", 5)
                 
                 self.logger.info(f"  🔍 Semantic search via RAG: '{query}'")
+                min_similarity = 0.65
+                try:
+                    if self.rag_config is not None:
+                        min_similarity = float(self.rag_config.retrieval.min_similarity)
+                except Exception:
+                    pass
+
                 rag_result = await self.rag_service.retrieve_context(
                     query=query,
                     top_k=limit,
-                    min_similarity=config.RAG_MIN_SIMILARITY
+                    min_similarity=min_similarity
                 )
                 
                 # RAGResult has .chunks (list of dicts with content, source_file, similarity)
@@ -190,7 +209,7 @@ class AgentPlatformTools:
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} semantic results")
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             
@@ -240,7 +259,7 @@ class AgentPlatformTools:
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} code results")
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             

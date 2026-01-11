@@ -259,60 +259,76 @@ export function MultimodalKnowledgePanel() {
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card className="glass-card">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Total Items</p>
-                  <p className="text-2xl font-bold">{stats.total_items}</p>
-                  <p className="text-xs text-gray-400 mt-1">Across all types</p>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <Database className="w-5 h-5 text-gray-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">{stats.total_items}</div>
+                    <div className="text-sm text-muted-foreground truncate">Total Items</div>
+                  </div>
                 </div>
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Database className="w-5 h-5 text-gray-400" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="glass-card">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Tables</p>
-                  <p className="text-2xl font-bold">{stats.by_type?.table || 0}</p>
-                  <p className="text-xs text-gray-400 mt-1">Structured data</p>
-                </div>
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Table2 className="w-5 h-5 text-gray-400" />
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  Across all types
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Images</p>
-                  <p className="text-2xl font-bold">{stats.by_type?.image || 0}</p>
-                  <p className="text-xs text-gray-400 mt-1">Visual content</p>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <Table2 className="w-5 h-5 text-gray-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">{stats.by_type?.table || 0}</div>
+                    <div className="text-sm text-muted-foreground truncate">Tables</div>
+                  </div>
                 </div>
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <ImageIcon className="w-5 h-5 text-gray-400" />
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  Structured data
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="glass-card">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Formulas</p>
-                  <p className="text-2xl font-bold">{stats.by_type?.formula || 0}</p>
-                  <p className="text-xs text-gray-400 mt-1">Mathematical</p>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <ImageIcon className="w-5 h-5 text-gray-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">{stats.by_type?.image || 0}</div>
+                    <div className="text-sm text-muted-foreground truncate">Images</div>
+                  </div>
                 </div>
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <Calculator className="w-5 h-5 text-gray-400" />
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  Visual content
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <Calculator className="w-5 h-5 text-gray-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">{stats.by_type?.formula || 0}</div>
+                    <div className="text-sm text-muted-foreground truncate">Formulas</div>
+                  </div>
+                </div>
+                <div className="shrink-0 text-right text-xs text-muted-foreground">
+                  Mathematical
                 </div>
               </div>
             </CardContent>

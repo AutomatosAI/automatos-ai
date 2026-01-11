@@ -77,7 +77,7 @@ async def list_credential_types(
     
     try:
         types = store.list_credential_types(category=category, active_only=active_only)
-        return [CredentialTypeResponse.from_orm(t) for t in types]
+        return [CredentialTypeResponse.model_validate(t) for t in types]
     
     except Exception as e:
         logger.error(f"Failed to list credential types: {e}")
@@ -113,7 +113,7 @@ async def get_credential_type(
         if not cred_type:
             raise HTTPException(status_code=404, detail="Credential type not found")
         
-        return CredentialTypeResponse.from_orm(cred_type)
+        return CredentialTypeResponse.model_validate(cred_type)
     
     except HTTPException:
         raise
@@ -135,7 +135,7 @@ async def get_credential_type_by_name(
         if not cred_type:
             raise HTTPException(status_code=404, detail=f"Credential type '{type_name}' not found")
         
-        return CredentialTypeResponse.from_orm(cred_type)
+        return CredentialTypeResponse.model_validate(cred_type)
     
     except HTTPException:
         raise

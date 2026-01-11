@@ -18,7 +18,8 @@ export function MainLayout({ children }: MainLayoutProps) {
 
   // Get current page context for the chat
   const getCurrentPage = () => {
-    if (pathname === '/') return 'dashboard'
+    if (pathname === '/') return 'chat'
+    if (pathname.startsWith('/dashboard')) return 'dashboard'
     if (pathname.startsWith('/agents')) return 'agents'
     if (pathname.startsWith('/documents')) return 'documents'
     if (pathname.startsWith('/workflows')) return 'workflows'
@@ -41,9 +42,19 @@ export function MainLayout({ children }: MainLayoutProps) {
     <div className="min-h-screen gradient-bg">
       {/* Sidebar */}
       <Sidebar collapsed={sidebarCollapsed} onToggle={setSidebarCollapsed} />
+
+      {/* Overlay scrim when sidebar expanded */}
+      {!sidebarCollapsed && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-[1px]"
+          onClick={() => setSidebarCollapsed(true)}
+          aria-hidden="true"
+        />
+      )}
       
       {/* Main Content */}
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+      {/* Always keep content offset for collapsed sidebar; expanded sidebar overlays */}
+      <div className="transition-all duration-300 ml-16">
         <Header onMenuClick={() => setSidebarCollapsed(!sidebarCollapsed)} />
         
         <main className="p-6">
@@ -59,7 +70,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
       
       {/* Chat Widget - Only show on non-chat pages */}
-      {pathname !== '/chat' && (
+      {!pathname.startsWith('/chat') && (
         <ChatWidget 
           position="bottom-right"
           context={chatContext}

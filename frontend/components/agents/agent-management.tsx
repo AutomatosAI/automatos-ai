@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { 
-  Plus, 
-  Bot, 
-  Settings, 
-  BarChart, 
-  Users, 
-  Zap, 
+import {
+  Plus,
+  Bot,
+  Settings,
+  BarChart,
+  Users,
+  Zap,
   Brain,
   Search,
   Filter,
@@ -40,11 +40,15 @@ export function AgentManagement() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [viewDetailsAgentId, setViewDetailsAgentId] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
-  
+
   // Fetch real data from APIs
-  const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents } = useAgents()
+  const { data: agents = [], isLoading: agentsLoading, refetch: refetchAgents, error: agentsError } = useAgents()
   const { data: agentStats, isLoading: statsLoading } = useAgentStats()
   const { data: agentTypes = [] } = useAgentTypes()
+
+  // Debug logging
+  console.log('Agents API Response:', { agents, agentsLoading, agentsError })
+  console.log('Agent count:', (agents as any[])?.length)
 
   // Debug log active tab changes
   useEffect(() => {
@@ -123,31 +127,36 @@ export function AgentManagement() {
         className="flex justify-between items-start"
       >
         <div>
-        <h1 className="text-3xl font-bold mb-2">
+          <h1 className="text-3xl font-bold mb-2">
             Agent <span className="gradient-text">Management</span>
           </h1>
           <p className="text-muted-foreground mt-1">
             Manage your AI agents, skills, and coordination strategies
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
+          {agentsError && (
+            <Badge variant="outline" className="border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400">
+              Agents API error (HTTP {(agentsError as any)?.status || '500'})
+            </Badge>
+          )}
           <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
             {agentsLoading ? 'Loading...' : `${(agents as any[])?.length || 0} Agents`}
           </Badge>
-          
-          <Button 
-            onClick={handleRefresh} 
-            variant="outline" 
+
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
             size="sm"
-            disabled={agentsLoading}
+            disabled={agentsLoading && !agentsError}
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${agentsLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          
-          <Button 
+
+          <Button
             onClick={() => setShowCreateModal(true)}
             className="bg-brand-primary hover:bg-brand-primary/90"
           >
@@ -156,6 +165,22 @@ export function AgentManagement() {
           </Button>
         </div>
       </motion.div>
+
+      {agentsError && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+          <div className="text-sm font-semibold text-red-600 dark:text-red-400">
+            Agents failed to load (backend error)
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code> and <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/v1/skills</code>.
+          </div>
+          <div className="mt-3 flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Statistics Cards */}
       <motion.div
@@ -166,26 +191,30 @@ export function AgentManagement() {
       >
         {stats.map((stat, index) => (
           <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <stat.icon className={`w-5 h-5 ${
-                    index === 0 ? 'text-orange-400' :
-                    index === 1 ? 'text-green-400' :
-                    index === 2 ? 'text-blue-400' :
-                    index === 3 ? 'text-purple-400' :
-                    'text-white'
-                  }`} />
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <stat.icon
+                      className={`w-5 h-5 ${
+                        index === 0 ? 'text-orange-400' :
+                        index === 1 ? 'text-green-400' :
+                        index === 2 ? 'text-blue-400' :
+                        index === 3 ? 'text-purple-400' :
+                        'text-white'
+                      }`}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">
+                      {statsLoading ? '…' : stat.value}
+                    </div>
+                    <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">
-                  {statsLoading ? '...' : stat.value}
-                </h3>
-                <p className="text-muted-foreground text-sm">{stat.label}</p>
-                <p className={`text-xs ${stat.color}`}>
+                <div className={`shrink-0 text-xs ${stat.color}`}>
                   {stat.change}
-                </p>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -208,7 +237,7 @@ export function AgentManagement() {
             className="pl-10"
           />
         </div>
-        
+
         <div className="flex gap-2">
           <Button
             variant={statusFilter === 'all' ? 'default' : 'outline'}
@@ -268,7 +297,7 @@ export function AgentManagement() {
           <TabsContent value="roster" className="space-y-6">
             <AgentRoster
               agents={agents as any[]}
-              loading={agentsLoading}
+              loading={agentsLoading && !agentsError}
               searchTerm={searchTerm}
               statusFilter={statusFilter}
               onAgentSelect={setSelectedAgentId}

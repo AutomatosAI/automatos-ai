@@ -32,17 +32,42 @@ export interface PandasAIInsight {
   error?: string
 }
 
+export type ToolCallState = 'running' | 'completed' | 'error'
+
+/**
+ * Tool call lifecycle state for UI transparency
+ */
+export interface ToolCall {
+  toolCallId: string
+  toolName: string
+  state: ToolCallState
+  input?: any
+  error?: string
+  durationMs?: number
+  startedAt?: string
+  endedAt?: string
+}
+
 /**
  * Database query result
  */
 export interface DatabaseResult {
   database: string
+  status?: string
   sql: string
   row_count: number
   data: any[]
   columns: string[]
   execution_time_ms: number
   pandas_ai?: PandasAIInsight
+  explanation?: string
+  rephrased_query?: string
+  visualization?: any
+  follow_up_questions?: string[]
+  clarifications?: string[]
+  clarification_answers?: Record<string, any>
+  original_query?: string
+  message?: string
 }
 
 /**
@@ -63,6 +88,7 @@ export interface CodeSnippet {
 export interface DocumentReference {
   id: number
   filename: string
+  title?: string
   excerpt: string
   content?: string
   preview?: string
@@ -72,6 +98,11 @@ export interface DocumentReference {
   preview_chunk_end?: number
   similarity: number
   has_full_content?: boolean
+  file_path?: string
+  download_url?: string
+  relevance?: number
+  full_content?: string
+  chunks?: Array<{ content: string; excerpt: string }>
 }
 
 /**
@@ -109,6 +140,7 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   codeSnippets?: CodeSnippet[]
   documents?: DocumentReference[]
   database_results?: DatabaseResult[]
+  toolCalls?: ToolCall[]
 }
 
 /**

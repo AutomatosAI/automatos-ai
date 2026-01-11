@@ -665,7 +665,8 @@ async def semantic_search(
         start_time = time.time()
         
         # Generate query embedding using centralized embedding manager
-        from core.llm import create_embedding_manager
+        # NOTE: import directly from module for compatibility across deployments
+        from core.llm.embedding_manager import create_embedding_manager
         import asyncio
         
         embedding_manager = create_embedding_manager()

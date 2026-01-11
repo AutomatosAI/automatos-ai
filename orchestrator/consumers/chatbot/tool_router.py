@@ -14,28 +14,46 @@ Handles:
 import json
 import logging
 from typing import List, Dict, Any, Optional
+from contextlib import contextmanager
 
 # Use modules.tools directly - NO duplicate tool definitions
-from modules.tools import ToolRegistry, ToolCategory, UnifiedToolExecutor
+from modules.tools import ToolCategory, UnifiedToolExecutor
 from modules.tools.formatting.result_formatter import ToolResultFormatter
-from core.database.database import get_db_session
+from modules.tools.registry import get_tool_registry as registry_get_tool_registry
+from core.database.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
-# Global tool registry instance
+@contextmanager
+def _session_scope():
+    """Lightweight context manager to ensure sessions are always closed."""
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+# Global tool registry instance (backed by modules.tools.registry singleton)
 _tool_registry = None
 
 
-def get_tool_registry() -> ToolRegistry:
-    """Get or create the ToolRegistry instance."""
+def _get_registry(db_session=None):
+    """
+    Get the shared ToolRegistry with a DB session so MCP tools are loaded.
+    If the registry already exists without a DB, injecting a session later
+    will populate MCP tools via registry_get_tool_registry.
+    """
     global _tool_registry
     if _tool_registry is None:
-        _tool_registry = ToolRegistry()
-        logger.info(f"✅ ToolRouter connected to modules.tools.ToolRegistry ({len(_tool_registry.tools)} tools)")
+        _tool_registry = registry_get_tool_registry(db_session=db_session)
+        logger.info(f"✅ ToolRouter connected to ToolRegistry ({len(_tool_registry.tools)} tools)")
+    elif db_session and not _tool_registry.db:
+        _tool_registry = registry_get_tool_registry(db_session=db_session)
     return _tool_registry
 
 
-def get_chatbot_tools() -> List[Dict[str, Any]]:
+def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
     SINGLE SOURCE OF TRUTH - no duplicate definitions.
@@ -43,13 +61,22 @@ def get_chatbot_tools() -> List[Dict[str, Any]]:
     Note: We expose `smart_query_database` as the primary database tool,
     filtering out the basic `query_database` for better user experience.
     """
-    registry = get_tool_registry()
+    # Ensure registry has DB so MCP tools are available
+    registry = _get_registry(db_session=db_session)
+    session_used = db_session
+    if session_used is None:
+        # Open a short-lived session for permission checks
+        try:
+            session_used = SessionLocal()
+        except Exception:
+            session_used = None
     
     try:
-        # Get RESEARCH and DATABASE tools for chatbot
+        # Get RESEARCH, DATABASE, and MCP tools for chatbot
         research_tools = registry.get_tools_by_category(ToolCategory.RESEARCH)
         database_tools = registry.get_tools_by_category(ToolCategory.DATABASE_TOOLS)
-        all_tools = research_tools + database_tools
+        mcp_tools = registry.get_tools_by_category(ToolCategory.MCP_TOOLS)
+        all_tools = research_tools + database_tools + mcp_tools
         
         # Filter: Use smart_query_database as THE database tool
         # Remove basic query_database to avoid LLM choosing the dumber option
@@ -57,6 +84,13 @@ def get_chatbot_tools() -> List[Dict[str, Any]]:
             tool for tool in all_tools 
             if tool.name != 'query_database'  # Prefer smart version
         ]
+
+        # Agent-aware filtering (especially for MCP tools)
+        if agent_id is not None and session_used is not None:
+            filtered_tools = [
+                tool for tool in filtered_tools
+                if registry.validate_tool_access(agent_id=agent_id, tool_name=tool.name, db=session_used)[0]
+            ]
         
         # Convert to OpenAI function format
         openai_tools = []
@@ -67,11 +101,18 @@ def get_chatbot_tools() -> List[Dict[str, Any]]:
                 "function": schema
             })
         
-        logger.info(f"✅ Loaded {len(openai_tools)} tools for chatbot (smart_query_database enabled)")
+        logger.info(
+            f"✅ Loaded {len(openai_tools)} tools for chatbot "
+            f"(agent_id={agent_id}, smart_query_database enabled, includes MCP={len(mcp_tools) > 0})"
+        )
         return openai_tools
     except Exception as e:
         logger.error(f"Error loading tools from registry: {e}")
         return []
+    finally:
+        if db_session is None and session_used is not None:
+            # Only close if we opened it
+            session_used.close()
 
 
 async def execute_tool(
@@ -268,7 +309,7 @@ class ToolRouter:
             
             return {
                 "role": "system",
-                "content": f"{doc_context}\n\n**INSTRUCTIONS**: Read the full content above and provide a comprehensive answer to the user's question. Synthesize information from multiple documents if needed. Cite document names when referencing specific information. Do NOT just list the documents - actually answer the question using the content provided."
+                "content": f"{doc_context}\n\n**CRITICAL INSTRUCTIONS**:\n1. READ ALL the full content provided above\n2. SYNTHESIZE information from multiple sources\n3. Write a COMPREHENSIVE answer using the actual content\n4. Do NOT just list documents or say 'search didn't yield results'\n5. The content IS THERE - use it to write detailed responses\n6. Cite document names when referencing specific information\n7. If asked for code examples, include the actual code shown above\n8. If asked for statistics, use the actual numbers provided"
             }
         
         elif tool_name in ['search_codebase', 'search_code']:
@@ -358,12 +399,11 @@ def get_tool_router() -> ToolRouter:
 
 
 # Expose commonly used functions at module level
-CHAT_TOOLS = None  # Lazy load to avoid import issues
-
-def get_chat_tools() -> List[Dict[str, Any]]:
-    """Get chatbot tools (lazy loaded)."""
-    global CHAT_TOOLS
-    if CHAT_TOOLS is None:
-        CHAT_TOOLS = get_chatbot_tools()
-    return CHAT_TOOLS
+def get_chat_tools(agent_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Get chatbot tools. Do NOT cache globally because availability can
+    depend on agent permissions (especially MCP).
+    """
+    with _session_scope() as session:
+        return get_chatbot_tools(agent_id=agent_id, db_session=session)
 

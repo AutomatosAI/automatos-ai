@@ -52,7 +52,6 @@ import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
 import { MonitoringTab } from './monitoring-tab'
 import { TemplatesTab } from './templates-tab'
-import { LiveProgressTab } from './live-progress-tab'
 import { ExecutionTheater } from './execution-theater'
 
 // Real data will be loaded from backend
@@ -526,20 +525,24 @@ export function WorkflowManagement() {
         {workflowStats.map((stat, index) => (
           <motion.div
             key={stat.label}
-            className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+            className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300"
             initial={{ opacity: 0, y: 20 }}
             animate={inView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.8, delay: index * 0.1 }}
           >
-            <div className="flex items-center justify-between mb-4">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <stat.icon className={`w-5 h-5 ${stat.color}`} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-2xl font-bold leading-none">{stat.value}</div>
+                  <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
+                </div>
               </div>
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-2xl font-bold">{stat.value}</h3>
-              <p className="text-muted-foreground text-sm">{stat.label}</p>
-              <p className="text-xs text-green-400">{stat.change}</p>
+              <div className="shrink-0 text-right text-xs text-green-400">
+                {stat.change}
+              </div>
             </div>
           </motion.div>
         ))}
@@ -552,7 +555,7 @@ export function WorkflowManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="active" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="active" className="flex items-center space-x-2">
               <Play className="w-4 h-4" />
               <span className="hidden sm:inline">Active</span>
@@ -569,30 +572,9 @@ export function WorkflowManagement() {
               <Activity className="w-4 h-4" />
               <span className="hidden sm:inline">Monitoring</span>
             </TabsTrigger>
-            <TabsTrigger value="live" className="flex items-center space-x-2">
-              <Eye className="w-4 h-4" />
-              <span className="hidden sm:inline">Live</span>
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="active" className="space-y-6">
-            {/* Search and Filters */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search workflows by name, category, or tags..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
-                />
-              </div>
-              <Button variant="outline" className="shrink-0">
-                <Filter className="w-4 h-4 mr-2" />
-                Filters
-              </Button>
-            </div>
-
             {/* Loading State */}
             {loading && (
               <div className="flex items-center justify-center py-12">
@@ -640,10 +622,6 @@ export function WorkflowManagement() {
 
           <TabsContent value="monitoring" className="space-y-6">
             <MonitoringTab />
-          </TabsContent>
-
-          <TabsContent value="live" className="space-y-6">
-            <LiveProgressTab />
           </TabsContent>
         </Tabs>
       </motion.div>

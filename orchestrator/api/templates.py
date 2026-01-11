@@ -204,10 +204,11 @@ async def get_skill_suggestions(
         # Group by category
         skills_by_category = {}
         for skill in suggested_skills:
-            if skill.category not in skills_by_category:
-                skills_by_category[skill.category] = []
+            skill_category = getattr(skill, 'category', None) or skill.skill_type  # Fallback to skill_type if category missing
+            if skill_category not in skills_by_category:
+                skills_by_category[skill_category] = []
             
-            skills_by_category[skill.category].append({
+            skills_by_category[skill_category].append({
                 "id": skill.id,
                 "name": skill.name,
                 "description": skill.description,

@@ -3,12 +3,12 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  Play, 
-  Pause, 
-  Square, 
-  Clock, 
-  CheckCircle, 
+import {
+  Play,
+  Pause,
+  Square,
+  Clock,
+  CheckCircle,
   AlertTriangle,
   Activity,
   Users,
@@ -27,11 +27,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import {
   Dialog,
@@ -103,11 +103,11 @@ interface ActiveWorkflowsPanelProps {
 }
 
 export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelProps) {
-  const [selectedWorkflow, setSelectedWorkflow] = useState<{id: number, name: string} | null>(null)
+  const [selectedWorkflow, setSelectedWorkflow] = useState<{ id: number, name: string } | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [showCleanupDialog, setShowCleanupDialog] = useState(false)
   const [cleanupDays, setCleanupDays] = useState('30')
-  const [workflowToDelete, setWorkflowToDelete] = useState<{id: number, name: string} | null>(null)
+  const [workflowToDelete, setWorkflowToDelete] = useState<{ id: number, name: string } | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -116,34 +116,34 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
 
   // Use React Query hook for active workflows
   const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
-  
+
   // Use mutation hook for executing workflows
   const executeWorkflowMutation = useExecuteWorkflowAdvanced()
-  
+
   // Filter workflows based on search and status
   const filteredWorkflows = useMemo(() => {
     if (!workflowsData?.active_workflows) return []
-    
+
     let filtered = [...workflowsData.active_workflows]
-    
+
     // Apply search filter
     if (searchQuery) {
-      filtered = filtered.filter(workflow => 
+      filtered = filtered.filter(workflow =>
         workflow.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         workflow.description.toLowerCase().includes(searchQuery.toLowerCase())
       )
     }
-    
+
     // Apply status filter
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(workflow => 
+      filtered = filtered.filter(workflow =>
         workflow.current_execution.status === statusFilter
       )
     }
-    
+
     return filtered
   }, [workflowsData, searchQuery, statusFilter])
-  
+
   // Auto refresh every 5 seconds if enabled
   useEffect(() => {
     if (autoRefresh) {
@@ -180,7 +180,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
 
   const handleDeleteWorkflow = async () => {
     if (!workflowToDelete) return
-    
+
     setIsDeleting(true)
     try {
       await apiClient.deleteWorkflow(workflowToDelete.id)
@@ -287,7 +287,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             {filteredWorkflows.length} of {workflowsData.total_active} workflows • {workflowsData.system_load}% system load
           </p>
         </div>
-        
+
         <div className="flex gap-2">
           <Button
             variant="outline"
@@ -298,7 +298,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             <Trash2 className="w-4 h-4 mr-2" />
             Cleanup Old Workflows
           </Button>
-          
+
           <Button
             variant="outline"
             size="sm"
@@ -332,7 +332,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             </Button>
           )}
         </div>
-        
+
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[180px]">
             <Filter className="w-4 h-4 mr-2" />
@@ -380,171 +380,171 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {filteredWorkflows.map((workflow, index) => {
-          const StatusIcon = getStatusIcon(workflow.current_execution.status)
-          const statusColor = getStatusColor(workflow.current_execution.status)
-          
-          return (
-            <motion.div
-              key={workflow.id}
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              onClick={() => onWorkflowClick?.(workflow.id)}
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-lg mb-1">{workflow.name}</h4>
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {workflow.description}
-                  </p>
-                </div>
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation()
-                      onWorkflowClick?.(workflow.id)
-                    }}>
-                      <Eye className="w-4 h-4 mr-2" />
-                      Open Execution Theater
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation()
-                      handleExecuteWorkflow(workflow.id)
-                    }}>
-                      <Play className="w-4 h-4 mr-2" />
-                      Execute Workflow
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation()
-                      handleDuplicateWorkflow(workflow.id, workflow.name)
-                    }}>
-                      <Copy className="w-4 h-4 mr-2" />
-                      Duplicate Workflow
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setWorkflowToDelete({ id: workflow.id, name: workflow.name })
-                      }}
-                      className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Delete Workflow
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+            const StatusIcon = getStatusIcon(workflow.current_execution.status)
+            const statusColor = getStatusColor(workflow.current_execution.status)
 
-              {/* Current Execution Status */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    <StatusIcon className={`w-4 h-4 ${statusColor}`} />
-                    <span className="text-sm font-medium">{workflow.current_execution.current_step}</span>
+            return (
+              <motion.div
+                key={workflow.id}
+                className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: index * 0.1 }}
+                onClick={() => onWorkflowClick?.(workflow.id)}
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-lg mb-1">{workflow.name}</h4>
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {workflow.description}
+                    </p>
                   </div>
-                  <Badge className={getStatusBadgeStyle(workflow.current_execution.status)}>
-                    {workflow.current_execution.status}
-                  </Badge>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation()
+                        onWorkflowClick?.(workflow.id)
+                      }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        Open Execution Theater
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation()
+                        handleExecuteWorkflow(workflow.id)
+                      }}>
+                        <Play className="w-4 h-4 mr-2" />
+                        Execute Workflow
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => {
+                        e.stopPropagation()
+                        handleDuplicateWorkflow(workflow.id, workflow.name)
+                      }}>
+                        <Copy className="w-4 h-4 mr-2" />
+                        Duplicate Workflow
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setWorkflowToDelete({ id: workflow.id, name: workflow.name })
+                        }}
+                        className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Workflow
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-                
-                {workflow.current_execution.status === 'running' && (
-                  <>
-                    <Progress value={workflow.current_execution.progress} className="h-2 mb-2" />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{workflow.current_execution.progress}% complete</span>
-                      <span>
-                        ETA: {workflow.current_execution.estimated_completion ? 
-                          new Date(workflow.current_execution.estimated_completion).toLocaleTimeString() : 
-                          'Calculating...'
-                        }
-                      </span>
+
+                {/* Current Execution Status */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-2">
+                      <StatusIcon className={`w-4 h-4 ${statusColor}`} />
+                      <span className="text-sm font-medium">{workflow.current_execution.current_step}</span>
                     </div>
-                  </>
-                )}
-              </div>
-
-              {/* Agents */}
-              <div className="mb-4">
-                <div className="text-sm text-muted-foreground mb-2">
-                  Agents ({workflow.agents?.length || 0})
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {(workflow.agents || []).map(agent => (
-                    <Badge key={agent.id} variant="outline" className="text-xs">
-                      {agent.name}
+                    <Badge className={getStatusBadgeStyle(workflow.current_execution.status)}>
+                      {workflow.current_execution.status}
                     </Badge>
-                  ))}
-                </div>
-              </div>
+                  </div>
 
-              {/* Metrics */}
-              <div className="grid grid-cols-2 gap-4 mb-4 text-xs">
-                <div>
-                  <p className="text-green-400">Total Runs</p>
-                  <p className="font-medium">{workflow.metrics.total_executions}</p>
-                </div>
-                <div>
-                  <p className="text-green-400">Success Rate</p>
-                  <p className="font-medium">{workflow.metrics.success_rate}%</p>
-                </div>
-                <div>
-                  <p className="text-green-400">Avg Duration</p>
-                  <p className="font-medium">{workflow.metrics.avg_duration}</p>
-                </div>
-                <div>
-                  <p className="text-green-400">Last Run</p>
-                  <p className="font-medium">
-                    {workflow.metrics.last_execution ? 
-                      new Date(workflow.metrics.last_execution).toLocaleDateString() : 
-                      'Never'
-                    }
-                  </p>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex justify-between items-center pt-4 border-t border-border/30">
-                <div className="text-xs">
-                  <span className="text-green-400">Created:</span> <span className="text-muted-foreground">{new Date(workflow.created_at).toLocaleDateString()}</span>
-                </div>
-                
-                <div className="flex space-x-2">
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onWorkflowClick?.(workflow.id)
-                    }}
-                  >
-                    <Eye className="w-3 h-3 mr-1" />
-                    Open Theater
-                  </Button>
-                  
-                  {workflow.current_execution.status === 'idle' && (
-                    <Button 
-                      size="sm" 
-                      className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                      onClick={() => handleExecuteWorkflow(workflow.id)}
-                    >
-                      <Play className="w-3 h-3 mr-1" />
-                      Execute
-                    </Button>
+                  {workflow.current_execution.status === 'running' && (
+                    <>
+                      <Progress value={workflow.current_execution.progress} className="h-2 mb-2" />
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>{workflow.current_execution.progress}% complete</span>
+                        <span>
+                          ETA: {workflow.current_execution.estimated_completion ?
+                            new Date(workflow.current_execution.estimated_completion).toLocaleTimeString() :
+                            'Calculating...'
+                          }
+                        </span>
+                      </div>
+                    </>
                   )}
                 </div>
-              </div>
-            </motion.div>
-          )
-        })}
-      </div>
+
+                {/* Agents */}
+                <div className="mb-4">
+                  <div className="text-sm text-muted-foreground mb-2">
+                    Agents ({workflow.agents?.length || 0})
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {(workflow.agents || []).map(agent => (
+                      <Badge key={agent.id} variant="outline" className="text-xs">
+                        {agent.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Metrics */}
+                <div className="grid grid-cols-2 gap-4 mb-4 text-xs">
+                  <div>
+                    <p className="text-green-400">Total Runs</p>
+                    <p className="font-medium">{workflow.metrics.total_executions}</p>
+                  </div>
+                  <div>
+                    <p className="text-green-400">Success Rate</p>
+                    <p className="font-medium">{workflow.metrics.success_rate}%</p>
+                  </div>
+                  <div>
+                    <p className="text-green-400">Avg Duration</p>
+                    <p className="font-medium">{workflow.metrics.avg_duration}</p>
+                  </div>
+                  <div>
+                    <p className="text-green-400">Last Run</p>
+                    <p className="font-medium">
+                      {workflow.metrics.last_execution ?
+                        new Date(workflow.metrics.last_execution).toLocaleDateString() :
+                        'Never'
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-between items-center pt-4 border-t border-border/30">
+                  <div className="text-xs">
+                    <span className="text-green-400">Created:</span> <span className="text-muted-foreground">{new Date(workflow.created_at).toLocaleDateString()}</span>
+                  </div>
+
+                  <div className="flex space-x-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onWorkflowClick?.(workflow.id)
+                      }}
+                    >
+                      <Eye className="w-3 h-3 mr-1" />
+                      Open Theater
+                    </Button>
+
+                    {workflow.current_execution.status === 'idle' && (
+                      <Button
+                        size="sm"
+                        className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+                        onClick={() => handleExecuteWorkflow(workflow.id)}
+                      >
+                        <Play className="w-3 h-3 mr-1" />
+                        Execute
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )
+          })}
+        </div>
       )}
 
       {/* Live Progress Panel */}

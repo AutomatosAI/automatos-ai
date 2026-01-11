@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
+import { ExternalLink, Copy } from 'lucide-react'
 
 export interface TextArtifactProps {
   content: string
@@ -24,11 +25,13 @@ interface PandasAIInsight {
 
 export function TextArtifact({ content, metadata }: TextArtifactProps) {
   const pandasAI = (metadata?.pandas_ai ?? null) as PandasAIInsight | null
+  const chunks = Array.isArray(metadata?.chunks) ? (metadata?.chunks as Array<{ content: string; excerpt?: string }>) : null
+  const downloadUrl = metadata?.download_url as string | undefined
 
   const renderMarkdown = (markdown: string) => (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      className="prose prose-invert prose-sm max-w-none"
+      className="prose prose-sm max-w-none dark:prose-invert"
       components={{
         a: ({ href, children, ...props }) => {
           if (href?.startsWith('sandbox://')) {
@@ -52,47 +55,47 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
           )
         },
         code: ({ children }) => (
-          <code className="rounded bg-gray-900/60 px-1.5 py-0.5 text-xs">
+          <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-foreground dark:bg-gray-900/60 dark:text-gray-100">
             {children}
           </code>
         ),
         pre: ({ children }) => (
-          <pre className="rounded-lg bg-gray-900/70 p-4 text-xs overflow-x-auto border border-gray-800/60">
+          <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
             {children}
           </pre>
         ),
         ul: ({ children }) => (
-          <ul className="list-disc space-y-2 pl-5 text-gray-100">{children}</ul>
+          <ul className="list-disc space-y-2 pl-5 text-foreground dark:text-gray-100">{children}</ul>
         ),
         ol: ({ children }) => (
-          <ol className="list-decimal space-y-2 pl-5 text-gray-100">{children}</ol>
+          <ol className="list-decimal space-y-2 pl-5 text-foreground dark:text-gray-100">{children}</ol>
         ),
         li: ({ children }) => <li className="leading-relaxed">{children}</li>,
         table: ({ children }) => (
-          <div className="overflow-x-auto rounded-xl border border-gray-800/60 bg-gray-900/40">
-            <table className="min-w-full divide-y divide-gray-800/70 text-sm text-gray-100">
+          <div className="overflow-x-auto rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/40">
+            <table className="min-w-full divide-y divide-border/60 text-sm text-foreground dark:divide-gray-800/70 dark:text-gray-100">
               {children}
             </table>
           </div>
         ),
         thead: ({ children }) => (
-          <thead className="bg-gray-900/60 text-xs uppercase tracking-wide text-gray-400">
+          <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground dark:bg-gray-900/60 dark:text-gray-400">
             {children}
           </thead>
         ),
         tbody: ({ children }) => (
-          <tbody className="divide-y divide-gray-800/70">{children}</tbody>
+          <tbody className="divide-y divide-border/50 dark:divide-gray-800/70">{children}</tbody>
         ),
         tr: ({ children }) => (
-          <tr className="hover:bg-gray-900/60 transition-colors">{children}</tr>
+          <tr className="hover:bg-secondary/40 transition-colors dark:hover:bg-gray-900/60">{children}</tr>
         ),
         th: ({ children }) => (
-          <th className="px-4 py-3 text-left font-semibold text-gray-300">
+          <th className="px-4 py-3 text-left font-semibold text-foreground/80 dark:text-gray-300">
             {children}
           </th>
         ),
         td: ({ children }) => (
-          <td className="px-4 py-3 align-top text-gray-200">{children}</td>
+          <td className="px-4 py-3 align-top text-foreground dark:text-gray-200">{children}</td>
         ),
       }}
     >
@@ -106,42 +109,101 @@ export function TextArtifact({ content, metadata }: TextArtifactProps) {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             {metadata.database && (
-              <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase text-orange-200">
+              <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase text-orange-700 dark:text-orange-200">
                 {metadata.database}
               </span>
             )}
             {metadata.model && (
-              <span className="inline-flex items-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-200">
+              <span className="inline-flex items-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-700 dark:text-blue-200">
                 {metadata.model}
               </span>
             )}
+            {downloadUrl && (
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase text-blue-200 hover:bg-blue-500/20"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Download
+              </a>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 gap-3 text-sm text-gray-300 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 text-sm text-muted-foreground md:grid-cols-2">
             {metadata.row_count !== undefined && (
-              <div className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-500">Rows</div>
-                <div className="text-lg font-semibold text-gray-100">{metadata.row_count}</div>
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Rows</div>
+                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{metadata.row_count}</div>
               </div>
             )}
             {metadata.execution_time_ms !== undefined && (
-              <div className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-500">Execution Time</div>
-                <div className="text-lg font-semibold text-gray-100">{Number(metadata.execution_time_ms).toFixed(0)} ms</div>
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Execution Time</div>
+                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{Number(metadata.execution_time_ms).toFixed(0)} ms</div>
               </div>
             )}
             {metadata.similarity !== undefined && (
-              <div className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-500">Similarity</div>
-                <div className="text-lg font-semibold text-gray-100">{(metadata.similarity * 100).toFixed(1)}%</div>
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Similarity</div>
+                <div className="text-lg font-semibold text-foreground dark:text-gray-100">{(metadata.similarity * 100).toFixed(1)}%</div>
               </div>
             )}
             {metadata.document_id && (
-              <div className="rounded-lg border border-gray-800/60 bg-gray-900/40 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-500">Document</div>
-                <div className="text-base font-semibold text-gray-100">{metadata.document_id}</div>
+              <div className="rounded-xl border border-border/60 bg-card/50 p-3 dark:border-gray-800/60 dark:bg-gray-900/40">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Document</div>
+                <div className="text-base font-semibold text-foreground dark:text-gray-100">{metadata.document_id}</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* RAG chunk inspector (when provided) */}
+      {chunks && chunks.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-foreground/80 dark:text-gray-300 uppercase tracking-wide">
+            Relevant Chunks ({chunks.length})
+          </h4>
+          <div className="space-y-2">
+            {chunks.map((chunk, idx) => (
+              <details
+                key={idx}
+                className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4"
+              >
+                <summary className="cursor-pointer text-sm font-medium text-foreground dark:text-gray-200">
+                  Chunk {idx + 1}: {chunk.excerpt ? chunk.excerpt.slice(0, 120) : 'Open'}
+                  {chunk.excerpt && chunk.excerpt.length > 120 ? '…' : ''}
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center justify-end">
+                    <button
+                      className="inline-flex items-center gap-2 rounded border border-border/60 px-2 py-1 text-[11px] uppercase tracking-wide text-muted-foreground hover:border-orange-400/60 hover:text-orange-600 dark:hover:text-orange-300"
+                      onClick={async () => {
+                        if (!navigator.clipboard) {
+                          toast.error('Clipboard API is not available')
+                          return
+                        }
+                        try {
+                          await navigator.clipboard.writeText(chunk.content || '')
+                          toast.success('Chunk copied')
+                        } catch (error) {
+                          toast.error('Failed to copy chunk')
+                        }
+                      }}
+                      type="button"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy chunk
+                    </button>
+                  </div>
+                  <pre className="rounded-lg bg-muted/40 p-4 text-xs overflow-x-auto border border-border/60 whitespace-pre-wrap text-foreground dark:bg-gray-900/70 dark:border-gray-800/60 dark:text-gray-100">
+                    {chunk.content}
+                  </pre>
+                </div>
+              </details>
+            ))}
           </div>
         </div>
       )}

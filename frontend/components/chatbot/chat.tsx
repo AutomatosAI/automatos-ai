@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bot, ArrowDown } from 'lucide-react'
+import Link from 'next/link'
+import { Bot, ArrowDown, Database, GitBranch, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChat } from '@/lib/chat/hooks'
 import { Message } from './message'
@@ -36,6 +37,7 @@ export function Chat({
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(initialChatModel)
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
@@ -53,18 +55,18 @@ export function Chat({
   }, [])
 
   const [activeChatId, setActiveChatId] = useState(id)
-  
+
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id: activeChatId,
     initialMessages,
     selectedModelId: currentModelId,
+    selectedAgentId,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
       }
     },
     onChatIdUpdate: (newChatId) => {
-      // Update local state when backend creates/returns chat ID
       setActiveChatId(newChatId)
     },
   })
@@ -123,7 +125,7 @@ export function Chat({
     setSelectedArtifact(artifact)
     setIsArtifactViewerVisible(true)
   }, [])
-  
+
   const handleCodeSelect = useCallback((code: CodeSnippet) => {
     setSelectedArtifact({
       id: `code-${Date.now()}`,
@@ -135,10 +137,10 @@ export function Chat({
     })
     setIsArtifactViewerVisible(true)
   }, [])
-  
+
   const handleDocumentSelect = useCallback((doc: DocumentReference) => {
     const artifactId = `doc-${Date.now()}`
-    const initialContent = doc.excerpt || doc.preview || doc.content || 'Loading document...'
+    const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || 'Loading document...'
 
     const curatedMetadata: Record<string, any> = {
       document_id: doc.id,
@@ -150,6 +152,9 @@ export function Chat({
       has_full_content: doc.has_full_content ?? false,
       preview_excerpt: doc.excerpt,
       is_loading_full_content: !doc.has_full_content,
+      download_url: doc.download_url,
+      file_path: doc.file_path,
+      chunks: doc.chunks,
     }
 
     setSelectedArtifact({
@@ -205,7 +210,7 @@ export function Chat({
         })
       })
   }, [])
-  
+
   const handleDatabaseSelect = useCallback((db: DatabaseResult) => {
     const idBase = `db-${Date.now()}`
     const columns = db.columns && db.columns.length > 0
@@ -217,11 +222,11 @@ export function Chat({
       `**Rows returned:** ${db.row_count}`,
       `**Execution time:** ${db.execution_time_ms?.toFixed(0)} ms`,
     ]
- 
+
     if (db.pandas_ai?.summary) {
       summaryContentLines.push('', db.pandas_ai.summary)
     }
- 
+
     if (db.data && db.data.length > 0) {
       const numericColumns = columns.filter((col) =>
         db.data!.some((row) => typeof row[col] === 'number' && !Number.isNaN(row[col]))
@@ -267,15 +272,24 @@ export function Chat({
 
     const artifact = {
       id: idBase,
-      kind: 'text' as const,
+      kind: 'sheet' as const,
       title: `${db.database} Insight`,
       content: summaryContentLines.join('\n'),
       metadata: {
         database: db.database,
+        status: db.status,
         sql: db.sql,
         row_count: db.row_count,
         execution_time_ms: db.execution_time_ms,
+        columns,
+        data: db.data,
         pandas_ai: db.pandas_ai,
+        explanation: db.explanation,
+        rephrased_query: db.rephrased_query,
+        visualization: db.visualization,
+        follow_up_questions: db.follow_up_questions,
+        clarifications: db.clarifications,
+        message: db.message,
       },
     }
 
@@ -292,6 +306,15 @@ export function Chat({
     "Plot hourly CPU and memory utilization over the last 24 hours using the system_metrics table",
     "Highlight the most frequent CodeGraph queries this week by counting entries in codegraph_query_logs and visualize their counts",
   ]
+
+  const quickLinks = [
+    { label: 'Create an Agent', href: '/agents', icon: Bot },
+    { label: 'Knowledge Base', href: '/documents', icon: Database },
+    { label: 'Create a Workflow', href: '/workflows', icon: GitBranch },
+    { label: 'Edit Tools', href: '/tools', icon: Wrench },
+  ] as const
+
+  const showWelcomeCard = !hasSentMessage && !isTyping
 
   return (
     <>
@@ -373,6 +396,8 @@ export function Chat({
                       sendMessage={sendMessage}
                       selectedModelId={currentModelId}
                       onModelChange={setCurrentModelId}
+                      selectedAgentId={selectedAgentId}
+                      onAgentChange={setSelectedAgentId}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
                     />
@@ -423,85 +448,155 @@ export function Chat({
       {/* Normal chat view - NO artifact */}
       {!isArtifactViewerVisible && (
         <div className="relative flex h-full w-full flex-col bg-transparent">
-          {/* Messages */}
-          <div
-            ref={messagesContainerRef}
-            className="flex-1 overflow-y-scroll overscroll-contain"
-            style={{ overflowAnchor: 'none' }}
-          >
-            <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
-              {/* Greeting */}
-              {!hasSentMessage && (
-                <div className="mx-auto mt-4 flex size-full max-w-3xl flex-col justify-center md:mt-16">
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.5 }}
-                    className="font-semibold text-xl md:text-2xl"
-                  >
-                    Hello <span className="text-orange-500">there!</span>
-                  </motion.div>
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.6 }}
-                    className="text-xl text-muted-foreground md:text-2xl"
-                  >
-                    How can I help you today?
-                  </motion.div>
+          {/* Incredible-style centered welcome card (empty state) */}
+          {showWelcomeCard && (
+            <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
+              {/* Hero header (dark-mode version of marketing header) */}
+              <div className="w-full max-w-5xl text-center mb-8 md:mb-10">
+                <div className="text-xs uppercase tracking-[0.35em] text-muted-foreground dark:text-orange-200/70">
+                  Future-Ready AI Agency
                 </div>
-              )}
-
-            {/* Suggested Actions - will be positioned above input */}
-
-              {/* Messages */}
-              <AnimatePresence>
-                {messages.map((message, index) => (
-                  <Message
-                    key={message.id}
-                    chatId={id}
-                    message={message}
-                    isLoading={isTyping && index === messages.length - 1}
-                    setMessages={setMessages}
-                    regenerate={regenerate}
-                    isReadonly={isReadonly}
-                    onArtifactSelect={handleArtifactSelect}
-                    onCodeSelect={handleCodeSelect}
-                    onDocumentSelect={handleDocumentSelect}
-                    onDatabaseSelect={handleDatabaseSelect}
-                  />
-                ))}
-              </AnimatePresence>
-
-              {/* Typing Indicator */}
-              {isTyping && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="flex items-start gap-3"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-500">
-                    <Bot className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="rounded-lg bg-muted/50 px-4 py-3">
-                    <div className="flex space-x-1">
-                      {[0, 1, 2].map((i) => (
-                        <motion.div
-                          key={i}
-                          className="h-2 w-2 rounded-full bg-muted-foreground/50"
-                          animate={{ y: [0, -8, 0] }}
-                          transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.2 }}
+                <h1 className="mt-3 text-4xl md:text-6xl font-semibold tracking-tight text-foreground dark:text-white leading-[1.05]">
+                  <span className="block">AI Services That</span>
+                  <span className="block mt-2">
+                    <span className="gradient-text">[Elevate]</span>{' '}
+                    <span className="inline-flex align-middle px-1">
+                      <span
+                        className={[
+                          'inline-flex h-10 w-10 md:h-14 md:w-14 items-center justify-center',
+                          'rounded-2xl bg-white/95 ring-2 ring-orange-500/60',
+                          'shadow-[0_0_0_1px_rgba(249,115,22,0.25),0_18px_45px_rgba(0,0,0,0.35),0_0_40px_rgba(249,115,22,0.25)]',
+                          '-rotate-12',
+                        ].join(' ')}
+                        aria-hidden="true"
+                      >
+                        <img
+                          src="/brand/automatos-mark-hi.png"
+                          alt=""
+                          className="h-6 w-6 md:h-8 md:w-8 object-contain drop-shadow-[0_0_10px_rgba(249,115,22,0.35)]"
+                          draggable={false}
                         />
-                      ))}
+                      </span>
+                    </span>
+                    <span className="whitespace-nowrap">Your Workflow</span>
+                  </span>
+                </h1>
+                <p className="mt-4 text-base md:text-lg text-muted-foreground max-w-3xl mx-auto">
+                  Transforming ideas into intelligent solutions—explore documents, databases, workflows, and tools in one place.
+                </p>
+              </div>
+              <div
+                className={[
+                  'relative w-full max-w-3xl md:max-w-4xl overflow-hidden rounded-3xl',
+                  'border border-orange-500/12 bg-background/40 backdrop-blur-xl',
+                  'shadow-[0_0_64px_rgba(249,115,22,0.10)]',
+                ].join(' ')}
+              >
+                {/* soft glow layer */}
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-orange-500/10 via-transparent to-transparent" />
+
+                <div className="relative space-y-6 p-6 md:p-8">
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {suggestedActions.map((suggestion, index) => (
+                      <motion.div
+                        key={suggestion}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.12 + 0.03 * index }}
+                      >
+                        <Button
+                          variant="outline"
+                          className={[
+                            'w-full rounded-2xl border-orange-500/25 bg-transparent',
+                            'px-4 py-3 text-left text-sm font-medium leading-snug',
+                            'hover:border-orange-500/45 hover:bg-orange-500/5',
+                            'shadow-[0_0_0_1px_rgba(249,115,22,0.10)]',
+                          ].join(' ')}
+                          onClick={() => sendMessage(suggestion)}
+                          title={suggestion}
+                        >
+                          <span className="block line-clamp-2 text-left text-sm text-foreground/90">
+                            {suggestion}
+                          </span>
+                        </Button>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2">
+                    <MultimodalInput
+                      chatId={id}
+                      status={status}
+                      stop={stop}
+                      sendMessage={sendMessage}
+                      selectedModelId={currentModelId}
+                      onModelChange={setCurrentModelId}
+                      selectedAgentId={selectedAgentId}
+                      onAgentChange={setSelectedAgentId}
+                      selectedVisibilityType={visibilityType}
+                      usage={usage}
+                    />
+                    <div className="flex flex-wrap justify-center gap-2 pt-1">
+                      {quickLinks.map((item) => {
+                        const Icon = item.icon
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className={[
+                              'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium',
+                              'bg-black/10 backdrop-blur text-foreground/90',
+                              'hover:bg-orange-500/10 transition-colors',
+                              'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                            ].join(' ')}
+                          >
+                            <Icon className="h-3.5 w-3.5 text-orange-400" />
+                            <span>{item.label}</span>
+                          </Link>
+                        )
+                      })}
                     </div>
                   </div>
-                </motion.div>
-              )}
-
-              <div ref={messagesEndRef} />
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Messages */}
+          {!showWelcomeCard && (
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-scroll overscroll-contain"
+              style={{ overflowAnchor: 'none' }}
+            >
+              <div className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 px-4 py-4 md:gap-6 md:px-8">
+
+                {/* Messages */}
+                <AnimatePresence>
+                  {messages.map((message, index) => (
+                    <Message
+                      key={message.id}
+                      chatId={id}
+                      message={message}
+                      isLoading={isTyping && index === messages.length - 1}
+                      setMessages={setMessages}
+                      regenerate={regenerate}
+                      isReadonly={isReadonly}
+                      onArtifactSelect={handleArtifactSelect}
+                      onCodeSelect={handleCodeSelect}
+                      onDocumentSelect={handleDocumentSelect}
+                      onDatabaseSelect={handleDatabaseSelect}
+                    />
+                  ))}
+                </AnimatePresence>
+
+                {/* Typing indicator removed: we show "Thinking…" on the streaming message */}
+
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          )}
 
           {/* Scroll to Bottom */}
           {!isAtBottom && hasSentMessage && (
@@ -528,37 +623,9 @@ export function Chat({
           )}
 
           {/* Input Area */}
-          {!isReadonly && (
+          {!isReadonly && !showWelcomeCard && (
             <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
-                {/* Suggested Actions - above input */}
-                {!hasSentMessage && (
-                  <div className="grid w-full gap-2 sm:grid-cols-2">
-                    {suggestedActions.map((suggestion, index) => (
-                      <motion.div
-                        key={suggestion}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        transition={{ delay: 0.05 * index }}
-                      >
-                        <Button
-                          variant="outline"
-                          className="w-full rounded-xl border-orange-500/30 bg-transparent px-4 py-3 text-left text-sm font-medium leading-snug hover:border-orange-500/50 hover:bg-orange-500/5"
-                          onClick={() => {
-                            sendMessage(suggestion)
-                          }}
-                          title={suggestion}
-                        >
-                          <span className="block line-clamp-2 text-left text-sm text-foreground/90">
-                            {suggestion}
-                          </span>
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-                
                 <MultimodalInput
                   chatId={id}
                   status={status}
@@ -566,9 +633,31 @@ export function Chat({
                   sendMessage={sendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
+                  selectedAgentId={selectedAgentId}
+                  onAgentChange={setSelectedAgentId}
                   selectedVisibilityType={visibilityType}
                   usage={usage}
                 />
+                <div className="flex flex-wrap justify-center gap-2">
+                  {quickLinks.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={[
+                          'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium',
+                          'bg-black/10 backdrop-blur text-foreground/90',
+                          'hover:bg-orange-500/10 transition-colors',
+                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                        ].join(' ')}
+                      >
+                        <Icon className="h-3.5 w-3.5 text-orange-400" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )
+                  })}
+                </div>
               </div>
             </div>
           )}

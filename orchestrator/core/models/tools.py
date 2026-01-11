@@ -35,6 +35,7 @@ class Tool(Base):
     
     # Display and metadata
     icon = Column(String(50))  # Emoji or icon identifier
+    logo = Column(String(255))  # Logo file path, e.g. "/logos/Discord.png"
     pricing = Column(String(100))  # Free, Pro, Pay-per-use, etc.
     rating = Column(Float, default=0.0)
     tags = Column(ARRAY(String), default=list)

@@ -475,7 +475,7 @@ function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps)
                                         isAssigned 
                                           ? hasConflict 
                                             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400'
-                                            : 'bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white'
+                                            : 'bg-secondary border border-primary/40 hover:border-primary/60 hover:bg-secondary/80 text-foreground'
                                           : isAllowed 
                                             ? 'hover:border-orange-500/50 hover:bg-orange-500/10 cursor-pointer' 
                                             : 'opacity-50 cursor-not-allowed'
@@ -745,7 +745,7 @@ function AgentToolAssignment({ open, onClose, tools }: AgentToolAssignmentProps)
             <Button 
               onClick={handleSave}
               disabled={saving || conflicts?.length > 0}
-              className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+              className="bg-secondary border border-primary/40 hover:border-primary/60 hover:bg-secondary/80 text-foreground transition-all duration-200"
             >
               {saving ? (
                 <>

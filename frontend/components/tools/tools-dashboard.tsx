@@ -19,11 +19,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Search, 
-  Filter, 
-  Grid3X3, 
-  List, 
+import {
+  Search,
+  Filter,
+  Grid3X3,
+  List,
   Plus,
   Zap,
   Shield,
@@ -54,11 +54,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { apiClient } from '@/lib/api-client'
 import { ToolConfigModal } from './tool-config-modal'
@@ -67,58 +67,11 @@ import { AgentToolAssignment } from './agent-tool-assignment'
 import { CreateToolModal } from './create-tool-modal'
 import { EnhancedPagination } from '@/components/ui/pagination'
 import { useMCPTools, useMCPToolsStats, useMCPToolCategories, useMCPToolAssignments, useUpdateMCPTool } from '@/hooks/use-mcp-tools-api'
+import { ToolLogo } from '@/components/ui/tool-logo'
 
-// Tool Categories
-const toolCategories = [
-  {
-    id: 'all',
-    name: 'All Tools',
-    color: 'text-gray-400',
-    count: 0
-  },
-  {
-    id: 'developer',
-    name: 'Developer Tools',
-    color: 'text-blue-400',
-    description: 'Code repositories, project management, CI/CD',
-    count: 12
-  },
-  {
-    id: 'communication',
-    name: 'Communication',
-    color: 'text-green-400',
-    description: 'Team chat, email, video conferencing',
-    count: 8
-  },
-  {
-    id: 'cloud',
-    name: 'Cloud Services',
-    color: 'text-purple-400',
-    description: 'AWS, Azure, GCP infrastructure tools',
-    count: 15
-  },
-  {
-    id: 'analytics',
-    name: 'Analytics',
-    color: 'text-orange-400',
-    description: 'Data analysis, monitoring, reporting',
-    count: 10
-  },
-  {
-    id: 'productivity',
-    name: 'Productivity',
-    color: 'text-pink-400',
-    description: 'Task management, documentation, scheduling',
-    count: 7
-  },
-  {
-    id: 'security',
-    name: 'Security',
-    color: 'text-red-400',
-    description: 'Security scanning, compliance, monitoring',
-    count: 6
-  }
-]
+// Tool Categories are now loaded dynamically from the API
+// See toolCategories useMemo below for the dynamic implementation
+
 
 // MCP Tools data comes from the database via useMCPTools hook
 // No mock data needed - using real MCP server metadata
@@ -158,17 +111,48 @@ interface Tool {
   lastUpdated: string
   configuration?: Record<string, any>
   metadata?: Record<string, any>
+  logo?: string
 }
 
 export function ToolsDashboard() {
-  // Pagination state
+  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [sortBy, setSortBy] = useState('name')
+
+  // Pagination state - dynamic page size based on view mode
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize] = useState(20)
-  
-  // Fetch real data from API with error handling and pagination
-  const { data: mcpToolsData, isLoading: toolsLoading, error: toolsError } = useMCPTools({ 
+  const pageSize = viewMode === 'list' ? 60 : 20 // 60 for list (20 rows × 3 cols), 20 for grid
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery)
+      setCurrentPage(1) // Reset to first page on search
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Reset to page 1 when view mode changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [viewMode])
+
+  // Fetch real data from API with error handling, pagination, and search
+  const categoryParam = selectedCategory !== 'all' ? selectedCategory : undefined
+  console.log('API call params:', {
     skip: (currentPage - 1) * pageSize,
-    limit: pageSize
+    limit: pageSize,
+    search: debouncedSearch,
+    category: categoryParam
+  })
+
+  const { data: mcpToolsData, isLoading: toolsLoading, error: toolsError } = useMCPTools({
+    skip: (currentPage - 1) * pageSize,
+    limit: pageSize,
+    search: debouncedSearch || undefined,
+    category: categoryParam
   })
   const { data: statsData, error: statsError } = useMCPToolsStats()
   const { data: categoriesData, error: categoriesError } = useMCPToolCategories()
@@ -181,18 +165,40 @@ export function ToolsDashboard() {
   const mcpTools = mcpToolsData?.data || []
   const paginationData = mcpToolsData?.pagination || { total: 0, pages: 0, current_page: 1 }
 
+  // Build dynamic categories from API data
+  const toolCategories = useMemo(() => {
+    const categories = [
+      {
+        id: 'all',
+        name: 'All Tools',
+        color: 'text-gray-400',
+        count: paginationData.total || 0
+      }
+    ]
+
+    if (categoriesData && Array.isArray(categoriesData)) {
+      console.log('Categories from API:', categoriesData)
+      categoriesData.forEach((cat: any) => {
+        categories.push({
+          id: cat.id || cat.name?.toLowerCase().replace(/\s+/g, '_'),
+          name: cat.name,
+          color: 'text-blue-400', // Default color
+          count: cat.count || 0
+        })
+      })
+    }
+
+    return categories
+  }, [categoriesData, paginationData.total])
+
   // Log any API errors (but don't spam the console)
   if (toolsError && !(toolsError as any).message?.includes('422')) console.error('Tools API Error:', toolsError)
   if (statsError && !(statsError as any).message?.includes('422')) console.error('Stats API Error:', statsError)
   if (categoriesError && !(categoriesError as any).message?.includes('422')) console.error('Categories API Error:', categoriesError)
 
-  const [selectedCategory, setSelectedCategory] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const [sortBy, setSortBy] = useState('name')
   const [loading, setLoading] = useState(false)
   const [toolModifications, setToolModifications] = useState<Record<number, Partial<Tool>>>({})
-  
+
   // Modal states
   const [configModalOpen, setConfigModalOpen] = useState(false)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
@@ -205,10 +211,10 @@ export function ToolsDashboard() {
     try {
       return (mcpTools as any[]).map((tool: any) => {
         // Check if this tool is assigned to any agent
-        const isAssigned = (toolAssignments as any[]).some((assignment: any) => 
+        const isAssigned = (toolAssignments as any[]).some((assignment: any) =>
           assignment.tool_id === tool.id && assignment.enabled
         )
-        
+
         const baseTool = {
           ...tool,
           isInstalled: tool.status === 'active', // Use actual tool status
@@ -221,7 +227,7 @@ export function ToolsDashboard() {
           lastUpdated: tool.updated_at,
           pricing: 'Free' // TODO: Add pricing info to backend
         }
-        
+
         // Apply any local modifications
         const modifications = toolModifications[tool.id]
         return modifications ? { ...baseTool, ...modifications } : baseTool
@@ -274,31 +280,46 @@ export function ToolsDashboard() {
   const getToolStats = () => {
     // Use real stats from API if available and has the expected structure
     if (statsData && typeof statsData === 'object' && 'total_tools' in statsData) {
+      console.log('Stats API data:', statsData)
       return {
-        installed: (statsData as any).assigned_tools || 0,
-        configured: (statsData as any).assigned_tools || 0,
-        available: (statsData as any).active_tools || 0,
+        installed: (statsData as any).assigned_tools || (statsData as any).enabled_tools || 0,
+        configured: (statsData as any).configured_tools || (statsData as any).assigned_tools || 0,
+        available: (statsData as any).active_tools || (statsData as any).available_tools || 0,
         total: (statsData as any).total_tools || 0
       }
     }
-    
-    // Fallback to calculated stats
+
+    console.log('Stats API not available, using fallback. Tools on page:', tools.length)
+
+    // Fallback: Use pagination total for overall count, but this won't give accurate enabled count
+    // The enabled count will be wrong unless we fetch all tools
     const installed = tools.filter(tool => tool?.isInstalled)?.length || 0
     const configured = tools.filter(tool => tool?.isConfigured)?.length || 0
     const available = tools.filter(tool => tool?.status === 'active')?.length || 0
-    
-    return { installed, configured, available, total: tools?.length || 0 }
+
+    return {
+      installed, // This will be inaccurate - only counts current page
+      configured,
+      available,
+      total: paginationData.total || tools?.length || 0
+    }
   }
 
   const getCategoryCount = (categoryId: string) => {
     if (categoryId === 'all') return paginationData.total || 0
-    
+
     // Use real category counts from API if available
-    if (categoriesData && Array.isArray(categoriesData) && categoryId !== 'all') {
-      const category = (categoriesData as any[]).find((c: any) => c.name === categoryId)
-      if (category) return category.count
+    if (categoriesData && Array.isArray(categoriesData)) {
+      const category = (categoriesData as any[]).find((c: any) =>
+        c.id === categoryId || c.name?.toLowerCase().replace(/\s+/g, '_') === categoryId
+      )
+      if (category && typeof category.count === 'number') {
+        return category.count
+      }
     }
-    
+
+    // Fallback: This will be inaccurate as it only counts current page
+    // TODO: Fetch all tools without pagination for accurate counts
     return tools.filter(tool => tool?.category === categoryId)?.length || 0
   }
 
@@ -366,11 +387,11 @@ export function ToolsDashboard() {
         ...prev,
         [tool.id]: { isInstalled: enabled, isConfigured: enabled }
       }))
-      
+
       // Update the tool status in the database
       await updateToolMutation.mutateAsync({
         id: tool.id,
-        data: { 
+        data: {
           status: enabled ? 'active' : 'inactive',
           // Add metadata to track installation state
           metadata: {
@@ -380,9 +401,9 @@ export function ToolsDashboard() {
           }
         }
       })
-      
+
       console.log(`✅ Successfully ${enabled ? 'enabled' : 'disabled'} tool: ${tool.name}`)
-      
+
     } catch (error) {
       console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
       // Revert local state on error
@@ -410,15 +431,15 @@ export function ToolsDashboard() {
     setLoading(true)
     try {
       console.log(`Deleting tool: ${tool.name} (ID: ${tool.id})`)
-      
+
       // Use the mutation hook which automatically invalidates queries
       await updateToolMutation.mutateAsync({
         id: tool.id,
         data: { status: 'inactive' }
       })
-      
+
       console.log('Tool deleted successfully')
-      
+
     } catch (error) {
       console.error('Failed to delete tool:', error)
       alert(`❌ Failed to delete ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -460,13 +481,13 @@ export function ToolsDashboard() {
             Discover, install, and manage tools to extend your AI agents' capabilities
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
-          
+
           <Button
             variant="outline"
             onClick={() => setAssignmentModalOpen(true)}
@@ -475,8 +496,8 @@ export function ToolsDashboard() {
             <Users className="w-4 h-4 mr-2" />
             Agent Assignment
           </Button>
-          
-          <Button 
+
+          <Button
             className="bg-brand-primary hover:bg-brand-primary/90"
             onClick={() => setCreateToolModalOpen(true)}
           >
@@ -524,24 +545,27 @@ export function ToolsDashboard() {
           }
         ].map((stat, index) => (
           <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <stat.icon className={`w-5 h-5 ${
-                    index === 0 ? 'text-green-400' :
-                    index === 1 ? 'text-blue-400' :
-                    index === 2 ? 'text-purple-400' :
-                    index === 3 ? 'text-orange-400' :
-                    'text-white'
-                  }`} />
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
+                    <stat.icon
+                      className={`w-5 h-5 ${index === 0 ? 'text-green-400' :
+                        index === 1 ? 'text-blue-400' :
+                          index === 2 ? 'text-purple-400' :
+                            index === 3 ? 'text-orange-400' :
+                              'text-white'
+                        }`}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-2xl font-bold leading-none">
+                      {toolsLoading ? '…' : stat.value}
+                    </div>
+                    <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-2xl font-bold">
-                  {toolsLoading ? '...' : stat.value}
-                </h3>
-                <div className="text-muted-foreground text-sm">{stat.label}</div>
-                <div className={`text-xs ${stat.color}`}>
+                <div className={`shrink-0 text-xs ${stat.color}`}>
                   {stat.change}
                 </div>
               </div>
@@ -566,37 +590,8 @@ export function ToolsDashboard() {
             className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
           />
         </div>
-        
-        <div className="flex gap-2">
-          <Button
-            variant={selectedCategory === 'all' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory('all')}
-          >
-            All
-          </Button>
-          <Button
-            variant={selectedCategory === 'developer' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory('developer')}
-          >
-            Developer
-          </Button>
-          <Button
-            variant={selectedCategory === 'communication' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory('communication')}
-          >
-            Communication
-          </Button>
-          <Button
-            variant={selectedCategory === 'cloud' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory('cloud')}
-          >
-            Cloud
-          </Button>
-        </div>
+
+
       </motion.div>
 
       {/* Main Content */}
@@ -615,10 +610,11 @@ export function ToolsDashboard() {
               <CheckCircle className="w-4 h-4" />
               <span className="hidden sm:inline">Enabled ({stats.installed})</span>
             </TabsTrigger>
-            <TabsTrigger value="security" className="flex items-center space-x-2">
+            {/* Security tab hidden - not implemented yet */}
+            {/* <TabsTrigger value="security" className="flex items-center space-x-2">
               <Shield className="w-4 h-4" />
               <span className="hidden sm:inline">Security</span>
-            </TabsTrigger>
+            </TabsTrigger> */}
           </TabsList>
 
           <TabsContent value="marketplace" className="space-y-6">
@@ -660,292 +656,188 @@ export function ToolsDashboard() {
               </div>
             </div>
 
-          {/* Categories */}
-          <div className="flex flex-wrap gap-2">
-            {toolCategories.map((category) => (
-              <Button
-                key={category.id}
-                variant={selectedCategory === category.id ? 'default' : 'outline'}
-                onClick={() => setSelectedCategory(category.id)}
-                className={`flex items-center space-x-2 ${
-                  selectedCategory === category.id 
-                    ? 'bg-gray-800 border-orange-400/50 text-white' 
+            {/* Categories */}
+            <div className="flex flex-wrap gap-2">
+              {toolCategories.map((category) => (
+                <Button
+                  key={category.id}
+                  variant={selectedCategory === category.id ? 'default' : 'outline'}
+                  onClick={() => setSelectedCategory(category.id)}
+                  className={`flex items-center space-x-2 ${selectedCategory === category.id
+                    ? 'bg-gray-800 border-orange-400/50 text-white'
                     : 'hover:border-orange-500/50'
-                }`}
-              >
-                <span>{category.name}</span>
-                <Badge variant="outline" className="ml-1 text-xs">
-                  {getCategoryCount(category.id)}
-                </Badge>
-              </Button>
-            ))}
-          </div>
-
-          {/* Tools Grid/List */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <AnimatePresence>
-              {filteredTools.map((tool, index) => (
-                <motion.div
-                  key={tool?.id}
-                  className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                    }`}
                 >
-                  {/* Header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                        <span className="text-lg">{tool?.icon}</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold truncate">{tool?.name}</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {tool?.provider} • {tool?.category}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    {/* Context Menu - Top Right */}
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleToolDetails(tool)}>
-                          <Eye className="w-4 h-4 mr-2" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleToolConfigure(tool)}>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Configure
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={() => handleToolDelete(tool)}
-                          className="text-red-400"
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  <span>{category.name}</span>
+                  <Badge variant="outline" className="ml-1 text-xs">
+                    {getCategoryCount(category.id)}
+                  </Badge>
+                </Button>
+              ))}
+            </div>
 
-                  {/* Status */}
-                  <div className="flex items-center justify-between mb-4">
-                    <Badge className={tool?.isInstalled 
-                      ? 'bg-green-500/10 text-green-400 border-green-500/20' 
-                      : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
-                    }>
-                      {tool?.isInstalled ? 'installed' : 'available'}
+            {/* Tools Grid/List */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <AnimatePresence>
+                {filteredTools.map((tool, index) => (
+                  <ToolCard
+                    key={tool?.id}
+                    tool={tool}
+                    viewMode={viewMode}
+                    index={index}
+                    onInstall={() => handleToolToggle(tool, true)}
+                    onConfigure={() => {
+                      setSelectedTool(tool)
+                      setConfigModalOpen(true)
+                    }}
+                    onUninstall={() => handleToolToggle(tool, false)}
+                    loading={loading}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+
+            {/* Pagination */}
+            {paginationData.total > pageSize && (
+              <EnhancedPagination
+                data={paginationData}
+                onPageChange={(page) => setCurrentPage(page)}
+                className="mt-6"
+              />
+            )}
+
+            {/* Empty State */}
+            {filteredTools?.length === 0 && (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
+                  <Search className="w-8 h-8 text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">No tools found</h3>
+                <p className="text-muted-foreground mb-4">
+                  Try adjusting your search or category filter
+                </p>
+                <Button variant="outline" onClick={() => {
+                  setSearchQuery('')
+                  setSelectedCategory('all')
+                }}>
+                  Clear Filters
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="installed" className="space-y-6">
+            {/* Installed Tools Management */}
+            <div className="space-y-4">
+              <h3 className="text-xl font-semibold">Installed Tools</h3>
+              <div className="grid gap-4">
+                {tools.filter(tool => tool?.isInstalled).map((tool) => (
+                  <Card key={tool?.id} className="bg-secondary/30 border-border/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
+                            <span className="text-lg">{tool?.icon}</span>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold">{tool?.name}</h4>
+                            <p className="text-sm text-muted-foreground">{tool?.provider}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge className={tool?.isConfigured
+                            ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                            : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                          }>
+                            {tool?.isConfigured ? 'Configured' : 'Needs Config'}
+                          </Badge>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleToolConfigure(tool)}
+                          >
+                            Configure
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="security" className="space-y-6">
+            {/* Security Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card className="bg-secondary/30 border-border/30">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center space-x-2">
+                    <Shield className="w-5 h-5 text-green-400" />
+                    <span>Security Status</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Active Tools</span>
+                    <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                      {tools.filter(t => t?.status === 'active').length}
                     </Badge>
                   </div>
-
-                  {/* Description */}
-                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                    {tool?.description}
-                  </p>
-
-                  {/* Tool Info */}
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <p className="text-sm font-medium">Version</p>
-                      <p className="text-xs text-muted-foreground">{tool?.version}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Rating</p>
-                      <p className="text-xs text-muted-foreground">
-                        <div className="flex items-center space-x-1">
-                          <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-                          <span>{tool?.rating}</span>
-                        </div>
-                      </p>
-                    </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Assigned Tools</span>
+                    <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                      {tools.filter(t => t?.isInstalled).length}
+                    </Badge>
                   </div>
-
-                  {/* Tags */}
-                  <div className="flex flex-wrap gap-1 mb-4">
-                    {tool?.tags?.slice(0, 2)?.map((tag: string) => (
-                      <Badge key={tag} variant="secondary" className="text-xs">
-                        {tag}
-                      </Badge>
-                    )) || []}
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Configured Tools</span>
+                    <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">
+                      {tools.filter(t => t?.isConfigured).length}
+                    </Badge>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Total Agents</span>
+                    <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+                      {new Set((toolAssignments as any[]).map((a: any) => a.agent_id)).size}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
 
-                  {/* Action Buttons */}
+              <Card className="bg-secondary/30 border-border/30">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center space-x-2">
+                    <Activity className="w-5 h-5 text-blue-400" />
+                    <span>Tool Assignments</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
                   <div className="space-y-3">
-                    {/* Toggle Section */}
-                    <div className="flex items-center justify-between">
-                      {/* Custom Toggle Button */}
-                      <button
-                        onClick={() => {
-                          console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
-                          handleToolToggle(tool, !tool?.isInstalled)
-                        }}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${
-                          tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
-                        }`}
-                      >
-                        <span className="sr-only">Toggle tool</span>
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                      <span className="text-sm text-muted-foreground">
-                        {tool?.isInstalled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-
-          {/* Pagination */}
-          {paginationData.total > pageSize && (
-            <EnhancedPagination
-              data={paginationData}
-              onPageChange={(page) => setCurrentPage(page)}
-              className="mt-6"
-            />
-          )}
-
-          {/* Empty State */}
-          {filteredTools?.length === 0 && (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
-                <Search className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-semibold mb-2">No tools found</h3>
-              <p className="text-muted-foreground mb-4">
-                Try adjusting your search or category filter
-              </p>
-              <Button variant="outline" onClick={() => {
-                setSearchQuery('')
-                setSelectedCategory('all')
-              }}>
-                Clear Filters
-              </Button>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="installed" className="space-y-6">
-          {/* Installed Tools Management */}
-          <div className="space-y-4">
-            <h3 className="text-xl font-semibold">Installed Tools</h3>
-            <div className="grid gap-4">
-              {tools.filter(tool => tool?.isInstalled).map((tool) => (
-                <Card key={tool?.id} className="bg-secondary/30 border-border/30">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <span className="text-lg">{tool?.icon}</span>
-                </div>
-                        <div>
-                          <h4 className="font-semibold">{tool?.name}</h4>
-                          <p className="text-sm text-muted-foreground">{tool?.provider}</p>
+                    {(toolAssignments as any[]).slice(0, 5).map((assignment: any, index: number) => (
+                      <div key={index} className="flex items-center space-x-3">
+                        <div className="w-2 h-2 rounded-full bg-green-400" />
+                        <div className="flex-1">
+                          <p className="text-sm">
+                            {assignment.tool?.name || `Tool ${assignment.tool_id}`} → Agent {assignment.agent_id}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {assignment.enabled ? 'Active' : 'Disabled'}
+                          </p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge className={tool?.isConfigured 
-                          ? 'bg-green-500/10 text-green-400 border-green-500/20' 
-                          : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-                        }>
-                          {tool?.isConfigured ? 'Configured' : 'Needs Config'}
-                        </Badge>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleToolConfigure(tool)}
-                        >
-                          Configure
-                        </Button>
+                    ))}
+                    {(toolAssignments as any[]).length === 0 && (
+                      <div className="text-center py-4">
+                        <p className="text-sm text-muted-foreground">No tool assignments yet</p>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="security" className="space-y-6">
-          {/* Security Overview */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-secondary/30 border-border/30">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center space-x-2">
-                  <Shield className="w-5 h-5 text-green-400" />
-                  <span>Security Status</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Active Tools</span>
-                  <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
-                    {tools.filter(t => t?.status === 'active').length}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Assigned Tools</span>
-                  <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
-                    {tools.filter(t => t?.isInstalled).length}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Configured Tools</span>
-                  <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">
-                    {tools.filter(t => t?.isConfigured).length}
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">Total Agents</span>
-                  <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
-                    {new Set((toolAssignments as any[]).map((a: any) => a.agent_id)).size}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-secondary/30 border-border/30">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center space-x-2">
-                  <Activity className="w-5 h-5 text-blue-400" />
-                  <span>Tool Assignments</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {(toolAssignments as any[]).slice(0, 5).map((assignment: any, index: number) => (
-                    <div key={index} className="flex items-center space-x-3">
-                      <div className="w-2 h-2 rounded-full bg-green-400" />
-                      <div className="flex-1">
-                        <p className="text-sm">
-                          {assignment.tool?.name || `Tool ${assignment.tool_id}`} → Agent {assignment.agent_id}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {assignment.enabled ? 'Active' : 'Disabled'}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                  {(toolAssignments as any[]).length === 0 && (
-                    <div className="text-center py-4">
-                      <p className="text-sm text-muted-foreground">No tool assignments yet</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+        </Tabs>
       </motion.div>
 
       {/* Modals */}
@@ -1014,72 +906,47 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
   const statusColor = statusColors[tool?.status as keyof typeof statusColors] || 'text-gray-400'
 
   if (viewMode === 'list') {
+    // Compact list view - still 3 columns but minimal card content
     return (
       <motion.div
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -20 }}
-        transition={{ delay: index * 0.1 }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 20 }}
+        transition={{ delay: index * 0.05 }}
       >
-        <Card className="bg-secondary/30 border-border/30 hover:border-orange-500/30 transition-colors">
+        <Card className="glass-card hover:border-primary/20 transition-all">
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4 flex-1">
-                <div className="w-12 h-12 rounded-lg bg-secondary/50 flex items-center justify-center">
-                  <span className="text-lg">{tool?.icon}</span>
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2">
-                    <h3 className="font-semibold">{tool?.name}</h3>
-                    <Badge variant="outline">{tool?.category}</Badge>
-                    <StatusIcon className={`w-4 h-4 ${statusColor}`} />
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1">{tool?.description}</div>
-                  <div className="flex items-center space-x-4 mt-2 text-xs text-muted-foreground">
-                    <span>{tool?.provider}</span>
-                    <span>v{tool?.version}</span>
-                    <span>{tool?.pricing}</span>
-                    <div className="flex items-center space-x-1">
-                      <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
-                      <span>{tool?.rating}</span>
-                    </div>
-                  </div>
+            <div className="flex items-center gap-3 justify-between">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <ToolLogo
+                  logo={tool?.logo}
+                  name={tool?.name}
+                  size={40}
+                  fallbackIcon={tool?.icon}
+                  showBackground={true}
+                />
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold truncate">{tool?.name}</h3>
+                  <Badge variant="outline" className="mt-1 capitalize text-xs">
+                    {tool?.category || 'Uncategorized'}
+                  </Badge>
                 </div>
               </div>
-              <div className="flex items-center space-x-2">
-                {tool?.isInstalled ? (
-                  <>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={onConfigure}
-                      className="hover:border-blue-500/50"
-                    >
-                      <Settings className="w-4 h-4 mr-1" />
-                      Configure
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={onUninstall}
-                      className="hover:border-red-500/50 text-red-400"
-                      disabled={loading}
-                    >
-                      Remove
-                    </Button>
-                  </>
-                ) : (
-                  <Button 
-                    onClick={onInstall}
-                    disabled={loading}
-                    className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                    size="sm"
-                  >
-                    <Download className="w-4 h-4 mr-1" />
-                    Install
-                  </Button>
-                )}
-              </div>
+              {/* Toggle button */}
+              <button
+                onClick={() => {
+                  console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                  tool?.isInstalled ? onUninstall() : onInstall()
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
+                  }`}
+              >
+                <span className="sr-only">Toggle tool</span>
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                />
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -1098,9 +965,13 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                <span className="text-lg">{tool?.icon}</span>
-              </div>
+              <ToolLogo
+                logo={tool?.logo}
+                name={tool?.name}
+                size={40}
+                fallbackIcon={tool?.icon}
+                showBackground={true}
+              />
               <div>
                 <h3 className="font-semibold">{tool?.name}</h3>
                 <p className="text-xs text-muted-foreground">{tool?.provider}</p>
@@ -1120,7 +991,7 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
           <p className="text-sm text-muted-foreground line-clamp-2">
             {tool?.description}
           </p>
-          
+
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center space-x-1">
               <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
@@ -1139,42 +1010,26 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
 
           <Separator />
 
-          {/* Documentation Link */}
-          <div className="space-y-2">
-            <div className="flex space-x-2">
-              {tool?.isInstalled ? (
-                <>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="flex-1 hover:border-blue-500/50"
-                    onClick={onConfigure}
-                  >
-                    <Settings className="w-4 h-4 mr-1" />
-                    Config
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={onUninstall}
-                    className="hover:border-red-500/50 text-red-400"
-                    disabled={loading}
-                  >
-                    Remove
-                  </Button>
-                </>
-              ) : (
-                <Button 
-                  onClick={onInstall}
-                  disabled={loading}
-                  className="w-full bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                  size="sm"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Install
-                </Button>
-              )}
-            </div>
+          {/* Toggle Section */}
+          <div className="flex items-center justify-between">
+            {/* Custom Toggle Button */}
+            <button
+              onClick={() => {
+                console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                tool?.isInstalled ? onUninstall() : onInstall()
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
+                }`}
+            >
+              <span className="sr-only">Toggle tool</span>
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+              />
+            </button>
+            <span className="text-sm text-muted-foreground">
+              {tool?.isInstalled ? 'Enabled' : 'Disabled'}
+            </span>
           </div>
         </CardContent>
       </Card>

@@ -13,6 +13,7 @@ export interface CredentialType {
   display_name: string
   category: string | null
   icon: string | null
+  logo?: string | null  // Logo file path
   description: string | null
   schema_definition: CredentialFieldDefinition[]
   test_endpoint: any | null

@@ -313,6 +313,7 @@ class MCPTool(Base):
     provider = Column(String(255))
     version = Column(String(50))
     icon = Column(String(100))
+    logo = Column(String(255))  # Logo file path, e.g. "/logos/Discord.png"
     category = Column(String(100))
     tags = Column(PG_ARRAY(String))
     tool_metadata = Column('metadata', JSON, default={})  # Renamed from metadata (reserved in SQLAlchemy)
@@ -616,6 +617,7 @@ class MCPToolResponse(BaseModel):
     provider: Optional[str] = None
     version: Optional[str] = None
     icon: Optional[str] = None
+    logo: Optional[str] = None  # Logo file path
     category: Optional[str] = None
     tags: Optional[List[str]] = []
     # Use Field with validation_alias to map from SQLAlchemy attribute

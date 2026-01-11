@@ -184,15 +184,15 @@ export function ChatWidget({
               transition={{ type: "spring", stiffness: 300, damping: 25 }}
               className="w-80"
             >
-              <Card className="bg-gray-900/95 backdrop-blur-sm border-gray-800/50 shadow-2xl">
+              <Card className="glass-card card-glow">
                 <CardHeader className="flex flex-row items-center justify-between pb-3">
                   <div className="flex items-center space-x-2">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
                       <Bot className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white">AI Assistant</h3>
-                      <p className="text-xs text-gray-400">Ready to help!</p>
+                      <h3 className="font-semibold text-foreground dark:text-white">AI Assistant</h3>
+                      <p className="text-xs text-muted-foreground">Ready to help!</p>
                     </div>
                   </div>
                   <div className="flex space-x-2">
@@ -200,7 +200,7 @@ export function ChatWidget({
                       variant="ghost"
                       size="sm"
                       onClick={() => router.push('/chat')}
-                      className="text-gray-400 hover:text-white hover:bg-gray-800"
+                      className="text-muted-foreground hover:text-foreground dark:hover:text-white"
                     >
                       <Maximize2 className="w-4 h-4" />
                     </Button>
@@ -208,7 +208,7 @@ export function ChatWidget({
                       variant="ghost"
                       size="sm"
                       onClick={() => setIsMinimized(true)}
-                      className="text-gray-400 hover:text-white hover:bg-gray-800"
+                      className="text-muted-foreground hover:text-foreground dark:hover:text-white"
                     >
                       <X className="w-4 h-4" />
                     </Button>
@@ -216,7 +216,7 @@ export function ChatWidget({
                 </CardHeader>
                 
                 <CardContent className="space-y-4">
-                  <div className="flex items-center space-x-2 text-sm text-gray-300">
+                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                     <Sparkles className="w-4 h-4 text-orange-400" />
                     <span>Need help? Try asking:</span>
                   </div>
@@ -226,7 +226,7 @@ export function ChatWidget({
                       <motion.button
                         key={index}
                         onClick={() => handleSuggestionClick(suggestion)}
-                        className="w-full text-left p-2 rounded-lg bg-gray-800/50 hover:bg-gray-800 transition-colors text-sm text-gray-300 hover:text-white"
+                        className="w-full text-left p-2 rounded-xl bg-secondary/40 hover:bg-secondary/70 transition-colors text-sm text-foreground/80"
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
@@ -240,7 +240,7 @@ export function ChatWidget({
                       value={quickMessage}
                       onChange={(e) => setQuickMessage(e.target.value)}
                       placeholder="Type your question..."
-                      className="bg-gray-800/50 border-gray-700 text-white placeholder-gray-400 text-sm"
+                      className="text-sm"
                       disabled={isTyping}
                     />
                     <Button 
@@ -261,7 +261,7 @@ export function ChatWidget({
                     </Button>
                   </form>
 
-                  <div className="flex items-center justify-between text-xs text-gray-500">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <div className="flex items-center space-x-1">
                       <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                       <span>AI online</span>
