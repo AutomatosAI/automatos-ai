@@ -22,8 +22,8 @@ RUN apk add --no-cache \
     g++ \
     curl
 
-# Copy package files (works from repo root - Railway uses this)
-COPY automatos-ai/frontend/package*.json ./
+# Copy package files (works when Root Directory is set to automatos-ai)
+COPY frontend/package*.json ./
 
 # =============================================================================
 # Development Stage - Hot Reload
@@ -35,7 +35,7 @@ FROM base as development
 RUN npm install --legacy-peer-deps
 
 # Copy source code
-COPY automatos-ai/frontend/ .
+COPY frontend/ .
 
 # Expose port
 EXPOSE 3000
@@ -56,7 +56,7 @@ FROM base as builder
 RUN npm install --legacy-peer-deps
 
 # Copy source code
-COPY automatos-ai/frontend/ .
+COPY frontend/ .
 
 # Build application
 RUN npm run build
@@ -72,7 +72,7 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 # Copy package files and install production dependencies only
-COPY automatos-ai/frontend/package*.json ./
+COPY frontend/package*.json ./
 RUN npm ci --legacy-peer-deps --only=production && npm cache clean --force
 
 # Copy built application from builder
