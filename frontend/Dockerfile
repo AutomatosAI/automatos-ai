@@ -22,8 +22,8 @@ RUN apk add --no-cache \
     g++ \
     curl
 
-# Copy package files (works when Root Directory is set to automatos-ai)
-COPY frontend/package*.json ./
+# Copy package files (Dockerfile is in frontend/, so copy from current dir)
+COPY package*.json ./
 
 # =============================================================================
 # Development Stage - Hot Reload
@@ -34,8 +34,8 @@ FROM base as development
 # Use npm install instead of npm ci for development (more forgiving with lock file)
 RUN npm install --legacy-peer-deps
 
-# Copy source code
-COPY frontend/ .
+# Copy source code (Dockerfile is in frontend/, so copy from current dir)
+COPY . .
 
 # Expose port
 EXPOSE 3000
@@ -55,8 +55,8 @@ FROM base as builder
 # Install ALL dependencies (including devDependencies for build)
 RUN npm install --legacy-peer-deps
 
-# Copy source code
-COPY frontend/ .
+# Copy source code (Dockerfile is in frontend/, so copy from current dir)
+COPY . .
 
 # Build application
 RUN npm run build
@@ -72,7 +72,7 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 # Copy package files and install production dependencies only
-COPY frontend/package*.json ./
+COPY package*.json ./
 RUN npm ci --legacy-peer-deps --only=production && npm cache clean --force
 
 # Copy built application from builder
