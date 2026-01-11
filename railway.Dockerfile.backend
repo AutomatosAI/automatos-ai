@@ -1,0 +1,64 @@
+# =============================================================================
+# Railway Backend Dockerfile - Builds from repository root
+# =============================================================================
+# This Dockerfile works when Railway's build context is the repo root
+# Use this if Railway Root Directory setting is not available
+# =============================================================================
+
+FROM python:3.11-slim as base
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    postgresql-client \
+    libmagic1 \
+    tesseract-ocr \
+    ghostscript \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements (from automatos-ai/orchestrator)
+COPY automatos-ai/orchestrator/requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# =============================================================================
+# Production Stage
+# =============================================================================
+FROM base as production
+
+# Copy application code
+COPY automatos-ai/orchestrator/ .
+
+# Copy entrypoint script
+COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/vector_stores /app/projects
+
+# Remove dev dependencies
+RUN pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true
+
+# Create non-root user for security
+RUN useradd -m -u 1000 automatos && \
+    chown -R automatos:automatos /app
+
+USER automatos
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+# Production command - use PORT env var (Railway provides this)
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
