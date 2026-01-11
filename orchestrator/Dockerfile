@@ -36,9 +36,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # =============================================================================
 FROM base as development
 
-# Copy entrypoint script (from automatos-ai root)
-COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
+# For docker-compose, the full entrypoint.sh will be mounted/overridden
+RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Copy application code
 COPY automatos-ai/orchestrator/ .
@@ -67,9 +68,10 @@ FROM base as production
 # Copy application code only (no dev tools)
 COPY automatos-ai/orchestrator/ .
 
-# Copy entrypoint script (from automatos-ai root)
-COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
+# For docker-compose, the full entrypoint.sh will be mounted/overridden
+RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/vector_stores /app/projects

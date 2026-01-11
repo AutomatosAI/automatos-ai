@@ -106,6 +106,7 @@ services:
     volumes:
       # Mount source for hot-reload in development
       - ./orchestrator:/app
+      - ./docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
       - backend_logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
