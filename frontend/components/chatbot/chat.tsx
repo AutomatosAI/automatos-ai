@@ -37,6 +37,7 @@ export function Chat({
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(initialChatModel)
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
@@ -54,18 +55,18 @@ export function Chat({
   }, [])
 
   const [activeChatId, setActiveChatId] = useState(id)
-  
+
   const { messages, setMessages, sendMessage, status, stop, reload } = useChat({
     id: activeChatId,
     initialMessages,
     selectedModelId: currentModelId,
+    selectedAgentId,
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
       }
     },
     onChatIdUpdate: (newChatId) => {
-      // Update local state when backend creates/returns chat ID
       setActiveChatId(newChatId)
     },
   })
@@ -124,7 +125,7 @@ export function Chat({
     setSelectedArtifact(artifact)
     setIsArtifactViewerVisible(true)
   }, [])
-  
+
   const handleCodeSelect = useCallback((code: CodeSnippet) => {
     setSelectedArtifact({
       id: `code-${Date.now()}`,
@@ -136,7 +137,7 @@ export function Chat({
     })
     setIsArtifactViewerVisible(true)
   }, [])
-  
+
   const handleDocumentSelect = useCallback((doc: DocumentReference) => {
     const artifactId = `doc-${Date.now()}`
     const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || 'Loading document...'
@@ -209,7 +210,7 @@ export function Chat({
         })
       })
   }, [])
-  
+
   const handleDatabaseSelect = useCallback((db: DatabaseResult) => {
     const idBase = `db-${Date.now()}`
     const columns = db.columns && db.columns.length > 0
@@ -221,11 +222,11 @@ export function Chat({
       `**Rows returned:** ${db.row_count}`,
       `**Execution time:** ${db.execution_time_ms?.toFixed(0)} ms`,
     ]
- 
+
     if (db.pandas_ai?.summary) {
       summaryContentLines.push('', db.pandas_ai.summary)
     }
- 
+
     if (db.data && db.data.length > 0) {
       const numericColumns = columns.filter((col) =>
         db.data!.some((row) => typeof row[col] === 'number' && !Number.isNaN(row[col]))
@@ -395,6 +396,8 @@ export function Chat({
                       sendMessage={sendMessage}
                       selectedModelId={currentModelId}
                       onModelChange={setCurrentModelId}
+                      selectedAgentId={selectedAgentId}
+                      onAgentChange={setSelectedAgentId}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
                     />
@@ -458,22 +461,22 @@ export function Chat({
                   <span className="block mt-2">
                     <span className="gradient-text">[Elevate]</span>{' '}
                     <span className="inline-flex align-middle px-1">
-                    <span
-                      className={[
-                        'inline-flex h-10 w-10 md:h-14 md:w-14 items-center justify-center',
-                        'rounded-2xl bg-white/95 ring-2 ring-orange-500/60',
-                        'shadow-[0_0_0_1px_rgba(249,115,22,0.25),0_18px_45px_rgba(0,0,0,0.35),0_0_40px_rgba(249,115,22,0.25)]',
-                        '-rotate-12',
-                      ].join(' ')}
-                      aria-hidden="true"
-                    >
-                      <img
-                        src="/brand/automatos-mark-hi.png"
-                        alt=""
-                        className="h-6 w-6 md:h-8 md:w-8 object-contain drop-shadow-[0_0_10px_rgba(249,115,22,0.35)]"
-                        draggable={false}
-                      />
-                    </span>
+                      <span
+                        className={[
+                          'inline-flex h-10 w-10 md:h-14 md:w-14 items-center justify-center',
+                          'rounded-2xl bg-white/95 ring-2 ring-orange-500/60',
+                          'shadow-[0_0_0_1px_rgba(249,115,22,0.25),0_18px_45px_rgba(0,0,0,0.35),0_0_40px_rgba(249,115,22,0.25)]',
+                          '-rotate-12',
+                        ].join(' ')}
+                        aria-hidden="true"
+                      >
+                        <img
+                          src="/brand/automatos-mark-hi.png"
+                          alt=""
+                          className="h-6 w-6 md:h-8 md:w-8 object-contain drop-shadow-[0_0_10px_rgba(249,115,22,0.35)]"
+                          draggable={false}
+                        />
+                      </span>
                     </span>
                     <span className="whitespace-nowrap">Your Workflow</span>
                   </span>
@@ -529,6 +532,8 @@ export function Chat({
                       sendMessage={sendMessage}
                       selectedModelId={currentModelId}
                       onModelChange={setCurrentModelId}
+                      selectedAgentId={selectedAgentId}
+                      onAgentChange={setSelectedAgentId}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
                     />
@@ -628,6 +633,8 @@ export function Chat({
                   sendMessage={sendMessage}
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
+                  selectedAgentId={selectedAgentId}
+                  onAgentChange={setSelectedAgentId}
                   selectedVisibilityType={visibilityType}
                   usage={usage}
                 />

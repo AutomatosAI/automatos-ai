@@ -874,13 +874,24 @@ Available Shell Tools:
         
         # Get API key from credential resolver
         from core.credentials.resolver import get_credential_resolver
+        import os
         resolver = get_credential_resolver()
         
         api_key = None
         if provider == LLMProviderEnum.OPENAI:
             api_key = resolver.get_credential_field("development_openai", "api_key")
+            # Fallback to environment variable if credential resolver fails
+            if not api_key:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    self.logger.info(f"Using OPENAI_API_KEY from environment variable for {agent_name}")
         elif provider == LLMProviderEnum.ANTHROPIC:
             api_key = resolver.get_credential_field("development_anthropic", "api_key")
+            # Fallback to environment variable
+            if not api_key:
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                if api_key:
+                    self.logger.info(f"Using ANTHROPIC_API_KEY from environment variable for {agent_name}")
         
         if not api_key:
             raise ValueError(f"API key not found for provider: {model_config.provider}")

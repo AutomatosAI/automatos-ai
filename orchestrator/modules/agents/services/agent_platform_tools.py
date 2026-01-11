@@ -167,9 +167,9 @@ class AgentPlatformTools:
                 if formatted:
                     self.logger.info(f"  📄 Sample: {formatted[0].get('excerpt', '')[:100]}...")
                 
-                # Return standardized format
+                # Return standardized format (empty results are still success)
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             
@@ -209,7 +209,7 @@ class AgentPlatformTools:
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} semantic results")
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             
@@ -259,7 +259,7 @@ class AgentPlatformTools:
                 
                 self.logger.info(f"  ✅ Found {len(formatted)} code results")
                 return ToolResultFormatter.standardize_result(
-                    {"success": bool(formatted), "results": formatted},
+                    {"success": True, "results": formatted},
                     tool_name
                 )
             

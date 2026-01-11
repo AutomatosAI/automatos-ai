@@ -36,7 +36,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # =============================================================================
 FROM base as development
 
-# Copy entrypoint script
+# Copy entrypoint script (from root of repo)
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
@@ -67,7 +67,7 @@ FROM base as production
 # Copy application code only (no dev tools)
 COPY orchestrator/ .
 
-# Copy entrypoint script
+# Copy entrypoint script (from root of repo)
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
@@ -93,6 +93,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Production command - multiple workers, no reload
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Production command - use PORT env var (Railway provides this)
+# Default to 8000 if PORT not set
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
 

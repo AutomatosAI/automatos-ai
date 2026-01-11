@@ -5,6 +5,7 @@ import { Send, StopCircle, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from './model-selector'
+import { AgentSelector } from './agent-selector'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
@@ -16,6 +17,8 @@ export interface MultimodalInputProps {
   sendMessage: (message: any) => void
   selectedModelId: string
   onModelChange: (modelId: string) => void
+  selectedAgentId?: number | null
+  onAgentChange?: (agentId: number | null) => void
   selectedVisibilityType: VisibilityType
   usage?: AppUsage
 }
@@ -27,6 +30,8 @@ export function MultimodalInput({
   sendMessage,
   selectedModelId,
   onModelChange,
+  selectedAgentId,
+  onAgentChange,
   selectedVisibilityType,
   usage,
 }: MultimodalInputProps) {
@@ -35,7 +40,7 @@ export function MultimodalInput({
   const [uploadQueue, setUploadQueue] = useState<string[]>([])
   const [uploadedDocs, setUploadedDocs] = useState<Array<{ document_id: string; filename: string; status: string }>>([])
   const [input, setInput] = useState('')
-  
+
   // Safe input with default
   const safeInput = input || ''
 
@@ -71,11 +76,11 @@ export function MultimodalInput({
       content: trimmedInput,
       parts,
     })
-    
+
     // Clear input and attachments
     setInput('')
     setUploadedDocs([])
-    
+
     // Reset height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -180,7 +185,7 @@ export function MultimodalInput({
           className="min-h-[100px] max-h-[200px] w-full resize-none bg-transparent border-0 px-4 pt-4 pb-14 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0"
           rows={1}
         />
-        
+
         {/* Bottom toolbar - inside the input */}
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2 border-t border-transparent">
           {/* Left side: Attachment + Model Selector */}
@@ -195,13 +200,21 @@ export function MultimodalInput({
             >
               <Paperclip className="w-4 h-4" />
             </Button>
-            
-            <ModelSelector
-              selectedModelId={selectedModelId}
-              onModelChange={onModelChange}
-            />
+
+            {/* PRD: Unified Agent-Chat System - Agent Selector */}
+            {onAgentChange ? (
+              <AgentSelector
+                selectedAgentId={selectedAgentId}
+                onAgentChange={onAgentChange}
+              />
+            ) : (
+              <ModelSelector
+                selectedModelId={selectedModelId}
+                onModelChange={onModelChange}
+              />
+            )}
           </div>
-          
+
           {/* Right side: Send/Stop Button */}
           {isStreaming ? (
             <Button

@@ -4,7 +4,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState } from 'react'
 import { MockProvider } from '../lib/mock-context'
-import { ThemeProvider } from './theme-provider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -17,12 +16,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }))
 
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <QueryClientProvider client={queryClient}>
-        <MockProvider>
-          {children}
-        </MockProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <MockProvider>
+        {children}
+      </MockProvider>
+    </QueryClientProvider>
   )
 }

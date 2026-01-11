@@ -8,12 +8,14 @@ export function useChat({
   id,
   initialMessages = [],
   selectedModelId = 'gpt-4',
+  selectedAgentId,
   onData,
   onChatIdUpdate,
 }: {
   id: string
   initialMessages?: ChatMessage[]
   selectedModelId?: string
+  selectedAgentId?: number | null
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
 }) {
@@ -90,7 +92,8 @@ export function useChat({
               role: 'user',
               parts: outgoingParts,
             },
-            selectedChatModel: selectedModelId,
+            // PRD: Unified Agent-Chat System - Send agentId if selected
+            ...(selectedAgentId ? { agentId: selectedAgentId } : { selectedChatModel: selectedModelId }),
             selectedVisibilityType: 'private',
           }),
           signal: abortControllerRef.current.signal,
@@ -140,18 +143,18 @@ export function useChat({
             // AI SDK Data Stream format
             if (line.startsWith('0:')) {
               // Text chunk
-            try {
+              try {
                 const text = JSON.parse(line.slice(2))
                 accumulatedContent += text
-                
-                setMessages(prev => 
-                  prev.map(m => 
+
+                setMessages(prev =>
+                  prev.map(m =>
                     m.id === assistantMessageId
                       ? {
-                          ...m,
-                          content: accumulatedContent,
-                          parts: [{ type: 'text', text: accumulatedContent }],
-                        }
+                        ...m,
+                        content: accumulatedContent,
+                        parts: [{ type: 'text', text: accumulatedContent }],
+                      }
                       : m
                   )
                 )
@@ -162,7 +165,7 @@ export function useChat({
               // Data event
               try {
                 const data = JSON.parse(line.slice(2))
-                
+
                 // Handle chat-id event - critical for conversation continuity
                 if (data.type === 'chat-id' && data.chatId) {
                   setChatId(data.chatId)
@@ -181,9 +184,9 @@ export function useChat({
                     prev.map((m) =>
                       m.id === assistantMessageId
                         ? {
-                            ...m,
-                            toolCalls: upsertToolCall(m.toolCalls, toolCall),
-                          }
+                          ...m,
+                          toolCalls: upsertToolCall(m.toolCalls, toolCall),
+                        }
                         : m
                     )
                   )
@@ -204,28 +207,28 @@ export function useChat({
                     prev.map((m) =>
                       m.id === assistantMessageId
                         ? {
-                            ...m,
-                            toolCalls: upsertToolCall(m.toolCalls, toolCall),
-                          }
+                          ...m,
+                          toolCalls: upsertToolCall(m.toolCalls, toolCall),
+                        }
                         : m
                     )
                   )
 
                   if (onData) onData({ type: 'tool-end', data: data.data })
                 } else if (data.type === 'tool-data' && data.data) {
-                setMessages(prev => 
-                  prev.map(m => 
-                    m.id === assistantMessageId
-                      ? {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === assistantMessageId
+                        ? {
                           ...m,
-                            database_results: data.data.database_results || m.database_results,
-                            documents: data.data.documents || m.documents,
-                            // Convert snake_case from backend to camelCase for frontend
-                            codeSnippets: data.data.code_snippets || m.codeSnippets,
+                          database_results: data.data.database_results || m.database_results,
+                          documents: data.data.documents || m.documents,
+                          // Convert snake_case from backend to camelCase for frontend
+                          codeSnippets: data.data.code_snippets || m.codeSnippets,
                         }
-                      : m
+                        : m
+                    )
                   )
-                )
                   if (onData) onData({ type: 'tool-data', data: data.data })
                 } else if (data.type === 'usage' && data.data) {
                   setUsage({
@@ -234,8 +237,8 @@ export function useChat({
                     totalTokens: data.data.totalTokens || 0,
                   })
                   if (onData) onData({ type: 'data-usage', data: data.data })
-              }
-            } catch (e) {
+                }
+              } catch (e) {
                 // Skip parse errors
               }
             } else if (line.startsWith('data:')) {
@@ -249,10 +252,10 @@ export function useChat({
                     prev.map((m) =>
                       m.id === assistantMessageId
                         ? {
-                            ...m,
-                            content: accumulatedContent,
-                            parts: [{ type: 'text', text: accumulatedContent }],
-                          }
+                          ...m,
+                          content: accumulatedContent,
+                          parts: [{ type: 'text', text: accumulatedContent }],
+                        }
                         : m
                     )
                   )
@@ -261,11 +264,11 @@ export function useChat({
                     prev.map((m) =>
                       m.id === assistantMessageId
                         ? {
-                            ...m,
-                            database_results: payload.data.database_results || m.database_results,
-                            documents: payload.data.documents || m.documents,
-                            codeSnippets: payload.data.code_snippets || m.codeSnippets,
-                          }
+                          ...m,
+                          database_results: payload.data.database_results || m.database_results,
+                          documents: payload.data.documents || m.documents,
+                          codeSnippets: payload.data.code_snippets || m.codeSnippets,
+                        }
                         : m
                     )
                   )

@@ -18,9 +18,6 @@ from pydantic import BaseModel
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
 
-# Get tools from consumers.chatbot (uses modules.tools)
-CHAT_TOOLS = get_chat_tools()
-
 logger = logging.getLogger(__name__)
 
 # Standard API key auth (matches all other APIs)
@@ -57,6 +54,8 @@ class ChatRequest(BaseModel):
     selectedChatModel: Optional[str] = "gpt-4"
     selectedVisibilityType: Optional[str] = "private"
     context: Optional[dict] = None
+    # PRD: Unified Agent-Chat System
+    agentId: Optional[int] = None  # Selected agent ID (default: system agent id=1)
 
 
 class UpdateTitleRequest(BaseModel):
@@ -173,18 +172,42 @@ async def stream_chat(
         parts=[part.dict() for part in parts]
     )
     
+    
     # Get chat history
     messages = chat_service.get_messages_by_chat_id(chat_id)
     message_history = [{'role': msg.role, 'parts': msg.parts} for msg in messages]
     
-    # Stream response using AI SDK Data Stream format
-    # Pass selected model from frontend request
+    # DEBUG: Log incoming request
+    logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")
+    
+    # PRD: Unified Agent-Chat System
+    # Use agent-based streaming if agentId is provided
+    if request.agentId:
+        logger.info(f"Using agent-based streaming with agent_id={request.agentId}")
+        return StreamingResponse(
+            streaming_service.stream_response_with_agent(
+                chat_id=chat_id,
+                messages=message_history,
+                agent_id=request.agentId,
+                user_id=user_id
+            ),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+                "x-vercel-ai-data-stream": "v1"
+            }
+        )
+    
+    # Legacy: Stream response using AI SDK Data Stream format with model selection
     return StreamingResponse(
         streaming_service.stream_response_aisdk(
             chat_id=chat_id,
             messages=message_history,
-            tools=CHAT_TOOLS,
-            selected_model=request.selectedChatModel
+            tools=get_chat_tools(agent_id=request.agentId or 1),
+            selected_model=request.selectedChatModel,
+            agent_id=request.agentId or 1
         ),
         media_type="text/plain; charset=utf-8",
         headers={
@@ -347,3 +370,100 @@ async def vote_message(
     
     return {"success": success}
 
+
+# PRD: Unified Agent-Chat System - Agent Endpoints
+@router.get("/agents")
+async def get_available_agents(
+    status: str = "active",
+    db: Session = Depends(get_db)
+):
+    """Get list of available agents for chat selection."""
+    from core.models import Agent
+    
+    query = db.query(Agent).filter(Agent.status == status)
+    agents = query.all()
+    
+    return {
+        "agents": [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "agent_type": agent.agent_type,
+                "description": agent.description,
+                "status": agent.status,
+                "skills": agent.configuration.get("skills", []) if agent.configuration else [],
+                "model_config": agent.model_config or {},
+                "is_default": agent.id == 1,
+                "tags": agent.tags or []
+            }
+            for agent in agents
+        ]
+    }
+
+
+class SwitchAgentRequest(BaseModel):
+    newAgentId: int
+    reason: Optional[str] = None
+
+
+@router.post("/{chat_id}/switch-agent")
+async def switch_agent(
+    chat_id: str,
+    request: SwitchAgentRequest,
+    db: Session = Depends(get_db)
+):
+    """Switch to a different agent mid-conversation."""
+    from core.models import Chat, Agent
+    from datetime import datetime
+    import json
+    
+    chat_service = ChatService(db)
+    user_id = get_user_id(db)
+    
+    chat = chat_service.get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    if chat.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId).first()
+    if not new_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    old_agent_id = getattr(chat, 'current_agent_id', None) or 1
+    
+    db.execute(
+        text("UPDATE chats SET current_agent_id = :new_agent_id WHERE id = :chat_id"),
+        {"new_agent_id": request.newAgentId, "chat_id": chat.id}
+    )
+    
+    switch_record = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "from_agent_id": old_agent_id,
+        "to_agent_id": request.newAgentId,
+        "reason": request.reason or "User requested switch"
+    }
+    
+    existing_switches = getattr(chat, 'agent_switches', None) or []
+    if isinstance(existing_switches, str):
+        existing_switches = json.loads(existing_switches)
+    
+    existing_switches.append(switch_record)
+    
+    db.execute(
+        text("UPDATE chats SET agent_switches = :switches WHERE id = :chat_id"),
+        {"switches": json.dumps(existing_switches), "chat_id": chat.id}
+    )
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "agent": {
+            "id": new_agent.id,
+            "name": new_agent.name,
+            "type": new_agent.agent_type,
+            "message": f"Switched to {new_agent.name}. How can I help?"
+        }
+    }

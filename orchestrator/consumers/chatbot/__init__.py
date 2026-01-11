@@ -39,8 +39,8 @@ CHAT_TOOLS = None
 def get_tools():
     """Get chatbot tools (lazy loaded)."""
     global CHAT_TOOLS
-    if CHAT_TOOLS is None:
-        CHAT_TOOLS = get_chat_tools()
+    # Retain compatibility: defaults to agent_id=None (all allowed)
+    CHAT_TOOLS = get_chat_tools()
     return CHAT_TOOLS
 
 __all__ = [

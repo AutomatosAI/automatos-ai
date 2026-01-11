@@ -210,13 +210,19 @@ class StreamingChatService:
         self.memory_injector = get_memory_injector()
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
+        
+        # PRD: Unified Agent-Chat System - Initialize AgentFactory
+        from modules.agents.factory.agent_factory import AgentFactory
+        self.agent_factory = AgentFactory(db_session=db)
+        logger.info("StreamingChatService initialized with AgentFactory integration")
     
     async def stream_response_aisdk(
         self,
         chat_id: str,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Any]] = None,
-        selected_model: Optional[str] = None
+        selected_model: Optional[str] = None,
+        agent_id: int = 1
     ) -> AsyncGenerator[str, None]:
         """
         Stream chat response using AI SDK Data Stream format.
@@ -227,9 +233,9 @@ class StreamingChatService:
         from core.llm import create_llm_manager
         import asyncio
         
-        # Get tools from modules.tools if not provided
+        # Get tools from modules.tools if not provided (agent-scoped)
         if tools is None:
-            tools = get_chat_tools()
+            tools = get_chat_tools(agent_id=agent_id)
         
         try:
             # Send chat_id to frontend
@@ -270,7 +276,13 @@ class StreamingChatService:
                 detected_tools = self.prompt_analyzer.detect_explicit_tool_requests(latest_text)
                 if detected_tools:
                     logger.info(f"Pre-triggering tools: {detected_tools}")
-                    async for chunk in self._execute_pretriggered_tools(detected_tools, latest_text, llm_messages, tool_data):
+                    async for chunk in self._execute_pretriggered_tools(
+                        detected_tools,
+                        latest_text,
+                        llm_messages,
+                        tool_data,
+                        agent_id
+                    ):
                         yield chunk
                         await asyncio.sleep(0)
             
@@ -320,7 +332,11 @@ class StreamingChatService:
                     # Execute all tools in parallel
                     async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any]):
                         logger.info(f"Executing tool: {tool_name}")
-                        result = await self.tool_router.execute_and_format(tool_name, tool_args)
+                        result = await self.tool_router.execute_and_format(
+                            tool_name,
+                            tool_args,
+                            agent_id=agent_id
+                        )
                         return {
                             "tool_call_id": tool_id,
                             "tool_name": tool_name,
@@ -466,11 +482,14 @@ class StreamingChatService:
                     summary = summary[:700].rsplit(" ", 1)[0].strip() + "…"
                 return (summary + "\n\n" + header).strip()
 
-            if tool_data.get("documents") and (
-                documents_tool_used
-                or ("doc" in (latest_text or "").lower())
-                or ("document" in (latest_text or "").lower())
-            ):
+            # Only apply document shaping for DIRECT document requests
+            # Don't apply for research/synthesis queries like "write a report"
+            is_direct_doc_request = bool(re.search(
+                r'\b(show|give|list|find|search)\s+(me\s+)?(the\s+)?(docs?|documents?)\b',
+                (latest_text or '').lower()
+            ))
+            
+            if tool_data.get("documents") and is_direct_doc_request:
                 topic = _infer_doc_topic(latest_text)
                 full_response = _enforce_documents_shape(full_response, topic)
             
@@ -502,6 +521,177 @@ class StreamingChatService:
             import traceback
             traceback.print_exc()
             yield self.streaming_handler.format_aisdk_error(str(e))
+    
+    async def stream_response_with_agent(
+        self,
+        chat_id: str,
+        messages: List[Dict[str, Any]],
+        agent_id: int,
+        user_id: int
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream chat response using a specialized agent from AgentFactory.
+        
+        PRD: Unified Agent-Chat System
+        - Activates agent from factory
+        - Uses agent's LLM manager, skills, and tools
+        - Builds system prompt from agent's skills
+        - Uses shared user-level memory
+        
+        Args:
+            chat_id: Chat session ID
+            messages: Chat messages
+            agent_id: ID of agent to use
+            user_id: User ID for memory
+            
+        Yields:
+            AI SDK formatted response chunks
+        """
+        import asyncio
+        
+        try:
+            # Send chat_id to frontend
+            yield self.streaming_handler.format_aisdk_chat_id(chat_id)
+            await asyncio.sleep(0)
+            
+            # Activate agent from factory
+            logger.info(f"Activating agent {agent_id} for chat {chat_id}")
+            agent_runtime = await self.agent_factory.activate_agent(agent_id)
+            
+            if not agent_runtime:
+                raise Exception(f"Failed to activate agent {agent_id}")
+            
+            # Send agent info to frontend
+            yield self.streaming_handler.format_aisdk_data({
+                "type": "agent-info",
+                "agent": {
+                    "id": agent_runtime.agent_id,
+                    "name": agent_runtime.metadata.name,
+                    "type": agent_runtime.metadata.agent_type,
+                    "skills": agent_runtime.metadata.skills
+                }
+            })
+            await asyncio.sleep(0)
+            
+            # Build system prompt from agent's skills and extract tool schemas
+            system_prompt, skill_tools = await self._build_agent_system_prompt(agent_runtime)
+            
+            # Convert messages to LLM format and inject system prompt
+            llm_messages = self.prompt_analyzer.convert_to_llm_messages(messages)
+            
+            # Replace or prepend system message with agent's system prompt
+            if llm_messages and llm_messages[0].get('role') == 'system':
+                llm_messages[0]['content'] = system_prompt
+            else:
+                llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
+            
+            # Get shared user memory
+            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+            memory_context = await self.memory_injector.retrieve_relevant_memories(
+                chat_id, 
+                latest_text
+            )
+            
+            if memory_context:
+                logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
+                llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
+            
+            # Determine tool usage
+            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
+            
+            # Use agent's tools (MCP tools + skill tools)
+            agent_mcp_tools = agent_runtime.tools if hasattr(agent_runtime, 'tools') else []
+            all_tools = agent_mcp_tools + skill_tools if skill_tools else agent_mcp_tools
+            use_tools = None if is_simple else (all_tools if all_tools else get_chat_tools())
+            
+            # Generate response using agent's LLM manager
+            logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
+            response = await agent_runtime.llm_manager.generate_response(
+                messages=llm_messages,
+                tools=use_tools
+            )
+            
+            # Track response parts
+            assistant_parts = []
+            full_response = ""
+            tool_data = {}
+            
+            # Handle tool calls if any
+            if response.tool_calls:
+                logger.info(f"Agent requested {len(response.tool_calls)} tool calls")
+                final_response = None
+                async for chunk in self._handle_tool_calls_aisdk(response, llm_messages, agent_runtime, tool_data, use_tools):
+                    # Check if this is the final response
+                    if isinstance(chunk, dict) and chunk.get('_final_response'):
+                        final_response = chunk['_final_response']
+                        logger.info(f"Received final response from tool loop: {bool(final_response.content)}")
+                    else:
+                        yield chunk
+                    await asyncio.sleep(0)
+                
+                # CRITICAL: Ensure we ALWAYS have a final response
+                if final_response and final_response.content:
+                    logger.info(f"Using final response from tool loop ({len(final_response.content)} chars)")
+                    full_response = final_response.content
+                else:
+                    # Tool loop completed but no final response - force one
+                    logger.warning("Tool loop completed without final response - forcing synthesis")
+                    # Add instruction to synthesize
+                    llm_messages.append({
+                        'role': 'system',
+                        'content': 'Based on the tool results above, provide a comprehensive response to the user. Synthesize the information and create the requested output.'
+                    })
+                    forced_response = await agent_runtime.llm_manager.generate_response(
+                        messages=llm_messages,
+                        tools=None  # No tools - force text response
+                    )
+                    full_response = forced_response.content if forced_response.content else "I apologize, but I encountered an issue generating a response. Please try again."
+                    logger.info(f"Forced response generated ({len(full_response)} chars)")
+            else:
+                # No tool calls, use response content directly
+                if response.content:
+                    full_response = response.content
+            
+            # Stream text response
+            async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
+                yield chunk
+            
+            # Send usage data
+            if hasattr(response, 'usage') and response.usage:
+                yield self.streaming_handler.format_aisdk_usage(
+                    response.usage.get('prompt_tokens', 0),
+                    response.usage.get('completion_tokens', 0),
+                    response.usage.get('total_tokens', 0)
+                )
+            
+            # Send finish event
+            yield self.streaming_handler.format_aisdk_finish()
+            
+            # Save assistant message
+            assistant_parts.append({'type': 'text', 'text': full_response})
+            self.chat_service.save_message(chat_id=chat_id, role="assistant", parts=assistant_parts)
+            
+            # Store memory (shared user-level)
+            if latest_text and full_response:
+                await self.memory_injector.store_conversation_memory(
+                    chat_id, 
+                    latest_text, 
+                    full_response
+                )
+            
+            # Update agent metrics
+            if hasattr(agent_runtime, 'update_metrics'):
+                tokens_used = response.usage.get('total_tokens', 0) if response.usage else 0
+                agent_runtime.update_metrics(
+                    execution_time=1.0,  # TODO: Track actual time
+                    tokens_used=tokens_used,
+                    success=True
+                )
+            
+        except Exception as e:
+            logger.error(f"Error streaming response with agent: {e}", exc_info=True)
+            yield self.streaming_handler.format_aisdk_error(str(e))
+
     
     async def stream_response(
         self,
@@ -614,12 +804,241 @@ class StreamingChatService:
         
         return provider, model
     
+    async def _build_agent_system_prompt(self, agent_runtime) -> tuple[str, list]:
+        """
+        Build system prompt from agent's skills.
+        
+        Combines:
+        1. Base chatbot prompt
+        2. Agent-specific prompt (from description/type)
+        3. Skills (prompt templates from database)
+        
+        Args:
+            agent_runtime: AgentRuntime from factory
+            
+        Returns:
+            Tuple of (system_prompt, tool_schemas)
+        """
+        from core.models import Skill
+        
+        # Base chatbot system prompt
+        base_prompt = """You are a helpful AI assistant with access to various tools and knowledge.
+
+CRITICAL INSTRUCTIONS:
+- When asked to CREATE, WRITE, or GENERATE something, you MUST use your tools to actually do it
+- DO NOT explain how to do something - ACTUALLY DO IT using function calls
+- If you have a write_file or create_document tool, USE IT to create files
+- If you have database query tools, USE THEM to get real data
+- EXECUTE first, explain later (if needed)
+
+Examples:
+- "Create a report" → Call write_file tool with the report content
+- "Query the database" → Call smart_query_database tool
+- "Search for code" → Call search_codebase tool
+
+Always be clear, concise, and ACTION-ORIENTED in your responses."""
+        
+        # Add agent-specific context
+        agent_context = f"""
+
+You are {agent_runtime.metadata.name}, a specialized {agent_runtime.metadata.agent_type} agent.
+
+AGENT DESCRIPTION:
+{agent_runtime.metadata.description or f"Specialized {agent_runtime.metadata.agent_type} with expertise in specific domains."}
+
+YOUR SPECIALIZED SKILLS:
+"""
+        
+        # Load and inject skills from database
+        skills_text = ""
+        if agent_runtime.metadata.skills:
+            # Query database for skill details
+            skills = self.db.query(Skill).filter(
+                Skill.name.in_(agent_runtime.metadata.skills),
+                Skill.is_active == True
+            ).all()
+            
+            for skill in skills:
+                if skill.prompt_template:
+                    skills_text += f"\n{skill.prompt_template}\n"
+                elif skill.description:
+                    skills_text += f"\n- {skill.name}: {skill.description}\n"
+        
+        # Build complete prompt
+        complete_prompt = f"{base_prompt}\n\n{agent_context}\n\n{skills_text}"
+        
+        # Extract tool schemas from skills for function calling
+        tool_schemas = []
+        if agent_runtime.metadata.skills:
+            skills = self.db.query(Skill).filter(
+                Skill.name.in_(agent_runtime.metadata.skills),
+                Skill.is_active == True
+            ).all()
+            
+            for skill in skills:
+                if skill.content and isinstance(skill.content, dict):
+                    tools_schema = skill.content.get('tools_schema', [])
+                    if tools_schema:
+                        logger.info(f"Extracted {len(tools_schema)} tools from skill '{skill.name}'")
+                        tool_schemas.extend(tools_schema)
+        
+        return (complete_prompt, tool_schemas)
+    
+    async def _handle_tool_calls_aisdk(
+        self,
+        response,
+        llm_messages: List[Dict],
+        agent_runtime,
+        tool_data: Dict,
+        use_tools: List = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Handle tool calls from agent's LLM response.
+        
+        Args:
+            response: LLM response with tool_calls
+            llm_messages: Current message history
+            agent_runtime: Agent runtime with tools
+            tool_data: Dict to store tool results
+            use_tools: Tools to pass to LLM for next iteration
+            
+        Yields:
+            AI SDK formatted tool execution chunks
+        """
+        import asyncio
+        import time
+        
+        max_iterations = 5
+        iteration = 0
+        current_response = response
+        
+        while current_response.tool_calls and iteration < max_iterations:
+            iteration += 1
+            logger.info(f"Tool iteration {iteration}: {len(current_response.tool_calls)} tool calls")
+            
+            start_times = {}
+            tool_calls_prepared = []
+            
+            for tool_call in current_response.tool_calls:
+                tool_name = tool_call.get('function', {}).get('name', 'unknown')
+                tool_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
+                
+                # Emit tool-start
+                yield self.streaming_handler.format_aisdk_tool_start(tool_id, tool_name)
+                await asyncio.sleep(0)
+                
+                start_times[tool_id] = time.time()
+                tool_calls_prepared.append((tool_id, tool_name, tool_call))
+            
+            # Execute tools
+            tool_results = []
+            for tool_id, tool_name, tool_call in tool_calls_prepared:
+                try:
+                    # Parse arguments
+                    args_str = tool_call.get('function', {}).get('arguments', '{}')
+                    tool_args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                    
+                    # Execute tool via tool router
+                    result = await self.tool_router.execute_and_format(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1
+                    )
+                    
+                    # Extract LLM context from result and truncate to prevent context overflow
+                    llm_context = result.get('llm_context', str(result.get('raw_result', '')))
+                    # Truncate to max 1000 chars to keep context manageable
+                    if len(llm_context) > 1000:
+                        llm_context = llm_context[:1000] + f"\n... (truncated {len(llm_context) - 1000} chars)"
+                    
+                    # Store result
+                    tool_results.append({
+                        'tool_call_id': tool_id,
+                        'role': 'tool',
+                        'name': tool_name,
+                        'content': llm_context
+                    })
+                    
+                    # Emit tool-result as data event
+                    yield self.streaming_handler.format_aisdk_data('tool-result', {
+                        'toolCallId': tool_id,
+                        'toolName': tool_name,
+                        'result': llm_context[:500]  # Truncate for streaming
+                    })
+                    await asyncio.sleep(0)
+                    
+                except Exception as e:
+                    logger.error(f"Tool {tool_name} failed: {e}")
+                    error_msg = f"Error executing {tool_name}: {str(e)}"
+                    tool_results.append({
+                        'tool_call_id': tool_id,
+                        'role': 'tool',
+                        'name': tool_name,
+                        'content': error_msg
+                    })
+                    
+                    yield self.streaming_handler.format_aisdk_data('tool-result', {
+                        'toolCallId': tool_id,
+                        'toolName': tool_name,
+                        'result': error_msg
+                    })
+                    await asyncio.sleep(0)
+            
+            # Add assistant message with tool_calls first (required by OpenAI API)
+            assistant_tool_message = {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': tc[0],
+                        'type': 'function',
+                        'function': {
+                            'name': tc[1],
+                            'arguments': tc[2].get('function', {}).get('arguments', '{}')
+                        }
+                    }
+                    for tc in tool_calls_prepared
+                ]
+            }
+            llm_messages.append(assistant_tool_message)
+            
+            # Then add tool results to message history
+            llm_messages.extend(tool_results)
+            
+            # Get next LLM response
+            current_response = await agent_runtime.llm_manager.generate_response(
+                messages=llm_messages,
+                tools=use_tools
+            )
+            
+            # Log iteration completion
+            logger.info(f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, Has content: {bool(current_response.content)}")
+            
+            # If no more tool calls, this is the final response
+            if not current_response.tool_calls:
+                logger.info(f"✅ Tool loop complete after {iteration} iterations. Returning final response.")
+                # Yield final response marker
+                yield {'_final_response': current_response}
+                return  # Exit the generator
+        
+        # If max iterations reached, force final response
+        if iteration >= max_iterations:
+            logger.warning(f"Max tool iterations ({max_iterations}) reached. Forcing final response.")
+            # Make one final call without tools to get synthesized response
+            final_response = await agent_runtime.llm_manager.generate_response(
+                messages=llm_messages,
+                tools=None  # No tools - force text response
+            )
+            yield {'_final_response': final_response}
+
+    
     async def _execute_pretriggered_tools(
         self,
         detected_tools: List[str],
         query: str,
         llm_messages: List[Dict],
-        tool_data: Dict
+        tool_data: Dict,
+        agent_id: int
     ) -> AsyncGenerator[str, None]:
         """Execute pre-triggered tools and inject results."""
         for tool_name in detected_tools:
@@ -634,7 +1053,11 @@ class StreamingChatService:
                 tool_input={"query": query},
             )
 
-            result = await self.tool_router.execute_and_format(tool_name, {"query": query})
+            result = await self.tool_router.execute_and_format(
+                tool_name,
+                {"query": query},
+                agent_id=agent_id
+            )
             
             if result['success']:
                 tool_data.update(result['frontend_data'])
