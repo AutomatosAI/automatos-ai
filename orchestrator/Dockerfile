@@ -32,7 +32,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download NLTK data (punkt tokenizer, stopwords) for memory operations
-RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
+# Set NLTK_DATA to a system-wide location accessible to all users
+ENV NLTK_DATA=/usr/local/nltk_data
+RUN python -c "import nltk; nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')" && \
+    chmod -R 755 /usr/local/nltk_data
 
 # =============================================================================
 # Development Stage - Hot Reload & Debugging
@@ -48,7 +51,7 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
 
 # Expose port
 EXPOSE 8000
@@ -77,7 +80,7 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
 
 # Remove dev dependencies
 RUN pip uninstall -y pytest pytest-asyncio black isort
