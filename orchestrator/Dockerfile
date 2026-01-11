@@ -25,8 +25,8 @@ RUN apt-get update && apt-get install -y \
     ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY orchestrator/requirements.txt .
+# Copy requirements (works from repo root - Railway uses this)
+COPY automatos-ai/orchestrator/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -36,12 +36,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # =============================================================================
 FROM base as development
 
-# Copy entrypoint script (from root of repo)
-COPY docker-entrypoint.sh /usr/local/bin/
+# Copy entrypoint script (from automatos-ai root)
+COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Copy application code
-COPY orchestrator/ .
+COPY automatos-ai/orchestrator/ .
 
 # Create necessary directories
 RUN mkdir -p /app/logs /app/vector_stores /app/projects
@@ -65,10 +65,10 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 FROM base as production
 
 # Copy application code only (no dev tools)
-COPY orchestrator/ .
+COPY automatos-ai/orchestrator/ .
 
-# Copy entrypoint script (from root of repo)
-COPY docker-entrypoint.sh /usr/local/bin/
+# Copy entrypoint script (from automatos-ai root)
+COPY automatos-ai/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
