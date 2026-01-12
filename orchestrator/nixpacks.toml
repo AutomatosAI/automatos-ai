@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
+
+[phases.install]
+cmds = [
+  "pip install --no-cache-dir -r requirements.txt",
+  "export NLTK_DATA=/usr/local/nltk_data && python -c \"import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')\" || true"
+]
+
+[variables]
+NLTK_DATA = "/usr/local/nltk_data"
