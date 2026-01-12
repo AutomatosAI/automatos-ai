@@ -1,6 +1,10 @@
 [phases.setup]
 nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
 
+# Explicitly use Python from nixpkgs, ignore mise/.python-version
+[providers]
+python = "nixpkgs"
+
 [phases.install]
 cmds = [
   "pip install --no-cache-dir -r requirements.txt",

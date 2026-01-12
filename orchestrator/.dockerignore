@@ -79,6 +79,9 @@ Thumbs.db
 .credential_key
 core/.credential_key
 
+# Python version managers (Nixpacks uses runtime.txt instead)
+.python-version
+
 # Development files
 migrate_*.py
 add-*.py
