@@ -535,43 +535,92 @@ class CredentialTester:
     
     async def _test_huggingface(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Test Hugging Face API credentials"""
-        # Hugging Face uses 'api_token' field name
-        api_token = data.get('api_token') or data.get('api_key')  # Support both field names
+        # Hugging Face uses 'api_token' field name, but check all possible variations
+        api_token = (
+            data.get('api_token') or 
+            data.get('api_key') or 
+            data.get('token') or
+            data.get('access_token')
+        )
         
         if not api_token:
-            return {'success': False, 'message': 'API token is required'}
+            # Log available keys for debugging
+            available_keys = list(data.keys())
+            logger.warning(f"Hugging Face test: No token found. Available keys: {available_keys}")
+            return {'success': False, 'message': f'API token is required. Available fields: {", ".join(available_keys)}'}
         
-        # Hugging Face API test endpoint
-        url = 'https://huggingface.co/api/whoami'
-        headers = {'Authorization': f'Bearer {api_token}'}
+        # Clean token (remove whitespace)
+        api_token = api_token.strip()
         
-        async with self.session.get(url, headers=headers) as response:
-            if response.status == 200:
-                user_data = await response.json()
-                return {
-                    'success': True,
-                    'message': f'Hugging Face API connection successful. Authenticated as {user_data.get("name", "Unknown")}',
-                    'details': {
-                        'username': user_data.get('name'),
-                        'email': user_data.get('email'),
-                        'type': user_data.get('type'),  # user, org, etc.
-                        'canPay': user_data.get('canPay', False),
-                        'orgs': user_data.get('orgs', [])
+        # Validate token format (should start with hf_)
+        if not api_token.startswith('hf_'):
+            logger.warning(f"Hugging Face token doesn't start with 'hf_': {api_token[:10]}...")
+            # Don't fail here, some tokens might be valid without the prefix
+        
+        # Log token prefix for debugging (first 10 chars only)
+        token_prefix = api_token[:10] + '...' if len(api_token) > 10 else '***'
+        logger.debug(f"Testing Hugging Face API with token: {token_prefix}")
+        
+        # Hugging Face API test endpoint (updated to whoami-v2)
+        url = 'https://huggingface.co/api/whoami-v2'
+        headers = {
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            async with self.session.get(url, headers=headers) as response:
+                response_text = await response.text()
+                
+                if response.status == 200:
+                    try:
+                        user_data = await response.json()
+                        return {
+                            'success': True,
+                            'message': f'Hugging Face API connection successful. Authenticated as {user_data.get("name", "Unknown")}',
+                            'details': {
+                                'username': user_data.get('name'),
+                                'email': user_data.get('email'),
+                                'type': user_data.get('type'),  # user, org, etc.
+                                'canPay': user_data.get('canPay', False),
+                                'orgs': user_data.get('orgs', [])
+                            }
+                        }
+                    except Exception as e:
+                        logger.error(f"Failed to parse Hugging Face response: {e}")
+                        return {
+                            'success': False,
+                            'message': f'Hugging Face API returned 200 but response parsing failed: {str(e)}',
+                            'details': {'status_code': response.status, 'raw_response': response_text[:200]}
+                        }
+                elif response.status == 401:
+                    # Try to get error details from response
+                    try:
+                        error_data = await response.json()
+                        error_msg = error_data.get('error', 'Invalid API token')
+                    except:
+                        error_msg = response_text[:200] if response_text else 'Invalid API token'
+                    
+                    logger.warning(f"Hugging Face API authentication failed: {error_msg}")
+                    return {
+                        'success': False,
+                        'message': f'Hugging Face API authentication failed: {error_msg}',
+                        'details': {'status_code': response.status, 'error': error_msg}
                     }
-                }
-            elif response.status == 401:
-                return {
-                    'success': False,
-                    'message': 'Hugging Face API authentication failed: Invalid API token',
-                    'details': {'status_code': response.status, 'error': 'unauthorized'}
-                }
-            else:
-                error_text = await response.text()
-                return {
-                    'success': False,
-                    'message': f'Hugging Face API test failed: {response.status} - {error_text[:200]}',
-                    'details': {'status_code': response.status, 'error': error_text[:200]}
-                }
+                else:
+                    logger.error(f"Hugging Face API test failed with status {response.status}: {response_text[:200]}")
+                    return {
+                        'success': False,
+                        'message': f'Hugging Face API test failed: {response.status} - {response_text[:200]}',
+                        'details': {'status_code': response.status, 'error': response_text[:200]}
+                    }
+        except Exception as e:
+            logger.error(f"Hugging Face API test exception: {e}")
+            return {
+                'success': False,
+                'message': f'Hugging Face API test failed: {str(e)}',
+                'details': {'error': str(e), 'type': type(e).__name__}
+            }
     
     async def _test_oauth2_token(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': 'OAuth2 token testing not yet implemented'}

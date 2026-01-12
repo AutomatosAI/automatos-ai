@@ -111,7 +111,7 @@ ALL_CREDENTIAL_TYPES = [
         ],
         "test_endpoint": {
             "method": "api_call",
-            "url": "https://huggingface.co/api/whoami",
+            "url": "https://huggingface.co/api/whoami-v2",
             "headers": {"Authorization": "Bearer {api_token}"}
         },
         "is_system": True
