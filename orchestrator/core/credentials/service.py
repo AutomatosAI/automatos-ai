@@ -350,31 +350,22 @@ class CredentialStore:
         )
         self.db.flush()  # Ensure audit log is saved
         
-        # Explicitly delete audit logs to avoid relationship cascade type issues
-        # Use raw SQL to handle potential VARCHAR/INTEGER mismatch
-        # Database column is VARCHAR, so cast the parameter
-        from sqlalchemy import text
-        try:
-            self.db.execute(
-                text("DELETE FROM credential_audit_logs WHERE credential_id = CAST(:cred_id AS VARCHAR)"),
-                {"cred_id": credential_id}
-            )
-            self.db.flush()
-        except Exception as e:
-            logger.warning(f"Could not delete audit logs for credential {credential_id}: {e}")
-            # Rollback the failed delete attempt to avoid transaction issues
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
-            # Continue with credential deletion anyway
+        # Note: Audit logs will be deleted automatically by database CASCADE constraint
+        # Relationship is set to lazy='noload' to prevent SQLAlchemy from querying it
+        # (which would cause VARCHAR/INTEGER type mismatch)
         
         # Secure deletion: overwrite encrypted data first
         credential.encrypted_data = self.encryption_service.encrypt('DELETED')
         self.db.flush()
         
-        # Delete credential (audit logs already deleted, so no cascade issues)
-        self.db.delete(credential)
+        # Delete credential using raw SQL to avoid SQLAlchemy relationship loading
+        # which causes VARCHAR/INTEGER type mismatch
+        # Database CASCADE will automatically delete audit logs
+        from sqlalchemy import text
+        self.db.execute(
+            text("DELETE FROM credentials WHERE id = :cred_id"),
+            {"cred_id": credential_id}
+        )
         self.db.commit()
         
         logger.info(f"Deleted credential '{cred_name}' (ID: {credential_id})")

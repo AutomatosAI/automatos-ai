@@ -89,7 +89,9 @@ class Credential(Base):
     
     # Relationships
     credential_type = relationship("CredentialType", back_populates="credentials")
-    audit_logs = relationship("CredentialAuditLog", back_populates="credential", cascade="all, delete-orphan")
+    # Note: cascade removed - audit logs deleted via database CASCADE to avoid SQLAlchemy type mismatch
+    # Database has ondelete='CASCADE' so audit logs are deleted automatically
+    audit_logs = relationship("CredentialAuditLog", back_populates="credential", lazy='noload', passive_deletes=True)
     # Note: tool_assignments relationship removed - AgentToolAssignment.credential_id is optional and may not always reference credentials
     
     # Unique constraint: one credential name per environment
