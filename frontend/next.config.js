@@ -3,28 +3,9 @@ const nextConfig = {
   typescript: { 
     ignoreBuildErrors: true 
   },
-  // Proxy API requests to backend (works like Nginx proxy)
-  // This allows frontend to use relative URLs like /api/agents
-  async rewrites() {
-    // Use NEXT_PUBLIC_API_URL (set in Railway at build time)
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    
-    // Remove trailing slash if present
-    const cleanUrl = backendUrl.replace(/\/$/, '')
-    
-    console.log('🔀 Next.js rewrites configured:', {
-      backendUrl: cleanUrl,
-      source: '/api/:path*',
-      destination: `${cleanUrl}/api/:path*`
-    })
-    
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${cleanUrl}/api/:path*`,
-      },
-    ]
-  }
+  // Rewrites disabled - using absolute URLs from client instead
+  // Next.js rewrites require env vars at build time, which is problematic on Railway
+  // The API client will use NEXT_PUBLIC_API_URL for direct calls to backend
 }
 
 module.exports = nextConfig
