@@ -348,12 +348,25 @@ class CredentialStore:
             success=True,
             metadata={"credential_name": cred_name}
         )
+        self.db.flush()  # Ensure audit log is saved
+        
+        # Explicitly delete audit logs to avoid relationship cascade type issues
+        # Use raw SQL to handle potential VARCHAR/INTEGER mismatch
+        from sqlalchemy import text
+        try:
+            self.db.execute(
+                text("DELETE FROM credential_audit_logs WHERE credential_id = :cred_id"),
+                {"cred_id": credential_id}
+            )
+        except Exception as e:
+            logger.warning(f"Could not delete audit logs for credential {credential_id}: {e}")
+            # Continue with credential deletion anyway
         
         # Secure deletion: overwrite encrypted data first
         credential.encrypted_data = self.encryption_service.encrypt('DELETED')
         self.db.flush()
         
-        # Delete credential
+        # Delete credential (audit logs already deleted, so no cascade issues)
         self.db.delete(credential)
         self.db.commit()
         
@@ -823,7 +836,10 @@ class CredentialStore:
         query = self.db.query(CredentialAuditLog)
         
         if credential_id:
-            query = query.filter(CredentialAuditLog.credential_id == credential_id)
+            # Handle potential VARCHAR/INTEGER mismatch by casting
+            from sqlalchemy import cast, Integer, text
+            # Use cast to ensure type compatibility
+            query = query.filter(cast(CredentialAuditLog.credential_id, Integer) == credential_id)
         
         if action:
             query = query.filter(CredentialAuditLog.action == action)

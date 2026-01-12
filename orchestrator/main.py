@@ -332,8 +332,8 @@ async def add_request_id_middleware(request, call_next):
 @app.middleware("http")
 async def api_tracking_middleware(request, call_next):
     """Track API calls and response times"""
-    # Skip tracking for websockets and static files
-    if request.url.path.startswith(("/ws/", "/static/", "/docs", "/openapi.json")):
+    # Skip tracking for websockets, static files, and OPTIONS (CORS preflight)
+    if request.url.path.startswith(("/ws/", "/static/", "/docs", "/openapi.json")) or request.method == "OPTIONS":
         return await call_next(request)
     
     start_time = time.time()
@@ -366,10 +366,16 @@ async def api_tracking_middleware(request, call_next):
             stats["error_count"] += 1
 
 # Simple API key auth dependency - use centralized config
+# Note: OPTIONS requests (CORS preflight) are handled by CORS middleware before this
 def require_api_key(x_api_key: str = Header(None)):
-    if config.REQUIRE_API_KEY and x_api_key != config.API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
+    # Skip API key check if not required
+    if not config.REQUIRE_API_KEY:
+        return True
+    # Allow if API key matches
+    if x_api_key == config.API_KEY:
+        return True
+    # Reject if API key is required but missing/invalid
+    raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 # Include API routers
 app.include_router(agents_router)

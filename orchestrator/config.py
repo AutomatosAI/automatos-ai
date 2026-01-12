@@ -63,8 +63,11 @@ class Config:
     # CORS (Frontend origins)
     # =============================================================================
     # Allow multiple origins (comma-separated) for Railway deployment
-    # Default includes localhost for local dev, but Railway frontend must be added
-    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    # Default includes localhost for local dev and Railway frontend domain
+    # Set CORS_ALLOW_ORIGINS in Railway to include your frontend domain
+    # For Railway: https://automotas-ai-frontend-production.up.railway.app
+    # For custom domain: https://ui.automatos.app
+    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://automotas-ai-frontend-production.up.railway.app")
     CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================

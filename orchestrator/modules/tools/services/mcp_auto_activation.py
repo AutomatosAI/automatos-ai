@@ -15,7 +15,7 @@ This creates a seamless UX: Add credential → Tools instantly available!
 """
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, cast, String
 from datetime import datetime
 from typing import List, Dict, Any
 import logging
@@ -67,9 +67,9 @@ class MCPAutoActivationService:
             matching_servers = self.db.query(MCPTool).filter(
                 or_(
                     # Check credentials_schema.credential_type
-                    MCPTool.credentials_schema['credential_type'].astext == credential_type_name,
+                    cast(MCPTool.credentials_schema['credential_type'], String) == credential_type_name,
                     # Check metadata.auto_enable_on_credential
-                    MCPTool.tool_metadata['auto_enable_on_credential'].astext == credential_type_name
+                    cast(MCPTool.tool_metadata['auto_enable_on_credential'], String) == credential_type_name
                 ),
                 # Only activate inactive servers
                 MCPTool.status == 'inactive'
@@ -166,8 +166,8 @@ class MCPAutoActivationService:
         
         matching_servers = self.db.query(MCPTool).filter(
             or_(
-                MCPTool.credentials_schema['credential_type'].astext == credential_type_name,
-                MCPTool.tool_metadata['auto_enable_on_credential'].astext == credential_type_name
+                cast(MCPTool.credentials_schema['credential_type'], String) == credential_type_name,
+                cast(MCPTool.tool_metadata['auto_enable_on_credential'], String) == credential_type_name
             ),
             MCPTool.status == 'inactive'
         ).all()
@@ -203,8 +203,10 @@ class MCPAutoActivationService:
         
         try:
             # Find servers linked to this credential
+            # Use cast() to properly query JSONB column
+            from sqlalchemy import cast, String
             linked_servers = self.db.query(MCPTool).filter(
-                MCPTool.tool_metadata['linked_credential_id'].astext == str(credential_id),
+                cast(MCPTool.tool_metadata['linked_credential_id'], String) == str(credential_id),
                 MCPTool.status == 'active'
             ).all()
             
