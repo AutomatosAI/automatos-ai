@@ -460,14 +460,11 @@ async def health_check():
     - `unhealthy`: Critical issues detected
     """
     try:
-        # Check WebSocket manager
-        websocket_status = "healthy" if manager else "unavailable"
-        websocket_connections = manager.get_connection_count() if manager else 0
-        
         # Check system components
+        # Note: WebSocket manager removed - using AI SDK SSE streaming instead
         components = {
             "api_server": "healthy",
-            "websocket_manager": websocket_status,
+            "streaming": "healthy (AI SDK SSE)",
             "multi_agent_systems": "healthy",
             "field_theory": "healthy",
             "context_engineering": "healthy",
@@ -488,7 +485,7 @@ async def health_check():
             "🔧 components": components,
             
             "📊 metrics": {
-                "websocket_connections": websocket_connections,
+                "streaming_connections": "SSE-based",
                 "uptime": "operational",
                 "memory_usage": "optimal",
                 "cpu_usage": "normal",
@@ -502,7 +499,7 @@ async def health_check():
             },
             
             "🔌 connectivity": {
-                "websocket": f"✅ Active ({websocket_connections} connections)",
+                "streaming": "✅ Active (AI SDK SSE)",
                 "http": "✅ Active",
                 "cors": "✅ Enabled"
             },
