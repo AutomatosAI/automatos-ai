@@ -5,9 +5,13 @@ nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract",
 [providers]
 python = "nixpkgs"
 
+# Install phase - Railway automatically caches pip packages between builds
+# Only reinstalls if requirements.txt changes
 [phases.install]
 cmds = [
-  "pip install --no-cache-dir -r requirements.txt",
+  # Install Python packages (pip cache enabled - Railway caches automatically)
+  "pip install -r requirements.txt",
+  # Download NLTK data (cached - only downloads if missing)
   "export NLTK_DATA=/usr/local/nltk_data && python -c \"import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')\" || true"
 ]
 
