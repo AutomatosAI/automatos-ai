@@ -534,7 +534,44 @@ class CredentialTester:
         return {'success': False, 'message': 'GitLab credential testing not yet implemented'}
     
     async def _test_huggingface(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        return {'success': False, 'message': 'Hugging Face credential testing not yet implemented'}
+        """Test Hugging Face API credentials"""
+        # Hugging Face uses 'api_token' field name
+        api_token = data.get('api_token') or data.get('api_key')  # Support both field names
+        
+        if not api_token:
+            return {'success': False, 'message': 'API token is required'}
+        
+        # Hugging Face API test endpoint
+        url = 'https://huggingface.co/api/whoami'
+        headers = {'Authorization': f'Bearer {api_token}'}
+        
+        async with self.session.get(url, headers=headers) as response:
+            if response.status == 200:
+                user_data = await response.json()
+                return {
+                    'success': True,
+                    'message': f'Hugging Face API connection successful. Authenticated as {user_data.get("name", "Unknown")}',
+                    'details': {
+                        'username': user_data.get('name'),
+                        'email': user_data.get('email'),
+                        'type': user_data.get('type'),  # user, org, etc.
+                        'canPay': user_data.get('canPay', False),
+                        'orgs': user_data.get('orgs', [])
+                    }
+                }
+            elif response.status == 401:
+                return {
+                    'success': False,
+                    'message': 'Hugging Face API authentication failed: Invalid API token',
+                    'details': {'status_code': response.status, 'error': 'unauthorized'}
+                }
+            else:
+                error_text = await response.text()
+                return {
+                    'success': False,
+                    'message': f'Hugging Face API test failed: {response.status} - {error_text[:200]}',
+                    'details': {'status_code': response.status, 'error': error_text[:200]}
+                }
     
     async def _test_oauth2_token(self, data: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'message': 'OAuth2 token testing not yet implemented'}
