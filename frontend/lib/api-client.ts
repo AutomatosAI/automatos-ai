@@ -86,6 +86,12 @@ class ApiClient {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
     this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
+    
+    // Warn if baseUrl is not set (will cause 404s)
+    if (!this.baseUrl && typeof window !== 'undefined') {
+      console.error('❌ NEXT_PUBLIC_API_URL is not set! API calls will fail.')
+      console.error('Set NEXT_PUBLIC_API_URL in Railway frontend service variables')
+    }
 
     // Get API key from environment variables
     const apiKey = typeof window !== 'undefined'
@@ -117,6 +123,7 @@ class ApiClient {
 
     console.log('🚀 API Client initialized')
     console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
+    console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
     console.log(`🔐 API Key: ${apiKey ? '✅ Configured' : '❌ Missing'}`)
     if (this.mockConfig.enabled) {
       console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
