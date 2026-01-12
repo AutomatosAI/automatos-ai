@@ -303,9 +303,13 @@ app = FastAPI(
 )
 
 # CORS middleware - use centralized config
+# Parse and clean CORS origins (handle comma-separated list with whitespace)
+cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
+logger.info(f"🌐 CORS configured with allowed origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ALLOW_ORIGINS.split(","),
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

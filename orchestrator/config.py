@@ -62,7 +62,10 @@ class Config:
     # =============================================================================
     # CORS (Frontend origins)
     # =============================================================================
-    CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    # Allow multiple origins (comma-separated) for Railway deployment
+    # Default includes localhost for local dev, but Railway frontend must be added
+    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================
     # LLM KEYS (Optional - LLM Manager handles these)
