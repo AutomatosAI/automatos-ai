@@ -1,8 +1,9 @@
 [phases.setup]
 # System packages needed
 # "file" package provides libmagic library needed for python-magic
-# Note: In Nix, "file" package provides libmagic, but we need to ensure it's accessible
-nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
+# Note: Python version comes from runtime.txt (python-3.11.9)
+# gcc includes g++, so we don't need both
+nixPkgs = ["python3", "gcc", "curl", "postgresql", "file", "tesseract", "ghostscript"]
 
 # Install phase - Railway caches pip packages when requirements.txt hasn't changed
 # IMPORTANT: Railway caches based on file hashes, so ensure requirements.txt is stable
