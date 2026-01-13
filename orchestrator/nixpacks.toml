@@ -1,19 +1,27 @@
 [phases.setup]
+# System packages needed
+# "file" package provides libmagic library needed for python-magic
 nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
 
 # Explicitly use Python from nixpkgs, ignore mise/.python-version
 [providers]
 python = "nixpkgs"
 
-# Install phase - Railway automatically caches pip packages between builds
-# Only reinstalls if requirements.txt changes
+# Install phase - Railway caches pip packages when requirements.txt hasn't changed
+# IMPORTANT: Railway caches based on file hashes, so ensure requirements.txt is stable
 [phases.install]
 cmds = [
-  # Install Python packages (pip cache enabled - Railway caches automatically)
+  # Install Python packages (pip uses cache - Railway caches the layer)
+  # Railway will cache this step if requirements.txt hash hasn't changed
   "pip install -r requirements.txt",
   # Download NLTK data (cached - only downloads if missing)
-  "export NLTK_DATA=/usr/local/nltk_data && python -c \"import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')\" || true"
+  "export NLTK_DATA=/usr/local/nltk_data && python -c \"import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')\" || true",
+  # Create symlink for libmagic so python-magic can find it
+  # Nix stores libraries in /nix/store, but python-magic looks in standard paths
+  "find /nix/store -name 'libmagic.so*' 2>/dev/null | head -1 | xargs -I {} sh -c 'mkdir -p /usr/lib && ln -sf {} /usr/lib/libmagic.so.1' || true"
 ]
 
 [variables]
 NLTK_DATA = "/usr/local/nltk_data"
+# python-magic needs libmagic - file package provides it, but Nix stores it in /nix/store
+# We'll set this in the install phase to ensure it's available at runtime
