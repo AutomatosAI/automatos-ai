@@ -1,6 +1,7 @@
 [phases.setup]
 # System packages needed
 # "file" package provides libmagic library needed for python-magic
+# Note: In Nix, "file" package provides libmagic, but we need to ensure it's accessible
 nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
 
 # Explicitly use Python from nixpkgs, ignore mise/.python-version
@@ -16,9 +17,8 @@ cmds = [
   "pip install -r requirements.txt",
   # Download NLTK data (cached - only downloads if missing)
   "export NLTK_DATA=/usr/local/nltk_data && python -c \"import nltk; import os; os.makedirs('/usr/local/nltk_data', exist_ok=True); nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')\" || true",
-  # Create symlink for libmagic so python-magic can find it
-  # Nix stores libraries in /nix/store, but python-magic looks in standard paths
-  "find /nix/store -name 'libmagic.so*' 2>/dev/null | head -1 | xargs -I {} sh -c 'mkdir -p /usr/lib && ln -sf {} /usr/lib/libmagic.so.1' || true"
+  # Make startup script executable
+  "chmod +x start-railway.sh || true"
 ]
 
 [variables]
