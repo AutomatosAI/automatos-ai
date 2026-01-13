@@ -39,9 +39,6 @@ set -e  # Re-enable exit on error for app startup
 # Get port from Railway (defaults to 8000)
 PORT=${PORT:-8000}
 
-# Re-enable exit on error for app startup
-set -e
-
 # Start the application
 # Use workers for production (Railway), reload for dev (local)
 if [ "${ENVIRONMENT:-production}" = "development" ]; then

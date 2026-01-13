@@ -18,6 +18,7 @@ import logging
 import mimetypes
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -317,18 +318,53 @@ class DocumentManager:
     def __init__(self, db_config: Dict[str, str]):
         self.db_config = db_config
         self.processor = DocumentProcessor()
+        self._db_initialized = False
+        self._init_lock = False  # Simple flag to prevent concurrent initialization
         
         # Use centralized embedding manager
         from core.llm import create_embedding_manager
         self.embedding_manager = create_embedding_manager()
         logger.info(f"DocumentManager using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
-        self._init_database()
+        # Don't initialize database at import time - do it lazily on first use
+    
+    def _ensure_database_initialized(self, max_retries: int = 5, retry_delay: float = 2.0):
+        """Ensure database is initialized with retry logic"""
+        if self._db_initialized:
+            return
+        
+        if self._init_lock:
+            # Wait for concurrent initialization
+            for _ in range(max_retries):
+                time.sleep(retry_delay)
+                if self._db_initialized:
+                    return
+            raise RuntimeError("Database initialization timeout")
+        
+        self._init_lock = True
+        try:
+            for attempt in range(max_retries):
+                try:
+                    self._init_database()
+                    self._db_initialized = True
+                    logger.info("Database initialized successfully")
+                    return
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    if "the database system is starting up" in str(e) or "connection" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(f"Database not ready (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                    raise
+            raise RuntimeError(f"Failed to initialize database after {max_retries} attempts")
+        finally:
+            self._init_lock = False
     
     def _init_database(self):
         """Initialize database tables if they don't exist"""
+        conn = psycopg2.connect(**self.db_config)
         try:
-            conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
             # Create documents table
@@ -383,13 +419,9 @@ class DocumentManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_documents_file_type ON documents(file_type);")
             
             conn.commit()
+        finally:
             cursor.close()
             conn.close()
-            logger.info("Database initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Error initializing database: {e}")
-            raise
     
     def _calculate_file_hash(self, file_path: str) -> str:
         """Calculate SHA-256 hash of file for deduplication"""
@@ -403,6 +435,7 @@ class DocumentManager:
                             tags: List[str] = None, description: str = "",
                             created_by: str = "system") -> int:
         """Upload and process a document"""
+        self._ensure_database_initialized()
         try:
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"File not found: {file_path}")
@@ -479,6 +512,7 @@ class DocumentManager:
     
     async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType):
         """Process document: extract text, chunk, and generate embeddings"""
+        self._ensure_database_initialized()
         try:
             logger.info(f"Starting document processing for document {document_id}, type: {file_type}")
             
@@ -770,6 +804,7 @@ class DocumentManager:
                       file_type: Optional[DocumentType] = None,
                       limit: int = 100, offset: int = 0) -> List[Dict]:
         """List documents with optional filtering"""
+        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -802,6 +837,7 @@ class DocumentManager:
     
     def get_document(self, document_id: int) -> Optional[Dict]:
         """Get document by ID"""
+        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -820,6 +856,7 @@ class DocumentManager:
     
     def delete_document(self, document_id: int) -> bool:
         """Delete document and all its chunks"""
+        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
@@ -844,6 +881,7 @@ class DocumentManager:
     
     def search_documents(self, query: str, limit: int = 10) -> List[Dict]:
         """Search documents by content similarity"""
+        self._ensure_database_initialized()
         try:
             # Generate query embedding
             query_embedding = asyncio.run(self._generate_embedding(query))
@@ -885,6 +923,7 @@ class DocumentManager:
     
     def get_document_stats(self) -> Dict:
         """Get document statistics"""
+        self._ensure_database_initialized()
         try:
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
