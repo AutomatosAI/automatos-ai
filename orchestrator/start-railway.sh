@@ -6,15 +6,20 @@
 # Works for both Railpack and Nixpacks
 # =============================================================================
 
-# Don't exit on error for libmagic setup (non-critical)
-set +e
-
 # Set NLTK data path
 export NLTK_DATA=/usr/local/nltk_data
 
-# Fix libmagic for python-magic
-# Try multiple methods to ensure libmagic is available
-if [ -d "/nix/store" ]; then
+# Fix libmagic for python-magic - MUST be done before any Python imports
+# Try multiple locations and methods to find libmagic
+set +e  # Don't exit on error for libmagic setup
+
+if [ -f "/usr/lib/libmagic.so.1" ]; then
+    # Symlink exists from build phase (Nixpacks)
+    export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
+elif [ -f "/usr/lib/x86_64-linux-gnu/libmagic.so.1" ]; then
+    # Debian/Ubuntu standard location (Railpack)
+    export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+elif [ -d "/nix/store" ]; then
     # Nixpacks: Find libmagic in /nix/store and create symlink
     LIBMAGIC=$(find /nix/store -name 'libmagic.so*' 2>/dev/null | head -1)
     if [ -n "$LIBMAGIC" ]; then
@@ -22,13 +27,14 @@ if [ -d "/nix/store" ]; then
         ln -sf "$LIBMAGIC" /usr/lib/libmagic.so.1 2>/dev/null || true
         export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
     fi
-elif [ -f "/usr/lib/x86_64-linux-gnu/libmagic.so.1" ]; then
-    # Debian/Ubuntu standard location
-    export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
-elif [ -f "/usr/lib/libmagic.so.1" ]; then
-    # Standard /usr/lib location
-    export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"
 fi
+
+# Verify libmagic is accessible (for debugging)
+if [ -n "$LD_LIBRARY_PATH" ]; then
+    echo "LD_LIBRARY_PATH set to: $LD_LIBRARY_PATH"
+fi
+
+set -e  # Re-enable exit on error for app startup
 
 # Get port from Railway (defaults to 8000)
 PORT=${PORT:-8000}
