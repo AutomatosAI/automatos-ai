@@ -4,10 +4,6 @@
 # Note: In Nix, "file" package provides libmagic, but we need to ensure it's accessible
 nixPkgs = ["python311", "gcc", "g++", "curl", "postgresql", "file", "tesseract", "ghostscript"]
 
-# Explicitly use Python from nixpkgs, ignore mise/.python-version
-[providers]
-python = "nixpkgs"
-
 # Install phase - Railway caches pip packages when requirements.txt hasn't changed
 # IMPORTANT: Railway caches based on file hashes, so ensure requirements.txt is stable
 [phases.install]
@@ -26,6 +22,4 @@ cmds = [
 
 [variables]
 NLTK_DATA = "/usr/local/nltk_data"
-# Set LD_LIBRARY_PATH to include /usr/lib where we symlink libmagic
-# This ensures python-magic can find libmagic at import time
-LD_LIBRARY_PATH = "/usr/lib:/nix/store"
+# Note: LD_LIBRARY_PATH is set in start-railway.sh at runtime
