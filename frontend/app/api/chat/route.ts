@@ -8,12 +8,23 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
+    // Get API key from environment, request headers, or fallback
+    const apiKey = process.env.NEXT_PUBLIC_API_KEY || 
+                   request.headers.get('x-api-key') ||
+                   'test_api_key_for_backend_validation_2025' // Fallback for Railway
+    
+    // Log for debugging (remove in production)
+    if (!process.env.NEXT_PUBLIC_API_KEY) {
+      console.warn('[Chat Proxy] Using fallback API key - set NEXT_PUBLIC_API_KEY in Railway')
+    }
+    
     // Forward to Python backend
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/plain',
+        'x-api-key': apiKey, // Always send API key
       },
       body: JSON.stringify(body),
     })

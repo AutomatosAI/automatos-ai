@@ -75,6 +75,12 @@ export function useChat({
       try {
         abortControllerRef.current = new AbortController()
         const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        
+        // Get API key from env or localStorage (from settings)
+        const apiKey = typeof window !== 'undefined' 
+          ? (process.env.NEXT_PUBLIC_API_KEY || localStorage.getItem('api_key'))
+          : process.env.NEXT_PUBLIC_API_KEY
+        
         const outgoingParts =
           Array.isArray(messageObj.parts) && messageObj.parts.length > 0
             ? messageObj.parts
@@ -85,6 +91,7 @@ export function useChat({
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...(apiKey ? { 'x-api-key': apiKey } : {}),
           },
           body: JSON.stringify({
             id: chatId || '',

@@ -21,9 +21,14 @@ from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
 logger = logging.getLogger(__name__)
 
 # Standard API key auth (matches all other APIs)
+# For chat endpoint, API key is optional if not set in env (user-facing feature)
 def require_api_key(x_api_key: str = Header(None)):
     required = os.getenv("API_KEY")
-    if required and x_api_key != required:
+    # If API_KEY is not set in env, allow requests (for user-facing chat)
+    if not required:
+        return True
+    # If API_KEY is set, require it
+    if x_api_key != required:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return True
 
