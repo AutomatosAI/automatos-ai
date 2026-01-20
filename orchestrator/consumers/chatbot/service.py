@@ -88,15 +88,55 @@ class ChatService:
         return query.order_by(desc(Chat.created_at)).limit(limit).all()
     
     def update_chat_title(self, chat_id: str, title: str) -> bool:
-        """Update chat title."""
+        """Update chat title, handling unique constraint violations."""
+        from sqlalchemy.exc import IntegrityError
+        
         chat = self.get_chat(chat_id)
-        if chat:
+        if not chat:
+            return False
+        
+        # If title is the same, no update needed
+        if chat.title == title:
+            return True
+        
+        # Try to update, handle unique constraint violation
+        try:
             chat.title = title
             chat.updated_at = datetime.utcnow()
             self.db.commit()
             logger.info(f"Updated chat {chat_id} title: {title}")
             return True
-        return False
+        except IntegrityError as e:
+            # Handle unique constraint: make title unique by appending counter
+            self.db.rollback()
+            base_title = title
+            counter = 1
+            while True:
+                unique_title = f"{base_title} ({counter})"
+                # Check if this title already exists for this user
+                existing = self.db.query(Chat).filter(
+                    Chat.user_id == chat.user_id,
+                    Chat.title == unique_title,
+                    Chat.id != chat.id
+                ).first()
+                
+                if not existing:
+                    try:
+                        chat.title = unique_title
+                        chat.updated_at = datetime.utcnow()
+                        self.db.commit()
+                        logger.info(f"Updated chat {chat_id} title to unique: {unique_title}")
+                        return True
+                    except IntegrityError:
+                        self.db.rollback()
+                        counter += 1
+                        continue
+                counter += 1
+                
+                # Safety: prevent infinite loop
+                if counter > 100:
+                    logger.error(f"Failed to generate unique title for chat {chat_id} after 100 attempts")
+                    return False
     
     def delete_chat(self, chat_id: str) -> bool:
         """Delete a chat and all its messages."""
@@ -270,6 +310,76 @@ class StreamingChatService:
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             supports_native_tools = provider in ['openai', 'anthropic', 'grok'] if provider else False
             use_tools = None if is_simple else tools if supports_native_tools else None
+
+            # Explicit tool call bypass (e.g., "Use tool X with params {...}")
+            explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
+            if explicit_call and tools:
+                available_tool_names = {
+                    t.get("function", {}).get("name")
+                    for t in tools
+                    if isinstance(t, dict)
+                }
+                tool_name = explicit_call["tool_name"]
+                tool_args = explicit_call["tool_args"]
+                parse_error = explicit_call["parse_error"]
+
+                if tool_name in available_tool_names:
+                    if parse_error:
+                        full_response = f"Invalid tool params for {tool_name}: {parse_error}"
+                    else:
+                        import time
+                        tool_call_id = str(uuid.uuid4())
+                        start_time = time.time()
+
+                        yield self.streaming_handler.format_aisdk_tool_start(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            tool_input=tool_args,
+                        )
+                        await asyncio.sleep(0)
+
+                        result = await self.tool_router.execute_and_format(
+                            tool_name,
+                            tool_args,
+                            agent_id=agent_id
+                        )
+
+                        yield self.streaming_handler.format_aisdk_tool_end(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            success=result.get("success", False),
+                            error=(result.get("raw_result", {}) or {}).get("error"),
+                            duration_ms=int((time.time() - start_time) * 1000),
+                        )
+                        await asyncio.sleep(0)
+
+                        if result.get("frontend_data"):
+                            tool_data.update(result["frontend_data"])
+                            yield self.streaming_handler.format_aisdk_tool_data(result["frontend_data"])
+                            await asyncio.sleep(0)
+
+                        if result.get("success"):
+                            full_response = f"✅ Ran {tool_name} successfully."
+                        else:
+                            error_msg = (result.get("raw_result", {}) or {}).get("error", "Unknown error")
+                            full_response = f"❌ {tool_name} failed: {error_msg}"
+
+                    # Stream text response
+                    async for chunk in self.streaming_handler.stream_text_aisdk(full_response):
+                        yield chunk
+
+                    # Send finish event
+                    yield self.streaming_handler.format_aisdk_finish()
+
+                    # Save assistant message
+                    assistant_parts.append({'type': 'text', 'text': full_response})
+                    self.chat_service.save_message(chat_id=chat_id, role="assistant", parts=assistant_parts)
+
+                    # Store memory
+                    if latest_text and full_response:
+                        await self.memory_injector.store_conversation_memory(chat_id, latest_text, full_response)
+
+                    return
             
             # Pre-trigger tools for models without native tool calling
             if not is_simple and not supports_native_tools:
@@ -288,6 +398,13 @@ class StreamingChatService:
             
             # Generate response via shared.llm
             response = await llm_manager.generate_response(messages=llm_messages, tools=use_tools)
+            
+            # DEBUG: Log LLM response to understand why tools aren't being called
+            logger.info(f"🔍 LLM Response - has_tool_calls: {bool(response.tool_calls)}, content_length: {len(response.content or '')}, finish_reason: {getattr(response, 'finish_reason', 'unknown')}")
+            if response.tool_calls:
+                logger.info(f"✅ LLM requested {len(response.tool_calls)} tool calls")
+            elif use_tools:
+                logger.warning(f"⚠️ LLM did NOT call tools despite {len(use_tools)} tools being available. Response: {response.content[:200] if response.content else 'No content'}")
             
             # Handle tool calls from LLM (supports multi-turn)
             if response.tool_calls:
@@ -550,15 +667,28 @@ class StreamingChatService:
         import asyncio
         
         try:
+            # Start parallel tasks
+            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
+            
+            # Start memory retrieval concurrently
+            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+            memory_task = asyncio.create_task(self.memory_injector.retrieve_relevant_memories(chat_id, latest_text))
+            
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
             await asyncio.sleep(0)
             
-            # Activate agent from factory
-            logger.info(f"Activating agent {agent_id} for chat {chat_id}")
-            agent_runtime = await self.agent_factory.activate_agent(agent_id)
+            # Await agent activation
+            try:
+                agent_runtime = await agent_task
+                logger.info(f"Activating agent {agent_id} for chat {chat_id}")
+            except Exception as e:
+                 # Cancel memory task if agent fails
+                memory_task.cancel()
+                raise e
             
             if not agent_runtime:
+                memory_task.cancel()
                 raise Exception(f"Failed to activate agent {agent_id}")
             
             # Send agent info to frontend
@@ -585,12 +715,8 @@ class StreamingChatService:
             else:
                 llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
             
-            # Get shared user memory
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            memory_context = await self.memory_injector.retrieve_relevant_memories(
-                chat_id, 
-                latest_text
-            )
+            # Await memory result
+            memory_context = await memory_task
             
             if memory_context:
                 logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
@@ -599,17 +725,38 @@ class StreamingChatService:
             # Determine tool usage
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
             
-            # Use agent's tools (MCP tools + skill tools)
-            agent_mcp_tools = agent_runtime.tools if hasattr(agent_runtime, 'tools') else []
-            all_tools = agent_mcp_tools + skill_tools if skill_tools else agent_mcp_tools
-            use_tools = None if is_simple else (all_tools if all_tools else get_chat_tools())
+            # CRITICAL: Use tool_router to get properly formatted function schemas
+            # agent_runtime.tools contains METADATA, not OpenAI function schemas!
+            # get_chat_tools returns proper OpenAI function schemas based on agent permissions
+            from consumers.chatbot.tool_router import get_chat_tools
+            use_tools = None if is_simple else get_chat_tools(agent_id=agent_id)
+            
+            # Add skill tools if available
+            if not is_simple and skill_tools:
+                if use_tools is None:
+                    use_tools = skill_tools
+                else:
+                    use_tools = use_tools + skill_tools
+            
             
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
+            logger.info(f"🔍 Agent tools - count: {len(use_tools) if use_tools else 0}, is_simple: {is_simple}")
+            if use_tools:
+                tool_names = [t.get("function", {}).get("name") for t in use_tools if isinstance(t, dict)]
+                logger.info(f"🔍 Available tools: {tool_names}")
+            
             response = await agent_runtime.llm_manager.generate_response(
                 messages=llm_messages,
                 tools=use_tools
             )
+            
+            # DEBUG: Log LLM response to understand why tools aren't being called
+            logger.info(f"🔍 Agent LLM Response - has_tool_calls: {bool(response.tool_calls)}, content_length: {len(response.content or '')}, finish_reason: {getattr(response, 'finish_reason', 'unknown')}")
+            if response.tool_calls:
+                logger.info(f"✅ Agent LLM requested {len(response.tool_calls)} tool calls")
+            elif use_tools:
+                logger.warning(f"⚠️ Agent LLM did NOT call tools despite {len(use_tools)} tools being available. Response preview: {response.content[:200] if response.content else 'No content'}")
             
             # Track response parts
             assistant_parts = []
@@ -825,18 +972,28 @@ class StreamingChatService:
         base_prompt = """You are a helpful AI assistant with access to various tools and knowledge.
 
 CRITICAL INSTRUCTIONS:
-- When asked to CREATE, WRITE, or GENERATE something, you MUST use your tools to actually do it
+- When asked to CREATE, WRITE, GENERATE, POST, SEND, or MESSAGE something, you MUST use your tools to actually do it
 - DO NOT explain how to do something - ACTUALLY DO IT using function calls
 - If you have a write_file or create_document tool, USE IT to create files
 - If you have database query tools, USE THEM to get real data
+- If you have communication tools (adapter_slack, adapter_github, etc.), USE THEM to send messages, post updates, create issues, etc.
 - EXECUTE first, explain later (if needed)
 
 Examples:
 - "Create a report" → Call write_file tool with the report content
 - "Query the database" → Call smart_query_database tool
 - "Search for code" → Call search_codebase tool
+- "Post a message to Slack" → Call adapter_slack tool with operation="chat.postMessage"
+- "Send a message" → Call adapter_slack tool to actually send it
+- "Create a GitHub issue" → Call adapter_github tool with appropriate operation
 
-Always be clear, concise, and ACTION-ORIENTED in your responses."""
+COMMUNICATION TOOLS:
+- adapter_slack: Use this to POST messages to Slack channels, read conversations, upload files, add reactions
+  - When user asks to "post", "send", "message" in Slack → Use adapter_slack with operation="chat.postMessage"
+  - Required params: {"channel": "C123456", "text": "your message"}
+- adapter_github: Use this to interact with GitHub repositories, create issues, manage PRs
+
+Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
         
         # Add agent-specific context
         agent_context = f"""

@@ -107,18 +107,18 @@ export function Chat({
 
   // Generate title
   useEffect(() => {
-    if (!hasGeneratedTitle && messages.length >= 2) {
+    if (!hasGeneratedTitle && messages.length >= 2 && activeChatId) {
       const firstUserMessage = messages.find(m => m.role === 'user')
       if (firstUserMessage && firstUserMessage.parts) {
         const textPart = firstUserMessage.parts.find(p => p.type === 'text')
         if (textPart && 'text' in textPart) {
           const title = generateTitle(textPart.text)
-          updateChatTitle(id, title).catch(console.error)
+          updateChatTitle(activeChatId, title).catch(console.error)
           setHasGeneratedTitle(true)
         }
       }
     }
-  }, [messages, id, hasGeneratedTitle])
+  }, [messages, activeChatId, hasGeneratedTitle])
 
   // Handle selections
   const handleArtifactSelect = useCallback((artifact: Artifact) => {

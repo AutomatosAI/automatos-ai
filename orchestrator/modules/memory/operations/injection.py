@@ -13,6 +13,8 @@ Handles:
 
 import json
 import logging
+import asyncio
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -73,6 +75,10 @@ class MemoryInjector:
     Handles memory retrieval and storage for the chat service.
     Uses multiple strategies to ensure relevant context is available.
     """
+    
+    def __init__(self):
+        self._recent_cache = {"time": 0, "data": []}
+        self._cache_ttl = 60  # Cache recent memories for 60 seconds
     
     async def retrieve_relevant_memories(
         self,
@@ -185,36 +191,46 @@ class MemoryInjector:
         all_memories = []
         seen_ids = set()
         
-        # 1. Get semantically relevant memories
-        logger.info(f"[Memory] Semantic search for: {query[:50]}...")
-        try:
-            semantic_memories = await memory_system.retrieve_relevant_memories(
-                agent_id=1,
-                context=query,
-                memory_types=["experience"],
-                top_k=8
-            ) or []
-            for mem in semantic_memories:
-                mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
-                if mem_id not in seen_ids:
-                    seen_ids.add(mem_id)
-                    all_memories.append(('semantic', mem))
-            logger.info(f"[Memory] Semantic search found {len(semantic_memories)} memories")
-        except Exception as e:
-            logger.error(f"[Memory] Semantic search failed: {e}")
+        # Run searches in parallel
+        semantic_task = memory_system.retrieve_relevant_memories(
+            agent_id=1,
+            context=query,
+            memory_types=["experience"],
+            top_k=8
+        )
+        recent_task = self._get_recent_memories(limit=10)
         
-        # 2. Get recent memories for continuity
-        logger.info("[Memory] Fetching recent memories...")
-        try:
-            recent_memories = await self._get_recent_memories(limit=10)
-            for mem in recent_memories:
-                mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
-                if mem_id not in seen_ids:
-                    seen_ids.add(mem_id)
-                    all_memories.append(('recent', mem))
+        logger.info(f"[Memory] Starting parallel retrieval: Semantic + Recent")
+        results = await asyncio.gather(semantic_task, recent_task, return_exceptions=True)
+        
+        # Process Semantic Results
+        semantic_memories = []
+        if isinstance(results[0], list):
+            semantic_memories = results[0]
+            logger.info(f"[Memory] Semantic search found {len(semantic_memories)} memories")
+        else:
+            logger.error(f"[Memory] Semantic search failed: {results[0]}")
+
+        # Process Recent Results
+        recent_memories = []
+        if isinstance(results[1], list):
+            recent_memories = results[1]
             logger.info(f"[Memory] Recent memories: {len(recent_memories)}")
-        except Exception as e:
-            logger.error(f"[Memory] Recent memory fetch failed: {e}")
+        else:
+            logger.error(f"[Memory] Recent memory fetch failed: {results[1]}")
+            
+        # Combine results
+        for mem in semantic_memories:
+            mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
+            if mem_id not in seen_ids:
+                seen_ids.add(mem_id)
+                all_memories.append(('semantic', mem))
+                
+        for mem in recent_memories:
+            mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
+            if mem_id not in seen_ids:
+                seen_ids.add(mem_id)
+                all_memories.append(('recent', mem))
         
         if not all_memories:
             logger.info("[Memory] No memories found")
@@ -245,7 +261,13 @@ class MemoryInjector:
         return "\n".join(memory_lines) if memory_lines else None
     
     async def _get_recent_memories(self, limit: int = 10) -> List[Dict]:
-        """Fetch the most recent memories regardless of semantic similarity."""
+        """Fetch the most recent memories regardless of semantic similarity. Cached for 60s."""
+        # Check cache
+        now = time.time()
+        if self._recent_cache["data"] and (now - self._recent_cache["time"] < self._cache_ttl):
+            logger.info("[Memory] Using cached recent memories")
+            return self._recent_cache["data"][:limit]
+
         try:
             from core.database.database import get_db_session
             from sqlalchemy import text
@@ -273,6 +295,11 @@ class MemoryInjector:
                         'metadata': row.metadata,
                         'created_at': row.created_at
                     })
+                # Update cache
+                self._recent_cache = {
+                    "time": time.time(),
+                    "data": memories
+                }
                 return memories
         except Exception as e:
             logger.error(f"[Memory] Direct DB query failed: {e}")
@@ -311,8 +338,10 @@ class MemoryInjector:
                 "goal_relevant": True
             }
             
+            # Use None for agent_id when no specific agent is selected (general chat)
+            # This avoids foreign key violations when agent_id=1 doesn't exist
             result = await memory_system.store_experience(
-                agent_id=1,
+                agent_id=None,
                 experience=experience
             )
             logger.info(f"[Memory] ✅ Stored (id={result}): {user_message[:50]}...")

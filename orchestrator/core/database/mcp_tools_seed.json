@@ -35,7 +35,8 @@
     ],
     "metadata": {
       "documentation": "https://platform.openai.com/docs",
-      "auto_enable_on_credential": "openai"
+      "auto_enable_on_credential": "openai",
+      "credential_type": "openAiApi"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -80,7 +81,8 @@
       "installed_at": "2025-10-20T18:31:41.599Z",
       "is_installed": true,
       "documentation": "https://docs.anthropic.com/",
-      "auto_enable_on_credential": "anthropic"
+      "auto_enable_on_credential": "anthropic",
+      "credential_type": "anthropic_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -125,7 +127,8 @@
       "installed_at": "2025-10-19T22:58:12.465Z",
       "is_installed": true,
       "documentation": "https://huggingface.co/docs",
-      "auto_enable_on_credential": "huggingface"
+      "auto_enable_on_credential": "huggingface",
+      "credential_type": "huggingface_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -187,7 +190,8 @@
     ],
     "metadata": {
       "documentation": "https://www.postgresql.org/docs/",
-      "auto_enable_on_credential": "postgresql"
+      "auto_enable_on_credential": "postgresql",
+      "credential_type": "postgres_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -249,7 +253,8 @@
     ],
     "metadata": {
       "documentation": "https://dev.mysql.com/doc/",
-      "auto_enable_on_credential": "mysql"
+      "auto_enable_on_credential": "mysql",
+      "credential_type": "mysql_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -293,7 +298,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.mongodb.com/",
-      "auto_enable_on_credential": "mongodb"
+      "auto_enable_on_credential": "mongodb",
+      "credential_type": "mongoDb"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -345,7 +351,8 @@
     ],
     "metadata": {
       "documentation": "https://redis.io/docs/",
-      "auto_enable_on_credential": "redis"
+      "auto_enable_on_credential": "redis",
+      "credential_type": "redis"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -392,7 +399,8 @@
     ],
     "metadata": {
       "documentation": "https://www.elastic.co/guide/",
-      "auto_enable_on_credential": "elasticsearch"
+      "auto_enable_on_credential": "elasticsearch",
+      "credential_type": "elasticsearch_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -447,7 +455,8 @@
       "installed_at": "2025-10-19T23:37:34.218Z",
       "is_installed": true,
       "documentation": "https://docs.aws.amazon.com/",
-      "auto_enable_on_credential": "aws"
+      "auto_enable_on_credential": "aws",
+      "credential_type": "aws"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -503,7 +512,8 @@
       "installed_at": "2025-10-20T18:29:54.495Z",
       "is_installed": true,
       "documentation": "https://docs.microsoft.com/azure/",
-      "auto_enable_on_credential": "azure"
+      "auto_enable_on_credential": "azure",
+      "credential_type": "azure_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -547,7 +557,8 @@
     ],
     "metadata": {
       "documentation": "https://cloud.google.com/docs",
-      "auto_enable_on_credential": "google_cloud"
+      "auto_enable_on_credential": "google_cloud",
+      "credential_type": "google_cloud_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -590,7 +601,8 @@
     ],
     "metadata": {
       "documentation": "https://api.slack.com/docs",
-      "auto_enable_on_credential": "slack"
+      "auto_enable_on_credential": "slack",
+      "credential_type": "slack_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -633,7 +645,8 @@
     ],
     "metadata": {
       "documentation": "https://discord.com/developers/docs",
-      "auto_enable_on_credential": "discord"
+      "auto_enable_on_credential": "discord",
+      "credential_type": "discordBotApi"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -676,7 +689,8 @@
     ],
     "metadata": {
       "documentation": "https://core.telegram.org/bots/api",
-      "auto_enable_on_credential": "telegram"
+      "auto_enable_on_credential": "telegram",
+      "credential_type": "telegram_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -724,7 +738,8 @@
     ],
     "metadata": {
       "documentation": "https://www.twilio.com/docs",
-      "auto_enable_on_credential": "twilio"
+      "auto_enable_on_credential": "twilio",
+      "credential_type": "twilio_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -767,7 +782,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.sendgrid.com/",
-      "auto_enable_on_credential": "sendgrid"
+      "auto_enable_on_credential": "sendgrid",
+      "credential_type": "sendGridApi"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -810,7 +826,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.github.com/",
-      "auto_enable_on_credential": "github"
+      "auto_enable_on_credential": "github",
+      "credential_type": "github_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -857,7 +874,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.gitlab.com/",
-      "auto_enable_on_credential": "gitlab"
+      "auto_enable_on_credential": "gitlab",
+      "credential_type": "gitlab_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -914,7 +932,8 @@
     ],
     "metadata": {
       "documentation": "https://www.openssh.com/manual.html",
-      "auto_enable_on_credential": "ssh"
+      "auto_enable_on_credential": "ssh",
+      "credential_type": "ssh_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -959,7 +978,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.docker.com/",
-      "auto_enable_on_credential": "docker"
+      "auto_enable_on_credential": "docker",
+      "credential_type": "docker_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1002,7 +1022,8 @@
     ],
     "metadata": {
       "documentation": "https://kubernetes.io/docs/",
-      "auto_enable_on_credential": "kubernetes"
+      "auto_enable_on_credential": "kubernetes",
+      "credential_type": "kubernetes_credentials"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1045,7 +1066,8 @@
     ],
     "metadata": {
       "documentation": "https://stripe.com/docs",
-      "auto_enable_on_credential": "stripe"
+      "auto_enable_on_credential": "stripe",
+      "credential_type": "stripe_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1093,7 +1115,8 @@
     ],
     "metadata": {
       "documentation": "https://developer.paypal.com/docs",
-      "auto_enable_on_credential": "paypal"
+      "auto_enable_on_credential": "paypal",
+      "credential_type": "payPalApi"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1151,7 +1174,8 @@
     ],
     "metadata": {
       "documentation": "https://developer.salesforce.com/docs",
-      "auto_enable_on_credential": "salesforce"
+      "auto_enable_on_credential": "salesforce",
+      "credential_type": "salesforceOAuth2Api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1194,7 +1218,8 @@
     ],
     "metadata": {
       "documentation": "https://developers.hubspot.com/docs",
-      "auto_enable_on_credential": "hubspot"
+      "auto_enable_on_credential": "hubspot",
+      "credential_type": "hubspot_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1242,7 +1267,8 @@
     ],
     "metadata": {
       "documentation": "https://docs.datadoghq.com/",
-      "auto_enable_on_credential": "datadog"
+      "auto_enable_on_credential": "datadog",
+      "credential_type": "datadog_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1296,7 +1322,8 @@
       "installed_at": "2025-10-22T17:41:24.725Z",
       "is_installed": true,
       "documentation": "https://docs.aws.amazon.com/s3/",
-      "auto_enable_on_credential": "aws_s3"
+      "auto_enable_on_credential": "aws_s3",
+      "credential_type": "s3"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1348,7 +1375,8 @@
     ],
     "metadata": {
       "documentation": "https://restfulapi.net/",
-      "auto_enable_on_credential": "generic_api"
+      "auto_enable_on_credential": "generic_api",
+      "credential_type": "generic_api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1406,7 +1434,8 @@
     ],
     "metadata": {
       "documentation": "https://oauth.net/2/",
-      "auto_enable_on_credential": "oauth2"
+      "auto_enable_on_credential": "oauth2",
+      "credential_type": "oAuth2Api"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -1453,7 +1482,8 @@
     ],
     "metadata": {
       "documentation": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication",
-      "auto_enable_on_credential": "http_basic"
+      "auto_enable_on_credential": "http_basic",
+      "credential_type": "http_basic_auth"
     },
     "created_by": "system",
     "created_at": "2025-10-19T13:26:30.632280",
@@ -13788,7 +13818,7 @@
     "metadata": {
       "documentation": "https://dev.mysql.com/doc/",
       "auto_enable_on_credential": "mySql",
-      "credential_type": "mySql"
+      "credential_type": "mysql_credentials"
     },
     "created_by": null,
     "created_at": "2025-10-19T23:17:21.679355",

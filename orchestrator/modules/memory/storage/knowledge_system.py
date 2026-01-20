@@ -58,7 +58,7 @@ class MemoryItem(Base):
     __tablename__ = 'memory_items'
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    agent_id = Column(Integer, nullable=False)
+    agent_id = Column(Integer, nullable=True)  # Allow NULL for general conversations without specific agent
     content = Column(Text, nullable=False)
     memory_type = Column(String(50), nullable=False)
     memory_level = Column(String(50), nullable=False, default=MemoryLevel.SHORT_TERM)
@@ -216,7 +216,7 @@ class HierarchicalMemorySystem:
     
     async def store_experience(
         self,
-        agent_id: int,
+        agent_id: Optional[int],
         experience: Dict[str, Any]
     ) -> str:
         """

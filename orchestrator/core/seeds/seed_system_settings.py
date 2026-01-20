@@ -246,6 +246,23 @@ def seed_system_settings(db: Session):
             "description": "Public API URL for frontend",
             "is_required": True
         },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "context_forge_api_key",
+            "default_value": "",
+            "value_type": "string",
+            "description": "Context Forge admin API key for bulk imports and tool sync",
+            "is_required": False,
+            "is_sensitive": True
+        },
+        {
+            "category": SettingCategory.GENERAL.value,
+            "key": "context_forge_url",
+            "default_value": "https://mcp.automatos.app",
+            "value_type": "string",
+            "description": "Context Forge base URL (admin UI + API)",
+            "is_required": False
+        },
         
         # ========================================
         # ORCHESTRATOR LLM SETTINGS

@@ -1,9 +1,10 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, text
 import time
 import logging
+import os
 
 from core.database.database import get_db
 from core.models import PriorityLevel
@@ -20,7 +21,14 @@ from core.models import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+# API key authentication (consistent with other routes)
+def require_api_key(x_api_key: str = Header(None)):
+    required = os.getenv("API_KEY")
+    if required and x_api_key != required:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return True 
 
 def _normalize_tags(raw_tags) -> List[str]:
     """Normalize incoming tags into a list of unique, lower-trimmed strings."""
@@ -50,28 +58,40 @@ def _normalize_tags(raw_tags) -> List[str]:
     return normalized
 
 
-def _build_agent_response(agent: Agent) -> AgentResponse:
+def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build agent response with skills and tools"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
     logger.info(f"Agent {agent.id} model_config: {model_cfg}")
     
-    # Build tools list from tool_assignments relationship
+    # Build tools list - CLEAN ARCHITECTURE
+    # Simple: tool_id is 'slack', 'github', etc. (no prefix, no transformation)
     tools = []
     if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
+        from core.models.core import MCPTool
         for assignment in agent.tool_assignments:
-            if assignment.enabled and hasattr(assignment, 'tool'):
-                tools.append({
-                    "id": assignment.tool.id,
-                    "name": assignment.tool.name,
-                    "description": assignment.tool.description,
-                    "provider": assignment.tool.provider,
-                    "category": assignment.tool.category,
-                    "icon": assignment.tool.icon,
-                    "permissions": assignment.permissions or {},
-                    "configuration": assignment.configuration or {},
-                    "assigned_at": assignment.assigned_at
-                })
+            if assignment.enabled:
+                # Fetch tool metadata from mcp_tools
+                tool = db.query(MCPTool).filter(
+                    MCPTool.tool_id == assignment.tool_id,
+                    MCPTool.status == 'active'
+                ).first()
+                
+                if tool:
+                    tools.append({
+                        "id": tool.id,  # Fix: Use MCPTool ID (PK) for frontend matching
+                        "assignment_id": assignment.id, # Keep assignment ID for reference
+                        "name": assignment.tool_id,  # Clean: 'slack', 'github'
+                        "description": tool.description,
+                        "provider": tool.provider,
+                        "category": tool.category,
+                        "icon": tool.icon,
+                        "permissions": {},
+                        "configuration": {},
+                        "assigned_at": assignment.created_at
+                    })
+                else:
+                    logger.warning(f"Skipping assignment {assignment.id}: Tool '{assignment.tool_id}' not found or inactive.")
     
     # Read-time adapter: Remove tags from configuration if present (legacy data cleanup)
     # agent.tags is the single source of truth, configuration should not contain tags
@@ -110,9 +130,7 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
-# from main import require_api_key
-
-@router.get("/types", )
+@router.get("/types", dependencies=[Depends(require_api_key)])
 async def get_agent_types():
     """Get available agent types"""
     return {
@@ -138,7 +156,7 @@ async def get_agent_types():
         }
     }
 
-@router.get("/stats", )
+@router.get("/stats", dependencies=[Depends(require_api_key)])
 async def get_agent_stats(db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
@@ -167,7 +185,7 @@ async def get_agent_stats(db: Session = Depends(get_db)):
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/bulk", response_model=List[AgentResponse], )
+@router.post("/bulk", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
 async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
@@ -221,7 +239,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         for agent in created_agents:
             db.refresh(agent)
             agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
-            result.append(_build_agent_response(agent_with_skills))
+            result.append(_build_agent_response(agent_with_skills, db))
         
         return result
         
@@ -232,7 +250,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
 
-@router.post("/", response_model=AgentResponse, )
+@router.post("/", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     print("🚀 API CALL: create_agent function called!")
@@ -313,9 +331,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
                 assignment = AgentToolAssignment(
                     agent_id=agent.id,
                     tool_id=tool.id,
-                    enabled=True,
-                    permissions={"read": True, "write": True, "execute": True},
-                    configuration={}
+                    enabled=True
                 )
                 db.add(assignment)
         
@@ -325,10 +341,10 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         # Load skills and tools for response
         agent_with_skills_and_tools = db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+            joinedload(Agent.tool_assignments)
         ).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills_and_tools)
+        return _build_agent_response(agent_with_skills_and_tools, db)
         
     except HTTPException:
         raise
@@ -337,7 +353,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
 
-@router.get("/", response_model=List[AgentResponse], )
+@router.get("/", response_model=List[AgentResponse], dependencies=[Depends(require_api_key)])
 async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -351,7 +367,7 @@ async def list_agents(
     try:
         query = db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+            joinedload(Agent.tool_assignments)  # Note: tools are fetched separately by tool_id
         )
         
         # Apply filters
@@ -373,13 +389,13 @@ async def list_agents(
         
         agents = query.offset(skip).limit(limit).all()
         
-        return [_build_agent_response(agent) for agent in agents]
+        return [_build_agent_response(agent, db) for agent in agents]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/status", )
+@router.get("/{agent_id}/status", dependencies=[Depends(require_api_key)])
 async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
@@ -405,7 +421,7 @@ async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/execute", )
+@router.post("/{agent_id}/execute", dependencies=[Depends(require_api_key)])
 async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
@@ -435,25 +451,25 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}", response_model=AgentResponse, )
+@router.get("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def get_agent(agent_id: int, db: Session = Depends(get_db)):
     """Get a specific agent by ID with skills and tools"""
     try:
         agent = db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
+            joinedload(Agent.tool_assignments)
         ).filter(Agent.id == agent_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        return _build_agent_response(agent)
+        return _build_agent_response(agent, db)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/skills", )
+@router.get("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
 async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
     """Get skills for a specific agent"""
     try:
@@ -479,7 +495,7 @@ async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/skills", )
+@router.post("/{agent_id}/skills", dependencies=[Depends(require_api_key)])
 async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
@@ -504,7 +520,7 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = De
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{agent_id}", response_model=AgentResponse, )
+@router.put("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_api_key)])
 async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
@@ -534,6 +550,62 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
                 config = agent.configuration.copy()
                 config.pop("tags", None)
                 agent.configuration = config
+
+        # Handle tool updates (NEW)
+        if agent_update.tool_ids is not None:
+            logger.info(f"🛠️ Updating tool assignments for agent {agent.id} to: {agent_update.tool_ids}")
+            
+            # Validate tools exist and are active
+            tools = db.query(MCPTool).filter(
+                MCPTool.id.in_(agent_update.tool_ids),
+                MCPTool.status == "active"
+            ).all()
+            
+            if len(tools) != len(agent_update.tool_ids):
+                found_ids = [t.id for t in tools]
+                missing_ids = [tid for tid in agent_update.tool_ids if tid not in found_ids]
+                raise HTTPException(status_code=404, detail=f"Tools not found or inactive: {missing_ids}")
+            
+            # Create map of PK -> String ID for resolution
+            tool_pk_map = {t.id: t.tool_id for t in tools}
+            
+            # Create a set of NEW clean IDs being requested
+            new_tool_ids_set = set()
+            for tid in agent_update.tool_ids:
+                if tid in tool_pk_map:
+                    new_tool_ids_set.add(tool_pk_map[tid])
+            
+            # Get current assignments
+            current_assignments = db.query(AgentToolAssignment).filter(
+                AgentToolAssignment.agent_id == agent.id
+            ).all()
+            current_map = {a.tool_id: a for a in current_assignments}
+            
+            # 1. Remove assignments not in the new list
+            for tool_id, assignment in current_map.items():
+                if tool_id not in new_tool_ids_set:
+                    logger.info(f"Removing assignment {assignment.id} for Agent {agent.id}: Tool '{tool_id}' deselected.")
+                    db.delete(assignment)
+             
+            # 2. Add or update assignments
+            for tool_pk in agent_update.tool_ids:
+                clean_tool_id = tool_pk_map.get(tool_pk)
+                if not clean_tool_id:
+                    logger.error(f"Could not resolve String ID for Tool PK {tool_pk}")
+                    continue
+
+                if clean_tool_id in current_map:
+                    # Ensure enabled if it was disabled
+                    current_map[clean_tool_id].enabled = True
+                else:
+                    # Create new assignment using the CLEAN STRING ID
+                    logger.info(f"Creating NEW assignment for Agent {agent.id}: Tool '{clean_tool_id}' (PK: {tool_pk})")
+                    new_assignment = AgentToolAssignment(
+                        agent_id=agent.id,
+                        tool_id=clean_tool_id,
+                        enabled=True
+                    )
+                    db.add(new_assignment)
         
         db.commit()
         db.refresh(agent)
@@ -541,7 +613,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills)
+        return _build_agent_response(agent_with_skills, db)
         
     except HTTPException:
         raise
@@ -550,7 +622,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
 
-@router.delete("/{agent_id}", )
+@router.delete("/{agent_id}", dependencies=[Depends(require_api_key)])
 async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
     """Delete an agent and all related records"""
     try:

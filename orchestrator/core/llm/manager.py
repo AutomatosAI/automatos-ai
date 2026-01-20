@@ -9,6 +9,7 @@ Supports per-service configuration via system settings.
 import os
 import logging
 from typing import Dict, Any, List, Optional
+from functools import lru_cache
 
 from .clients.base import LLMProvider, LLMConfig
 from .clients.openai_client import OpenAIProvider
@@ -110,6 +111,7 @@ def get_provider_and_model_from_settings(service_name: str = "orchestrator") -> 
     return provider_str, model_str
 
 
+@lru_cache(maxsize=32)
 def get_credential_data(provider: str, environment: str = None, service_name: str = "orchestrator") -> Dict[str, Any]:
     """
     Get credential data for a provider from credential system.
@@ -244,7 +246,7 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             try:
                 # If credential name starts with 'development_', try in development environment
                 lookup_env = 'development' if cred_name.startswith('development_') else environment
-                cred_data = resolver.get_dict(cred_name, environment=lookup_env)
+                cred_data = resolver.get_dict(cred_name, environment=lookup_env, silent=True)
                 if cred_data and len(cred_data) > 0:
                     logger.info(f"Found credential '{cred_name}' for provider '{provider}' (env: {lookup_env})")
                     return cred_data
@@ -298,7 +300,7 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             try:
                 for cred_name in credential_name_variations:
                     try:
-                        cred_data = resolver.get_dict(cred_name, environment='development')
+                        cred_data = resolver.get_dict(cred_name, environment='development', silent=True)
                         if cred_data and len(cred_data) > 0:
                             logger.info(f"Found credential '{cred_name}' in 'development' environment for provider '{provider}'")
                             return cred_data

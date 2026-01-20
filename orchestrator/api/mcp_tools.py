@@ -14,6 +14,7 @@ import logging
 
 from core.database.database import get_db
 from core.models import Agent, MCPTool, AgentToolAssignment, MCPToolCreate, MCPToolUpdate, MCPToolResponse, AgentToolAssignmentCreate, AgentToolAssignmentResponse
+from modules.tools.services.adapter_client import AdapterClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,70 +36,29 @@ async def list_mcp_tools(
 ):
     """List all MCP tools with pagination and optional filters"""
     try:
-        query = db.query(MCPTool)
-        
+        adapter_client = AdapterClient()
+        if adapter_client.is_configured():
+            adapter_tools = await adapter_client.list_tools()
+            items = _merge_adapter_tools(adapter_tools, db)
+        else:
+            items = _load_local_tools(db)
+
         # Apply filters
-        if status:
-            query = query.filter(MCPTool.status == status)
-        if category:
-            query = query.filter(MCPTool.category == category)
-        if provider:
-            query = query.filter(MCPTool.provider == provider)
-        if search:
-            search_pattern = f"%{search}%"
-            query = query.filter(
-                or_(
-                    MCPTool.name.ilike(search_pattern),
-                    MCPTool.description.ilike(search_pattern),
-                    MCPTool.provider.ilike(search_pattern)
-                )
-            )
-        
-        # Get total count before pagination
-        total = query.count()
-        
-        # Apply pagination
-        tools = query.order_by(MCPTool.name).offset(skip).limit(limit).all()
-        
-        # Calculate pagination metadata
-        pages = (total + limit - 1) // limit  # Ceiling division
-        
-        # Manually convert to dict to handle metadata field
-        items = [
-            {
-                "id": t.id,
-                "name": t.name,
-                "description": t.description,
-                "mcp_server_url": t.mcp_server_url,
-                "capabilities": t.capabilities or {},
-                "credentials_schema": t.credentials_schema or {},
-                "status": t.status,
-                "provider": t.provider,
-                "version": t.version,
-                "icon": t.icon,
-                "logo": t.logo,  # Logo path from metadata
-                "category": t.category,
-                "tags": t.tags or [],
-                "metadata": t.tool_metadata or {},  # Map tool_metadata -> metadata
-                "created_at": t.created_at,
-                "updated_at": t.updated_at,
-                "created_by": t.created_by
-            }
-            for t in tools
-        ]
-        
-        # Return paginated response (frontend expects 'data' and 'pagination')
+        filtered = _apply_filters(items, status, category, provider, search)
+        total = len(filtered)
+        pages = (total + limit - 1) // limit if limit else 1
+        paged = filtered[skip : skip + limit]
+
         return {
-            "data": items,
+            "data": paged,
             "pagination": {
                 "total": total,
                 "skip": skip,
                 "limit": limit,
                 "pages": pages,
-                "current_page": (skip // limit) + 1 if limit > 0 else 1
-            }
+                "current_page": (skip // limit) + 1 if limit > 0 else 1,
+            },
         }
-        
     except Exception as e:
         logger.error(f"Error listing MCP tools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -106,29 +66,27 @@ async def list_mcp_tools(
 @router.get("/{tool_id}")
 async def get_mcp_tool(tool_id: int, db: Session = Depends(get_db)):
     """Get single MCP tool by ID"""
-    tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
-    if not tool:
+    try:
+        # Try to find by integer ID first (local DB)
+        tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+        if tool:
+             return _local_tool_to_response(tool)
+
+        # If not found locally by ID, check adapter
+        adapter_client = AdapterClient()
+        if adapter_client.is_configured():
+            adapter_tools = await adapter_client.list_tools()
+            items = _merge_adapter_tools(adapter_tools, db)
+            for item in items:
+                if item["id"] == tool_id:
+                    return item
+            
         raise HTTPException(status_code=404, detail="Tool not found")
-    
-    return {
-        "id": tool.id,
-        "name": tool.name,
-        "description": tool.description,
-        "mcp_server_url": tool.mcp_server_url,
-        "capabilities": tool.capabilities or {},
-        "credentials_schema": tool.credentials_schema or {},
-        "status": tool.status,
-        "provider": tool.provider,
-        "version": tool.version,
-        "icon": tool.icon,
-        "logo": tool.logo,  # Logo path from metadata
-        "category": tool.category,
-        "tags": tool.tags or [],
-        "metadata": tool.tool_metadata or {},
-        "created_at": tool.created_at,
-        "updated_at": tool.updated_at,
-        "created_by": tool.created_by
-    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading MCP tool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/", response_model=MCPToolResponse)
 async def create_mcp_tool(
@@ -185,14 +143,15 @@ async def update_mcp_tool(
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         
-        # Update fields
         update_data = tool_data.model_dump(exclude_unset=True, by_alias=False)
         logger.info(f"Updating tool {tool_id} with data: {update_data}")
-        
+
+        allowed_fields = {"status", "metadata", "tool_metadata"}
         for field, value in update_data.items():
-            # Handle the metadata field properly
-            if field == 'metadata' or field == 'tool_metadata':
-                setattr(tool, 'tool_metadata', value)
+            if field not in allowed_fields:
+                continue
+            if field in {"metadata", "tool_metadata"}:
+                setattr(tool, "tool_metadata", value)
             else:
                 setattr(tool, field, value)
         
@@ -279,20 +238,21 @@ async def test_mcp_tool_connection(
 async def list_tool_categories(db: Session = Depends(get_db)):
     """Get list of all tool categories with counts"""
     try:
-        # Get distinct categories with counts
+        adapter_client = AdapterClient()
+        if adapter_client.is_configured():
+            adapter_tools = await adapter_client.list_tools()
+            items = _merge_adapter_tools(adapter_tools, db)
+            counts: Dict[str, int] = {}
+            for item in items:
+                cat = item.get("category") or "uncategorized"
+                counts[cat] = counts.get(cat, 0) + 1
+            return [{"name": name, "count": count} for name, count in counts.items()]
+
         categories = db.query(
             MCPTool.category,
-            func.count(MCPTool.id).label('count')
-        ).filter(
-            MCPTool.category.isnot(None)
-        ).group_by(
-            MCPTool.category
-        ).all()
-        
-        return [
-            {"name": cat, "count": count}
-            for cat, count in categories
-        ]
+            func.count(MCPTool.id).label("count"),
+        ).filter(MCPTool.category.isnot(None)).group_by(MCPTool.category).all()
+        return [{"name": cat, "count": count} for cat, count in categories]
         
     except Exception as e:
         logger.error(f"Error listing categories: {e}")
@@ -324,8 +284,19 @@ async def get_all_tool_assignments(
 async def get_tools_stats(db: Session = Depends(get_db)):
     """Get tool statistics summary"""
     try:
-        total = db.query(func.count(MCPTool.id)).scalar()
-        active = db.query(func.count(MCPTool.id)).filter(MCPTool.status == 'active').scalar()
+        adapter_client = AdapterClient()
+        if adapter_client.is_configured():
+            adapter_tools = await adapter_client.list_tools()
+            items = _merge_adapter_tools(adapter_tools, db)
+            total = len(items)
+            active = sum(1 for item in items if item.get("status") == "active")
+        else:
+            total = db.query(func.count(MCPTool.id)).scalar()
+            active = (
+                db.query(func.count(MCPTool.id))
+                .filter(MCPTool.status == "active")
+                .scalar()
+            )
         assigned = db.query(func.count(func.distinct(AgentToolAssignment.tool_id))).filter(
             AgentToolAssignment.enabled == True
         ).scalar()
@@ -340,6 +311,127 @@ async def get_tools_stats(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error getting tool stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _apply_filters(
+    items: List[Dict[str, Any]],
+    status: Optional[str],
+    category: Optional[str],
+    provider: Optional[str],
+    search: Optional[str],
+) -> List[Dict[str, Any]]:
+    filtered = items
+    if status:
+        filtered = [item for item in filtered if item.get("status") == status]
+    if category:
+        filtered = [item for item in filtered if item.get("category") == category]
+    if provider:
+        filtered = [item for item in filtered if item.get("provider") == provider]
+    if search:
+        query = search.lower()
+        filtered = [
+            item
+            for item in filtered
+            if query in (item.get("name") or "").lower()
+            or query in (item.get("description") or "").lower()
+            or query in (item.get("provider") or "").lower()
+        ]
+    return sorted(filtered, key=lambda item: item.get("name") or "")
+
+
+def _local_tool_to_response(tool: MCPTool) -> Dict[str, Any]:
+    return {
+        "id": tool.id,
+        "name": tool.name,
+        "description": tool.description,
+        "mcp_server_url": tool.mcp_server_url,
+        "capabilities": tool.capabilities or {},
+        "credentials_schema": tool.credentials_schema or {},
+        "status": tool.status,
+        "provider": tool.provider,
+        "version": tool.version,
+        "icon": tool.icon,
+        "logo": tool.logo,
+        "category": tool.category,
+        "tags": tool.tags or [],
+        "metadata": tool.tool_metadata or {},
+        "credential_usage": "tool",
+        "created_at": tool.created_at,
+        "updated_at": tool.updated_at,
+        "created_by": tool.created_by,
+    }
+
+
+def _load_local_tools(db: Session) -> List[Dict[str, Any]]:
+    tools = db.query(MCPTool).order_by(MCPTool.name).all()
+    return [_local_tool_to_response(tool) for tool in tools]
+
+
+def _merge_adapter_tools(adapter_tools: List[Dict[str, Any]], db: Session) -> List[Dict[str, Any]]:
+    local_tools = {tool.name: tool for tool in db.query(MCPTool).all()}
+    created = False
+    for adapter_tool in adapter_tools:
+        name = adapter_tool.get("name")
+        if not name:
+            continue
+        if name in local_tools:
+            continue
+        status = "active" if adapter_tool.get("enabled") else "inactive"
+        new_tool = MCPTool(
+            name=name,
+            description=adapter_tool.get("description") or "",
+            mcp_server_url=adapter_tool.get("mcp_server_url"),
+            capabilities=(adapter_tool.get("metadata") or {}).get("capabilities") or {},
+            credentials_schema=(adapter_tool.get("metadata") or {}).get("credentials_schema") or {},
+            status=status,
+            provider=adapter_tool.get("provider"),
+            version=(adapter_tool.get("metadata") or {}).get("version"),
+            icon=(adapter_tool.get("metadata") or {}).get("icon"),
+            logo=(adapter_tool.get("metadata") or {}).get("logo"),
+            category=adapter_tool.get("category"),
+            tags=adapter_tool.get("tags") or [],
+            tool_metadata={"adapter_tool_id": adapter_tool.get("id")},
+            created_by="adapter-sync",
+        )
+        db.add(new_tool)
+        local_tools[name] = new_tool
+        created = True
+    if created:
+        db.commit()
+        for tool in local_tools.values():
+            db.refresh(tool)
+
+    items: List[Dict[str, Any]] = []
+    for adapter_tool in adapter_tools:
+        name = adapter_tool.get("name")
+        if not name:
+            continue
+        local = local_tools.get(name)
+        adapter_metadata = adapter_tool.get("metadata") or {}
+        status = local.status if local else ("active" if adapter_tool.get("enabled") else "inactive")
+        items.append(
+            {
+                "id": local.id if local else adapter_tool.get("id"),
+                "name": name,
+                "description": adapter_tool.get("description") or "",
+                "mcp_server_url": adapter_tool.get("mcp_server_url"),
+                "capabilities": adapter_metadata.get("capabilities") or {},
+                "credentials_schema": adapter_metadata.get("credentials_schema") or {},
+                "status": status,
+                "provider": adapter_tool.get("provider"),
+                "version": adapter_metadata.get("version") or (local.version if local else None),
+                "icon": adapter_metadata.get("icon") or (local.icon if local else None),
+                "logo": adapter_metadata.get("logo") or (local.logo if local else None),
+                "category": adapter_tool.get("category"),
+                "tags": adapter_tool.get("tags") or [],
+                "metadata": adapter_metadata,
+                "credential_usage": "tool",
+                "created_at": local.created_at if local else None,
+                "updated_at": local.updated_at if local else None,
+                "created_by": local.created_by if local else None,
+            }
+        )
+    return items
 
 # ===================================================================
 # AGENT-TOOL ASSIGNMENT ENDPOINTS
@@ -391,12 +483,15 @@ async def assign_tool_to_agent(
         if agent.status != "active":
             raise HTTPException(status_code=400, detail=f"Agent '{agent.name}' is not active (status: {agent.status})")
         
-        # Enhanced validation: Check if tool exists and is active
+        # Enhanced validation: Check if tool exists and is active (Lookup by PK)
         tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
         if not tool:
             raise HTTPException(status_code=404, detail="Tool not found")
         if tool.status != "active":
             raise HTTPException(status_code=400, detail=f"Tool '{tool.name}' is not active (status: {tool.status})")
+        
+        # Use simple string ID from the tool model for the assignment
+        clean_tool_id = tool.tool_id
         
         # Enhanced validation: Check for circular dependencies or conflicts
         if agent_id == tool_id:  # This shouldn't happen but let's be safe
@@ -405,7 +500,7 @@ async def assign_tool_to_agent(
         # Check if assignment already exists
         existing = db.query(AgentToolAssignment).filter(
             AgentToolAssignment.agent_id == agent_id,
-            AgentToolAssignment.tool_id == tool_id
+            AgentToolAssignment.tool_id == clean_tool_id
         ).first()
         
         if existing:
@@ -416,18 +511,18 @@ async def assign_tool_to_agent(
             db.commit()
             db.refresh(existing)
             
-            # Load tool relationship
+            # Load tool relationship - Re-query to ensure relations are loaded
             assignment_with_tool = db.query(AgentToolAssignment).options(
                 joinedload(AgentToolAssignment.tool)
             ).filter(AgentToolAssignment.id == existing.id).first()
             
-            logger.info(f"Updated tool assignment: Agent {agent_id} - Tool {tool_id}")
+            logger.info(f"Updated tool assignment: Agent {agent_id} - Tool {clean_tool_id} (PK: {tool_id})")
             return assignment_with_tool
         else:
             # Create new assignment
             assignment = AgentToolAssignment(
                 agent_id=agent_id,
-                tool_id=tool_id,
+                tool_id=clean_tool_id,
                 enabled=assignment_data.enabled,
                 permissions=assignment_data.permissions or {"read": True, "write": True, "execute": True},
                 configuration=assignment_data.configuration or {}
@@ -442,7 +537,7 @@ async def assign_tool_to_agent(
                 joinedload(AgentToolAssignment.tool)
             ).filter(AgentToolAssignment.id == assignment.id).first()
             
-            logger.info(f"Created tool assignment: Agent {agent_id} - Tool {tool_id}")
+            logger.info(f"Created tool assignment: Agent {agent_id} - Tool {clean_tool_id} (PK: {tool_id})")
             return assignment_with_tool
         
     except HTTPException:
@@ -460,18 +555,33 @@ async def remove_tool_from_agent(
 ):
     """Remove tool assignment from agent"""
     try:
+        # Resolve tool PK to string ID first
+        tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+        if not tool:
+             raise HTTPException(status_code=404, detail="Tool not found")
+        
+        clean_tool_id = tool.tool_id
+
         assignment = db.query(AgentToolAssignment).filter(
             AgentToolAssignment.agent_id == agent_id,
-            AgentToolAssignment.tool_id == tool_id
+            AgentToolAssignment.tool_id == clean_tool_id
         ).first()
         
         if not assignment:
-            raise HTTPException(status_code=404, detail="Tool assignment not found")
+            # Fallback: check if assignment exists with PK (legacy/corrupt data that wasn't migrated)
+            assignment_pk = db.query(AgentToolAssignment).filter(
+                AgentToolAssignment.agent_id == agent_id,
+                AgentToolAssignment.tool_id == str(tool_id)
+            ).first()
+            if assignment_pk:
+                assignment = assignment_pk
+            else:
+                raise HTTPException(status_code=404, detail="Tool assignment not found")
         
         db.delete(assignment)
         db.commit()
         
-        logger.info(f"Removed tool assignment: Agent {agent_id} - Tool {tool_id}")
+        logger.info(f"Removed tool assignment: Agent {agent_id} - Tool {clean_tool_id} (PK: {tool_id})")
         return {"status": "success", "message": "Tool removed from agent"}
         
     except HTTPException:

@@ -110,16 +110,34 @@ def load_seed_data(load_credentials=True, load_tools=True):
                     mcp_tools = json.load(f)
                 
                 inserted = 0
+                updated = 0
                 skipped = 0
                 
                 for tool in mcp_tools:
                     try:
+                        # Check if tool exists first
+                        cursor.execute("SELECT id FROM mcp_tools WHERE name = %s", (tool['name'],))
+                        existing = cursor.fetchone()
+                        is_update = existing is not None
+                        
                         cursor.execute("""
                             INSERT INTO mcp_tools 
                             (id, name, description, mcp_server_url, capabilities, credentials_schema,
                              status, provider, version, icon, category, tags, metadata, created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (name) DO NOTHING
+                            ON CONFLICT (name) DO UPDATE SET
+                                description = EXCLUDED.description,
+                                mcp_server_url = EXCLUDED.mcp_server_url,
+                                capabilities = EXCLUDED.capabilities,
+                                credentials_schema = EXCLUDED.credentials_schema,
+                                status = EXCLUDED.status,
+                                provider = EXCLUDED.provider,
+                                version = EXCLUDED.version,
+                                icon = EXCLUDED.icon,
+                                category = EXCLUDED.category,
+                                tags = EXCLUDED.tags,
+                                metadata = EXCLUDED.metadata,
+                                updated_at = CURRENT_TIMESTAMP
                         """, (
                             tool['id'],
                             tool['name'],
@@ -136,17 +154,19 @@ def load_seed_data(load_credentials=True, load_tools=True):
                             json.dumps(tool.get('metadata')) if tool.get('metadata') else None,
                             tool.get('created_by', 'system')
                         ))
-                        if cursor.rowcount > 0:
-                            inserted += 1
+                        
+                        if is_update:
+                            updated += 1
                         else:
-                            skipped += 1
+                            inserted += 1
                     except Exception as e:
                         print(f"  ⚠️  Error inserting {tool['name']}: {str(e)[:100]}")
                         skipped += 1
                 
                 conn.commit()
                 print(f"  ✅ Inserted: {inserted} MCP tools")
-                print(f"  ⏭️  Skipped: {skipped} (already exist)")
+                print(f"  🔄 Updated: {updated} MCP tools")
+                print(f"  ⏭️  Skipped: {skipped} (no changes)")
             else:
                 print(f"  ⚠️  MCP tools file not found: {tools_file}")
         

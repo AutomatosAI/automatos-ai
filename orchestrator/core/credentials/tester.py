@@ -50,6 +50,7 @@ class CredentialTester:
             'ssh_credentials': self._test_ssh,
             'generic_api': self._test_generic_api,
             'slack_api': self._test_slack,
+            'slackApi': self._test_slack,  # Alias for n8n-style Slack credential name
             'discord_webhook': self._test_discord_webhook,
             'telegram_api': self._test_telegram,
             'aws_credentials': self._test_aws,
@@ -388,10 +389,19 @@ class CredentialTester:
     # Additional test methods for other credential types...
     async def _test_slack(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Test Slack API credentials"""
-        access_token = data.get('access_token')
+        access_token = (
+            data.get('access_token') or
+            data.get('accessToken') or
+            data.get('token') or
+            data.get('bot_token')
+        )
         
         if not access_token:
-            return {'success': False, 'message': 'Access token is required'}
+            available_keys = ", ".join(sorted(list(data.keys())))
+            return {
+                'success': False,
+                'message': f'Access token is required. Available fields: {available_keys}'
+            }
         
         url = 'https://slack.com/api/auth.test'
         headers = {'Authorization': f'Bearer {access_token}'}

@@ -70,27 +70,86 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[D
             session_used = SessionLocal()
         except Exception:
             session_used = None
+            
+    # [HOTFIX] Ensure Registry has access to DB to load MCP/Adapter tools
+    # If we created a local session, we must inject it if registry is missing one
+    if session_used and not registry.db:
+        logger.info("🔌 Injecting DB session into ToolRegistry for MCP discovery")
+        registry.db = session_used
+        registry._register_mcp_tools()
     
     try:
-        # Get RESEARCH, DATABASE, and MCP tools for chatbot
-        research_tools = registry.get_tools_by_category(ToolCategory.RESEARCH)
-        database_tools = registry.get_tools_by_category(ToolCategory.DATABASE_TOOLS)
-        mcp_tools = registry.get_tools_by_category(ToolCategory.MCP_TOOLS)
-        all_tools = research_tools + database_tools + mcp_tools
+        # Get all candidates first
+        # Get all tools from registry (Source of Truth)
+        # This covers all categories (Research, DB, MCP, Shell, FileOps, Communication, Developer, etc.)
+        all_candidates = registry.get_all_tools(active_only=True)
         
-        # Filter: Use smart_query_database as THE database tool
-        # Remove basic query_database to avoid LLM choosing the dumber option
-        filtered_tools = [
-            tool for tool in all_tools 
-            if tool.name != 'query_database'  # Prefer smart version
-        ]
-
-        # Agent-aware filtering (especially for MCP tools)
+        # [HOTFIX] Apply Context Filtering to ALL Tools (Core + MCP)
+        # Ensure we don't send irrelevant tools (e.g. execute_command in general context)
+        filtered_tools = []
+        
+        # 1. Determine Allowed Categories
+        allowed_categories = None
+        current_context = "general" # Default
+        
         if agent_id is not None and session_used is not None:
-            filtered_tools = [
-                tool for tool in filtered_tools
-                if registry.validate_tool_access(agent_id=agent_id, tool_name=tool.name, db=session_used)[0]
-            ]
+             from core.models import Agent
+             agent = session_used.query(Agent).get(agent_id)
+             if agent and agent.configuration:
+                 current_context = agent.configuration.get("active_context", "general")
+             
+             # Force Chatbot (1) to general if "all"
+             if agent_id == 1 and current_context == "all":
+                 current_context = "general"
+                 
+             # Context Map (Sync with ToolAccessService)
+             CONTEXT_MAP = {
+                "general": ["communication", "research", "productivity", "system", "collaboration"], 
+                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
+                "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
+                "communication": ["communication", "slack", "email", "chat", "collaboration"],
+                "research": ["research", "data", "search", "rag"],
+             }
+             allowed_categories = CONTEXT_MAP.get(current_context)
+        
+        # 2. Filter Candidates
+        for tool in all_candidates:
+            # Skip basic query_database if smart version exists (legacy logic)
+            if tool.name == 'query_database':
+                continue
+                
+            # System tools always allowed
+            if tool.name in ["switch_context", "search_knowledge"]:
+                filtered_tools.append(tool)
+                continue
+                
+            # Category Filtering
+            if allowed_categories:
+                # Normalize category string
+                tool_cat = tool.category.value if hasattr(tool.category, 'value') else str(tool.category)
+                tool_cat = tool_cat.lower()
+                
+                # Check mapping (handle partial matches or simple logic)
+                if tool_cat in allowed_categories:
+                    filtered_tools.append(tool)
+                else:
+                    # DEBUG: Log dropped tools (verbose but helpful for debugging)
+                    # logger.debug(f"Dropped tool {tool.name} (cat: {tool_cat}) for context {current_context}")
+                    pass
+            else:
+                # No context filtering (e.g. if agent not found or infinite context), allow all
+                filtered_tools.append(tool)
+
+        # 3. Agent Access Check (Database Assignments)
+        if agent_id is not None and session_used is not None:
+            # Filter solely based on registry validation (which checks assignments)
+            # Note: registry.validate_tool_access ALSO checks context now, so this is double-safe
+            final_tools = []
+            for tool in filtered_tools:
+                is_allowed, _ = registry.validate_tool_access(agent_id=agent_id, tool_name=tool.name, db=session_used)
+                if is_allowed:
+                    final_tools.append(tool)
+            filtered_tools = final_tools
         
         # Convert to OpenAI function format
         openai_tools = []
@@ -100,10 +159,14 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[D
                 "type": "function",
                 "function": schema
             })
+            # DEBUG: Log adapter tool descriptions to verify they're updated
+            if tool.name.startswith("adapter_"):
+                logger.info(f"🔍 Tool {tool.name} description: {schema.get('description', 'NO DESCRIPTION')[:100]}")
         
+        has_mcp = any(t.category == ToolCategory.MCP_TOOLS for t in filtered_tools)
         logger.info(
             f"✅ Loaded {len(openai_tools)} tools for chatbot "
-            f"(agent_id={agent_id}, smart_query_database enabled, includes MCP={len(mcp_tools) > 0})"
+            f"(agent_id={agent_id}, smart_query_database enabled, includes MCP={has_mcp})"
         )
         return openai_tools
     except Exception as e:

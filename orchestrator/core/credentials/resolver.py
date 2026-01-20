@@ -54,7 +54,8 @@ class CredentialResolver:
         environment: str = None,
         fallback_env: Optional[str] = None,
         fallback_value: Optional[str] = None,
-        service_name: Optional[str] = None
+        service_name: Optional[str] = None,
+        silent: bool = False
     ) -> str:
         """
         Resolve a credential value (synchronous version).
@@ -126,7 +127,8 @@ class CredentialResolver:
         if fallback_env:
             env_value = os.getenv(fallback_env)
             if env_value:
-                logger.warning(
+                log_func = logger.debug if silent else logger.warning
+                log_func(
                     f"Credential '{credential_name}' not found in database, "
                     f"using environment variable '{fallback_env}' as fallback"
                 )
@@ -134,7 +136,8 @@ class CredentialResolver:
         
         # Use fallback value
         if fallback_value is not None:
-            logger.warning(f"Using fallback value for credential '{credential_name}'")
+            log_func = logger.debug if silent else logger.warning
+            log_func(f"Using fallback value for credential '{credential_name}'")
             return fallback_value
         
         # No credential found and no fallback
@@ -148,7 +151,8 @@ class CredentialResolver:
         credential_name: str,
         environment: str = None,
         fallback_env_prefix: Optional[str] = None,
-        service_name: Optional[str] = None
+        service_name: Optional[str] = None,
+        silent: bool = False
     ) -> Dict[str, Any]:
         """
         Resolve a credential and return as dictionary (for multi-field credentials).
@@ -198,9 +202,11 @@ class CredentialResolver:
         except ImportError as e:
             logger.debug(f"Database import failed during credential lookup: {e}")
         except CredentialNotFoundError as e:
-                logger.warning(f"Credential '{credential_name}' not found in database: {e}")
+            log_func = logger.debug if silent else logger.warning
+            log_func(f"Credential '{credential_name}' not found in database: {e}")
         except Exception as e:
-            logger.warning(f"Could not load credential '{credential_name}' from database: {e}")
+            log_func = logger.debug if silent else logger.warning
+            log_func(f"Could not load credential '{credential_name}' from database: {e}")
         
         # Fallback to environment variables if prefix provided
         if fallback_env_prefix:

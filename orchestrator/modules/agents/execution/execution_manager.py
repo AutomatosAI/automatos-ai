@@ -689,8 +689,9 @@ class AgentExecutionManager:
             agent_mcp_tool_names = []
             if agent.tool_assignments:
                 for assignment in agent.tool_assignments:
-                    if assignment.tool and assignment.tool.name:
-                        agent_mcp_tool_names.append(assignment.tool.name)
+                    # Fix: tool is string ID now, fetch from mcp_tools
+                    if assignment.tool_id:
+                        agent_mcp_tool_names.append(assignment.tool_id)
                 
                 if agent_mcp_tool_names:
                     self.logger.info(f"🔧 Agent {agent_id} has {len(agent_mcp_tool_names)} MCP tools: {agent_mcp_tool_names}")

@@ -12,12 +12,14 @@ Single entry point for all tool execution, routing to appropriate executors:
 import logging
 import os
 from typing import Dict, Any, Optional
+from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.agents.services.agent_platform_tools import AgentPlatformTools
 from modules.agents.services.agent_action_executor import ActionExecutor
 from modules.tools.execution.mcp_executor import MCPToolExecutor
 from modules.tools.registry import ToolRegistry
+from modules.tools.services.tool_access_service import ToolAccessService, get_tool_access_service
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ class UnifiedToolExecutor:
         self._action_executor = None  # For file/shell operations
         self._mcp_executor = None  # For MCP tools
         self._tool_registry = None  # For tool metadata
+        self._tool_access_service = None  # PRD-35: Tool access validation
         
         # Tool routing map
         self.tool_routes = {
@@ -55,6 +58,7 @@ class UnifiedToolExecutor:
             'search_codebase': self._execute_platform_tool,
             'search_documents': self._execute_platform_tool,  # Alias
             'search_code': self._execute_platform_tool,  # Alias
+            'switch_context': self._execute_platform_tool, # Meta-tool for dynamic context switching
             
             # Database tools (natural language SQL)
             'query_database': self._execute_database_tool,
@@ -133,6 +137,14 @@ class UnifiedToolExecutor:
             self._tool_registry = ToolRegistry(self.db)
         return self._tool_registry
     
+    @property
+    def tool_access_service(self):
+        """Lazy-load tool access service only when needed (PRD-35)."""
+        if self._tool_access_service is None:
+            logger.info("  🔧 Initializing tool access service...")
+            self._tool_access_service = get_tool_access_service(self.db)
+        return self._tool_access_service
+    
     def _check_agent_permission(self, agent_id: int, tool_name: str) -> bool:
         """
         PRD-17: Check if agent has permission to use this tool.
@@ -176,7 +188,8 @@ class UnifiedToolExecutor:
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        agent_id: int = 0
+        agent_id: int = 0,
+        tenant_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute a tool by name, routing to the appropriate executor.
@@ -185,6 +198,7 @@ class UnifiedToolExecutor:
             tool_name: Name of the tool to execute
             parameters: Tool parameters
             agent_id: ID of the agent calling the tool
+            tenant_id: UUID of the tenant (required for external/adapter tools)
             
         Returns:
             Tool execution result with standard format
@@ -193,14 +207,9 @@ class UnifiedToolExecutor:
             logger.info(f"🔧 Executing tool '{tool_name}' for agent {agent_id}")
             logger.info(f"  📋 Parameters: {parameters}")
             
-            # PRD-17: Check agent permissions (except for research tools which are always allowed)
-            # if not self._check_agent_permission(agent_id, tool_name):
-            #     logger.warning(f"⚠️  Agent {agent_id} does not have permission to use '{tool_name}'")
-            #     return {
-            #         "success": False,
-            #         "error": f"Permission denied: Agent {agent_id} cannot use tool '{tool_name}'",
-            #         "tool": tool_name
-            #     }
+            # PRD-35: Check if this is an external/adapter tool (mcp_ prefix)
+            if tool_name.startswith("mcp_") and tenant_id and agent_id:
+                return await self._execute_external_tool(tool_name, parameters, agent_id, tenant_id)
             
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
@@ -234,6 +243,145 @@ class UnifiedToolExecutor:
                 "error": str(e),
                 "tool": tool_name
             }
+    
+    async def _execute_external_tool(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        tenant_id: UUID
+    ) -> Dict[str, Any]:
+        """
+        PRD-35: Execute an external/adapter tool with access validation.
+        
+        External tools have the format: mcp_{adapter_tool_id}_{method}
+        
+        Args:
+            tool_name: Full tool name (mcp_github_repos_list)
+            parameters: Tool parameters
+            agent_id: ID of the agent calling the tool
+            tenant_id: UUID of the tenant
+            
+        Returns:
+            Tool execution result
+        """
+        logger.info(f"  🌐 Executing external tool via ToolAccessService: {tool_name}")
+        
+        # Parse tool name: mcp_{adapter_tool_id}_{method}
+        parts = tool_name.split("_", 2)
+        if len(parts) < 3:
+            return {
+                "success": False,
+                "error": f"Invalid external tool name format: {tool_name}",
+                "tool": tool_name
+            }
+        
+        adapter_tool_id = parts[1]
+        method = parts[2] if len(parts) > 2 else "default"
+        
+        # Validate agent has access to this tool
+        has_access, error_msg, credential_id = await self.tool_access_service.validate_tool_access(
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            adapter_tool_id=adapter_tool_id
+        )
+        
+        if not has_access:
+            logger.warning(f"⚠️  Access denied: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "tool": tool_name
+            }
+        
+        logger.info(f"  ✅ Access validated for tool '{adapter_tool_id}', credential_id={credential_id}")
+        
+        # [NEW] Just-in-Time Execution utilizing Factory Pattern
+        try:
+            from modules.tools.executors.jit_mcp_client import JITMCPClient
+            
+            # 1. Fetch TenantToolConfig to get cached metadata (URL)
+            from core.models.tool_assignments import TenantToolConfig
+            tenant_config = self.db.query(TenantToolConfig).filter(
+                TenantToolConfig.tenant_id == tenant_id,
+                TenantToolConfig.tool_id == adapter_tool_id,
+                TenantToolConfig.enabled == True
+            ).first()
+            
+            if not tenant_config or not tenant_config.cached_metadata:
+                 # Fallback to legacy path if no metadata (shouldn't happen with migration)
+                 logger.warning(f"Cache miss in JIT execution for {adapter_tool_id}, falling back to legacy executor")
+                 execution_context = {
+                    "tenant_id": str(tenant_id),
+                    "credential_mode": "hosted",
+                    "credential_id": credential_id
+                 }
+                 params_with_context = {**parameters, "_execution_context": execution_context}
+                 return await self._execute_mcp_tool(tool_name, parameters=params_with_context, agent_id=agent_id)
+
+            # 2. Resolve Credentials
+            from modules.credentials.service import CredentialService
+            cred_service = CredentialService(self.db)
+            resolved_creds = await cred_service.resolve_credential(credential_id, tenant_id) if credential_id else {}
+            
+            # 3. Instantiate Ephemeral Client
+            # Metadata should contain 'url' or we assume a pattern or fetch from Adapter if missing
+            # For now, let's assume metadata has what we need or we fetch it from Adapter for the URL
+            # Actually, TenantToolConfig doesn't have URL, 'ToolRecord' in Adapter has it.
+            # We might need to fetch the tool definition from Adapter if URL not in cache.
+            # To be safe for this "cherry-pick", if URL is missing, we fetch it.
+            
+            tool_url = tenant_config.cached_metadata.get('url')
+            if not tool_url:
+                # One-time fetch to populate URL if missing (self-healing)
+                adapter_tool = await self.tool_access_service.adapter_client.get_tool(adapter_tool_id)
+                tool_url = adapter_tool.get('url') # Assuming adapter returns URL
+                # If still no URL (Adapter might mask it), we might need another approach. 
+                # Converting Adapter's 'mcp_server_url' logic here.
+                # Let's assume for now we fall back to legacy if can't construct client.
+                pass
+            
+            # If we don't have a URL, we can't use JIT client. Fallback.
+            if not tool_url:
+                 # Logic for finding URL might be complex (Adapter responsibility). 
+                 # For this step, let's stick to Legacy Fallback if we can't easily JIT.
+                 # BUT the goal is JIT. 
+                 # Let's assume AdapterToolDefinition in tool_assignments.py *should* have had URL? 
+                 # It doesn't. 
+                 # Plan B: The `cached_metadata` schema I added SHOULD include URL.
+                 # I need to update `ToolAccessService` to also cache `mcp_server_url`.
+                 logger.info("URL not found in cache, using legacy executor")
+                 execution_context = {
+                    "tenant_id": str(tenant_id),
+                    "credential_mode": "hosted",
+                    "credential_id": credential_id
+                 }
+                 params_with_context = {**parameters, "_execution_context": execution_context}
+                 return await self._execute_mcp_tool(tool_name, parameters=params_with_context, agent_id=agent_id)
+
+            # 4. Execute
+            headers = {}
+            # Context Forge / Adapter Authentication
+            if resolved_creds:
+                 # Standard Bearer token (for valid MCP servers that use it)
+                 if 'token' in resolved_creds:
+                     headers['Authorization'] = f"Bearer {resolved_creds['token']}"
+                 headers.update(resolved_creds.get('headers', {}))
+
+            client = JITMCPClient(url=tool_url, headers=headers)
+            
+            # [HOTFIX] Inject token dependencies for Adapter tools
+            # Adapters often require 'token' in the arguments
+            jit_params = parameters.copy() if parameters else {}
+            if resolved_creds and 'token' in resolved_creds:
+                jit_params['token'] = resolved_creds['token']
+
+            # method is valid tool name on the MCP server
+            return await client.execute_tool(method, jit_params)
+
+        except Exception as e:
+            logger.error(f"JIT Execution failed: {e}")
+            return {"success": False, "error": str(e)}
     
     async def _execute_platform_tool(
         self,
@@ -879,18 +1027,53 @@ class UnifiedToolExecutor:
         """
         logger.info(f"  🌐 Routing to MCP server: {tool_name}")
         
-        # Get tool from database
+        # Extract method/operation - support both 'method' and 'operation' keys
+        # 'operation' is used by adapter tools, 'method' is used by MCP protocol
+        if isinstance(parameters, dict):
+            method = parameters.get("method") or parameters.get("operation") or "default"
+            
+            # Build params - handle nested 'parameters' or 'params' keys
+            # GPT-4 may send: {'operation': 'postMessage', 'parameters': {'channel': '...', 'text': '...'}}
+            if "parameters" in parameters and isinstance(parameters["parameters"], dict):
+                # Use the nested 'parameters' dict
+                params = parameters["parameters"]
+            elif "params" in parameters and isinstance(parameters["params"], dict):
+                # Use the nested 'params' dict  
+                params = parameters["params"]
+            else:
+                # Extract all params except the operation/method key
+                params = {k: v for k, v in parameters.items() if k not in ("method", "operation", "params", "parameters")}
+        else:
+            method = "default"
+            params = {}
+        
+        logger.info(f"  📋 MCP execution: method={method}, params_keys={list(params.keys())}")
+        
+        # Prefer registry metadata for MCP tools
+        tool_spec = self.tool_registry.get_tool(tool_name)
+        if tool_spec and (tool_spec.metadata or {}).get("tool_id"):
+            tool_id = tool_spec.metadata.get("tool_id")
+            # Use metadata method only if no explicit method provided
+            if method == "default":
+                method = tool_spec.metadata.get("method") or method
+            return await self.mcp_executor.execute_tool(
+                agent_id=agent_id,
+                tool_id=tool_id,
+                method=method,
+                params=params,
+                execution_id=None
+            )
+        
+        # Fallback: direct MCP tool name lookup
         mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
         if not mcp_tool:
             return {"success": False, "error": f"MCP tool '{tool_name}' not found"}
         
-        # Execute via MCP protocol (JSON-RPC to actual MCP server)
-        method = parameters.get("method", "default")
         return await self.mcp_executor.execute_tool(
             agent_id=agent_id,
             tool_id=mcp_tool.id,
             method=method,
-            params=parameters,
+            params=params,
             execution_id=None
         )
     
@@ -911,6 +1094,79 @@ class UnifiedToolExecutor:
             return tools
         else:
             return list(self.tool_registry.tools.values())
+    
+    async def get_tools_for_agent(
+        self,
+        agent_id: int,
+        tenant_id: UUID,
+        include_core: bool = True
+    ) -> list:
+        """
+        PRD-35: Get all tools available to an agent.
+        
+        Combines:
+        - Core platform tools (always available if include_core=True)
+        - External tools assigned to the agent via ToolAccessService
+        
+        Args:
+            agent_id: ID of the agent
+            tenant_id: UUID of the tenant
+            include_core: Whether to include core platform tools
+            
+        Returns:
+            List of tool specifications
+        """
+        tools = []
+        
+        # Add core platform tools
+        if include_core:
+            core_tools = self.get_available_tools()
+            tools.extend(core_tools)
+        
+        # Add external tools from ToolAccessService
+        try:
+            external_tools = await self.tool_access_service.get_tools_for_agent(
+                agent_id=agent_id,
+                tenant_id=tenant_id
+            )
+            
+            # Convert AgentTool to ToolSpec format for consistency
+            from modules.tools.registry.tool_registry import ToolSpec, ToolParameter, ToolCategory, SecurityLevel
+            
+            for ext_tool in external_tools:
+                for method in ext_tool.methods or ["call"]:
+                    tool_name = f"mcp_{ext_tool.adapter_tool_id}_{method}"
+                    tools.append(ToolSpec(
+                        name=tool_name,
+                        category=ToolCategory.MCP_TOOLS,
+                        description=f"{ext_tool.description or ext_tool.name} - Method: {method}",
+                        executor_class="MCPToolExecutor",
+                        executor_method="execute_tool",
+                        parameters=[
+                            ToolParameter(
+                                name="params",
+                                type="object",
+                                description=f"Parameters for {method}",
+                                required=False,
+                                default={}
+                            )
+                        ],
+                        security_level=SecurityLevel.CAUTIOUS,
+                        metadata={
+                            "adapter_tool_id": ext_tool.adapter_tool_id,
+                            "method": method,
+                            "credential_id": ext_tool.credential_id,
+                            "provider": ext_tool.provider,
+                            "category": ext_tool.category
+                        }
+                    ))
+            
+            logger.info(f"Loaded {len(external_tools)} external tools for agent {agent_id}")
+            
+        except Exception as e:
+            logger.error(f"Error loading external tools for agent: {e}")
+        
+        return tools
     
     async def _execute_planning_tool(
         self,

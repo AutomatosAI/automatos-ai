@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 # Database models will be imported dynamically to avoid circular imports
 from core.database.database import get_db
 from core.models import MCPTool, AgentToolAssignment, ToolUsageLog, Agent
+from core.credentials.service import CredentialStore, CredentialNotFoundError, CredentialValidationError
+from core.credentials.encryption import EncryptionKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,67 @@ class MCPToolExecutor:
         self.db = db
         self.http_client = httpx.AsyncClient(timeout=30.0)
         logger.info("MCPToolExecutor initialized")
+
+    def _get_available_methods(self, capabilities: Dict[str, Any]) -> List[str]:
+        if not capabilities:
+            return []
+        methods = capabilities.get('methods') or capabilities.get('tools') or capabilities.get('actions') or []
+        if isinstance(methods, dict):
+            return list(methods.keys())
+        if isinstance(methods, list):
+            return methods
+        return []
+
+    def _resolve_tool_credentials(
+        self,
+        tool: MCPTool,
+        assignment: Optional[AgentToolAssignment]
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        config = (assignment.configuration or {}) if assignment else {}
+        metadata = tool.tool_metadata or {}
+
+        credential_id = config.get("credential_id") or metadata.get("linked_credential_id")
+        credential_name = config.get("credential_name") or metadata.get("linked_credential_name")
+        environment = config.get("credential_environment", "production")
+
+        store = CredentialStore(self.db)
+        if not credential_id and not credential_name:
+            # Fallback: resolve by credential type (if exactly one exists)
+            credential_type = (
+                metadata.get("credential_type")
+                or metadata.get("auto_enable_on_credential")
+                or metadata.get("n8n_credential_type")
+            )
+            if credential_type:
+                from core.models.credentials import Credential, CredentialType
+                candidate = self.db.query(Credential).join(CredentialType).filter(
+                    Credential.is_active == True,
+                    CredentialType.name == credential_type
+                ).order_by(Credential.updated_at.desc()).first()
+                if candidate:
+                    credential_data = store.get_decrypted_credential(
+                        credential_id=candidate.id,
+                        service_name="mcp_tool_executor"
+                    )
+                    return credential_data, {
+                        "credential_id": candidate.id,
+                        "credential_type": credential_type,
+                        "environment": candidate.environment
+                    }
+            return None, None
+        if credential_id:
+            credential_data = store.get_decrypted_credential(
+                credential_id=credential_id,
+                service_name="mcp_tool_executor"
+            )
+            return credential_data, {"credential_id": credential_id, "environment": environment}
+
+        credential_data = store.get_decrypted_credential_by_name(
+            name=credential_name,
+            environment=environment,
+            service_name="mcp_tool_executor"
+        )
+        return credential_data, {"credential_name": credential_name, "environment": environment}
     
     async def execute_tool(
         self,
@@ -89,12 +152,42 @@ class MCPToolExecutor:
             ).first()
             
             if not assignment:
-                raise MCPToolNotFoundError(
-                    f"Agent {agent_id} does not have access to tool {tool_id}"
-                )
+                # Allow auto-enabled tools with linked credentials
+                linked_credential_id = (tool.tool_metadata or {}).get("linked_credential_id")
+                if linked_credential_id:
+                    logger.info(
+                        f"Auto-enabled MCP tool '{tool.name}' "
+                        f"(linked_credential_id={linked_credential_id}) - bypassing assignment"
+                    )
+                else:
+                    # Fallback: allow if any active credential exists for tool's credential_type
+                    metadata = tool.tool_metadata or {}
+                    credential_type = (
+                        metadata.get("credential_type")
+                        or metadata.get("auto_enable_on_credential")
+                        or metadata.get("n8n_credential_type")
+                    )
+                    if credential_type:
+                        from core.models.credentials import Credential, CredentialType
+                        credential_exists = self.db.query(Credential).join(CredentialType).filter(
+                            Credential.is_active == True,
+                            CredentialType.name == credential_type
+                        ).first()
+                        if credential_exists:
+                            logger.info(
+                                f"Auto-enabled MCP tool '{tool.name}' via credential_type={credential_type}"
+                            )
+                        else:
+                            raise MCPToolNotFoundError(
+                                f"Agent {agent_id} does not have access to tool {tool_id}"
+                            )
+                    else:
+                        raise MCPToolNotFoundError(
+                            f"Agent {agent_id} does not have access to tool {tool_id}"
+                        )
             
             # 3. Check permissions for the requested method
-            permissions = assignment.permissions or {}
+            permissions = assignment.permissions if assignment else {"read": True, "write": True, "execute": True}
             if not self._check_method_permission(method, permissions):
                 raise MCPToolExecutionError(
                     f"Agent {agent_id} does not have permission to execute method '{method}'"
@@ -102,20 +195,39 @@ class MCPToolExecutor:
             
             # 4. Validate method exists in tool capabilities
             capabilities = tool.capabilities or {}
-            available_methods = capabilities.get('methods', [])
-            if method not in available_methods:
+            available_methods = self._get_available_methods(capabilities)
+            if available_methods and method not in available_methods:
                 raise MCPToolExecutionError(
                     f"Method '{method}' not available for tool {tool.name}. "
                     f"Available methods: {available_methods}"
                 )
+
+            # Resolve credentials (if configured)
+            credential_data = None
+            credential_info = None
+            try:
+                credential_data, credential_info = self._resolve_tool_credentials(tool, assignment)
+                if credential_info:
+                    logger.info(
+                        f"Resolved credentials for MCP tool '{tool.name}' "
+                        f"({credential_info})"
+                    )
+            except (CredentialNotFoundError, CredentialValidationError, EncryptionKeyError) as e:
+                raise MCPToolExecutionError(f"Credential resolution failed: {str(e)}")
             
             # 5. Execute the tool via MCP server
             if tool.mcp_server_url:
+                configuration = dict(assignment.configuration or {}) if assignment else {}
+                for key in ("credential_id", "credential_name", "credential_environment"):
+                    configuration.pop(key, None)
+                if credential_data:
+                    configuration["credentials"] = credential_data
+
                 output_data = await self._call_mcp_server(
                     tool.mcp_server_url,
                     method,
                     params or {},
-                    assignment.configuration
+                    configuration
                 )
             else:
                 # If no server URL, return a simulated success (for tools that are metadata-only)
@@ -270,6 +382,17 @@ class MCPToolExecutor:
         Log tool usage to the database for analytics and auditing.
         """
         try:
+            if not agent_id:
+                logger.warning("Skipping tool usage log: missing agent_id")
+                return
+
+            agent_exists = self.db.query(Agent).filter(Agent.id == agent_id).first()
+            if not agent_exists:
+                logger.warning(
+                    f"Skipping tool usage log: agent {agent_id} not found"
+                )
+                return
+
             usage_log = ToolUsageLog(
                 execution_id=execution_id,
                 agent_id=agent_id,
@@ -285,6 +408,7 @@ class MCPToolExecutor:
             self.db.commit()
         except Exception as e:
             logger.error(f"Failed to log tool usage: {e}")
+            self.db.rollback()
             # Don't raise - logging failure shouldn't break tool execution
     
     async def get_agent_tools(self, agent_id: int, enabled_only: bool = True) -> List[Dict[str, Any]]:

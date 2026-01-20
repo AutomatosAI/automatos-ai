@@ -10,8 +10,16 @@ import os
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# SINGLE-TENANT MODE CONSTANTS
+# =============================================================================
+
+# Default tenant UUID for single-tenant deployments
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -75,6 +83,12 @@ class Config:
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
+
+    # =============================================================================
+    # UNIFIED ADAPTER (Tool Metadata Source)
+    # =============================================================================
+    ADAPTER_ADMIN_BASE_URL: str = os.getenv("ADAPTER_ADMIN_BASE_URL")
+    ADAPTER_ADMIN_TOKEN: str = os.getenv("ADAPTER_ADMIN_TOKEN")
     
     # LLM settings - loaded from database system_settings (NO hardcoded defaults)
     @property

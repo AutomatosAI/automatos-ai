@@ -17,14 +17,13 @@
 
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search,
   Filter,
   Grid3X3,
   List,
-  Plus,
   Zap,
   Shield,
   Clock,
@@ -39,11 +38,6 @@ import {
   Activity,
   Trash2,
   MoreVertical,
-  Edit,
-  Power,
-  PowerOff,
-  BookOpen,
-  ExternalLink,
   Eye
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -63,8 +57,7 @@ import {
 import { apiClient } from '@/lib/api-client'
 import { ToolConfigModal } from './tool-config-modal'
 import { ToolDetailsModal } from './tool-details-modal'
-import { AgentToolAssignment } from './agent-tool-assignment'
-import { CreateToolModal } from './create-tool-modal'
+// import { AgentToolAssignment } from './agent-tool-assignment'
 import { EnhancedPagination } from '@/components/ui/pagination'
 import { useMCPTools, useMCPToolsStats, useMCPToolCategories, useMCPToolAssignments, useUpdateMCPTool } from '@/hooks/use-mcp-tools-api'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -154,6 +147,10 @@ export function ToolsDashboard() {
     search: debouncedSearch || undefined,
     category: categoryParam
   })
+  const { data: enabledToolsData, isLoading: enabledToolsLoading, error: enabledToolsError } = useMCPTools({
+    status: 'active',
+    limit: 1000
+  })
   const { data: statsData, error: statsError } = useMCPToolsStats()
   const { data: categoriesData, error: categoriesError } = useMCPToolCategories()
   // Temporarily disable assignments API until backend endpoint is ready
@@ -195,6 +192,7 @@ export function ToolsDashboard() {
   if (toolsError && !(toolsError as any).message?.includes('422')) console.error('Tools API Error:', toolsError)
   if (statsError && !(statsError as any).message?.includes('422')) console.error('Stats API Error:', statsError)
   if (categoriesError && !(categoriesError as any).message?.includes('422')) console.error('Categories API Error:', categoriesError)
+  if (enabledToolsError && !(enabledToolsError as any).message?.includes('422')) console.error('Enabled Tools API Error:', enabledToolsError)
 
   const [loading, setLoading] = useState(false)
   const [toolModifications, setToolModifications] = useState<Record<number, Partial<Tool>>>({})
@@ -203,40 +201,50 @@ export function ToolsDashboard() {
   const [configModalOpen, setConfigModalOpen] = useState(false)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
   const [selectedTool, setSelectedTool] = useState<any | null>(null)
-  const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
-  const [createToolModalOpen, setCreateToolModalOpen] = useState(false) // Phase 3
+  // const [assignmentModalOpen, setAssignmentModalOpen] = useState(false)
 
   // Convert MCP tools to match Tool interface for UI compatibility
-  const tools = useMemo(() => {
-    try {
-      return (mcpTools as any[]).map((tool: any) => {
-        // Check if this tool is assigned to any agent
-        const isAssigned = (toolAssignments as any[]).some((assignment: any) =>
-          assignment.tool_id === tool.id && assignment.enabled
-        )
+  const normalizeTools = useCallback(
+    (rawTools: any[]) => {
+      try {
+        return (rawTools || []).map((tool: any) => {
+          const isAssigned = (toolAssignments as any[]).some((assignment: any) =>
+            assignment.tool_id === tool.id && assignment.enabled
+          )
 
-        const baseTool = {
-          ...tool,
-          isInstalled: tool.status === 'active', // Use actual tool status
-          isConfigured: isAssigned, // Assume configured if assigned
-          rating: 0, // TODO: Add ratings system
-          usageCount: 0, // TODO: Track from usage logs
-          permissions: [], // TODO: Map from tool data
-          requiredCredentials: Object.keys(tool.credentials_schema?.required || {}),
-          supportedEnvironments: ['production', 'staging'], // TODO: Get from tool metadata
-          lastUpdated: tool.updated_at,
-          pricing: 'Free' // TODO: Add pricing info to backend
-        }
+          const baseTool = {
+            ...tool,
+            isInstalled: tool.status === 'active',
+            isConfigured: isAssigned,
+            rating: 0,
+            usageCount: 0,
+            permissions: [],
+            requiredCredentials: Object.keys(tool.credentials_schema?.required || {}),
+            supportedEnvironments: ['production', 'staging'],
+            lastUpdated: tool.updated_at,
+            pricing: 'Free'
+          }
 
-        // Apply any local modifications
-        const modifications = toolModifications[tool.id]
-        return modifications ? { ...baseTool, ...modifications } : baseTool
-      })
-    } catch (error) {
-      console.error('Error converting tools:', error)
-      return []
-    }
-  }, [mcpTools, toolAssignments, toolModifications])
+          const modifications = toolModifications[tool.id]
+          return modifications ? { ...baseTool, ...modifications } : baseTool
+        })
+      } catch (error) {
+        console.error('Error converting tools:', error)
+        return []
+      }
+    },
+    [toolAssignments, toolModifications]
+  )
+
+  const tools = useMemo(() => normalizeTools(mcpTools as any[]), [normalizeTools, mcpTools])
+  const enabledTools = useMemo(
+    () => normalizeTools((enabledToolsData as any)?.data || []),
+    [normalizeTools, enabledToolsData]
+  )
+  const enabledToolsCount = useMemo(
+    () => enabledTools.filter((tool) => tool?.isInstalled).length,
+    [enabledTools]
+  )
 
   // Filter and sort tools using useMemo to avoid infinite loops
   const filteredTools = useMemo(() => {
@@ -403,6 +411,10 @@ export function ToolsDashboard() {
       })
 
       console.log(`✅ Successfully ${enabled ? 'enabled' : 'disabled'} tool: ${tool.name}`)
+      if (enabled) {
+        setSelectedTool(tool)
+        setConfigModalOpen(true)
+      }
 
     } catch (error) {
       console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
@@ -458,7 +470,7 @@ export function ToolsDashboard() {
       }
       return acc
     }, []).length,
-    installed: tools.filter(tool => tool?.isInstalled)?.length || 0, // Use actual enabled tools count
+    installed: enabledToolsCount || 0, // Use full enabled tools count
     configured: (toolAssignments as any[]).filter((assignment: any) => assignment.enabled).length,
     available: paginationData.total || 0, // Use total from pagination for available
     total: paginationData.total || 0 // Use total from pagination
@@ -488,22 +500,7 @@ export function ToolsDashboard() {
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
 
-          <Button
-            variant="outline"
-            onClick={() => setAssignmentModalOpen(true)}
-            className="hover:border-blue-500/50"
-          >
-            <Users className="w-4 h-4 mr-2" />
-            Agent Assignment
-          </Button>
-
-          <Button
-            className="bg-brand-primary hover:bg-brand-primary/90"
-            onClick={() => setCreateToolModalOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Custom Tool
-          </Button>
+          {/* Agent Assignment Button Removed */}
         </div>
       </motion.div>
 
@@ -600,15 +597,15 @@ export function ToolsDashboard() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <Tabs defaultValue="marketplace" className="space-y-6">
+        <Tabs defaultValue="enabled" className="space-y-6">
           <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid bg-secondary/50">
+            <TabsTrigger value="enabled" className="flex items-center space-x-2">
+              <CheckCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">Enabled ({enabledToolsCount})</span>
+            </TabsTrigger>
             <TabsTrigger value="marketplace" className="flex items-center space-x-2">
               <Grid3X3 className="w-4 h-4" />
               <span className="hidden sm:inline">Marketplace</span>
-            </TabsTrigger>
-            <TabsTrigger value="installed" className="flex items-center space-x-2">
-              <CheckCircle className="w-4 h-4" />
-              <span className="hidden sm:inline">Enabled ({stats.installed})</span>
             </TabsTrigger>
             {/* Security tab hidden - not implemented yet */}
             {/* <TabsTrigger value="security" className="flex items-center space-x-2">
@@ -616,6 +613,33 @@ export function ToolsDashboard() {
               <span className="hidden sm:inline">Security</span>
             </TabsTrigger> */}
           </TabsList>
+
+          <TabsContent value="enabled" className="space-y-6">
+            {/* Enabled Tools Management */}
+            <div className="space-y-4">
+              <h3 className="text-xl font-semibold">Enabled Tools</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <AnimatePresence>
+                  {enabledTools
+                    .filter(tool => tool?.isInstalled)
+                    .map((tool, index) => (
+                      <ToolCard
+                        key={tool?.id}
+                        tool={tool}
+                        viewMode="grid"
+                        index={index}
+                        onInstall={() => handleToolToggle(tool, true)}
+                        onDetails={() => handleToolDetails(tool)}
+                        onUninstall={() => handleToolToggle(tool, false)}
+                        onConfigure={() => handleToolConfigure(tool)}
+                        loading={loading}
+                        showMenu={true}
+                      />
+                    ))}
+                </AnimatePresence>
+              </div>
+            </div>
+          </TabsContent>
 
           <TabsContent value="marketplace" className="space-y-6">
             {/* Additional Filters and View Options */}
@@ -686,11 +710,9 @@ export function ToolsDashboard() {
                     viewMode={viewMode}
                     index={index}
                     onInstall={() => handleToolToggle(tool, true)}
-                    onConfigure={() => {
-                      setSelectedTool(tool)
-                      setConfigModalOpen(true)
-                    }}
+                    onDetails={() => handleToolDetails(tool)}
                     onUninstall={() => handleToolToggle(tool, false)}
+                    onConfigure={() => handleToolConfigure(tool)}
                     loading={loading}
                   />
                 ))}
@@ -726,46 +748,7 @@ export function ToolsDashboard() {
             )}
           </TabsContent>
 
-          <TabsContent value="installed" className="space-y-6">
-            {/* Installed Tools Management */}
-            <div className="space-y-4">
-              <h3 className="text-xl font-semibold">Installed Tools</h3>
-              <div className="grid gap-4">
-                {tools.filter(tool => tool?.isInstalled).map((tool) => (
-                  <Card key={tool?.id} className="bg-secondary/30 border-border/30">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                            <span className="text-lg">{tool?.icon}</span>
-                          </div>
-                          <div>
-                            <h4 className="font-semibold">{tool?.name}</h4>
-                            <p className="text-sm text-muted-foreground">{tool?.provider}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Badge className={tool?.isConfigured
-                            ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                            : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-                          }>
-                            {tool?.isConfigured ? 'Configured' : 'Needs Config'}
-                          </Badge>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleToolConfigure(tool)}
-                          >
-                            Configure
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          </TabsContent>
+          {/* Installed tab removed; Enabled is now first */}
 
           <TabsContent value="security" className="space-y-6">
             {/* Security Overview */}
@@ -868,24 +851,14 @@ export function ToolsDashboard() {
         open={configModalOpen}
         onClose={() => setConfigModalOpen(false)}
         tool={selectedTool}
-        onSave={(toolId, config) => {
-          setToolModifications(prev => ({
-            ...prev,
-            [toolId]: { ...prev[toolId], isConfigured: true, configuration: config }
-          }))
-        }}
       />
 
-      <AgentToolAssignment
+      {/* <AgentToolAssignment
         open={assignmentModalOpen}
         onClose={() => setAssignmentModalOpen(false)}
         tools={tools}
-      />
+      /> */}
 
-      <CreateToolModal
-        open={createToolModalOpen}
-        onClose={() => setCreateToolModalOpen(false)}
-      />
     </div>
   )
 }
@@ -896,12 +869,24 @@ interface ToolCardProps {
   viewMode: 'grid' | 'list'
   index: number
   onInstall: () => void
-  onConfigure: () => void
+  onDetails: () => void
   onUninstall: () => void
+  onConfigure: () => void
   loading: boolean
+  showMenu?: boolean
 }
 
-function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, loading }: ToolCardProps) {
+function ToolCard({
+  tool,
+  viewMode,
+  index,
+  onInstall,
+  onDetails,
+  onUninstall,
+  onConfigure,
+  loading,
+  showMenu = false
+}: ToolCardProps) {
   const StatusIcon = statusIcons[tool?.status as keyof typeof statusIcons] || CheckCircle
   const statusColor = statusColors[tool?.status as keyof typeof statusColors] || 'text-gray-400'
 
@@ -933,20 +918,29 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
                 </div>
               </div>
               {/* Toggle button */}
-              <button
-                onClick={() => {
-                  console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
-                  tool?.isInstalled ? onUninstall() : onInstall()
-                }}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
-                  }`}
-              >
-                <span className="sr-only">Toggle tool</span>
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onDetails}
+                >
+                  View
+                </Button>
+                <button
+                  onClick={() => {
+                    console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                    tool?.isInstalled ? onUninstall() : onInstall()
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
                     }`}
-                />
-              </button>
+                >
+                  <span className="sr-only">Toggle tool</span>
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                  />
+                </button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -977,12 +971,26 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
                 <p className="text-xs text-muted-foreground">{tool?.provider}</p>
               </div>
             </div>
-            <div className="flex items-center space-x-1">
+            <div className="flex items-center space-x-2">
               <StatusIcon className={`w-4 h-4 ${statusColor}`} />
-              {tool?.isInstalled && (
-                <Badge className="bg-green-500/10 text-green-400 border-green-500/20 text-xs">
-                  Installed
-                </Badge>
+              {showMenu && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={onDetails}>
+                      <Eye className="w-4 h-4 mr-2" />
+                      View Details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={onConfigure}>
+                      <Settings className="w-4 h-4 mr-2" />
+                      Configure
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
           </div>
@@ -1009,27 +1017,30 @@ function ToolCard({ tool, viewMode, index, onInstall, onConfigure, onUninstall, 
           </div>
 
           <Separator />
-
-          {/* Toggle Section */}
+          {/* Action Section */}
           <div className="flex items-center justify-between">
-            {/* Custom Toggle Button */}
-            <button
-              onClick={() => {
-                console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
-                tool?.isInstalled ? onUninstall() : onInstall()
-              }}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
-                }`}
-            >
-              <span className="sr-only">Toggle tool</span>
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+            <Button variant="outline" size="sm" onClick={onDetails}>
+              View Details
+            </Button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  console.log('Toggle clicked:', tool.name, !tool?.isInstalled)
+                  tool?.isInstalled ? onUninstall() : onInstall()
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 ${tool?.isInstalled ? 'bg-orange-500' : 'bg-gray-600'
                   }`}
-              />
-            </button>
-            <span className="text-sm text-muted-foreground">
-              {tool?.isInstalled ? 'Enabled' : 'Disabled'}
-            </span>
+              >
+                <span className="sr-only">Toggle tool</span>
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${tool?.isInstalled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                />
+              </button>
+              <span className="text-sm text-muted-foreground">
+                {tool?.isInstalled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
           </div>
         </CardContent>
       </Card>

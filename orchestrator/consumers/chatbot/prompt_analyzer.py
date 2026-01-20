@@ -9,6 +9,7 @@ Handles:
 - Identifying simple vs complex prompts
 """
 
+import json
 import logging
 import re
 from typing import List, Dict, Any, Optional
@@ -41,6 +42,12 @@ EXPLICIT_TOOL_PATTERNS = {
     'search_knowledge': ['search doc', 'find doc', 'show me doc', 'in the doc'],
     'query_database': ['query database', 'from database', 'sql', 'how many']
 }
+
+# Explicit tool call syntax (e.g., "Use tool foo with params {...}")
+EXPLICIT_TOOL_CALL_RE = re.compile(
+    r"^\s*use\s+tool\s+([a-zA-Z0-9_\-\.]+)\s*(?:with\s+params|params|with\s+arguments|arguments)?\s*(\{.*\})\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class PromptAnalyzer:
@@ -156,6 +163,33 @@ class PromptAnalyzer:
         
         result = " ".join(expanded[:8])  # Limit to 8 terms
         return result if result.strip() else query[:50]
+
+    def parse_explicit_tool_call(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse explicit tool call syntax:
+        "Use tool <tool_name> with params {...}"
+        """
+        match = EXPLICIT_TOOL_CALL_RE.match(query or "")
+        if not match:
+            return None
+
+        tool_name = match.group(1)
+        args_str = match.group(2) or "{}"
+        try:
+            tool_args = json.loads(args_str)
+        except Exception as exc:
+            logger.warning(f"Failed to parse explicit tool params for {tool_name}: {exc}")
+            return {
+                "tool_name": tool_name,
+                "tool_args": {},
+                "parse_error": f"Invalid JSON params: {exc}"
+            }
+
+        return {
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+            "parse_error": None
+        }
     
     def convert_to_llm_messages(
         self,

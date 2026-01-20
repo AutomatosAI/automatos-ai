@@ -132,7 +132,7 @@ class Agent(Base):
     skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
-    tool_assignments = relationship("AgentToolAssignment", foreign_keys="[AgentToolAssignment.agent_id]", cascade="all, delete-orphan")
+    tool_assignments = relationship("AgentToolAssignment", back_populates="agent", cascade="all, delete-orphan")
 
 class Skill(Base):
     __tablename__ = 'skills'
@@ -311,6 +311,7 @@ class MCPTool(Base):
     credentials_schema = Column(JSON, default={})
     status = Column(String(50), default='active')
     provider = Column(String(255))
+    tool_id = Column(String(255), unique=True, nullable=False, index=True)  # Clean: 'slack', 'github', etc.
     version = Column(String(50))
     icon = Column(String(100))
     logo = Column(String(255))  # Logo file path, e.g. "/logos/Discord.png"
@@ -322,24 +323,8 @@ class MCPTool(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relationships
-    tool_assignments = relationship("AgentToolAssignment", back_populates="tool", cascade="all, delete-orphan")
     usage_logs = relationship("ToolUsageLog", back_populates="tool", cascade="all, delete-orphan")
 
-class AgentToolAssignment(Base):
-    """Agent-Tool Assignment with permissions"""
-    __tablename__ = 'agent_tool_assignments'
-    
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'), nullable=False)
-    tool_id = Column(Integer, ForeignKey('mcp_tools.id', ondelete='CASCADE'), nullable=False)
-    enabled = Column(Boolean, default=True)
-    permissions = Column(JSON, default={})
-    configuration = Column(JSON, default={})
-    assigned_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool = relationship("MCPTool", back_populates="tool_assignments")
 
 class ToolUsageLog(Base):
     """Tool Usage Tracking for MCP Tools"""
@@ -523,6 +508,7 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
+    tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
 
 class AgentResponse(BaseModel):

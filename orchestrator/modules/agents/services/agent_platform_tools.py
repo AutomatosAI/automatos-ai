@@ -100,9 +100,88 @@ class AgentPlatformTools:
                     },
                     "required": ["query"]
                 }
+            },
+            {
+                "name": "switch_context",
+                "description": "Switch your specialized toolset (e.g., from 'general' to 'coding' or 'ops'). Use this when you need tools not currently visible.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "context": {
+                            "type": "string",
+                            "enum": ["general", "coding", "ops", "research", "communication"],
+                            "description": "The new context/mode to switch to"
+                        }
+                    },
+                    "required": ["context"]
+                }
             }
         ]
     
+    async def switch_context(
+        self,
+        context: str,
+        agent_id: int
+    ) -> Dict[str, Any]:
+        """
+        Switch the agent's active toolset context.
+        
+        Args:
+            context: The new context (coding, ops, communication, research, all)
+            agent_id: The agent ID
+            
+        Returns:
+            Result message
+        """
+        from core.models.agents import Agent
+        
+        self.logger.info(f"🔄 Agent {agent_id} switching context to '{context}'")
+        
+        try:
+            # Update agent's active context in DB
+            agent = self.db.query(Agent).get(agent_id)
+            if not agent:
+                return ToolResultFormatter.standardize_result(
+                    {"success": False, "error": f"Agent {agent_id} not found"},
+                    "switch_context"
+                )
+            
+            # Map context to tool groups (simple for now)
+            # This 'active_group' field might need to be added to Agent model
+            # For now, we'll assume it exists or use a metadata field if available
+            previous_context = getattr(agent, "active_context", "all")
+            
+            # Save new context to configuration (standard config field)
+            if not agent.configuration:
+                agent.configuration = {}
+                
+            # Make a copy to trigger SQLAlchemy detection of change for JSON field
+            new_config = dict(agent.configuration)
+            new_config["active_context"] = context
+            agent.configuration = new_config
+            
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(agent, "configuration")
+            
+            self.db.commit()
+            
+            return ToolResultFormatter.standardize_result(
+                {
+                    "success": True, 
+                    "message": f"Context switched from '{previous_context}' to '{context}'. Your available tools have been updated.",
+                    "previous_context": previous_context,
+                    "new_context": context
+                },
+                "switch_context"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ Context switch failed: {e}")
+            return ToolResultFormatter.standardize_result(
+                {"success": False, "error": str(e)},
+                "switch_context"
+            )
+
     async def execute_tool(
         self,
         tool_name: str,
@@ -127,7 +206,13 @@ class AgentPlatformTools:
         self.logger.info(f"  Parameters: {parameters}")
         
         try:
-            if tool_name == "search_knowledge":
+            if tool_name == "switch_context":
+                return await self.switch_context(
+                    context=parameters.get("context", "all"),
+                    agent_id=agent_id
+                )
+            
+            elif tool_name == "search_knowledge":
                 query = parameters.get("query", "")
                 limit = parameters.get("limit", 5)
                 

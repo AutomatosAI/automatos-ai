@@ -68,8 +68,24 @@ class OpenAIProvider(BaseLLMProvider):
                 }
                 # PRD-17: Add tools if provided
                 if tools:
-                    kwargs["tools"] = tools
+                    # Auto-Fix: Wrap legacy function definitions in "type": "function" structure
+                    formatted_tools = []
+                    for t in tools:
+                        # If tool is just the function definition (missing 'type' wrapper)
+                        if "type" not in t:
+                             formatted_tools.append({
+                                 "type": "function",
+                                 "function": t
+                             })
+                        else:
+                             formatted_tools.append(t)
+                    
+                    kwargs["tools"] = formatted_tools
                     kwargs["tool_choice"] = "auto"
+                    import json
+                    tools_json = json.dumps(formatted_tools, default=str)
+                    tools_summary = f"{len(formatted_tools)} tools. Sample: {tools_json[:200]}..."
+                    logger.info(f"Sending tools to OpenAI: {tools_summary}")
                 return self.client.chat.completions.create(**kwargs)
             
             response = await loop.run_in_executor(None, _call)

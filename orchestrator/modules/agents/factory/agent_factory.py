@@ -1689,6 +1689,57 @@ To use actions, respond with JSON blocks like:
             except Exception:
                 pass
         
+        # Explicitly add assigned adapter/MCP tools to the prompt (Generic & Scalable)
+        if db and agent.id:
+            try:
+                # Need to import here to avoid circular dependencies
+                from core.models import AgentToolAssignment, MCPTool
+                
+                # Query enabled assignments
+                assignments = db.query(AgentToolAssignment).filter(
+                    AgentToolAssignment.agent_id == agent.id,
+                    AgentToolAssignment.enabled == True
+                ).all()
+                
+                if assignments:
+                    helper_tools_section = ["\n## Available External Tools\n"]
+                    helper_tools_section.append("You have access to the following external tools. You MUST use them when their capabilities are needed to fulfill the user's request. Do not make up information if you can query these tools instead.\n")
+                    
+                    found_tools = False
+                    for assignment in assignments:
+                        # Find the tool definition
+                        tool_def = db.query(MCPTool).filter(
+                            MCPTool.tool_id == assignment.tool_id,
+                            MCPTool.status == 'active'
+                        ).first()
+                        
+                        if tool_def:
+                            found_tools = True
+                            # Construct tool name (matching registry convention)
+                            # Check provider to be sure
+                            tool_name = tool_def.name
+                            if not tool_def.mcp_server_url: # Adapter tool
+                                tool_name = f"adapter_{tool_def.name.lower().replace(' ', '_')}"
+                            
+                            helper_tools_section.append(f"### {tool_name}")
+                            helper_tools_section.append(f"**Description**: {tool_def.description}")
+                            
+                            # Add capabilities hint dynamically from metadata
+                            if tool_def.capabilities:
+                                caps = tool_def.capabilities
+                                methods = caps.get('methods') or caps.get('tools') or []
+                                if isinstance(methods, dict):
+                                    methods = list(methods.keys())
+                                if methods:
+                                    helper_tools_section.append(f"**Available Operations**: {', '.join(str(m) for m in methods)}")
+                                    helper_tools_section.append(f"**Usage**: This tool wraps the underlying API. Select the appropriate operation from the list above and provide the standard API parameters in the `params` object.")
+                                    
+                    if found_tools:
+                        sections.append("\n".join(helper_tools_section))
+                        self.logger.info(f"✨ Added {len(assignments)} helper tools to system prompt")
+            except Exception as e:
+                self.logger.warning(f"Failed to append helper tools to prompt: {e}")
+
         # Add instructions for handling dependency context
         sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
         sections.append("When you receive '## DEPENDENCY CONTEXT' at the beginning of your task:")
@@ -1929,7 +1980,7 @@ To use actions, respond with JSON blocks like:
             
             assignments = (
                 self.db_session.query(AgentToolAssignment)
-                .options(joinedload(AgentToolAssignment.tool))
+                
                 .filter(
                     AgentToolAssignment.agent_id == agent_id,
                     AgentToolAssignment.enabled == True
@@ -1937,21 +1988,29 @@ To use actions, respond with JSON blocks like:
                 .all()
             )
             
+            # CLEAN ARCHITECTURE: Query tools separately by tool_id (string)
+            from core.models.core import MCPTool
             tools = []
             for assignment in assignments:
-                if assignment.tool:  # Tool exists
+                # Fetch tool metadata using string tool_id
+                tool = self.db_session.query(MCPTool).filter(
+                    MCPTool.tool_id == assignment.tool_id,
+                    MCPTool.status == 'active'
+                ).first()
+                
+                if tool:  # Tool exists and is active
                     tools.append({
-                        "tool_id": assignment.tool.id,
-                        "name": assignment.tool.name,
-                        "description": assignment.tool.description,
-                        "provider": assignment.tool.provider,
-                        "category": assignment.tool.category,
-                        "icon": assignment.tool.icon,
-                        "mcp_server_url": assignment.tool.mcp_server_url,
-                        "capabilities": assignment.tool.capabilities or {},
-                        "permissions": assignment.permissions or {},
-                        "configuration": assignment.configuration or {},
-                        "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None
+                        "tool_id": tool.id,  # Numeric ID for legacy compat
+                        "name": tool.name,
+                        "description": tool.description,
+                        "provider": tool.provider,
+                        "category": tool.category,
+                        "icon": tool.icon,
+                        "mcp_server_url": tool.mcp_server_url,
+                        "capabilities": tool.capabilities or {},
+                        "permissions": {},  # Not stored in AgentToolAssignment anymore
+                        "configuration": {},  # Not stored in AgentToolAssignment anymore  
+                        "assigned_at": assignment.created_at.isoformat() if assignment.created_at else None
                     })
             
             if tools:

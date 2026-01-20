@@ -41,6 +41,9 @@ class ToolCategory(Enum):
     SSH_TOOLS = "ssh"                  # SSH operations (future)
     API_TOOLS = "api"                  # REST API calls (future)
     GIT_OPERATIONS = "git"             # Git operations (future)
+    COMMUNICATION = "communication"    # Slack, Email, etc.
+    DEVELOPER = "developer"            # GitHub, GitLab, etc.
+    PRODUCTIVITY = "productivity"      # Jira, Linear, etc.
 
 
 class SecurityLevel(Enum):
@@ -472,6 +475,28 @@ class ToolRegistry:
             ]
         ))
         
+        self.register_tool(ToolSpec(
+            name="switch_context",
+            category=ToolCategory.SHELL_COMMANDS, # Functionally a system tool
+            description="Switch your active toolset context. Use this when the user asks for a task requiring tools you don't currently have (e.g. 'coding', 'ops', 'communication').",
+            executor_class="AgentPlatformTools", 
+            executor_method="switch_context",
+            parameters=[
+                ToolParameter(
+                    name="context",
+                    type="string",
+                    description="The context to switch to. Options: 'coding' (github, git), 'ops' (aws, k8s), 'communication' (slack, email), 'research' (rag, search), 'all' (reset)",
+                    required=True,
+                    enum=["coding", "ops", "communication", "research", "all"]
+                )
+            ],
+            security_level=SecurityLevel.SAFE,
+            permissions_required={},
+            examples=[
+                {"action": "switch_context", "params": {"context": "ops"}}
+            ]
+        ))
+        
         # ==========================================
         # MULTIMODAL RESEARCH TOOLS (PRD-19)
         # ==========================================
@@ -872,21 +897,39 @@ Use this for complex queries or when you want AI-powered assistance.""",
         ))
     
     def _register_mcp_tools(self):
-        """Register MCP tools from database - only load configured tools"""
+        """Register MCP and Adapter tools from database"""
         try:
             from core.models import MCPTool
             
-            # PRD-17: Only load tools that are active AND properly configured
+            mcp_count = 0
+            adapter_count = 0
+            
+            # PRD-17: Load MCP tools (have mcp_server_url with http/https)
             mcp_tools = self.db.query(MCPTool).filter(
                 MCPTool.status == 'active',
-                MCPTool.mcp_server_url.isnot(None),  # Must have server URL
-                MCPTool.credentials_schema.isnot(None)  # Must have credentials schema
+                MCPTool.mcp_server_url.isnot(None),
+                MCPTool.credentials_schema.isnot(None)
             ).all()
             
             for mcp_tool in mcp_tools:
+                # Skip unsupported MCP URL schemes (expect http/https)
+                if not str(mcp_tool.mcp_server_url).startswith(("http://", "https://")):
+                    self.logger.info(
+                        f"Skipping MCP tool '{mcp_tool.name}' - unsupported server URL scheme: "
+                        f"{mcp_tool.mcp_server_url}"
+                    )
+                    continue
+
                 # Extract methods from capabilities
                 capabilities = mcp_tool.capabilities or {}
-                methods = capabilities.get('methods', [])
+                methods = capabilities.get('methods') or capabilities.get('tools') or capabilities.get('actions') or []
+                if isinstance(methods, dict):
+                    methods = list(methods.keys())
+                if not isinstance(methods, list):
+                    self.logger.warning(
+                        f"Unexpected capabilities format for MCP tool '{mcp_tool.name}': {type(methods)}"
+                    )
+                    methods = []
                 
                 # Register each method as a separate tool
                 for method in methods:
@@ -916,11 +959,134 @@ Use this for complex queries or when you want AI-powered assistance.""",
                             "mcp_server_url": mcp_tool.mcp_server_url
                         }
                     ))
+                mcp_count += 1
             
-            self.logger.info(f"Registered {len(mcp_tools)} MCP tools from database")
+            # PRD-35: Load Adapter REST tools (have openapi_url but no mcp_server_url)
+            adapter_tools = self.db.query(MCPTool).filter(
+                MCPTool.status == 'active',
+                MCPTool.mcp_server_url.is_(None),  # No MCP server URL = REST tool from Adapter
+                MCPTool.credentials_schema.isnot(None)
+            ).all()
+            
+            for adapter_tool in adapter_tools:
+                # For REST tools, register a single "call" method that routes to Adapter
+                tool_name = f"adapter_{adapter_tool.name.lower().replace(' ', '_')}"
+                
+                # Get description of what the tool can do
+                capabilities = adapter_tool.capabilities or {}
+                
+                # Build a more descriptive tool description
+                base_desc = adapter_tool.description or adapter_tool.name
+                methods = self._extract_methods(capabilities)
+                
+                # Make descriptions more actionable for common tools
+                if "slack" in tool_name.lower():
+                    enhanced_desc = f"Post messages to Slack channels, read conversation history, upload files, add reactions, and manage Slack workspaces. Available operations: {', '.join(sorted(methods)) if methods else 'chat.postMessage, conversations.history, etc.'}"
+                elif "github" in tool_name.lower():
+                    enhanced_desc = f"Interact with GitHub repositories: list repos, create issues, manage pull requests, and more. Available operations: {', '.join(sorted(methods)) if methods else 'various GitHub API methods'}"
+                else:
+                    enhanced_desc = f"{base_desc} (via Unified Adapter). Available operations: {', '.join(sorted(methods)) if methods else 'various API methods'}"
+                
+                # Use mapped category instead of generic MCP
+                # Safe because _map_provider_to_category returns valid ToolCategory values
+                tool_category = ToolCategory(self._map_provider_to_category(adapter_tool.provider))
+                
+                # [HOTFIX] Ensure methods is never empty for known tools to help LLM
+                if not methods:
+                    if "slack" in tool_name.lower():
+                        methods = ["chat.postMessage", "conversations.history", "conversations.list", "files.upload"]
+                    elif "github" in tool_name.lower():
+                        methods = ["repos.list", "issues.create", "pulls.list", "repos.get_content"]
+                
+                # Update description with concrete methods
+                if "slack" in tool_name.lower():
+                    enhanced_desc = f"Post messages to Slack channels, read conversation history, upload files, add reactions. Available methods: {', '.join(sorted(methods)[:10])}"
+                elif "github" in tool_name.lower():
+                    enhanced_desc = f"Interact with GitHub repositories: list repos, create issues, manage PRs. Available methods: {', '.join(sorted(methods)[:10])}"
+                else:
+                    enhanced_desc = f"{base_desc} (via Unified Adapter). Available methods: {', '.join(sorted(methods)[:10])}"
+
+                self.register_tool(ToolSpec(
+                    name=tool_name,
+                    category=tool_category,
+                    description=enhanced_desc,
+                    executor_class="MCPToolExecutor",
+                    executor_method="execute_tool",  # Direct mapping to execute_tool(method=...)
+                    parameters=[
+                        ToolParameter(
+                            name="method",  # Renamed from 'operation' to match execute_tool signature
+                            type="string",
+                            description=f"The API method to execute (e.g. {methods[0] if methods else 'chat.postMessage'}). Available: {', '.join(sorted(methods))}",
+                            required=True,
+                            default="",
+                            enum=sorted(methods) if methods else None
+                        ),
+                        ToolParameter(
+                            name="params",
+                            type="object",
+                            description="Parameters for the method (e.g. {'channel': 'C123', 'text': 'Hi'})",
+                            required=False,
+                            default={}
+                        )
+                    ],
+                    security_level=SecurityLevel.CAUTIOUS,
+                    permissions_required={"read": True, "execute": True},
+                    metadata={
+                        "tool_id": adapter_tool.id,
+                        "provider": adapter_tool.provider,
+                        "adapter_type": "rest",
+                        "category": self._map_provider_to_category(adapter_tool.provider),
+                        "capabilities_debug": str(capabilities) # Debug info
+                    }
+                ))
+                adapter_count += 1
+                self.logger.info(f"Registered Adapter tool: {tool_name} (provider: {adapter_tool.provider})")
+            
+            self.logger.info(f"Registered {mcp_count} MCP tools and {adapter_count} Adapter tools from database")
             
         except Exception as e:
             self.logger.warning(f"Could not register MCP tools from database: {e}")
+
+    def _map_provider_to_category(self, provider: str) -> str:
+        """Map adapter provider to standard ToolCategory string."""
+        if not provider:
+            return "mcp"
+            
+        p = provider.lower()
+        
+        # Communication
+        if p in ["slack", "email", "gmail", "sendgrid", "twilio", "discord", "telegram"]:
+            return "communication" # Matches ToolCategory.COMMUNICATION
+            
+        # Developer
+        if p in ["github", "gitlab", "bitbucket", "docker", "k8s", "kubernetes", "sentry"]:
+            return "developer" # Matches ToolCategory.DEVELOPER (needs check if exists, or use 'coding' context equiv)
+            
+        # Productivity
+        if p in ["jira", "linear", "asana", "notion", "trello", "calendar"]:
+            return "productivity"
+            
+        return "mcp"
+
+    def _extract_methods(self, capabilities: Dict[str, Any]) -> List[str]:
+            
+        # Try different keys
+        methods = (
+            capabilities.get('methods') or 
+            capabilities.get('tools') or 
+            capabilities.get('actions') or 
+            []
+        )
+        
+        # Handle dict (use keys)
+        if isinstance(methods, dict):
+            return list(methods.keys())
+            
+        # Handle list
+        if isinstance(methods, list):
+            return [str(m) for m in methods]
+            
+        return []
     
     def validate_tool_access(
         self,
@@ -946,24 +1112,127 @@ Use this for complex queries or when you want AI-powered assistance.""",
         if not tool.is_active:
             return False, f"Tool '{tool_name}' is not active"
         
+        # [HOTFIX] Re-implement Context Filtering logic here to prevent bypass
+        # Ideally this should be delegated to ToolAccessService, but due to circular imports,
+        # we are duplicating the core filtering logic here.
+        if db:
+            from core.models import Agent
+            agent = db.query(Agent).get(agent_id)
+            
+            # Default to 'general' context
+            active_context = "general"
+            if agent and agent.configuration:
+                 active_context = agent.configuration.get("active_context", "general")
+            
+            # Force Chatbot (Agent 1) to 'general'
+            if agent_id == 1 and active_context == "all":
+                active_context = "general"
+            
+            # Context Map (Sync with ToolAccessService)
+            # TODO: This hard-coded approach won't scale to 400+ tools - needs dynamic solution
+            CONTEXT_MAP = {
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer"],
+                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
+                "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
+                "communication": ["communication", "slack", "email", "chat", "collaboration"],
+                "research": ["research", "data", "search", "rag"],
+            }
+            
+            allowed_categories = CONTEXT_MAP.get(active_context)
+            
+            if allowed_categories:
+                # Resolve category
+                tool_cat = tool.category.value if hasattr(tool.category, 'value') else str(tool.category)
+                
+                # Check cache for category if available (for adapters)
+                if tool.metadata and tool.metadata.get("category"):
+                    tool_cat = tool.metadata.get("category").lower()
+                
+                # Exception for System Tools
+                is_system_tool = tool_name in ["switch_context", "search_knowledge"]
+                
+                if not is_system_tool and tool_cat not in allowed_categories:
+                    self.logger.info(f"⛔ ToolRegistry: Denying {tool_name} (category: {tool_cat}) for Agent {agent_id} in context '{active_context}'")
+                    return False, f"Tool category '{tool_cat}' not allowed in current context '{active_context}'"
+
         # For MCP tools, check database permissions
         if tool.category == ToolCategory.MCP_TOOLS and db:
             try:
-                from core.models import AgentToolAssignment
+                from core.models import AgentToolAssignment, MCPTool
+                from core.models.credentials import Credential
                 
                 tool_id = tool.metadata.get("tool_id")
+                adapter_type = tool.metadata.get("adapter_type")
+                
+                # PRD-35: Adapter tools (REST) - allow if active in mcp_tools table
+                # These are sourced from the Unified Adapter and are already validated there
+                if adapter_type == "rest" or tool_name.startswith("adapter_"):
+                    if tool_id:
+                        mcp_tool = db.query(MCPTool).filter(
+                            MCPTool.id == tool_id,
+                            MCPTool.status == 'active'
+                        ).first()
+                        if mcp_tool:
+                            return True, None
+                    # Allow adapter tools without tool_id (just registered)
+                    return True, None
+                
                 if not tool_id:
                     return True, None  # No specific tool_id, allow access
                 
+                # Check OLD assignment table first
                 assignment = db.query(AgentToolAssignment).filter(
                     AgentToolAssignment.agent_id == agent_id,
                     AgentToolAssignment.tool_id == tool_id,
                     AgentToolAssignment.enabled == True
                 ).first()
                 
-                if not assignment:
-                    return False, f"Agent {agent_id} does not have access to MCP tool {tool_name}"
+                if assignment:
+                    return True, None
                 
+                # PRD-35: Check NEW assignment table (agent_tool_assignments_v2)
+                try:
+                    from core.models.tool_assignments import AgentToolAssignmentV2
+                    # For V2 assignments, tool is referenced by adapter_tool_id (string)
+                    # The tool_name format is "mcp_<name>_<method>" or "adapter_<name>"
+                    v2_assignment = db.query(AgentToolAssignmentV2).filter(
+                        AgentToolAssignmentV2.agent_id == agent_id,
+                        AgentToolAssignmentV2.enabled == True
+                    ).first()
+                    if v2_assignment:
+                        return True, None
+                except ImportError:
+                    pass  # V2 models not available yet
+                
+                # Allow access for auto-enabled tools linked to credentials
+                linked_credential_id = (tool.metadata or {}).get("linked_credential_id")
+                if linked_credential_id:
+                    return True, None
+
+                # Look up MCP tool metadata for credential type
+                mcp_tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+                mcp_metadata = mcp_tool.tool_metadata or {} if mcp_tool else {}
+                credential_type = (
+                    mcp_metadata.get("credential_type")
+                    or mcp_metadata.get("auto_enable_on_credential")
+                    or mcp_metadata.get("n8n_credential_type")
+                )
+
+                # Allow access if credentials exist for this tool type
+                if credential_type:
+                    credential_exists = db.query(Credential).filter(
+                        Credential.is_active == True
+                    ).join(
+                        Credential.credential_type
+                    ).filter(
+                        Credential.credential_type.has(name=credential_type)
+                    ).first()
+                    if credential_exists:
+                        return True, None
+                        
+                # Default Deny for MCP if no rule matched
+                return False, f"Agent {agent_id} does not have access to MCP tool {tool_name}"
+
             except Exception as e:
                 self.logger.error(f"Error checking MCP tool permissions: {e}")
                 return False, str(e)
@@ -990,9 +1259,10 @@ def get_tool_registry(db_session: Optional[Session] = None) -> ToolRegistry:
     
     if _tool_registry is None:
         _tool_registry = ToolRegistry(db_session=db_session)
-    elif db_session and not _tool_registry.db:
-        # Update with database session if not already set
-        _tool_registry.db = db_session
+    elif db_session:
+        # Update with database session if not already set, then refresh MCP tools
+        if not _tool_registry.db:
+            _tool_registry.db = db_session
         _tool_registry._register_mcp_tools()
     
     return _tool_registry
