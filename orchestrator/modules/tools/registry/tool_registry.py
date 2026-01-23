@@ -22,10 +22,13 @@ Design Principles:
 """
 
 import logging
+import hashlib
+import re
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -179,6 +182,22 @@ class ToolRegistry:
             self._register_mcp_tools()
         
         self.logger.info(f"ToolRegistry initialized with {len(self.tools)} tools")
+
+    def _build_composio_tool_name(self, action_name: str) -> str:
+        """
+        Build a safe OpenAI function name for Composio actions.
+        OpenAI enforces a max length of 64 chars on function names.
+        """
+        if not action_name:
+            return "composio_action"
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", action_name.strip())
+        base = f"composio_{normalized}"
+        if len(base) <= 64:
+            return base
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:10]
+        max_slug_len = 64 - len("composio__") - len(digest)
+        trimmed = normalized[:max_slug_len].rstrip("_")
+        return f"composio_{trimmed}_{digest}"
     
     def register_tool(self, tool: ToolSpec) -> None:
         """
@@ -899,21 +918,132 @@ Use this for complex queries or when you want AI-powered assistance.""",
     def _register_mcp_tools(self):
         """Register MCP and Adapter tools from database"""
         try:
-            from core.models import MCPTool
+            from core.models import MCPTool, AgentToolAssignment
             
             mcp_count = 0
-            adapter_count = 0
+            composio_action_count = 0
+            assigned_tool_ids: Set[str] = set()
+            enabled_workspace_tools: Set[str] = set()
             
-            # PRD-17: Load MCP tools (have mcp_server_url with http/https)
+            try:
+                assigned_tool_ids = {
+                    str(row.tool_id)
+                    for row in self.db.query(AgentToolAssignment).filter(
+                        AgentToolAssignment.enabled == True
+                    ).all()
+                    if row.tool_id
+                }
+            except Exception as exc:
+                self.logger.warning(f"Failed to load agent tool assignments: {exc}")
+            
+            try:
+                from core.models.tool_assignments import WorkspaceToolConfig
+                enabled_workspace_tools = {
+                    str(row.tool_id)
+                    for row in self.db.query(WorkspaceToolConfig).filter(
+                        WorkspaceToolConfig.enabled == True
+                    ).all()
+                    if row.tool_id
+                }
+            except Exception:
+                # Workspace tool config may not be available in all deployments
+                pass
+            
+            allowed_tool_ids = assigned_tool_ids.union(enabled_workspace_tools)
+            
+            # PRD-17: Load MCP tools (have mcp_server_url with http/https or composio://)
+            # PRD-36: Also include Composio tools stored without mcp_server_url
             mcp_tools = self.db.query(MCPTool).filter(
-                MCPTool.status == 'active',
-                MCPTool.mcp_server_url.isnot(None),
-                MCPTool.credentials_schema.isnot(None)
+                or_(
+                    MCPTool.status == 'active',
+                    MCPTool.mcp_server_url.ilike("composio://%"),
+                    func.lower(MCPTool.provider) == "composio"
+                ),
+                or_(
+                    MCPTool.mcp_server_url.isnot(None),
+                    func.lower(MCPTool.provider) == "composio"
+                ),
+                or_(
+                    MCPTool.credentials_schema.isnot(None),
+                    MCPTool.mcp_server_url.ilike("composio://%"),
+                    func.lower(MCPTool.provider) == "composio"
+                )
             ).all()
             
             for mcp_tool in mcp_tools:
-                # Skip unsupported MCP URL schemes (expect http/https)
-                if not str(mcp_tool.mcp_server_url).startswith(("http://", "https://")):
+                # Normalize URL for robust scheme checks
+                mcp_url = str(mcp_tool.mcp_server_url or "").strip()
+                mcp_url_lower = mcp_url.lower()
+                is_composio_tool = (
+                    mcp_url_lower.startswith("composio://") or
+                    (mcp_tool.provider or "").lower() == "composio"
+                )
+                if is_composio_tool:
+                    # Register Composio tools (PRD-36) as action-based tools
+                    capabilities = mcp_tool.capabilities or {}
+                    methods = self._extract_methods(capabilities)
+                    # Fallback to tool metadata if capabilities are empty
+                    if not methods and isinstance(mcp_tool.tool_metadata, dict):
+                        methods = self._extract_methods(mcp_tool.tool_metadata)
+                    
+                    base_tool_id = mcp_tool.tool_id or mcp_tool.name
+                    if allowed_tool_ids and base_tool_id not in allowed_tool_ids:
+                        continue
+
+                    if not methods and base_tool_id:
+                        try:
+                            from core.composio.client import get_composio_client
+                            composio_client = get_composio_client()
+                            actions = composio_client.get_app_actions(base_tool_id)
+                            methods = [a.get("name") for a in actions if a.get("name")]
+                        except Exception as exc:
+                            self.logger.warning(
+                                f"Failed to fetch Composio actions for {base_tool_id}: {exc}"
+                            )
+                    
+                    provider = mcp_tool.provider or mcp_tool.name
+                    category_source = provider
+                    if (provider or "").lower() == "composio":
+                        category_source = base_tool_id or provider
+                    mapped_category = self._map_provider_to_category(category_source)
+                    
+                    for method in methods:
+                        action_name = str(method)
+                        tool_name = self._build_composio_tool_name(action_name)
+                        if tool_name != f"composio_{action_name}":
+                            self.logger.info(
+                                f"Composio action name truncated: {action_name} -> {tool_name}"
+                            )
+                        self.register_tool(ToolSpec(
+                            name=tool_name,
+                            category=ToolCategory.MCP_TOOLS,
+                            description=f"{mcp_tool.description or mcp_tool.name} (Composio action: {action_name})",
+                            executor_class="ComposioToolExecutor",
+                            executor_method="execute",
+                            parameters=[
+                                ToolParameter(
+                                    name="params",
+                                    type="object",
+                                    description=f"Parameters for {action_name}",
+                                    required=False,
+                                    default={}
+                                )
+                            ],
+                            security_level=SecurityLevel.CAUTIOUS,
+                            permissions_required={"read": True, "execute": True},
+                            metadata={
+                                "tool_id": base_tool_id,
+                                "provider": provider,
+                                "adapter_type": "composio",
+                                "action": action_name,
+                                "category": mapped_category
+                            }
+                        ))
+                        composio_action_count += 1
+                    mcp_count += 1
+                    continue
+                
+                if not mcp_url_lower.startswith(("http://", "https://")):
                     self.logger.info(
                         f"Skipping MCP tool '{mcp_tool.name}' - unsupported server URL scheme: "
                         f"{mcp_tool.mcp_server_url}"
@@ -953,7 +1083,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
                         security_level=SecurityLevel.CAUTIOUS,
                         permissions_required={"read": True, "execute": True},
                         metadata={
-                            "tool_id": mcp_tool.id,
+                            "tool_id": mcp_tool.tool_id,
                             "provider": mcp_tool.provider,
                             "method": method,
                             "mcp_server_url": mcp_tool.mcp_server_url
@@ -961,88 +1091,12 @@ Use this for complex queries or when you want AI-powered assistance.""",
                     ))
                 mcp_count += 1
             
-            # PRD-35: Load Adapter REST tools (have openapi_url but no mcp_server_url)
-            adapter_tools = self.db.query(MCPTool).filter(
-                MCPTool.status == 'active',
-                MCPTool.mcp_server_url.is_(None),  # No MCP server URL = REST tool from Adapter
-                MCPTool.credentials_schema.isnot(None)
-            ).all()
+            # Adapter REST tools removed: use Composio-only path.
             
-            for adapter_tool in adapter_tools:
-                # For REST tools, register a single "call" method that routes to Adapter
-                tool_name = f"adapter_{adapter_tool.name.lower().replace(' ', '_')}"
-                
-                # Get description of what the tool can do
-                capabilities = adapter_tool.capabilities or {}
-                
-                # Build a more descriptive tool description
-                base_desc = adapter_tool.description or adapter_tool.name
-                methods = self._extract_methods(capabilities)
-                
-                # Make descriptions more actionable for common tools
-                if "slack" in tool_name.lower():
-                    enhanced_desc = f"Post messages to Slack channels, read conversation history, upload files, add reactions, and manage Slack workspaces. Available operations: {', '.join(sorted(methods)) if methods else 'chat.postMessage, conversations.history, etc.'}"
-                elif "github" in tool_name.lower():
-                    enhanced_desc = f"Interact with GitHub repositories: list repos, create issues, manage pull requests, and more. Available operations: {', '.join(sorted(methods)) if methods else 'various GitHub API methods'}"
-                else:
-                    enhanced_desc = f"{base_desc} (via Unified Adapter). Available operations: {', '.join(sorted(methods)) if methods else 'various API methods'}"
-                
-                # Use mapped category instead of generic MCP
-                # Safe because _map_provider_to_category returns valid ToolCategory values
-                tool_category = ToolCategory(self._map_provider_to_category(adapter_tool.provider))
-                
-                # [HOTFIX] Ensure methods is never empty for known tools to help LLM
-                if not methods:
-                    if "slack" in tool_name.lower():
-                        methods = ["chat.postMessage", "conversations.history", "conversations.list", "files.upload"]
-                    elif "github" in tool_name.lower():
-                        methods = ["repos.list", "issues.create", "pulls.list", "repos.get_content"]
-                
-                # Update description with concrete methods
-                if "slack" in tool_name.lower():
-                    enhanced_desc = f"Post messages to Slack channels, read conversation history, upload files, add reactions. Available methods: {', '.join(sorted(methods)[:10])}"
-                elif "github" in tool_name.lower():
-                    enhanced_desc = f"Interact with GitHub repositories: list repos, create issues, manage PRs. Available methods: {', '.join(sorted(methods)[:10])}"
-                else:
-                    enhanced_desc = f"{base_desc} (via Unified Adapter). Available methods: {', '.join(sorted(methods)[:10])}"
-
-                self.register_tool(ToolSpec(
-                    name=tool_name,
-                    category=tool_category,
-                    description=enhanced_desc,
-                    executor_class="MCPToolExecutor",
-                    executor_method="execute_tool",  # Direct mapping to execute_tool(method=...)
-                    parameters=[
-                        ToolParameter(
-                            name="method",  # Renamed from 'operation' to match execute_tool signature
-                            type="string",
-                            description=f"The API method to execute (e.g. {methods[0] if methods else 'chat.postMessage'}). Available: {', '.join(sorted(methods))}",
-                            required=True,
-                            default="",
-                            enum=sorted(methods) if methods else None
-                        ),
-                        ToolParameter(
-                            name="params",
-                            type="object",
-                            description="Parameters for the method (e.g. {'channel': 'C123', 'text': 'Hi'})",
-                            required=False,
-                            default={}
-                        )
-                    ],
-                    security_level=SecurityLevel.CAUTIOUS,
-                    permissions_required={"read": True, "execute": True},
-                    metadata={
-                        "tool_id": adapter_tool.id,
-                        "provider": adapter_tool.provider,
-                        "adapter_type": "rest",
-                        "category": self._map_provider_to_category(adapter_tool.provider),
-                        "capabilities_debug": str(capabilities) # Debug info
-                    }
-                ))
-                adapter_count += 1
-                self.logger.info(f"Registered Adapter tool: {tool_name} (provider: {adapter_tool.provider})")
-            
-            self.logger.info(f"Registered {mcp_count} MCP tools and {adapter_count} Adapter tools from database")
+            self.logger.info(
+                f"Registered {mcp_count} MCP tool records "
+                f"(composio_actions={composio_action_count})"
+            )
             
         except Exception as e:
             self.logger.warning(f"Could not register MCP tools from database: {e}")
@@ -1112,9 +1166,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
         if not tool.is_active:
             return False, f"Tool '{tool_name}' is not active"
         
-        # [HOTFIX] Re-implement Context Filtering logic here to prevent bypass
-        # Ideally this should be delegated to ToolAccessService, but due to circular imports,
-        # we are duplicating the core filtering logic here.
+        # Context filtering to prevent tool bypass.
         if db:
             from core.models import Agent
             agent = db.query(Agent).get(agent_id)
@@ -1128,8 +1180,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
             if agent_id == 1 and active_context == "all":
                 active_context = "general"
             
-            # Context Map (Sync with ToolAccessService)
-            # TODO: This hard-coded approach won't scale to 400+ tools - needs dynamic solution
+            # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
             CONTEXT_MAP = {
                 "general": ["communication", "research", "productivity", "system", "collaboration", "developer"],
                 "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
@@ -1161,40 +1212,65 @@ Use this for complex queries or when you want AI-powered assistance.""",
                 from core.models import AgentToolAssignment, MCPTool
                 from core.models.credentials import Credential
                 
-                tool_id = tool.metadata.get("tool_id")
-                adapter_type = tool.metadata.get("adapter_type")
-                
-                # PRD-35: Adapter tools (REST) - allow if active in mcp_tools table
-                # These are sourced from the Unified Adapter and are already validated there
-                if adapter_type == "rest" or tool_name.startswith("adapter_"):
-                    if tool_id:
-                        mcp_tool = db.query(MCPTool).filter(
-                            MCPTool.id == tool_id,
-                            MCPTool.status == 'active'
-                        ).first()
-                        if mcp_tool:
-                            return True, None
-                    # Allow adapter tools without tool_id (just registered)
-                    return True, None
-                
+                tool_id_raw = tool.metadata.get("tool_id")
+                tool_id = str(tool_id_raw).strip() if tool_id_raw is not None else None
                 if not tool_id:
                     return True, None  # No specific tool_id, allow access
+
+                candidate_ids = {tool_id}
+                lower_candidate_ids = {tool_id.lower()}
+
+                def _find_assignment(check_agent_id: Optional[int] = None):
+                    query = db.query(AgentToolAssignment).filter(
+                        AgentToolAssignment.enabled == True
+                    )
+                    if check_agent_id is not None:
+                        query = query.filter(AgentToolAssignment.agent_id == check_agent_id)
+                    return query.filter(
+                        or_(
+                            AgentToolAssignment.tool_id.in_(candidate_ids),
+                            func.lower(AgentToolAssignment.tool_id).in_(lower_candidate_ids)
+                        )
+                    ).first()
                 
-                # Check OLD assignment table first
-                assignment = db.query(AgentToolAssignment).filter(
-                    AgentToolAssignment.agent_id == agent_id,
-                    AgentToolAssignment.tool_id == tool_id,
-                    AgentToolAssignment.enabled == True
-                ).first()
+                # Check OLD assignment table first (case-insensitive + slug/id fallback)
+                assignment = _find_assignment(agent_id)
                 
                 if assignment:
                     return True, None
+
+                # Fallback: resolve MCPTool by slug/name/id and retry
+                mcp_tool = None
+                try:
+                    id_match = int(tool_id) if tool_id.isdigit() else None
+                except ValueError:
+                    id_match = None
+                if id_match is not None:
+                    mcp_tool = db.query(MCPTool).filter(MCPTool.id == id_match).first()
+                if not mcp_tool:
+                    mcp_tool = db.query(MCPTool).filter(
+                        or_(MCPTool.tool_id == tool_id, MCPTool.name == tool_id)
+                    ).first()
+                if mcp_tool:
+                    for extra_id in (mcp_tool.tool_id, mcp_tool.name, str(mcp_tool.id)):
+                        if extra_id:
+                            candidate_ids.add(str(extra_id))
+                    lower_candidate_ids = {cid.lower() for cid in candidate_ids}
+                    assignment = _find_assignment(agent_id)
+                    if assignment:
+                        return True, None
+
+                # Allow Chatbot (agent 1) to use tools assigned to any agent
+                if agent_id == 1:
+                    any_assignment = _find_assignment(None)
+                    if any_assignment:
+                        return True, None
                 
                 # PRD-35: Check NEW assignment table (agent_tool_assignments_v2)
                 try:
                     from core.models.tool_assignments import AgentToolAssignmentV2
-                    # For V2 assignments, tool is referenced by adapter_tool_id (string)
-                    # The tool_name format is "mcp_<name>_<method>" or "adapter_<name>"
+                    # For V2 assignments, tool is referenced by tool_id (string)
+                    # The tool_name format is "composio_<ACTION_NAME>"
                     v2_assignment = db.query(AgentToolAssignmentV2).filter(
                         AgentToolAssignmentV2.agent_id == agent_id,
                         AgentToolAssignmentV2.enabled == True
@@ -1231,7 +1307,9 @@ Use this for complex queries or when you want AI-powered assistance.""",
                         return True, None
                         
                 # Default Deny for MCP if no rule matched
-                return False, f"Agent {agent_id} does not have access to MCP tool {tool_name}"
+                reason = f"Agent {agent_id} does not have access to MCP tool {tool_name}"
+                self.logger.info(f"[ToolAccess] denied tool={tool_name} agent={agent_id} reason={reason}")
+                return False, reason
 
             except Exception as e:
                 self.logger.error(f"Error checking MCP tool permissions: {e}")

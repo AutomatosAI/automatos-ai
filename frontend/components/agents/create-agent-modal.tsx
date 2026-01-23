@@ -101,7 +101,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     description: '',
     tags: '',
     skills: [] as string[],
-    tools: [] as string[],
+    tools: [] as number[],
     specializations: [] as string[],
     maxConcurrentTasks: 3,
     priority: 'medium',  // Backend expects: low, medium, high, critical
@@ -137,7 +137,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     }))
   }
 
-  const handleToolToggle = (toolId: string) => {
+  const handleToolToggle = (toolId: number) => {
     setAgentData(prev => ({
       ...prev,
       tools: prev.tools.includes(toolId)
@@ -209,15 +209,11 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         if (agentData.tools.length > 0) {
           try {
             console.log('Assigning tools to agent:', agentData.tools)
-            const assignments = agentData.tools.map(toolId => ({
-              adapter_tool_id: toolId,
-              enabled: true
-            }))
-
-            await apiClient.request(`/api/tools/agents/${newAgent.id}/tools/batch`, {
-              method: 'PUT',
-              body: JSON.stringify({ assignments })
-            })
+            await Promise.all(
+              agentData.tools.map((toolId) =>
+                apiClient.assignToolToAgent(newAgent.id, toolId, { enabled: true })
+              )
+            )
             console.log('Tools assigned successfully')
           } catch (error) {
             console.error('Failed to assign tools:', error)
@@ -644,8 +640,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {(availableTools as any[]).map((tool: any) => {
-                          const toolId = tool.name?.toLowerCase().replace(/\s+/g, '_') || tool.id
-                          const actualToolId = tool.name
+                          const actualToolId = tool.id
 
                           return (
                             <motion.div

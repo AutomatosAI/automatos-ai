@@ -17,6 +17,8 @@ from pydantic import BaseModel
 
 from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,13 @@ def get_user_id(db: Session) -> int:
 async def stream_chat(
     request: ChatRequest,
     _x_api_key: bool = Depends(require_api_key),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Stream chat messages using AI SDK Data Stream format (text/plain)"""
+    logger.info(f"[chat] RequestContext workspace_id={ctx.workspace_id}")
     chat_service = ChatService(db)
-    streaming_service = StreamingChatService(db)
+    streaming_service = StreamingChatService(db, workspace_id=ctx.workspace_id)
     user_id = get_user_id(db)
 
     def get_parts(msg: ChatMessageRequest) -> List[MessagePart]:
@@ -174,7 +178,8 @@ async def stream_chat(
     chat_service.save_message(
         chat_id=chat_id,
         role="user",
-        parts=[part.dict() for part in parts]
+        parts=[part.dict() for part in parts],
+        workspace_id=ctx.workspace_id
     )
     
     

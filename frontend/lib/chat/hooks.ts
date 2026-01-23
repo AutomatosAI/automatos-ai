@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall } from '@/types'
 import { toast } from 'sonner'
 
@@ -19,6 +20,7 @@ export function useChat({
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
 }) {
+  const { getToken, isLoaded } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [usage, setUsage] = useState<AppUsage | undefined>()
   const [isLoading, setIsLoading] = useState(false)
@@ -74,7 +76,7 @@ export function useChat({
 
       try {
         abortControllerRef.current = new AbortController()
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        const token = isLoaded ? await getToken() : null
         
         // Get API key from env or localStorage (from settings)
         const apiKey = typeof window !== 'undefined' 

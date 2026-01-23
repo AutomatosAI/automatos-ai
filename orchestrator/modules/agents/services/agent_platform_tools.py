@@ -133,7 +133,8 @@ class AgentPlatformTools:
         Returns:
             Result message
         """
-        from core.models.agents import Agent
+        from core.models import Agent
+        from modules.tools.formatting.result_formatter import ToolResultFormatter
         
         self.logger.info(f"🔄 Agent {agent_id} switching context to '{context}'")
         

@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const apiKey = getApiKey(request)
+    const authHeader = request.headers.get('authorization')
     
     // Log for debugging (remove in production)
     if (!process.env.NEXT_PUBLIC_API_KEY) {
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
         'Accept': 'text/plain',
         'x-api-key': apiKey, // Always send API key
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(body),
     })
@@ -66,6 +68,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json()
     const apiKey = getApiKey(request)
+    const authHeader = request.headers.get('authorization')
     
     // Get the path from the request URL to forward to correct backend endpoint
     const url = new URL(request.url)
@@ -77,6 +80,7 @@ export async function PATCH(request: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
+        ...(authHeader ? { 'Authorization': authHeader } : {}),
       },
       body: JSON.stringify(body),
     })

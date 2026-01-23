@@ -13,7 +13,9 @@ Handles:
 
 import json
 import logging
+import time
 from typing import List, Dict, Any, Optional
+from uuid import UUID, uuid4
 from contextlib import contextmanager
 
 # Use modules.tools directly - NO duplicate tool definitions
@@ -23,6 +25,23 @@ from modules.tools.registry import get_tool_registry as registry_get_tool_regist
 from core.database.database import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+def _new_trace_id() -> str:
+    return uuid4().hex[:12]
+
+def _summarize_args(args: Any) -> str:
+    if isinstance(args, dict):
+        keys = list(args.keys())
+        return f"dict keys={keys[:12]}{'...' if len(keys) > 12 else ''}"
+    if isinstance(args, list):
+        return f"list len={len(args)}"
+    return f"{type(args).__name__}"
+
+def _is_fatal_dependency_error(error: Optional[str]) -> bool:
+    if not error:
+        return False
+    lowered = error.lower()
+    return "composio openai sdk not available" in lowered or "composio-openai" in lowered
 
 @contextmanager
 def _session_scope():
@@ -34,122 +53,32 @@ def _session_scope():
         session.close()
 
 
-# Global tool registry instance (backed by modules.tools.registry singleton)
-_tool_registry = None
-
-
-def _get_registry(db_session=None):
-    """
-    Get the shared ToolRegistry with a DB session so MCP tools are loaded.
-    If the registry already exists without a DB, injecting a session later
-    will populate MCP tools via registry_get_tool_registry.
-    """
-    global _tool_registry
-    if _tool_registry is None:
-        _tool_registry = registry_get_tool_registry(db_session=db_session)
-        logger.info(f"✅ ToolRouter connected to ToolRegistry ({len(_tool_registry.tools)} tools)")
-    elif db_session and not _tool_registry.db:
-        _tool_registry = registry_get_tool_registry(db_session=db_session)
-    return _tool_registry
-
-
 def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
     SINGLE SOURCE OF TRUTH - no duplicate definitions.
-    
-    Note: We expose `smart_query_database` as the primary database tool,
-    filtering out the basic `query_database` for better user experience.
     """
-    # Ensure registry has DB so MCP tools are available
-    registry = _get_registry(db_session=db_session)
-    session_used = db_session
-    if session_used is None:
-        # Open a short-lived session for permission checks
-        try:
-            session_used = SessionLocal()
-        except Exception:
-            session_used = None
-            
-    # [HOTFIX] Ensure Registry has access to DB to load MCP/Adapter tools
-    # If we created a local session, we must inject it if registry is missing one
-    if session_used and not registry.db:
-        logger.info("🔌 Injecting DB session into ToolRegistry for MCP discovery")
-        registry.db = session_used
-        registry._register_mcp_tools()
-    
+    session_used = db_session or SessionLocal()
+    trace_id = _new_trace_id()
+    start_time = time.time()
     try:
-        # Get all candidates first
-        # Get all tools from registry (Source of Truth)
-        # This covers all categories (Research, DB, MCP, Shell, FileOps, Communication, Developer, etc.)
+        registry = registry_get_tool_registry(db_session=session_used)
         all_candidates = registry.get_all_tools(active_only=True)
-        
-        # [HOTFIX] Apply Context Filtering to ALL Tools (Core + MCP)
-        # Ensure we don't send irrelevant tools (e.g. execute_command in general context)
-        filtered_tools = []
-        
-        # 1. Determine Allowed Categories
-        allowed_categories = None
-        current_context = "general" # Default
-        
-        if agent_id is not None and session_used is not None:
-             from core.models import Agent
-             agent = session_used.query(Agent).get(agent_id)
-             if agent and agent.configuration:
-                 current_context = agent.configuration.get("active_context", "general")
-             
-             # Force Chatbot (1) to general if "all"
-             if agent_id == 1 and current_context == "all":
-                 current_context = "general"
-                 
-             # Context Map (Sync with ToolAccessService)
-             CONTEXT_MAP = {
-                "general": ["communication", "research", "productivity", "system", "collaboration"], 
-                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
-                "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
-                "communication": ["communication", "slack", "email", "chat", "collaboration"],
-                "research": ["research", "data", "search", "rag"],
-             }
-             allowed_categories = CONTEXT_MAP.get(current_context)
-        
-        # 2. Filter Candidates
-        for tool in all_candidates:
-            # Skip basic query_database if smart version exists (legacy logic)
-            if tool.name == 'query_database':
-                continue
-                
-            # System tools always allowed
-            if tool.name in ["switch_context", "search_knowledge"]:
-                filtered_tools.append(tool)
-                continue
-                
-            # Category Filtering
-            if allowed_categories:
-                # Normalize category string
-                tool_cat = tool.category.value if hasattr(tool.category, 'value') else str(tool.category)
-                tool_cat = tool_cat.lower()
-                
-                # Check mapping (handle partial matches or simple logic)
-                if tool_cat in allowed_categories:
+        filtered_tools = all_candidates
+        denied: List[Dict[str, Any]] = []
+
+        if agent_id is not None:
+            filtered_tools = []
+            for tool in all_candidates:
+                allowed, reason = registry.validate_tool_access(
+                    agent_id=agent_id,
+                    tool_name=tool.name,
+                    db=session_used
+                )
+                if allowed:
                     filtered_tools.append(tool)
                 else:
-                    # DEBUG: Log dropped tools (verbose but helpful for debugging)
-                    # logger.debug(f"Dropped tool {tool.name} (cat: {tool_cat}) for context {current_context}")
-                    pass
-            else:
-                # No context filtering (e.g. if agent not found or infinite context), allow all
-                filtered_tools.append(tool)
-
-        # 3. Agent Access Check (Database Assignments)
-        if agent_id is not None and session_used is not None:
-            # Filter solely based on registry validation (which checks assignments)
-            # Note: registry.validate_tool_access ALSO checks context now, so this is double-safe
-            final_tools = []
-            for tool in filtered_tools:
-                is_allowed, _ = registry.validate_tool_access(agent_id=agent_id, tool_name=tool.name, db=session_used)
-                if is_allowed:
-                    final_tools.append(tool)
-            filtered_tools = final_tools
+                    denied.append({"tool": tool.name, "reason": reason})
         
         # Convert to OpenAI function format
         openai_tools = []
@@ -159,29 +88,32 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[D
                 "type": "function",
                 "function": schema
             })
-            # DEBUG: Log adapter tool descriptions to verify they're updated
-            if tool.name.startswith("adapter_"):
-                logger.info(f"🔍 Tool {tool.name} description: {schema.get('description', 'NO DESCRIPTION')[:100]}")
         
         has_mcp = any(t.category == ToolCategory.MCP_TOOLS for t in filtered_tools)
+        elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
-            f"✅ Loaded {len(openai_tools)} tools for chatbot "
-            f"(agent_id={agent_id}, smart_query_database enabled, includes MCP={has_mcp})"
+            f"[tool-trace {trace_id}] Loaded {len(openai_tools)} tools "
+            f"(agent_id={agent_id}, includes MCP={has_mcp}, denied={len(denied)}, "
+            f"candidates={len(all_candidates)}, {elapsed_ms}ms)"
         )
+        if denied:
+            sample = denied[:10]
+            logger.info(f"[tool-trace {trace_id}] Denied sample: {sample}")
         return openai_tools
     except Exception as e:
-        logger.error(f"Error loading tools from registry: {e}")
+        logger.error(f"[tool-trace {trace_id}] Error loading tools from registry: {e}")
         return []
     finally:
-        if db_session is None and session_used is not None:
-            # Only close if we opened it
+        if db_session is None:
             session_used.close()
 
 
 async def execute_tool(
     tool_name: str,
     tool_args: Dict[str, Any],
-    agent_id: int = 1
+    agent_id: int = 1,
+    workspace_id: Optional[UUID] = None,
+    trace_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Execute a tool via modules.tools.UnifiedToolExecutor.
@@ -189,15 +121,42 @@ async def execute_tool(
     """
     from core.database.database import SessionLocal
     
+    trace = trace_id or _new_trace_id()
     # Use SessionLocal directly - simpler and works
     db_session = SessionLocal()
     try:
+        if workspace_id is None and agent_id:
+            try:
+                from core.models import Agent as AgentModel
+                agent_row = db_session.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                if agent_row and agent_row.workspace_id:
+                    workspace_id = agent_row.workspace_id
+                    logger.info(f"[tool-trace {trace}] Resolved workspace_id from agent {agent_id}")
+                else:
+                    logger.warning(f"[tool-trace {trace}] Agent workspace_id missing for agent={agent_id}")
+            except Exception as exc:
+                logger.warning(f"[tool-trace {trace}] Failed to resolve workspace_id: {exc}")
         executor = UnifiedToolExecutor(db_session)
-        result = await executor.execute_tool(tool_name, tool_args, agent_id)
+        logger.info(
+            f"[tool-trace {trace}] execute_tool start tool={tool_name} "
+            f"agent={agent_id} workspace={workspace_id} args={_summarize_args(tool_args)}"
+        )
+        result = await executor.execute_tool(
+            tool_name,
+            tool_args,
+            agent_id,
+            workspace_id=workspace_id,
+            trace_id=trace
+        )
         db_session.commit()
+        logger.info(
+            f"[tool-trace {trace}] execute_tool done tool={tool_name} "
+            f"success={bool(result.get('success'))}"
+        )
         return result
     except Exception as e:
         db_session.rollback()
+        logger.error(f"[tool-trace {trace}] execute_tool error tool={tool_name}: {e}")
         raise
     finally:
         db_session.close()
@@ -216,7 +175,8 @@ class ToolRouter:
         self,
         tool_name: str,
         tool_args: Dict[str, Any],
-        agent_id: int = 1
+        agent_id: int = 1,
+        workspace_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         Execute a tool and return formatted results.
@@ -229,10 +189,20 @@ class ToolRouter:
                 'raw_result': dict      # Original result
             }
         """
-        logger.info(f"[ToolRouter] Executing {tool_name} with args: {tool_args}")
+        trace_id = _new_trace_id()
+        logger.info(
+            f"[tool-trace {trace_id}] ToolRouter execute_and_format "
+            f"tool={tool_name} agent={agent_id} workspace={workspace_id} args={_summarize_args(tool_args)}"
+        )
         
         try:
-            result = await execute_tool(tool_name, tool_args, agent_id)
+            result = await execute_tool(
+                tool_name,
+                tool_args,
+                agent_id,
+                workspace_id=workspace_id,
+                trace_id=trace_id
+            )
             
             # Check success
             success = (
@@ -245,30 +215,46 @@ class ToolRouter:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
                 llm_context = self.formatter.format_for_llm(result, tool_name)
                 
-                logger.info(f"[ToolRouter] {tool_name} succeeded")
+                logger.info(f"[tool-trace {trace_id}] {tool_name} succeeded")
                 return {
                     'success': True,
                     'frontend_data': frontend_data,
                     'llm_context': llm_context,
-                    'raw_result': result
+                    'raw_result': result,
+                    'fatal_error': False,
+                    'error_type': None
                 }
             else:
                 error = result.get('error', 'Unknown error')
-                logger.warning(f"[ToolRouter] {tool_name} failed: {error}")
+                error_type = result.get('error_type')
+                fatal_error = bool(result.get('fatal')) or _is_fatal_dependency_error(error)
+                llm_error = error
+                if fatal_error:
+                    llm_error = "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
+                logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
                 return {
                     'success': False,
                     'frontend_data': {},
-                    'llm_context': f"Tool {tool_name} failed: {error}",
-                    'raw_result': result
+                    'llm_context': f"Tool {tool_name} failed: {llm_error}",
+                    'raw_result': result,
+                    'fatal_error': fatal_error,
+                    'error_type': error_type
                 }
                 
         except Exception as e:
-            logger.error(f"[ToolRouter] {tool_name} exception: {e}")
+            error_msg = str(e)
+            fatal_error = _is_fatal_dependency_error(error_msg)
+            logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
+            llm_error = error_msg
+            if fatal_error:
+                llm_error = "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
             return {
                 'success': False,
                 'frontend_data': {},
-                'llm_context': f"Tool {tool_name} error: {str(e)}",
-                'raw_result': {'success': False, 'error': str(e)}
+                'llm_context': f"Tool {tool_name} error: {llm_error}",
+                'raw_result': {'success': False, 'error': error_msg},
+                'fatal_error': fatal_error,
+                'error_type': 'dependency_missing' if fatal_error else None
             }
     
     def build_tool_context_message(

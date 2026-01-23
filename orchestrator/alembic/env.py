@@ -6,6 +6,11 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config

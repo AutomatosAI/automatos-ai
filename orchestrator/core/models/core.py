@@ -8,7 +8,8 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
-from sqlalchemy.orm import declarative_base
+# Base moved to core/database/base.py to avoid circular imports
+from core.database.base import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -16,14 +17,13 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 from uuid import uuid4
+
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
-
-Base = declarative_base()
 
 # Association tables for many-to-many relationships
 agent_skills = Table('agent_skills', Base.metadata,
@@ -95,6 +95,9 @@ class Agent(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
     
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
@@ -313,9 +316,9 @@ class MCPTool(Base):
     provider = Column(String(255))
     tool_id = Column(String(255), unique=True, nullable=False, index=True)  # Clean: 'slack', 'github', etc.
     version = Column(String(50))
-    icon = Column(String(100))
-    logo = Column(String(255))  # Logo file path, e.g. "/logos/Discord.png"
-    category = Column(String(100))
+    icon = Column(String(500))
+    logo = Column(String(500))  # Logo file path, e.g. "/logos/Discord.png"
+    category = Column(String(255))
     tags = Column(PG_ARRAY(String))
     tool_metadata = Column('metadata', JSON, default={})  # Renamed from metadata (reserved in SQLAlchemy)
     created_by = Column(String(255))
@@ -368,6 +371,9 @@ class Workflow(Base):
     complexity_score = Column(Float, nullable=True)  # Workflow complexity (9-stage enhancement)
     success_rate = Column(Float, nullable=True)  # Success rate (9-stage enhancement)
     
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
+    
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
     executions = relationship("WorkflowExecution", back_populates="workflow")
@@ -414,6 +420,9 @@ class Document(Base):
     upload_date = Column(DateTime, default=func.now())
     processed_date = Column(DateTime)
     created_by = Column(String(255))
+    
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
 class SystemConfiguration(Base):
     __tablename__ = 'system_configurations'
@@ -839,12 +848,20 @@ class Task(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 class User(Base):
-    """User model for task ownership"""
+    """User model with Clerk authentication (PRD-37: SaaS Foundation)"""
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
+    
+    # PRD-37: Clerk authentication fields
+    clerk_user_id = Column(String(255), unique=True, nullable=True)
+    name = Column(String(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
+    last_sign_in = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -1042,6 +1059,7 @@ class Message(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
     role = Column(String(20), nullable=False)
     parts = Column(JSONB, nullable=False, default=list, server_default='[]')
     attachments = Column(JSONB, default=list, server_default='[]')

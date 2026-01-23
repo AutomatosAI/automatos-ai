@@ -101,74 +101,74 @@ def load_seed_data(load_credentials=True, load_tools=True):
             else:
                 print(f"  ⚠️  Credential types file not found: {cred_file}")
         
-        # Load MCP Tools
-        if load_tools:
-            tools_file = db_path / "mcp_tools_seed.json"
-            if tools_file.exists():
-                print("\n📂 Loading MCP tools...")
-                with open(tools_file, 'r') as f:
-                    mcp_tools = json.load(f)
-                
-                inserted = 0
-                updated = 0
-                skipped = 0
-                
-                for tool in mcp_tools:
-                    try:
-                        # Check if tool exists first
-                        cursor.execute("SELECT id FROM mcp_tools WHERE name = %s", (tool['name'],))
-                        existing = cursor.fetchone()
-                        is_update = existing is not None
-                        
-                        cursor.execute("""
-                            INSERT INTO mcp_tools 
-                            (id, name, description, mcp_server_url, capabilities, credentials_schema,
-                             status, provider, version, icon, category, tags, metadata, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (name) DO UPDATE SET
-                                description = EXCLUDED.description,
-                                mcp_server_url = EXCLUDED.mcp_server_url,
-                                capabilities = EXCLUDED.capabilities,
-                                credentials_schema = EXCLUDED.credentials_schema,
-                                status = EXCLUDED.status,
-                                provider = EXCLUDED.provider,
-                                version = EXCLUDED.version,
-                                icon = EXCLUDED.icon,
-                                category = EXCLUDED.category,
-                                tags = EXCLUDED.tags,
-                                metadata = EXCLUDED.metadata,
-                                updated_at = CURRENT_TIMESTAMP
-                        """, (
-                            tool['id'],
-                            tool['name'],
-                            tool.get('description'),
-                            tool.get('mcp_server_url'),
-                            json.dumps(tool.get('capabilities')) if tool.get('capabilities') else None,
-                            json.dumps(tool.get('credentials_schema')) if tool.get('credentials_schema') else None,
-                            tool.get('status', 'active'),
-                            tool.get('provider'),
-                            tool.get('version'),
-                            tool.get('icon'),
-                            tool.get('category'),
-                            tool.get('tags'),  # PostgreSQL array
-                            json.dumps(tool.get('metadata')) if tool.get('metadata') else None,
-                            tool.get('created_by', 'system')
-                        ))
-                        
-                        if is_update:
-                            updated += 1
-                        else:
-                            inserted += 1
-                    except Exception as e:
-                        print(f"  ⚠️  Error inserting {tool['name']}: {str(e)[:100]}")
-                        skipped += 1
-                
-                conn.commit()
-                print(f"  ✅ Inserted: {inserted} MCP tools")
-                print(f"  🔄 Updated: {updated} MCP tools")
-                print(f"  ⏭️  Skipped: {skipped} (no changes)")
-            else:
-                print(f"  ⚠️  MCP tools file not found: {tools_file}")
+        # Load MCP Tools - DISABLED TO PREVENT LEGACY DATA RELOAD (Use Composio Sync instead)
+        # if load_tools:
+        #     tools_file = db_path / "mcp_tools_seed.json"
+        #     if tools_file.exists():
+        #         print("\n📂 Loading MCP tools...")
+        #         with open(tools_file, 'r') as f:
+        #             mcp_tools = json.load(f)
+        #         
+        #         inserted = 0
+        #         updated = 0
+        #         skipped = 0
+        #         
+        #         for tool in mcp_tools:
+        #             try:
+        #                 # Check if tool exists first
+        #                 cursor.execute("SELECT id FROM mcp_tools WHERE name = %s", (tool['name'],))
+        #                 existing = cursor.fetchone()
+        #                 is_update = existing is not None
+        #                 
+        #                 cursor.execute("""
+        #                     INSERT INTO mcp_tools 
+        #                     (id, name, description, mcp_server_url, capabilities, credentials_schema,
+        #                      status, provider, version, icon, category, tags, metadata, created_by)
+        #                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        #                     ON CONFLICT (name) DO UPDATE SET
+        #                         description = EXCLUDED.description,
+        #                         mcp_server_url = EXCLUDED.mcp_server_url,
+        #                         capabilities = EXCLUDED.capabilities,
+        #                         credentials_schema = EXCLUDED.credentials_schema,
+        #                         status = EXCLUDED.status,
+        #                         provider = EXCLUDED.provider,
+        #                         version = EXCLUDED.version,
+        #                         icon = EXCLUDED.icon,
+        #                         category = EXCLUDED.category,
+        #                         tags = EXCLUDED.tags,
+        #                         metadata = EXCLUDED.metadata,
+        #                         updated_at = CURRENT_TIMESTAMP
+        #                 """, (
+        #                     tool['id'],
+        #                     tool['name'],
+        #                     tool.get('description'),
+        #                     tool.get('mcp_server_url'),
+        #                     json.dumps(tool.get('capabilities')) if tool.get('capabilities') else None,
+        #                     json.dumps(tool.get('credentials_schema')) if tool.get('credentials_schema') else None,
+        #                     tool.get('status', 'active'),
+        #                     tool.get('provider'),
+        #                     tool.get('version'),
+        #                     tool.get('icon'),
+        #                     tool.get('category'),
+        #                     tool.get('tags'),  # PostgreSQL array
+        #                     json.dumps(tool.get('metadata')) if tool.get('metadata') else None,
+        #                     tool.get('created_by', 'system')
+        #                 ))
+        #                 
+        #                 if is_update:
+        #                     updated += 1
+        #                 else:
+        #                     inserted += 1
+        #             except Exception as e:
+        #                 print(f"  ⚠️  Error inserting {tool['name']}: {str(e)[:100]}")
+        #                 skipped += 1
+        #         
+        #         conn.commit()
+        #         print(f"  ✅ Inserted: {inserted} MCP tools")
+        #         print(f"  🔄 Updated: {updated} MCP tools")
+        #         print(f"  ⏭️  Skipped: {skipped} (no changes)")
+        #     else:
+        #         print(f"  ⚠️  MCP tools file not found: {tools_file}")
         
         # Verify counts
         print("\n📊 Database Verification:")

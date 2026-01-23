@@ -8,8 +8,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Zap, 
+import {
+  Zap,
   Key,
   Info,
   X,
@@ -28,6 +28,13 @@ import {
   type Credential
 } from '@/lib/api/credentials'
 import { apiClient } from '@/lib/api-client'
+import {
+  useAppActions,
+  useInitiateConnection,
+  useConnectedApps,
+  useDisconnectApp,
+  type ComposioAction
+} from '@/hooks/use-composio-api'
 
 interface Tool {
   id: number
@@ -44,6 +51,8 @@ interface Tool {
   metadata: any
   mcp_server_url?: string
   requiredCredentials?: string[]
+  composio_app_name?: string  // PRD-36: Composio app identifier
+  source?: 'mcp' | 'composio'  // PRD-36: Tool source
 }
 
 interface ToolConfigModalProps {
@@ -69,6 +78,18 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
   const [credentialsLoading, setCredentialsLoading] = useState(false)
   const [resetFormKey, setResetFormKey] = useState(0)
   const [fullTool, setFullTool] = useState<Tool | null>(null)
+
+  // PRD-36: Composio Integration
+  const isComposioApp = !!(tool?.composio_app_name || tool?.metadata?.composio_app_name || tool?.source === 'composio')
+  const composioAppName = tool?.composio_app_name || tool?.metadata?.composio_app_name || ''
+  const { data: appActions = [] } = useAppActions(composioAppName)
+  const { data: connections = [] } = useConnectedApps()
+  const initiateConnectionMutation = useInitiateConnection()
+  const disconnectMutation = useDisconnectApp()
+
+  const isConnected = connections.some(
+    (c) => c.app_name.toUpperCase() === composioAppName.toUpperCase() && c.status === 'active'
+  )
 
   // Fetch full tool details when modal opens
   useEffect(() => {
@@ -132,7 +153,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
 
   const resolveCredentialType = async (rawType: string): Promise<CredentialType | null> => {
     if (!rawType) return null
-    
+
     const normalized = toSnakeCase(rawType)
     // Try various naming patterns to find the credential type
     const candidates = [
@@ -166,7 +187,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
     const loadCredentialsForTool = async () => {
       // Use fullTool if available, otherwise fallback to tool
       const currentTool = fullTool || tool
-      
+
       if (!currentTool) {
         setCredentialType(null)
         setExistingCredential(null)
@@ -243,17 +264,17 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
           return
         }
         setCredentialType(type)
-        
+
         // Check for existing credentials of this type
         try {
           const response = await listCredentials({
             credential_type_id: type.id,
             active_only: true
           }) as any  // Response is paginated: { items: [...], total, ... }
-          
+
           // Handle paginated response
           const existingCreds = Array.isArray(response) ? response : (response?.items || [])
-          
+
           // Use the first matching credential if one exists
           if (existingCreds && existingCreds.length > 0) {
             setExistingCredential(existingCreds[0])
@@ -348,9 +369,14 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
 
               <CardContent className="pr-2">
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                  <TabsList className="grid w-full grid-cols-2 bg-secondary/50">
+                  <TabsList className={`grid w-full ${isComposioApp ? 'grid-cols-3' : 'grid-cols-2'} bg-secondary/50`}>
                     <TabsTrigger value="credentials">1. Credentials</TabsTrigger>
                     <TabsTrigger value="details">2. Details</TabsTrigger>
+                    {isComposioApp && (
+                      <TabsTrigger value="features" className="text-purple-400">
+                        3. Features
+                      </TabsTrigger>
+                    )}
                   </TabsList>
 
                   <TabsContent value="details" className="mt-6 space-y-6 max-h-[60vh] overflow-y-auto">
@@ -361,7 +387,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                     >
                       <div className="space-y-4">
                         <h4 className="font-medium text-sm">Basic Information</h4>
-                        
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">Tool Name</p>
@@ -494,7 +520,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                         {/* Configuration Section */}
                         <div className="space-y-4">
                           <h4 className="font-medium text-sm">{credentialType.display_name} Configuration</h4>
-                          
+
                           {/* Security Warning */}
                           {existingCredential && (
                             <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
@@ -510,19 +536,96 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                             <DynamicCredentialForm
                               key={resetFormKey}
                               credentialId={existingCredential?.id}
-                            lockCredentialTypeId={credentialType.id}
-                            lockedCredentialType={credentialType}
-                            hideMetadataSection={true}
-                            defaultName={existingCredential?.name || `${currentTool.name} Credential`}
-                            defaultEnvironment="production"
-                            onSuccess={handleCredentialSaved}
-                            onCancel={onClose}
-                          />
+                              lockCredentialTypeId={credentialType.id}
+                              lockedCredentialType={credentialType}
+                              hideMetadataSection={true}
+                              defaultName={existingCredential?.name || `${currentTool.name} Credential`}
+                              defaultEnvironment="production"
+                              onSuccess={handleCredentialSaved}
+                              onCancel={onClose}
+                            />
                           </div>
                         </div>
                       </div>
                     )}
                   </TabsContent>
+
+                  {/* PRD-36: Composio Features Tab */}
+                  {isComposioApp && (
+                    <TabsContent value="features" className="mt-6 space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-6"
+                      >
+                        {/* Connection Status */}
+                        <div className="rounded-lg border border-border/40 bg-secondary/20 p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`} />
+                              <div>
+                                <p className="font-medium">{composioAppName}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {isConnected ? 'Connected - Ready to use' : 'Not connected - Click to connect'}
+                                </p>
+                              </div>
+                            </div>
+                            {isConnected ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => disconnectMutation.mutate(composioAppName)}
+                                className="text-red-400 hover:text-red-300"
+                              >
+                                Disconnect
+                              </Button>
+                            ) : (
+                              <Button
+                                onClick={() => {
+                                  initiateConnectionMutation.mutate({
+                                    appName: composioAppName,
+                                    callbackUrl: `${window.location.origin}/tools?connected=${composioAppName}`,
+                                  })
+                                }}
+                                className="bg-purple-600 hover:bg-purple-700"
+                              >
+                                Connect {composioAppName}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Available Actions */}
+                        <div className="space-y-3">
+                          <h4 className="font-medium text-sm">Available Actions ({appActions.length})</h4>
+                          {appActions.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              {isConnected ? 'Loading actions...' : 'Connect the app to see available actions'}
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
+                              {appActions.map((action: ComposioAction) => (
+                                <div
+                                  key={action.name}
+                                  className="flex items-center justify-between p-3 bg-background/50 rounded-lg border border-border/50"
+                                >
+                                  <div>
+                                    <p className="font-medium text-sm">{action.display_name}</p>
+                                    {action.description && (
+                                      <p className="text-xs text-muted-foreground">{action.description}</p>
+                                    )}
+                                  </div>
+                                  <Badge variant="outline" className={action.enabled ? 'text-green-400' : 'text-gray-400'}>
+                                    {action.enabled ? 'Enabled' : 'Disabled'}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    </TabsContent>
+                  )}
                 </Tabs>
               </CardContent>
             </Card>

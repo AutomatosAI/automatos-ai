@@ -83,7 +83,9 @@ class MemoryInjector:
     async def retrieve_relevant_memories(
         self,
         chat_id: str,
-        query: str
+        query: str,
+        workspace_id: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Optional[str]:
         """
         Retrieve relevant memories for injection into LLM context.
@@ -114,7 +116,12 @@ class MemoryInjector:
             
             # Fallback to basic memory system
             logger.info("[Memory] Using HierarchicalMemorySystem...")
-            return await self._retrieve_with_basic_memory(chat_id, query)
+            return await self._retrieve_with_basic_memory(
+                chat_id,
+                query,
+                workspace_id=workspace_id,
+                agent_id=agent_id
+            )
             
         except Exception as e:
             logger.debug(f"Memory retrieval skipped: {e}")
@@ -177,7 +184,9 @@ class MemoryInjector:
     async def _retrieve_with_basic_memory(
         self,
         chat_id: str,
-        query: str
+        query: str,
+        workspace_id: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Optional[str]:
         """
         Retrieve memories using both semantic search and recent memories.
@@ -193,12 +202,13 @@ class MemoryInjector:
         
         # Run searches in parallel
         semantic_task = memory_system.retrieve_relevant_memories(
-            agent_id=1,
+            agent_id=agent_id or 1,
             context=query,
             memory_types=["experience"],
-            top_k=8
+            top_k=8,
+            workspace_id=workspace_id
         )
-        recent_task = self._get_recent_memories(limit=10)
+        recent_task = self._get_recent_memories(limit=10, workspace_id=workspace_id)
         
         logger.info(f"[Memory] Starting parallel retrieval: Semantic + Recent")
         results = await asyncio.gather(semantic_task, recent_task, return_exceptions=True)
@@ -260,7 +270,7 @@ class MemoryInjector:
         
         return "\n".join(memory_lines) if memory_lines else None
     
-    async def _get_recent_memories(self, limit: int = 10) -> List[Dict]:
+    async def _get_recent_memories(self, limit: int = 10, workspace_id: Optional[str] = None) -> List[Dict]:
         """Fetch the most recent memories regardless of semantic similarity. Cached for 60s."""
         # Check cache
         now = time.time()
@@ -273,13 +283,20 @@ class MemoryInjector:
             from sqlalchemy import text
             
             with get_db_session() as db:
-                result = db.execute(text("""
+                workspace_filter = ""
+                params = {"limit": limit}
+                if workspace_id:
+                    workspace_filter = "AND workspace_id = :workspace_id"
+                    params["workspace_id"] = str(workspace_id)
+
+                result = db.execute(text(f"""
                     SELECT id, content, metadata, created_at
-                    FROM memory_items 
+                    FROM memory_items
                     WHERE memory_type = 'experience'
+                    {workspace_filter}
                     ORDER BY created_at DESC
                     LIMIT :limit
-                """), {"limit": limit})
+                """), params)
                 
                 memories = []
                 for row in result:
@@ -309,7 +326,8 @@ class MemoryInjector:
         self,
         chat_id: str,
         user_message: str,
-        assistant_response: str
+        assistant_response: str,
+        workspace_id: Optional[str] = None
     ):
         """
         Store conversation as memory for future retrieval.
@@ -342,7 +360,8 @@ class MemoryInjector:
             # This avoids foreign key violations when agent_id=1 doesn't exist
             result = await memory_system.store_experience(
                 agent_id=None,
-                experience=experience
+                experience=experience,
+                workspace_id=workspace_id
             )
             logger.info(f"[Memory] ✅ Stored (id={result}): {user_message[:50]}...")
             

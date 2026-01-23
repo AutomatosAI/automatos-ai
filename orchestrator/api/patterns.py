@@ -5,7 +5,8 @@ import logging
 
 from core.database.database import get_db
 from core.models import Pattern, PatternCreate, PatternResponse
-#from main import require_api_key
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +16,12 @@ router = APIRouter(prefix="/api/patterns", tags=["patterns"])
 async def list_patterns(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """List all patterns"""
     try:
-        patterns = db.query(Pattern).offset(skip).limit(limit).all()
+        patterns = db.query(Pattern).filter(Pattern.workspace_id == ctx.workspace_id).offset(skip).limit(limit).all()
         
         pattern_responses = [PatternResponse(
             id=pattern.id,
@@ -39,11 +41,15 @@ async def list_patterns(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/", )
-async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_db)):
+async def create_pattern(
+    pattern_data: PatternCreate, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Create a new pattern"""
     try:
-        # Check if pattern name already exists
-        existing = db.query(Pattern).filter(Pattern.name == pattern_data.name).first()
+        # Check if pattern name already exists in workspace
+        existing = db.query(Pattern).filter(Pattern.name == pattern_data.name, Pattern.workspace_id == ctx.workspace_id).first()
         if existing:
             raise HTTPException(status_code=400, detail="Pattern with this name already exists")
         
@@ -51,7 +57,8 @@ async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_
             name=pattern_data.name,
             description=pattern_data.description,
             pattern_type=pattern_data.pattern_type,
-            configuration=pattern_data.configuration or {}
+            configuration=pattern_data.configuration or {},
+            workspace_id=ctx.workspace_id
         )
         
         db.add(pattern)
@@ -79,10 +86,14 @@ async def create_pattern(pattern_data: PatternCreate, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail=f"Error creating pattern: {str(e)}")
 
 @router.get("/{pattern_id}", )
-async def get_pattern(pattern_id: int, db: Session = Depends(get_db)):
+async def get_pattern(
+    pattern_id: int, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Get a specific pattern by ID"""
     try:
-        pattern = db.query(Pattern).filter(Pattern.id == pattern_id).first()
+        pattern = db.query(Pattern).filter(Pattern.id == pattern_id, Pattern.workspace_id == ctx.workspace_id).first()
         if not pattern:
             raise HTTPException(status_code=404, detail="Pattern not found")
         
@@ -106,10 +117,14 @@ async def get_pattern(pattern_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/{pattern_id}", )
-async def delete_pattern(pattern_id: int, db: Session = Depends(get_db)):
+async def delete_pattern(
+    pattern_id: int, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Delete a pattern"""
     try:
-        pattern = db.query(Pattern).filter(Pattern.id == pattern_id).first()
+        pattern = db.query(Pattern).filter(Pattern.id == pattern_id, Pattern.workspace_id == ctx.workspace_id).first()
         if not pattern:
             raise HTTPException(status_code=404, detail="Pattern not found")
         

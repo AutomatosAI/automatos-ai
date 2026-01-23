@@ -14,7 +14,10 @@ import logging
 
 from core.database.database import get_db
 from core.models import Agent, MCPTool, AgentToolAssignment, MCPToolCreate, MCPToolUpdate, MCPToolResponse, AgentToolAssignmentCreate, AgentToolAssignmentResponse
-from modules.tools.services.adapter_client import AdapterClient
+from core.composio.client import get_composio_client
+from core.composio.entity_manager import EntityManager
+from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +35,93 @@ async def list_mcp_tools(
     search: Optional[str] = Query(None, description="Search in name, description"),
     skip: int = Query(0, ge=0, description="Number of items to skip (for pagination)"),
     limit: int = Query(20, ge=1, le=10000, description="Number of items per page (max 10000)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """List all MCP tools with pagination and optional filters"""
+    print(">>> API LIST MCP TOOLS HIT - DEBUG <<<")
     try:
-        adapter_client = AdapterClient()
-        if adapter_client.is_configured():
-            adapter_tools = await adapter_client.list_tools()
-            items = _merge_adapter_tools(adapter_tools, db)
-        else:
+        # Use Composio Client instead of legacy adapter
+        composio_client = get_composio_client()
+        try:
+            # Get apps directly (they are the "tool groups")
+            apps = composio_client.get_available_apps()
+            items = _merge_composio_apps(apps, db)
+        except Exception as e:
+            logger.error(f"Failed to fetch Composio apps: {e}")
+            # Fallback to local DB only if Composio fails
             items = _load_local_tools(db)
 
+        # [ISOLATION FIX] Override status/enabled based on WorkspaceToolConfig
+        from core.models.tool_assignments import WorkspaceToolConfig
+        
+        # Connected apps for this workspace (Composio connections)
+        connected_app_names: set[str] = set()
+        try:
+            entity_manager = EntityManager(db)
+            entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+            if entity:
+                connections = entity_manager.get_entity_connections(entity["id"])
+                connected_app_names = {
+                    (c["app_name"] or "").lower()
+                    for c in connections
+                    if c.get("status") == "active"
+                }
+        except Exception as e:
+            logger.warning(f"Failed to load connected apps for workspace: {e}")
+        
+        # specific to this workspace
+        enabled_configs = db.query(WorkspaceToolConfig).filter(
+            WorkspaceToolConfig.workspace_id == ctx.workspace_id,
+            WorkspaceToolConfig.enabled == True
+        ).all()
+        
+        logger.info(f"[MCP_TOOLS_DEBUG] Workspace: {ctx.workspace_id}, Enabled Configs Found: {len(enabled_configs)}")
+        for cfg in enabled_configs:
+            logger.info(f"[MCP_TOOLS_DEBUG] Config: {cfg.tool_id}, Enabled: {cfg.enabled}")
+
+        enabled_tool_ids = {str(c.tool_id).lower() for c in enabled_configs} # adapter_tool_id / app_name
+        
+        for item in items:
+            # Map item ID/Names to enablement
+            # MCPTool.name usually matches the adapter tool_id/name
+            # For Composio, the 'name' is the app name (e.g. "GITHUB")
+            item_name = (item.get("name") or "").lower()
+            is_connected = item_name in connected_app_names
+            is_enabled = item_name in enabled_tool_ids or is_connected
+            
+            # If status filter is active, we might want to respect real enablement
+            item["enabled"] = is_enabled
+            item["status"] = "active" if is_enabled else "available" # 'available' means in marketplace but not enabled
+            if is_connected:
+                metadata = item.get("metadata") or {}
+                if not metadata.get("action_count"):
+                    try:
+                        metadata["action_count"] = composio_client.get_app_action_count(item.get("name") or "")
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch action count for {item.get('name')}: {e}")
+                        metadata["action_count"] = 0
+                item["metadata"] = metadata
+
         # Apply filters
+        # If filtering by status='active', we now only return actually enabled tools
         filtered = _apply_filters(items, status, category, provider, search)
         total = len(filtered)
         pages = (total + limit - 1) // limit if limit else 1
         paged = filtered[skip : skip + limit]
+
+        # Populate action counts for visible apps if missing
+        for item in paged:
+            if item.get("provider") != "Composio":
+                continue
+            metadata = item.get("metadata") or {}
+            if not metadata.get("action_count"):
+                try:
+                    metadata["action_count"] = composio_client.get_app_action_count(item.get("name") or "")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch action count for {item.get('name')}: {e}")
+                    metadata["action_count"] = 0
+                item["metadata"] = metadata
 
         return {
             "data": paged,
@@ -63,23 +137,55 @@ async def list_mcp_tools(
         logger.error(f"Error listing MCP tools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/{tool_id}/actions")
+async def get_tool_actions(
+    tool_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all available actions (sub-tools) for a specific tool/app"""
+    try:
+        # Get tool name from DB or ID
+        tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+        if not tool:
+             # Fallback: check if we can resolve ID to a composio app name directly? 
+             # For now require tool to exist in DB (which it should if it was listed)
+             raise HTTPException(status_code=404, detail="Tool not found")
+        
+        if tool.provider != "Composio":
+            return [] # Local tools don't have dynamic actions via this API yet
+
+        composio_client = get_composio_client()
+        # tool.name is the app name (e.g. "gmail", "github")
+        actions = composio_client.get_app_actions(tool.name)
+        return actions
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching actions for tool {tool_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/{tool_id}")
 async def get_mcp_tool(tool_id: int, db: Session = Depends(get_db)):
     """Get single MCP tool by ID"""
     try:
         # Try to find by integer ID first (local DB)
-        tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
-        if tool:
-             return _local_tool_to_response(tool)
+        if tool_id:
+             # Try to find by integer ID first (local DB)
+             tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+             if tool:
+                 return _local_tool_to_response(tool)
 
-        # If not found locally by ID, check adapter
-        adapter_client = AdapterClient()
-        if adapter_client.is_configured():
-            adapter_tools = await adapter_client.list_tools()
-            items = _merge_adapter_tools(adapter_tools, db)
+        # If not found locally by ID, check Composio
+        composio_client = get_composio_client()
+        try:
+            apps = composio_client.get_available_apps()
+            items = _merge_composio_apps(apps, db)
             for item in items:
                 if item["id"] == tool_id:
                     return item
+        except Exception as e:
+            logger.error(f"Failed to fetch from Composio: {e}")
             
         raise HTTPException(status_code=404, detail="Tool not found")
     except HTTPException:
@@ -238,15 +344,23 @@ async def test_mcp_tool_connection(
 async def list_tool_categories(db: Session = Depends(get_db)):
     """Get list of all tool categories with counts"""
     try:
-        adapter_client = AdapterClient()
-        if adapter_client.is_configured():
-            adapter_tools = await adapter_client.list_tools()
-            items = _merge_adapter_tools(adapter_tools, db)
+        composio_client = get_composio_client()
+        try:
+            apps = composio_client.get_available_apps()
+            items = _merge_composio_apps(apps, db)
             counts: Dict[str, int] = {}
             for item in items:
-                cat = item.get("category") or "uncategorized"
-                counts[cat] = counts.get(cat, 0) + 1
+                tags = item.get("tags") or []
+                if tags:
+                    for tag in tags:
+                        counts[tag] = counts.get(tag, 0) + 1
+                else:
+                    cat = item.get("category") or "uncategorized"
+                    counts[cat] = counts.get(cat, 0) + 1
             return [{"name": name, "count": count} for name, count in counts.items()]
+        except Exception:
+             # Fallback
+             pass
 
         categories = db.query(
             MCPTool.category,
@@ -281,22 +395,76 @@ async def get_all_tool_assignments(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/stats/summary")
-async def get_tools_stats(db: Session = Depends(get_db)):
+async def get_tools_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Get tool statistics summary"""
     try:
-        adapter_client = AdapterClient()
-        if adapter_client.is_configured():
-            adapter_tools = await adapter_client.list_tools()
-            items = _merge_adapter_tools(adapter_tools, db)
+        composio_client = get_composio_client()
+        try:
+            apps = composio_client.get_available_apps()
+            items = _merge_composio_apps(apps, db)
             total = len(items)
-            active = sum(1 for item in items if item.get("status") == "active")
-        else:
+            # Connected apps for this workspace
+            connected_app_names: set[str] = set()
+            try:
+                entity_manager = EntityManager(db)
+                entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+                if entity:
+                    connections = entity_manager.get_entity_connections(entity["id"])
+                    connected_app_names = {
+                        (c["app_name"] or "").lower()
+                        for c in connections
+                        if c.get("status") == "active"
+                    }
+            except Exception as e:
+                logger.warning(f"Failed to load connected apps for workspace stats: {e}")
+
+            from core.models.tool_assignments import WorkspaceToolConfig
+            enabled_configs = db.query(WorkspaceToolConfig).filter(
+                WorkspaceToolConfig.workspace_id == ctx.workspace_id,
+                WorkspaceToolConfig.enabled == True
+            ).all()
+            enabled_tool_ids = {str(c.tool_id).lower() for c in enabled_configs}
+
+            active = 0
+            categories = set()
+            total_tools = 0
+            for item in items:
+                item_name = (item.get("name") or "").lower()
+                is_connected = item_name in connected_app_names
+                is_enabled = item_name in enabled_tool_ids or is_connected
+                if is_enabled:
+                    active += 1
+
+                tags = item.get("tags") or []
+                if tags:
+                    for tag in tags:
+                        categories.add(tag)
+                else:
+                    categories.add(item.get("category") or "uncategorized")
+
+                if is_connected:
+                    action_count = (item.get("metadata") or {}).get("action_count") or 0
+                    if not action_count:
+                        try:
+                            action_count = composio_client.get_app_action_count(item.get("name") or "")
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch action count for {item.get('name')}: {e}")
+                            action_count = 0
+                    total_tools += action_count
+        except Exception:
             total = db.query(func.count(MCPTool.id)).scalar()
             active = (
                 db.query(func.count(MCPTool.id))
                 .filter(MCPTool.status == "active")
                 .scalar()
             )
+            categories = set(
+                r[0] for r in db.query(MCPTool.category).filter(MCPTool.category.isnot(None)).all()
+            )
+            total_tools = 0
         assigned = db.query(func.count(func.distinct(AgentToolAssignment.tool_id))).filter(
             AgentToolAssignment.enabled == True
         ).scalar()
@@ -305,7 +473,11 @@ async def get_tools_stats(db: Session = Depends(get_db)):
             "total_tools": total,
             "active_tools": active,
             "assigned_tools": assigned,
-            "unassigned_tools": total - assigned
+            "unassigned_tools": total - assigned,
+            "connected_apps": active,
+            "categories": len(categories),
+            "apps_available": total,
+            "tools_available": total_tools,
         }
         
     except Exception as e:
@@ -324,7 +496,12 @@ def _apply_filters(
     if status:
         filtered = [item for item in filtered if item.get("status") == status]
     if category:
-        filtered = [item for item in filtered if item.get("category") == category]
+        category_lower = category.lower()
+        filtered = [
+            item for item in filtered
+            if (item.get("category") or "").lower() == category_lower
+            or any((tag or "").lower() == category_lower for tag in (item.get("tags") or []))
+        ]
     if provider:
         filtered = [item for item in filtered if item.get("provider") == provider]
     if search:
@@ -364,73 +541,103 @@ def _local_tool_to_response(tool: MCPTool) -> Dict[str, Any]:
 
 def _load_local_tools(db: Session) -> List[Dict[str, Any]]:
     tools = db.query(MCPTool).order_by(MCPTool.name).all()
-    return [_local_tool_to_response(tool) for tool in tools]
+    # Ensure even fallback only returns Composio tools
+    return [_local_tool_to_response(tool) for tool in tools if tool.provider == "Composio"]
 
 
-def _merge_adapter_tools(adapter_tools: List[Dict[str, Any]], db: Session) -> List[Dict[str, Any]]:
+def _merge_composio_apps(apps: List[Dict[str, Any]], db: Session) -> List[Dict[str, Any]]:
+    """Merge Composio apps into tool list, creating DB entries if needed."""
     local_tools = {tool.name: tool for tool in db.query(MCPTool).all()}
     created = False
-    for adapter_tool in adapter_tools:
-        name = adapter_tool.get("name")
+    
+    for app in apps:
+        name = app.get("name")
         if not name:
             continue
-        if name in local_tools:
-            continue
-        status = "active" if adapter_tool.get("enabled") else "inactive"
-        new_tool = MCPTool(
-            name=name,
-            description=adapter_tool.get("description") or "",
-            mcp_server_url=adapter_tool.get("mcp_server_url"),
-            capabilities=(adapter_tool.get("metadata") or {}).get("capabilities") or {},
-            credentials_schema=(adapter_tool.get("metadata") or {}).get("credentials_schema") or {},
-            status=status,
-            provider=adapter_tool.get("provider"),
-            version=(adapter_tool.get("metadata") or {}).get("version"),
-            icon=(adapter_tool.get("metadata") or {}).get("icon"),
-            logo=(adapter_tool.get("metadata") or {}).get("logo"),
-            category=adapter_tool.get("category"),
-            tags=adapter_tool.get("tags") or [],
-            tool_metadata={"adapter_tool_id": adapter_tool.get("id")},
-            created_by="adapter-sync",
-        )
-        db.add(new_tool)
-        local_tools[name] = new_tool
-        created = True
+            
+        # Create local mirror if not exists
+        if name not in local_tools:
+            # Default metadata for new tools
+            meta = app.get("meta", {})
+            
+            new_tool = MCPTool(
+                name=name,
+                description=app.get("description") or "",
+                mcp_server_url="composio://", # placeholder for Composio
+                capabilities={"actions": []}, # To be populated by describe
+                credentials_schema={},
+                status="inactive", # Default to inactive until enabled
+                provider="Composio",
+                tool_id=name,
+                version="1.0.0",
+                icon=app.get("logo_url"),
+                logo=app.get("logo_url"),
+                category=(app.get("categories") or ["Integration"])[0],
+                tags=app.get("categories") or [],
+                tool_metadata={
+                    "app_name": name,
+                    "auth_schemes": app.get("auth_schemes", []),
+                    "triggers": app.get("triggers", []),
+                    "trigger_count": app.get("trigger_count", 0),
+                    "action_count": app.get("action_count", 0),
+                },
+                created_by="composio-sync",
+            )
+            db.add(new_tool)
+            local_tools[name] = new_tool
+            created = True
+            
     if created:
         db.commit()
         for tool in local_tools.values():
             db.refresh(tool)
 
     items: List[Dict[str, Any]] = []
-    for adapter_tool in adapter_tools:
-        name = adapter_tool.get("name")
-        if not name:
-            continue
+    
+    # Return merged list
+    # Preference: Local DB state (which tracks ID and status), enriched with live Composio metadata
+    for app in apps:
+        name = app.get("name")
         local = local_tools.get(name)
-        adapter_metadata = adapter_tool.get("metadata") or {}
-        status = local.status if local else ("active" if adapter_tool.get("enabled") else "inactive")
+        
+        status = local.status if local else "inactive"
+        
         items.append(
             {
-                "id": local.id if local else adapter_tool.get("id"),
+                "id": local.id if local else 0, # Should always have local ID if we synced
                 "name": name,
-                "description": adapter_tool.get("description") or "",
-                "mcp_server_url": adapter_tool.get("mcp_server_url"),
-                "capabilities": adapter_metadata.get("capabilities") or {},
-                "credentials_schema": adapter_metadata.get("credentials_schema") or {},
+                "description": app.get("description") or (local.description if local else ""),
+                "mcp_server_url": local.mcp_server_url if local else "composio://",
+                "capabilities": local.capabilities if local else {},
+                "credentials_schema": {}, # handled by Composio auth
                 "status": status,
-                "provider": adapter_tool.get("provider"),
-                "version": adapter_metadata.get("version") or (local.version if local else None),
-                "icon": adapter_metadata.get("icon") or (local.icon if local else None),
-                "logo": adapter_metadata.get("logo") or (local.logo if local else None),
-                "category": adapter_tool.get("category"),
-                "tags": adapter_tool.get("tags") or [],
-                "metadata": adapter_metadata,
-                "credential_usage": "tool",
+                "provider": "Composio",
+                "version": local.version if local else "1.0.0",
+                "icon": app.get("logo_url") or (local.icon if local else None),
+                "logo": app.get("logo_url") or (local.logo if local else None),
+                "category": ((app.get("categories") or ["Integration"])[0]) if app.get("categories") else (local.category if local else "Integration"),
+                "tags": app.get("categories") or [],
+                "metadata": {
+                    **((local.tool_metadata or {}) if local else {}),
+                    "auth_schemes": app.get("auth_schemes", []),
+                    "triggers": app.get("triggers", []),
+                    "trigger_count": app.get("trigger_count", 0),
+                    "action_count": app.get("action_count", 0),
+                },
+                "credential_usage": "oauth",
                 "created_at": local.created_at if local else None,
                 "updated_at": local.updated_at if local else None,
                 "created_by": local.created_by if local else None,
             }
         )
+    
+    # Also include non-Composio tools (e.g. database tools)
+    for tool_name, tool in local_tools.items():
+        # ONLY return Composio tools - hide legacy "Internal" or "Marketplace" tools
+        if tool.provider == "Composio" and tool.name not in [app.get("name") for app in apps if app.get("name")]:
+             # If it's a Composio tool in DB but not in current fetch (e.g. valid cache), include it
+            items.append(_local_tool_to_response(tool))
+            
     return items
 
 # ===================================================================

@@ -56,7 +56,7 @@ from api.credentials import router as credentials_router  # PRD-18: Enhanced cre
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
 from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools - Fixed import
-from api.tool_catalog import router as tool_catalog_router  # PRD-35: Tool Catalog & Assignments
+from api.composio import router as composio_router  # PRD-36: Composio Integration
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -404,7 +404,7 @@ app.include_router(credentials_router)  # PRD-18: Enhanced credentials with mana
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
-app.include_router(tool_catalog_router)  # PRD-35: Tool Catalog & Assignments
+app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)

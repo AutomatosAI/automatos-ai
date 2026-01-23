@@ -29,6 +29,8 @@ from core.models import (
     SystemHealthResponse
 )
 import logging
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -806,20 +808,21 @@ async def get_agent_types():
     }
 
 @router.get("/agent-statistics")
-async def get_agent_statistics(db: Session = Depends(get_db)):
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
         from sqlalchemy import func
         from core.models import Agent, AgentType
         
-        total_agents = db.query(func.count(Agent.id)).scalar() or 0
-        active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active").scalar() or 0
-        inactive_agents = db.query(func.count(Agent.id)).filter(Agent.status == "inactive").scalar() or 0
+        total_agents = db.query(func.count(Agent.id)).filter(Agent.workspace_id == ctx.workspace_id).scalar() or 0
+        active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active", Agent.workspace_id == ctx.workspace_id).scalar() or 0
+        inactive_agents = db.query(func.count(Agent.id)).filter(Agent.status == "inactive", Agent.workspace_id == ctx.workspace_id).scalar() or 0
         
         # Get agent counts by type
         agent_types = {}
         for agent_type in AgentType:
-            count = db.query(func.count(Agent.id)).filter(Agent.agent_type == agent_type.value).scalar() or 0
+            count = db.query(func.count(Agent.id)).filter(Agent.agent_type == agent_type.value, Agent.workspace_id == ctx.workspace_id).scalar() or 0
             agent_types[agent_type.value] = count
         
         return {
@@ -838,12 +841,16 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/agent/{agent_id}/status")
-async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
+async def get_agent_status(
+    agent_id: int, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Get current status of a specific agent"""
     try:
         from core.models import Agent
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
             
@@ -866,13 +873,18 @@ async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/agent/{agent_id}/execute")
-async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = Depends(get_db)):
+async def execute_agent(
+    agent_id: int, 
+    execution_data: dict = {}, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Execute an agent with given parameters"""
     import time
     try:
         from core.models import Agent
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
             

@@ -81,18 +81,19 @@ class ApiClient {
   private mockConfig: MockConfig
   private mockData: Record<string, () => any>
   private currentPage: string = '' // Track which page is making requests
+  private getClerkToken: (() => Promise<string | null>) | null = null
 
   constructor() {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
-    
+
     // Try multiple ways to get the API URL (build-time and runtime)
-    this.baseUrl = 
+    this.baseUrl =
       (typeof window !== 'undefined' && (window as any).__NEXT_PUBLIC_API_URL__) || // Runtime injection
       process.env.NEXT_PUBLIC_API_URL || // Build-time env var
       (typeof window !== 'undefined' && (window as any).NEXT_PUBLIC_API_URL) || // Runtime fallback
       ''
-    
+
     // Warn if baseUrl is not set (will cause 404s)
     if (!this.baseUrl && typeof window !== 'undefined') {
       console.error('❌ NEXT_PUBLIC_API_URL is not set! API calls will fail.')
@@ -100,14 +101,9 @@ class ApiClient {
       console.error('Current env:', process.env.NEXT_PUBLIC_API_URL || 'NOT SET')
     }
 
-    // Get API key from environment variables
-    const apiKey = typeof window !== 'undefined'
-      ? (window as any).NEXT_PUBLIC_API_KEY || process.env.NEXT_PUBLIC_API_KEY
-      : process.env.NEXT_PUBLIC_API_KEY
-
+    // Default headers - NO API KEY, will use Clerk JWT
     this.defaultHeaders = {
       'Content-Type': 'application/json',
-      ...(apiKey && { 'x-api-key': apiKey }), // Add API key if available
     }
 
     // Initialize mock config
@@ -131,12 +127,21 @@ class ApiClient {
     console.log('🚀 API Client initialized')
     console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
     console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
-    console.log(`🔐 API Key: ${apiKey ? '✅ Configured' : '❌ Missing'}`)
+    console.log('🔐 Auth: Clerk JWT (workspace-aware)')
     if (this.mockConfig.enabled) {
       console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
     } else {
       console.log('✅ Real API mode enabled')
     }
+  }
+
+  /**
+   * Set the Clerk token getter function
+   * Call this from a React component that has access to useAuth()
+   */
+  public setClerkTokenGetter(getter: () => Promise<string | null>) {
+    this.getClerkToken = getter
+    console.log('✅ Clerk token getter configured')
   }
 
   // Load mock config from localStorage or use defaults
@@ -423,49 +428,6 @@ class ApiClient {
         ],
         overall_improvement: 0.35,
         last_updated: new Date().toISOString()
-      }),
-
-      // Tools endpoints
-      '/api/tools': () => [
-        {
-          id: 1,
-          name: 'API Tester',
-          type: 'debugging',
-          status: 'available',
-          description: 'Test API endpoints with custom payloads',
-          icon: 'bug'
-        },
-        {
-          id: 2,
-          name: 'Log Analyzer',
-          type: 'monitoring',
-          status: 'available',
-          description: 'Analyze and search through system logs',
-          icon: 'file-text'
-        },
-        {
-          id: 3,
-          name: 'Performance Profiler',
-          type: 'optimization',
-          status: 'maintenance',
-          description: 'Profile system performance and identify bottlenecks',
-          icon: 'activity'
-        },
-        {
-          id: 4,
-          name: 'Database Explorer',
-          type: 'data',
-          status: 'available',
-          description: 'Browse and query database tables',
-          icon: 'database'
-        }
-      ],
-      '/api/tools/health': () => ({
-        status: 'healthy',
-        available: 3,
-        maintenance: 1,
-        total: 4,
-        last_check: new Date().toISOString()
       }),
 
       // Legacy/Additional endpoints
@@ -818,19 +780,39 @@ class ApiClient {
 
     console.log('🔍 API Call:', { url, method: options.method || 'GET' })
 
+    // Get Clerk token if available
+    let token: string | null = null
+    if (this.getClerkToken) {
+      try {
+        token = await this.getClerkToken()
+      } catch (error) {
+        console.warn('⚠️ Failed to get Clerk token:', error)
+      }
+    }
+
     // Auto-stringify body if it's an object and not FormData
     let body = options.body
     if (body && typeof body === 'object' && !(body instanceof FormData)) {
       body = JSON.stringify(body)
     }
 
+    const headers: Record<string, string> = {
+      ...this.defaultHeaders,
+      ...(options.headers as Record<string, string>),
+    }
+
+    // Add Clerk JWT token if available
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+      console.log('🔐 Added Clerk JWT to request')
+    } else {
+      console.warn('⚠️ No Clerk token available - request may fail')
+    }
+
     const config: RequestInit = {
       ...options,
       body,
-      headers: {
-        ...this.defaultHeaders,
-        ...options.headers,
-      },
+      headers,
     }
 
     try {
@@ -881,6 +863,24 @@ class ApiClient {
   }
 
   // ===== SYSTEM ENDPOINTS =====
+
+  // Generic HTTP methods
+  async get<T = any>(endpoint: string, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'GET' })
+  }
+
+  async post<T = any>(endpoint: string, body?: any, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'POST', body })
+  }
+
+  async put<T = any>(endpoint: string, body?: any, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'PUT', body })
+  }
+
+  async delete<T = any>(endpoint: string, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' })
+  }
+
   async getSystemHealth() {
     return this.request('/api/system/health')
   }
@@ -1465,26 +1465,6 @@ class ApiClient {
 
   async getAnalyticsMetrics() {
     return this.request('/api/analytics/metrics')
-  }
-
-  // ===== TOOLS ENDPOINTS =====
-  async getTools() {
-    return this.request('/api/tools')
-  }
-
-  async getTool(id: string) {
-    return this.request(`/api/tools/${id}`)
-  }
-
-  async getToolsHealth() {
-    return this.request('/api/tools/health')
-  }
-
-  async executeToolAction(toolId: string, action: string, data?: any) {
-    return this.request(`/api/tools/${toolId}/${action}`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
   }
 
   // ===== MCP TOOLS ENDPOINTS (Phase 3) =====

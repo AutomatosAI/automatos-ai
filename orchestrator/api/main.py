@@ -83,6 +83,11 @@ from api.execution_history import router as execution_history_router  # Enhanced
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 
+# PRD-37: SaaS Foundation
+from api.auth import router as auth_router
+from api.workspaces import router as workspaces_router
+from api.api_keys import router as api_keys_router
+
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
     register_dashboard_routes,
@@ -414,6 +419,11 @@ app.include_router(document_processing_router)
 app.include_router(agent_endpoints_router)
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
+
+# PRD-37: SaaS Foundation
+app.include_router(auth_router)
+app.include_router(workspaces_router)
+app.include_router(api_keys_router)
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

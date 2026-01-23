@@ -11,10 +11,11 @@
 
 This PRD outlines the integration of **Composio** (500+ tools) and **AIML API** (400+ LLMs) into Automatos, creating a truly provider-agnostic unified gateway system. The integration will:
 
-1. **Replace** custom MCP tool execution with Composio's managed tool infrastructure
+1. **Replace** manual tool management with specific **Tool Router** sessions for intent-based routing
 2. **Add** AIML API as the primary LLM gateway for 400+ models
 3. **Redesign** the Tools page to match the "Manage Apps" UI pattern (see screenshot)
-4. **Simplify** OAuth management by leveraging Composio's built-in authentication
+4. **Simplify** OAuth management by leveraging Composio's **Hosted Authentication** links
+5. **Enable** Event-Driven Architectures using Composio **Triggers** (Webhooks)
 
 ### Key Benefits
 - **500+ pre-built tools** via Composio (vs. current ~160k individual methods)
@@ -46,7 +47,7 @@ This PRD outlines the integration of **Composio** (500+ tools) and **AIML API** 
 #### Core Components
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Tool Catalog API | `api/tool_catalog.py` | Tenant-level tool enablement, agent assignments |
+| Tool Catalog API | `api/tool_catalog.py` | Workspace-level tool enablement, agent assignments |
 | Tools API | `api/tools.py` | CRUD operations for tool marketplace |
 | MCP Tools API | `api/mcp_tools.py` | MCP-specific tool management |
 | Unified Executor | `modules/tools/execution/unified_executor.py` | Routes tool calls to executors |
@@ -58,7 +59,7 @@ This PRD outlines the integration of **Composio** (500+ tools) and **AIML API** 
 | Model | Table | Purpose |
 |-------|-------|---------|
 | `Tool` | `tools` | Tool registry with MCP config |
-| `TenantToolConfig` | `tenant_tool_config` | Per-tenant tool enablement |
+| `TenantToolConfig` | `tenant_tool_config` | Per-workspace tool enablement |
 | `AgentToolAssignment` | `agent_tool_assignments` | Agent-to-tool mappings |
 | `Credential` | `credentials` | Encrypted credential storage |
 | `MCPServer` | `mcp_servers` | MCP server connections |
@@ -248,57 +249,60 @@ class AIMLClient:
 
 ```python
 # core/composio/client.py
-from composio_openai import ComposioToolSet, Action, App
+from composio_openai import ComposioToolSet, App
+from composio import Composio
 
 class ComposioClient:
     """
-    Composio SDK wrapper for tool execution.
-    Manages 500+ apps with built-in OAuth.
+    Composio SDK wrapper using Tool Router and Hosted Auth.
     """
     
     def __init__(self, api_key: str):
+        self.composio = Composio(api_key=api_key)
         self.toolset = ComposioToolSet(api_key=api_key)
     
-    def get_tools_for_apps(
+    def create_tool_router_session(
         self,
-        apps: List[str],
-        actions: List[str] = None
-    ) -> List[Dict]:
-        """Get tool definitions for specified apps."""
-        if actions:
-            return self.toolset.get_tools(actions=actions)
-        return self.toolset.get_tools(apps=apps)
-    
-    async def execute_action(
-        self,
-        action: str,
-        params: Dict,
-        entity_id: str
-    ) -> Dict:
-        """Execute a Composio action."""
-        return await self.toolset.execute_action(
-            action=action,
-            params=params,
-            entity_id=entity_id
+        entity_id: str,
+        apps: List[str]
+    ):
+        """
+        Creates a Tool Router session scoped to specific apps.
+        Returns: A set of 'Meta-Tools' (Search, Plan, Execute) for the agent.
+        """
+        return self.composio.experimental.tool_router.create_session(
+            user_id=entity_id,
+            toolkits=apps
         )
-    
+
     def get_entity(self, entity_id: str):
-        """Get or create a Composio entity for user."""
+        """Get or create a Composio entity (maps to Workspace ID)."""
         return self.toolset.get_entity(id=entity_id)
     
     def initiate_connection(
         self,
         entity_id: str,
         app: str,
-        redirect_url: str = None
+        callback_url: str = None
     ) -> str:
-        """Initiate OAuth connection for an app."""
-        entity = self.get_entity(entity_id)
-        connection = entity.initiate_connection(
-            app_name=app,
-            redirect_url=redirect_url
+        """
+        Initiate OAuth using Composio's Hosted Auth Link.
+        Returns the simplified auth URL for the user.
+        """
+        request = self.composio.connected_accounts.link(
+            user_id=entity_id,
+            callback_url=callback_url
         )
-        return connection.redirectUrl
+        return request.redirect_url
+        
+    def wait_for_connection(self, request_object):
+        """Wait for user to complete auth flow (for backend scripts)."""
+        return request_object.wait_for_connection()
+        
+    def setup_trigger(self, trigger_type: str, callback_url: str):
+        """Register a webhook trigger (e.g., github_star_added)."""
+        # Logic to register webhook with Composio
+        pass
 ```
 
 ### Updated LLM Manager
@@ -332,36 +336,33 @@ class LLMManager:
         apps: List[str],
         entity_id: str
     ) -> LLMResponse:
-        """Execute chat with Composio tools."""
-        # Get tools from Composio
-        tools = self.composio_client.get_tools_for_apps(apps)
+        """Execute chat using Composio Tool Router."""
         
-        # Call LLM via AIML API
-        response = await self.aiml_client.generate_response(
-            messages=messages,
-            model=self.model_routing.get(model, model),
-            tools=tools
+        # 1. Create Router Session (Gets Meta-Tools: Search, Plan, Execute)
+        router_session = self.composio_client.create_tool_router_session(
+            entity_id=entity_id,
+            apps=apps
         )
         
-        # Handle tool calls
+        # 2. Get the Meta-Tools (not the raw tools!)
+        # This returns ~3-5 tools regardless of how many apps are enabled
+        meta_tools = router_session.get_tools() 
+        
+        # 3. Call LLM with Meta-Tools
+        response = await self.aiml_client.generate_response(
+            messages=messages,
+            model=model,
+            tools=meta_tools
+        )
+        
+        # 4. Handle Tool Calls (Router Logic)
         if response.tool_calls:
-            tool_results = []
-            for tool_call in response.tool_calls:
-                result = await self.composio_client.execute_action(
-                    action=tool_call.function.name,
-                    params=json.loads(tool_call.function.arguments),
-                    entity_id=entity_id
-                )
-                tool_results.append(result)
+            # The LLM will call 'search_tool' or 'execute_tool'
+            # The Router Session handles the actual execution logic
+            tool_results = await router_session.handle_tool_calls(response.tool_calls)
             
-            # Continue conversation with results
-            messages.append({"role": "assistant", "tool_calls": response.tool_calls})
-            for i, result in enumerate(tool_results):
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": response.tool_calls[i].id,
-                    "content": json.dumps(result)
-                })
+            # Continue conversation
+            # ... (append results and recurse)
             
             return await self.chat_with_tools(messages, model, apps, entity_id)
         
@@ -369,6 +370,48 @@ class LLMManager:
 ```
 
 ---
+
+---
+
+## Event-Driven Architecture (Triggers)
+
+Composio **Triggers** allow agents to be *reactive* rather than just *proactive*. Instead of an agent constantly polling "Do I have new mail?", the system wakes up when an event occurs.
+
+### Supported Triggers (User Examples)
+1.  **Communication:** `gmail_new_email_received`, `slack_new_message`
+2.  **Development:** `github_pull_request_opened`, `github_issue_created`
+3.  **Scheduling:** `google_calendar_event_start`
+4.  **Manual:** User manually triggers a workflow via UI ("Run Now").
+
+### Implementation Flow
+
+1.  **Registration:**
+    *   User enables a "Trigger" in the "Manage Apps" UI (e.g., "Watch for PRs").
+    *   Backend calls Composio to register a webhook callback: `POST /api/composio/webhook`.
+
+2.  **Event Handling (`/api/composio/webhook`):**
+    *   **Verify:** Check `x-composio-signature`.
+    *   **Map:** Identify which `workspace_id` and `agent_id` maps to the event's `user_id`.
+    *   **Wake Up:**
+        *   **Scenario A (Workflow):** Trigger a specific `workflow_id`.
+        *   **Scenario B (Agent):** Inject a "System Message" into the Agent's context: *"EVENT: New PR #123 opened by @user. Title: Fix bug."* and trigger a run.
+
+### Code Example: Trigger Registration
+
+```python
+# core/composio/client.py
+
+def subscribe_to_trigger(self, entity_id: str, trigger_name: str, callback_url: str):
+    """
+    Subscribes a user (entity) to a specific event.
+    Example: trigger_name="github_pull_request_opened"
+    """
+    return self.toolset.triggers.subscribe(
+        user_id=entity_id,
+        trigger_name=trigger_name,
+        callback_url=callback_url
+    )
+```
 
 ## Tools Page Redesign
 
@@ -575,7 +618,7 @@ def upgrade():
     op.create_table(
         'composio_entities',
         sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column('workspace_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('composio_entity_id', sa.String(255), nullable=False, unique=True),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
     )
@@ -625,23 +668,31 @@ async def list_available_apps():
     pass
 
 @router.post("/connect/{app_name}")
-async def initiate_connection(app_name: str, tenant_id: UUID):
+async def initiate_connection(app_name: str, workspace_id: UUID):
     """Initiate OAuth connection for an app."""
     pass
 
 @router.get("/connections")
-async def list_connections(tenant_id: UUID):
-    """List all connected apps for tenant."""
+async def list_connections(workspace_id: UUID):
+    """List all connected apps for workspace."""
     pass
 
 @router.delete("/connections/{app_name}")
-async def disconnect_app(app_name: str, tenant_id: UUID):
+async def disconnect_app(app_name: str, workspace_id: UUID):
     """Disconnect an app."""
     pass
 
 @router.get("/apps/{app_name}/actions")
 async def list_app_actions(app_name: str):
     """List all available actions for an app."""
+    pass
+
+@router.post("/webhook")
+async def receive_webhook(request: Request):
+    """
+    Handle incoming Composio triggers (e.g., github_star_added).
+    Validates signature using COMPOSIO_WEBHOOK_SECRET.
+    """
     pass
 ```
 
@@ -713,15 +764,15 @@ class UnifiedToolExecutor:
         tool_name: str,
         arguments: Dict,
         agent_id: int,
-        tenant_id: UUID
+        workspace_id: UUID
     ) -> Dict:
         """Execute a Composio tool action."""
         # Validate agent has access to this action
         if not await self._validate_agent_action_access(agent_id, tool_name):
             raise PermissionError(f"Agent {agent_id} not authorized for {tool_name}")
         
-        # Get entity ID for tenant
-        entity = await self.composio_executor.get_entity_for_tenant(tenant_id)
+        # Get entity ID for workspace
+        entity = await self.composio_executor.get_entity_for_workspace(workspace_id)
         
         # Execute via Composio
         return await self.composio_executor.execute(
@@ -741,24 +792,24 @@ class UnifiedToolExecutor:
 // hooks/use-composio-api.ts
 
 // Connected apps management
-export function useConnectedApps(tenantId: string) {
+export function useConnectedApps(workspaceId: string) {
   return useQuery({
-    queryKey: ['composio', 'connections', tenantId],
-    queryFn: () => apiClient.getComposioConnections(tenantId)
+    queryKey: ['composio', 'connections', workspaceId],
+    queryFn: () => apiClient.getComposioConnections(workspaceId)
   })
 }
 
 export function useInitiateConnection() {
   return useMutation({
-    mutationFn: ({ appName, tenantId }: { appName: string; tenantId: string }) =>
-      apiClient.initiateComposioConnection(appName, tenantId)
+    mutationFn: ({ appName, workspaceId }: { appName: string; workspaceId: string }) =>
+      apiClient.initiateComposioConnection(appName, workspaceId)
   })
 }
 
 export function useDisconnectApp() {
   return useMutation({
-    mutationFn: ({ appName, tenantId }: { appName: string; tenantId: string }) =>
-      apiClient.disconnectComposioApp(appName, tenantId)
+    mutationFn: ({ appName, workspaceId }: { appName: string; workspaceId: string }) =>
+      apiClient.disconnectComposioApp(appName, workspaceId)
   })
 }
 
@@ -826,7 +877,7 @@ components/
 
 export function ToolsDashboard() {
   const { data: availableApps } = useAvailableApps()
-  const { data: connectedApps } = useConnectedApps(tenantId)
+  const { data: connectedApps } = useConnectedApps(workspaceId)
   const initiateConnection = useInitiateConnection()
   
   return (
@@ -861,7 +912,7 @@ export function ToolsDashboard() {
               app={app}
               onConnect={() => initiateConnection.mutate({ 
                 appName: app.name, 
-                tenantId 
+                workspaceId 
               })}
             />
           ))}
@@ -924,10 +975,12 @@ export function ToolsDashboard() {
 - [ ] Add `PUT /api/agents/{id}/apps/{app}/features` endpoint
 - [ ] Add `POST /api/agents/{id}/apps/{app}` endpoint
 
-**Authentication**
+**Authentication & Triggers**
 - [ ] Add Composio API key to secrets management
 - [ ] Implement OAuth callback handler for Composio
-- [ ] Add webhook endpoint for Composio connection events
+- [ ] Implement `POST /api/composio/webhook` handler
+- [ ] Add trigger subscription usage to Agent API
+- [ ] Create `TriggerSubscription` database model
 
 #### Phase 3: Execution Layer (Week 3-4)
 
@@ -935,7 +988,7 @@ export function ToolsDashboard() {
 - [ ] Create `core/composio/tool_executor.py`
 - [ ] Update `UnifiedToolExecutor` routing
 - [ ] Implement Composio action execution
-- [ ] Add entity ID resolution from tenant
+- [ ] Add entity ID resolution from workspace
 - [ ] Implement feature access validation
 
 **LLM Integration**
@@ -971,7 +1024,8 @@ export function ToolsDashboard() {
 - [ ] Redesign Tools Dashboard page
 - [ ] Update Agent Configuration with app management
 - [ ] Add "Manage Apps" button to agent card
-- [ ] Update chat input for tool autocomplete
+- [ ] Update chat input for tool 
+
 
 #### Phase 5: Cleanup & Migration (Week 5-6)
 
@@ -1027,17 +1081,17 @@ export function ToolsDashboard() {
 ```python
 # scripts/migrate_to_composio.py
 
-async def migrate_tenant_tools(tenant_id: UUID):
+async def migrate_workspace_tools(workspace_id: UUID):
     """Migrate existing tool configurations to Composio."""
     
     # 1. Get existing tool configs
     existing_configs = db.query(TenantToolConfig).filter(
-        TenantToolConfig.tenant_id == tenant_id
+        TenantToolConfig.workspace_id == workspace_id
     ).all()
     
-    # 2. Create Composio entity for tenant
+    # 2. Create Composio entity for workspace
     composio = ComposioClient()
-    entity = composio.get_entity(str(tenant_id))
+    entity = composio.get_entity(str(workspace_id))
     
     # 3. Map old tools to Composio apps
     tool_mapping = {

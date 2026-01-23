@@ -4,15 +4,12 @@ import React from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ToolLogo } from '@/components/ui/tool-logo'
-import { 
-  ExternalLink, 
-  BookOpen, 
-  Settings, 
-  Download, 
-  Tag, 
+import {
+  ExternalLink,
+  BookOpen,
+  Settings,
   Shield,
   Zap,
   Database,
@@ -24,7 +21,6 @@ import {
   Activity,
   HardDrive,
   Globe,
-  Key,
   X
 } from 'lucide-react'
 
@@ -36,6 +32,7 @@ interface ToolDetailsModalProps {
   onConfigure?: () => void
   onUninstall?: () => void
   loading?: boolean
+  initialTab?: 'features' | 'triggers'
 }
 
 const categoryIcons: Record<string, any> = {
@@ -52,26 +49,74 @@ const categoryIcons: Record<string, any> = {
   'Security': Shield
 }
 
-export function ToolDetailsModal({ 
-  open, 
-  onClose, 
-  tool, 
-  onInstall, 
-  onConfigure, 
-  onUninstall, 
-  loading = false 
+// ... (previous imports)
+import { useState, useEffect } from 'react'
+import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
+import { Search, Loader2 } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
+import { useToast } from '@/hooks/use-toast'
+
+// ... (keep ToolDetailsModalProps)
+
+export function ToolDetailsModal({
+  open,
+  onClose,
+  tool,
+  onInstall,
+  onConfigure,
+  onUninstall,
+  loading = false,
+  initialTab
 }: ToolDetailsModalProps) {
+  const { toast } = useToast()
+  const [activeTab, setActiveTab] = useState<'features' | 'triggers'>(initialTab || 'features')
+  const [actions, setActions] = useState<any[]>([])
+  const [actionsLoading, setActionsLoading] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [triggerSearchQuery, setTriggerSearchQuery] = useState('')
+
+  useEffect(() => {
+    if (open && tool && tool.provider === 'Composio') {
+      fetchActions()
+    }
+  }, [open, tool])
+
+  const fetchActions = async () => {
+    setActionsLoading(true)
+    try {
+      const actionsResponse = await (apiClient as any).get(`/api/mcp-tools/${tool.id}/actions`)
+      const mapped = (actionsResponse.data || actionsResponse || []).map((a: any) => ({
+        ...a,
+        enabled: true // Default enabled
+      }))
+      setActions(mapped)
+    } catch (error) {
+      console.error('Failed to fetch actions:', error)
+    } finally {
+      setActionsLoading(false)
+    }
+  }
+
+  const handleToggleAction = (name: string) => {
+    setActions(prev => prev.map(a => a.name === name ? { ...a, enabled: !a.enabled } : a))
+    toast({ title: "Updated", description: "Feature preference saved locally." })
+  }
+
+  const filteredActions = actions.filter(a =>
+    a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.display_name || '').toLowerCase().includes(searchQuery.toLowerCase())
+  )
+
   if (!tool) return null
 
   const CategoryIcon = categoryIcons[tool.category] || Settings
-  const capabilities = tool.capabilities || {}
-  const credentialsSchema = tool.credentials_schema || {}
   const metadata = tool.metadata || {}
-  const capabilityList = extractCapabilities(capabilities)
-  const credentialList =
-    tool.requiredCredentials ||
-    Object.keys(credentialsSchema.required || {}) ||
-    []
+  const triggerList = Array.isArray(tool?.metadata?.triggers) ? tool.metadata.triggers : []
+  const filteredTriggers = triggerList.filter((trigger: any) => {
+    const name = typeof trigger === 'string' ? trigger : (trigger.name || trigger.trigger_name || '')
+    return name.toLowerCase().includes(triggerSearchQuery.toLowerCase())
+  })
 
   return (
     <AnimatePresence>
@@ -92,8 +137,8 @@ export function ToolDetailsModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between">
+            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="flex items-center gap-3 text-xl">
                   <ToolLogo
                     logo={tool.logo}
@@ -119,7 +164,8 @@ export function ToolDetailsModal({
                 </Button>
               </CardHeader>
 
-              <CardContent className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+              <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
+
                 <div className="space-y-6">
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold flex items-center gap-2">
@@ -133,146 +179,146 @@ export function ToolDetailsModal({
                     </div>
                   </div>
 
-                  {tool.tags && tool.tags.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Tag className="w-4 h-4" />
-                        Tags
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {tool.tags.map((tag: string) => (
-                          <Badge key={tag} variant="outline" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))}
+                  {tool.provider === 'Composio' && (
+                    <div className="space-y-4">
+                      <div className="flex space-x-4 border-b border-border/40">
+                        <button
+                          onClick={() => setActiveTab('features')}
+                          className={`text-sm font-medium pb-2 border-b-2 transition-colors ${activeTab === 'features' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                        >
+                          Features ({actions.length})
+                        </button>
+                        <button
+                          onClick={() => setActiveTab('triggers')}
+                          className={`text-sm font-medium pb-2 border-b-2 transition-colors ${activeTab === 'triggers' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                        >
+                          Trigger ({triggerList.length})
+                        </button>
                       </div>
-                    </div>
-                  )}
 
-                  {capabilityList.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Zap className="w-4 h-4" />
-                        Capabilities
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {capabilityList.map((capability: string) => (
-                          <Badge key={capability} variant="outline" className="text-xs">
-                            {capability}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                      {activeTab === 'features' && (
+                        <div className="h-full flex flex-col">
+                          <div className="flex items-center gap-4 mb-4">
+                            <div className="relative flex-1">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <Input
+                                placeholder="Search features..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9"
+                              />
+                            </div>
+                          </div>
 
-                  {credentialList.length > 0 && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Key className="w-4 h-4" />
-                        Required Credentials
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {credentialList.map((cred: string) => (
-                          <Badge key={cred} variant="secondary" className="text-xs">
-                            {cred}
-                          </Badge>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Add credentials in the Configure step for this tool.
-                      </p>
-                    </div>
-                  )}
+                          <div className="space-y-2">
+                            {actionsLoading ? (
+                              <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+                            ) : filteredActions.length === 0 ? (
+                              <div className="text-center p-8 text-muted-foreground">No features found.</div>
+                            ) : (
+                              filteredActions.map(action => (
+                                <div key={action.name} className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-secondary/10">
+                                  <div className="min-w-0 mr-4">
+                                    <div className="font-medium text-sm">{action.display_name || action.name}</div>
+                                    <div className="text-xs text-muted-foreground truncate">{action.description}</div>
+                                  </div>
+                                  <Switch checked={action.enabled} onCheckedChange={() => handleToggleAction(action.name)} />
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
 
-                  {metadata.auto_enable_on_credential && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <Settings className="w-4 h-4" />
-                        Auto-Activation
-                      </h3>
-                      <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-                        <p className="text-sm text-blue-400">
-                          This tool will automatically activate when you add a <strong>{metadata.auto_enable_on_credential}</strong> credential.
-                        </p>
-                      </div>
+                      {activeTab === 'triggers' && (
+                        <div className="h-full flex flex-col">
+                          <div className="flex items-center gap-4 mb-4">
+                            <div className="relative flex-1">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                              <Input
+                                placeholder="Search triggers..."
+                                value={triggerSearchQuery}
+                                onChange={(e) => setTriggerSearchQuery(e.target.value)}
+                                className="pl-9"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-2">
+                            {filteredTriggers.length === 0 ? (
+                              <div className="text-center p-8 text-muted-foreground">No triggers available.</div>
+                            ) : (
+                              filteredTriggers.map((trigger: any) => {
+                                const triggerName = typeof trigger === 'string'
+                                  ? trigger
+                                  : (trigger.display_name || trigger.name || trigger.trigger_name || 'Trigger')
+                                const triggerDescription = typeof trigger === 'string' ? '' : (trigger.description || '')
+                                return (
+                                  <div key={triggerName} className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-secondary/10">
+                                    <div className="min-w-0 mr-4">
+                                      <div className="font-medium text-sm">{triggerName}</div>
+                                      {triggerDescription && (
+                                        <div className="text-xs text-muted-foreground truncate">{triggerDescription}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
                   {metadata.documentation && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold flex items-center gap-2">
-                        <BookOpen className="w-4 h-4" />
-                        Documentation
-                      </h3>
-                      <Button
-                        variant="outline"
-                        onClick={() => window.open(metadata.documentation, '_blank')}
-                        className="w-full hover:border-blue-500/50 hover:text-blue-400"
-                      >
-                        <BookOpen className="w-4 h-4 mr-2" />
-                        View Documentation
-                        <ExternalLink className="w-4 h-4 ml-2" />
+                    <div className="mt-4">
+                      <Button variant="outline" size="sm" onClick={() => window.open(metadata.documentation, '_blank')} className="w-full">
+                        <BookOpen className="w-4 h-4 mr-2" /> View Documentation <ExternalLink className="w-4 h-4 ml-2" />
                       </Button>
                     </div>
                   )}
-
-                  <Separator />
-
-                  <div className="flex gap-3">
-                    {tool.isInstalled ? (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          className="flex-1 hover:border-blue-500/50"
-                          onClick={onConfigure}
-                        >
-                          <Settings className="w-4 h-4 mr-2" />
-                          Configure
-                        </Button>
-                        <Button 
-                          variant="outline"
-                          onClick={onUninstall}
-                          className="hover:border-red-500/50 text-red-400"
-                          disabled={loading}
-                        >
-                          Remove
-                        </Button>
-                      </>
-                    ) : (
-                      <Button 
-                        onClick={onInstall}
-                        disabled={loading}
-                        className="flex-1 bg-brand-primary hover:bg-brand-primary/90"
-                      >
-                        <Download className="w-4 h-4 mr-2" />
-                        Install Tool
-                      </Button>
-                    )}
-                  </div>
                 </div>
+
               </CardContent>
+
+              <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur">
+                <div className="flex gap-3">
+                  {tool.isInstalled ? (
+                    <>
+                      <Button
+                        variant="outline"
+                        className="flex-1 hover:border-blue-500/50"
+                        onClick={() => setActiveTab('features')}
+                      >
+                        <Settings className="w-4 h-4 mr-2" />
+                        Manage Features
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={onUninstall}
+                        className="hover:border-red-500/50 text-red-400"
+                        disabled={loading}
+                      >
+                        Disconnect
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      onClick={onInstall}
+                      disabled={loading}
+                      className="flex-1 bg-brand-primary hover:bg-brand-primary/90"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Connect with Composio
+                    </Button>
+                  )}
+                </div>
+              </div>
             </Card>
           </motion.div>
         </>
       )}
     </AnimatePresence>
   )
-}
-
-function extractCapabilities(capabilities: any): string[] {
-  if (!capabilities) return []
-  if (Array.isArray(capabilities)) return capabilities
-
-  const knownKeys = ['methods', 'tools', 'actions', 'operations', 'capabilities']
-  for (const key of knownKeys) {
-    const value = capabilities[key]
-    if (Array.isArray(value)) return value
-    if (value && typeof value === 'object') return Object.keys(value)
-  }
-
-  if (typeof capabilities === 'object') {
-    return Object.keys(capabilities)
-  }
-
-  return []
 }

@@ -7,6 +7,7 @@ Inspired by n8n's credential architecture.
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pydantic import BaseModel, Field, field_validator
@@ -65,6 +66,7 @@ class Credential(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)  # User-friendly name: "Production PostgreSQL"
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
     credential_type_id = Column(Integer, ForeignKey('credential_types.id', ondelete='CASCADE'), nullable=False)
     
     # Encrypted JSON blob of credential field values

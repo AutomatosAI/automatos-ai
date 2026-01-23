@@ -25,20 +25,20 @@ from core.models.core import Base
 # SQLAlchemy Database Models
 # ============================================================================
 
-class TenantToolConfig(Base):
+class WorkspaceToolConfig(Base):
     """
-    Tool enablement per tenant with 1:1 credential mapping.
+    Tool enablement per workspace with 1:1 credential mapping.
     
     When a user enables a tool in Settings > Tools, they must provide credentials.
-    This creates a 1:1 mapping between tool and credential for that tenant.
+    This creates a 1:1 mapping between tool and credential for that workspace.
     
     Adapter owns tool definitions; this table owns enablement and credential mapping.
     """
-    __tablename__ = 'tenant_tool_config'
+    __tablename__ = 'workspace_tool_config'
     __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
-    tenant_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
+    workspace_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     
     # Reference to Adapter's tool (not a FK - Adapter is separate DB)
     tool_id = Column(String(255), nullable=False, index=True)  # Clean: 'slack', 'github'
@@ -49,7 +49,7 @@ class TenantToolConfig(Base):
     # 1:1 credential mapping - set when tool is enabled
     credential_id = Column(Integer, ForeignKey('credentials.id', ondelete='SET NULL'), nullable=True)
     
-    # Tenant-specific tool configuration overrides
+    # Workspace-specific tool configuration overrides
     configuration = Column(JSONB, default=dict)
 
     # [NEW] Cache tool definition (methods, schemas, category) from Adapter
@@ -63,7 +63,7 @@ class TenantToolConfig(Base):
     credential = relationship("Credential", foreign_keys=[credential_id])
     
     def __repr__(self):
-        return f"<TenantToolConfig(tenant={self.tenant_id}, tool={self.tool_id}, enabled={self.enabled})>"
+        return f"<WorkspaceToolConfig(workspace={self.workspace_id}, tool={self.tool_id}, enabled={self.enabled})>"
 
 
 class AgentToolAssignment(Base):
@@ -135,10 +135,10 @@ class ToolDisableRequest(BaseModel):
     tool_id: str = Field(..., description="Tool ID (e.g., 'slack', 'github')")
 
 
-class TenantToolConfigResponse(BaseModel):
-    """Response for tenant tool configuration."""
+class WorkspaceToolConfigResponse(BaseModel):
+    """Response for workspace tool configuration."""
     id: int
-    tenant_id: UUID
+    workspace_id: UUID
     tool_id: str
     tool_name: str
     enabled: bool
@@ -163,10 +163,10 @@ class AvailableToolResponse(BaseModel):
     auth_config: Optional[Dict[str, Any]] = None
     icon: Optional[str] = None
     tags: Optional[List[str]] = None
-    # Tenant-specific status
-    enabled_for_tenant: bool = False
+    # Workspace-specific status
+    enabled_for_workspace: bool = False
     credential_configured: bool = False
-    tenant_config_id: Optional[int] = None
+    workspace_config_id: Optional[int] = None
 
 
 # --- Agent Tool Assignment ---
@@ -214,7 +214,7 @@ class AgentToolResponse(BaseModel):
 
 class CredentialResolveRequest(BaseModel):
     """Request from Adapter to resolve credentials."""
-    tenant_id: UUID
+    workspace_id: UUID
     tool_name: str
     credential_type: Optional[str] = None
     service_name: str = Field(default="unified-adapter")

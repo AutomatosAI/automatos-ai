@@ -81,11 +81,18 @@ class OpenAIProvider(BaseLLMProvider):
                              formatted_tools.append(t)
                     
                     kwargs["tools"] = formatted_tools
-                    kwargs["tool_choice"] = "auto"
+                    force_tool_choice = any(
+                        (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
+                        or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                        for m in (messages or [])
+                    )
+                    kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
                     import json
                     tools_json = json.dumps(formatted_tools, default=str)
                     tools_summary = f"{len(formatted_tools)} tools. Sample: {tools_json[:200]}..."
-                    logger.info(f"Sending tools to OpenAI: {tools_summary}")
+                    logger.info(
+                        f"Sending tools to OpenAI (tool_choice={kwargs['tool_choice']}): {tools_summary}"
+                    )
                 return self.client.chat.completions.create(**kwargs)
             
             response = await loop.run_in_executor(None, _call)

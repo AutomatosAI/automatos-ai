@@ -42,6 +42,8 @@ from modules.rag import (
     FormulaExtraction
 )
 from core.credentials.resolver import get_credential_resolver
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,7 @@ class DocumentUploadResponse(BaseModel):
 
 @router.get("/types", response_model=List[KnowledgeTypeInfo])
 async def get_knowledge_types(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -148,13 +151,13 @@ async def get_knowledge_types(
                 kt.supports_relationships,
                 COUNT(ki.id) as count
             FROM kb_types kt
-            LEFT JOIN knowledge_items ki ON kt.id = ki.kb_type_id AND ki.status = 'active'
+            LEFT JOIN knowledge_items ki ON kt.id = ki.kb_type_id AND ki.status = 'active' AND ki.workspace_id = :workspace_id
             WHERE kt.enabled = true
             GROUP BY kt.id, kt.type_name, kt.display_name, kt.description, kt.icon, kt.supports_search, kt.supports_relationships
             ORDER BY kt.display_name
         """)
         
-        results = db.execute(query).fetchall()
+        results = db.execute(query, {"workspace_id": ctx.workspace_id}).fetchall()
         
         types = [
             KnowledgeTypeInfo(
@@ -179,6 +182,7 @@ async def get_knowledge_types(
 @router.post("/items", response_model=KnowledgeItemResponse)
 async def create_knowledge_item(
     item: KnowledgeItemCreate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -200,9 +204,9 @@ async def create_knowledge_item(
         # Create knowledge item
         insert_query = text("""
             INSERT INTO knowledge_items 
-            (kb_type_id, title, content, summary, metadata, quality_score, importance_score, visibility, owner_id, status)
+            (kb_type_id, title, content, summary, metadata, quality_score, importance_score, visibility, owner_id, status, workspace_id)
             VALUES 
-            (:kb_type_id, :title, :content, :summary, :metadata, :quality_score, :importance_score, :visibility, :owner_id, 'active')
+            (:kb_type_id, :title, :content, :summary, :metadata, :quality_score, :importance_score, :visibility, :owner_id, 'active', :workspace_id)
             RETURNING id, created_at
         """)
         
@@ -217,7 +221,8 @@ async def create_knowledge_item(
                 "quality_score": item.quality_score,
                 "importance_score": item.importance_score,
                 "visibility": item.visibility,
-                "owner_id": item.owner_id
+                "owner_id": item.owner_id,
+                "workspace_id": ctx.workspace_id
             }
         ).fetchone()
         
@@ -253,6 +258,7 @@ async def upload_document_multimodal(
     extract_tables: bool = Form(True),
     extract_images: bool = Form(True),
     extract_formulas: bool = Form(True),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -329,9 +335,9 @@ async def upload_document_multimodal(
                 
                 doc_query = text("""
                     INSERT INTO knowledge_items 
-                    (kb_type_id, title, content, summary, metadata, status, source_type, source_id)
+                    (kb_type_id, title, content, summary, metadata, status, source_type, source_id, workspace_id)
                     VALUES 
-                    (:kb_type_id, :title, :content, :summary, :metadata, 'active', 'upload', :source_id)
+                    (:kb_type_id, :title, :content, :summary, :metadata, 'active', 'upload', :source_id, :workspace_id)
                     RETURNING id
                 """)
                 
@@ -343,7 +349,8 @@ async def upload_document_multimodal(
                         "content": results['text'],
                         "summary": summary,
                         "metadata": json.dumps({"filename": file.filename, "description": description}),
-                        "source_id": file.filename
+                        "source_id": file.filename,
+                        "workspace_id": ctx.workspace_id
                     }
                 ).fetchone()
                 
@@ -356,9 +363,9 @@ async def upload_document_multimodal(
             for table in results['tables']:
                 table_query = text("""
                     INSERT INTO knowledge_items 
-                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id)
+                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id, workspace_id)
                     VALUES 
-                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id)
+                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id, :workspace_id)
                     RETURNING id
                 """)
                 
@@ -378,16 +385,18 @@ async def upload_document_multimodal(
                             "column_count": table.column_count,
                             "page_number": table.page_number
                         }),
-                        "source_id": file.filename
+                        "source_id": file.filename,
+                        "workspace_id": ctx.workspace_id
                     }
                 ).fetchone()
                 
-                # Store in kb_tables
+                # Store in kb_tables (workspace_id implied by knowledge_item, but schema says kb_tables also has workspace_id!)
+                # Wait, schema DOES have workspace_id for kb_tables. Let's add it.
                 kb_table_query = text("""
                     INSERT INTO kb_tables 
-                    (knowledge_item_id, headers, row_count, column_count, markdown_representation, csv_data, json_data, caption)
+                    (knowledge_item_id, headers, row_count, column_count, markdown_representation, csv_data, json_data, caption, workspace_id)
                     VALUES 
-                    (:knowledge_item_id, :headers, :row_count, :column_count, :markdown, :csv, :json_data, :caption)
+                    (:knowledge_item_id, :headers, :row_count, :column_count, :markdown, :csv, :json_data, :caption, :workspace_id)
                 """)
                 
                 db.execute(
@@ -400,7 +409,8 @@ async def upload_document_multimodal(
                         "markdown": table.markdown,
                         "csv": table.csv,
                         "json_data": json.dumps(table.json),
-                        "caption": table.caption
+                        "caption": table.caption,
+                        "workspace_id": ctx.workspace_id
                     }
                 )
                 
@@ -410,9 +420,9 @@ async def upload_document_multimodal(
             for image in results['images']:
                 image_query = text("""
                     INSERT INTO knowledge_items 
-                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id)
+                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id, workspace_id)
                     VALUES 
-                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id)
+                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id, :workspace_id)
                     RETURNING id
                 """)
                 
@@ -432,16 +442,17 @@ async def upload_document_multimodal(
                             "format": image.format,
                             "page_number": image.page_number
                         }),
-                        "source_id": file.filename
+                        "source_id": file.filename,
+                        "workspace_id": ctx.workspace_id
                     }
                 ).fetchone()
                 
                 # Store in kb_images
                 kb_image_query = text("""
                     INSERT INTO kb_images 
-                    (knowledge_item_id, width, height, format, file_size_bytes, description, caption, detected_text, image_data, thumbnail_data)
+                    (knowledge_item_id, width, height, format, file_size_bytes, description, caption, detected_text, image_data, thumbnail_data, workspace_id)
                     VALUES 
-                    (:knowledge_item_id, :width, :height, :format, :file_size_bytes, :description, :caption, :detected_text, :image_data, :thumbnail_data)
+                    (:knowledge_item_id, :width, :height, :format, :file_size_bytes, :description, :caption, :detected_text, :image_data, :thumbnail_data, :workspace_id)
                 """)
                 
                 db.execute(
@@ -456,7 +467,8 @@ async def upload_document_multimodal(
                         "caption": image.caption,
                         "detected_text": image.detected_text,
                         "image_data": image.image_data,
-                        "thumbnail_data": image.thumbnail_data
+                        "thumbnail_data": image.thumbnail_data,
+                        "workspace_id": ctx.workspace_id
                     }
                 )
                 
@@ -466,9 +478,9 @@ async def upload_document_multimodal(
             for formula in results['formulas']:
                 formula_query = text("""
                     INSERT INTO knowledge_items 
-                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id)
+                    (kb_type_id, parent_id, title, content, metadata, status, source_type, source_id, workspace_id)
                     VALUES 
-                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id)
+                    (:kb_type_id, :parent_id, :title, :content, :metadata, 'active', 'extraction', :source_id, :workspace_id)
                     RETURNING id
                 """)
                 
@@ -487,16 +499,17 @@ async def upload_document_multimodal(
                             "domain": formula.domain,
                             "complexity": formula.complexity
                         }),
-                        "source_id": file.filename
+                        "source_id": file.filename,
+                        "workspace_id": ctx.workspace_id
                     }
                 ).fetchone()
                 
                 # Store in kb_formulas
                 kb_formula_query = text("""
                     INSERT INTO kb_formulas 
-                    (knowledge_item_id, latex, ascii_math, variables, operators, formula_type, domain, complexity_level)
+                    (knowledge_item_id, latex, ascii_math, variables, operators, formula_type, domain, complexity_level, workspace_id)
                     VALUES 
-                    (:knowledge_item_id, :latex, :ascii_math, :variables, :operators, :formula_type, :domain, :complexity_level)
+                    (:knowledge_item_id, :latex, :ascii_math, :variables, :operators, :formula_type, :domain, :complexity_level, :workspace_id)
                 """)
                 
                 db.execute(
@@ -509,7 +522,8 @@ async def upload_document_multimodal(
                         "operators": json.dumps(formula.operators),
                         "formula_type": formula.formula_type,
                         "domain": formula.domain,
-                        "complexity_level": formula.complexity
+                        "complexity_level": formula.complexity,
+                        "workspace_id": ctx.workspace_id
                     }
                 )
                 
@@ -546,6 +560,7 @@ async def upload_document_multimodal(
 @router.post("/search", response_model=List[KnowledgeSearchResult])
 async def search_knowledge(
     search: KnowledgeSearchRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -572,10 +587,11 @@ async def search_knowledge(
                     1.0 as quality_score,
                     f.created_at
                 FROM kb_formulas f
+                WHERE f.workspace_id = :workspace_id
                 ORDER BY f.created_at DESC
                 LIMIT :limit
             """)
-            formula_results = db.execute(formula_query, {"limit": search.limit}).fetchall()
+            formula_results = db.execute(formula_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
             all_results.extend([
                 KnowledgeSearchResult(
                     id=row.id,
@@ -601,10 +617,11 @@ async def search_knowledge(
                     1.0 as quality_score,
                     t.created_at
                 FROM kb_tables t
+                WHERE t.workspace_id = :workspace_id
                 ORDER BY t.created_at DESC
                 LIMIT :limit
             """)
-            table_results = db.execute(table_query, {"limit": search.limit}).fetchall()
+            table_results = db.execute(table_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
             all_results.extend([
                 KnowledgeSearchResult(
                     id=row.id,
@@ -630,10 +647,11 @@ async def search_knowledge(
                     1.0 as quality_score,
                     i.created_at
                 FROM kb_images i
+                WHERE i.workspace_id = :workspace_id
                 ORDER BY i.created_at DESC
                 LIMIT :limit
             """)
-            image_results = db.execute(image_query, {"limit": search.limit}).fetchall()
+            image_results = db.execute(image_query, {"limit": search.limit, "workspace_id": ctx.workspace_id}).fetchall()
             all_results.extend([
                 KnowledgeSearchResult(
                     id=row.id,
@@ -660,6 +678,7 @@ async def search_knowledge(
 async def get_knowledge_item(
     item_id: int,
     type: str = Query(..., description="Knowledge type: table, formula, or image"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -682,9 +701,9 @@ async def get_knowledge_item(
                     domain,
                     created_at
                 FROM kb_formulas
-                WHERE id = :item_id
+                WHERE id = :item_id AND workspace_id = :workspace_id
             """)
-            result = db.execute(query, {"item_id": item_id}).fetchone()
+            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
             if not result:
                 raise HTTPException(status_code=404, detail="Formula not found")
             
@@ -715,9 +734,9 @@ async def get_knowledge_item(
                     json_data,
                     created_at
                 FROM kb_tables
-                WHERE id = :item_id
+                WHERE id = :item_id AND workspace_id = :workspace_id
             """)
-            result = db.execute(query, {"item_id": item_id}).fetchone()
+            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
             if not result:
                 raise HTTPException(status_code=404, detail="Table not found")
             
@@ -749,9 +768,9 @@ async def get_knowledge_item(
                     storage_path,
                     created_at
                 FROM kb_images
-                WHERE id = :item_id
+                WHERE id = :item_id AND workspace_id = :workspace_id
             """)
-            result = db.execute(query, {"item_id": item_id}).fetchone()
+            result = db.execute(query, {"item_id": item_id, "workspace_id": ctx.workspace_id}).fetchone()
             if not result:
                 raise HTTPException(status_code=404, detail="Image not found")
             
@@ -781,6 +800,7 @@ async def get_knowledge_item(
 
 @router.get("/stats")
 async def get_knowledge_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -790,13 +810,13 @@ async def get_knowledge_stats(
     """
     try:
         # Get direct counts from multimodal tables
-        tables_count_query = text("SELECT COUNT(*) as count FROM kb_tables")
-        formulas_count_query = text("SELECT COUNT(*) as count FROM kb_formulas")
-        images_count_query = text("SELECT COUNT(*) as count FROM kb_images")
+        tables_count_query = text("SELECT COUNT(*) as count FROM kb_tables WHERE workspace_id = :workspace_id")
+        formulas_count_query = text("SELECT COUNT(*) as count FROM kb_formulas WHERE workspace_id = :workspace_id")
+        images_count_query = text("SELECT COUNT(*) as count FROM kb_images WHERE workspace_id = :workspace_id")
         
-        tables_count = db.execute(tables_count_query).fetchone().count
-        formulas_count = db.execute(formulas_count_query).fetchone().count
-        images_count = db.execute(images_count_query).fetchone().count
+        tables_count = db.execute(tables_count_query, {"workspace_id": ctx.workspace_id}).fetchone().count
+        formulas_count = db.execute(formulas_count_query, {"workspace_id": ctx.workspace_id}).fetchone().count
+        images_count = db.execute(images_count_query, {"workspace_id": ctx.workspace_id}).fetchone().count
         
         stats = {
             "by_type": [

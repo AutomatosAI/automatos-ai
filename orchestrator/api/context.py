@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from core.database.database import get_db
 from core.models import RAGConfiguration, Document
 from modules.rag import get_rag_service, RAGService
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 # Request models
 class RAGConfigCreate(BaseModel):
@@ -230,22 +232,30 @@ async def initialize_context_system(
         raise HTTPException(status_code=500, detail=f"Error initializing context system: {str(e)}")
 
 @router.get("/optimize")
-async def get_optimization_recommendations(db: Session = Depends(get_db)):
-    """Analyze context system and provide optimization recommendations"""
+async def get_optimization_recommendations(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """Analyze context system and provide optimization recommendations (Workspace Scoped)"""
     try:
         from sqlalchemy import text
         recommendations = []
         
-        # Check 1: Embeddings coverage
+        # Check 1: Embeddings coverage (Scoped to workspace)
         embedding_query = text("""
             SELECT 
                 COUNT(*) as total_docs,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs,
-                (SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL) as embedded_chunks
+                (SELECT COUNT(*) 
+                 FROM document_chunks dc
+                 JOIN documents d ON dc.document_id = d.id
+                 WHERE d.workspace_id = :workspace_id AND dc.embedding IS NOT NULL
+                ) as embedded_chunks
             FROM documents
+            WHERE workspace_id = :workspace_id
         """)
         
-        stats = db.execute(embedding_query).fetchone()
+        stats = db.execute(embedding_query, {"workspace_id": ctx.workspace_id}).fetchone()
         
         if stats and stats.total_docs > 0:
             incomplete_docs = stats.total_docs - stats.completed_docs
@@ -258,6 +268,7 @@ async def get_optimization_recommendations(db: Session = Depends(get_db)):
                     "action": "Reprocess failed documents",
                     "impact": "high"
                 })
+
         
         # Check 2: Query performance
         perf_query = text("""
@@ -345,6 +356,7 @@ async def get_optimization_recommendations(db: Session = Depends(get_db)):
 @router.post("/rag/config")
 async def create_rag_configuration(
     config: RAGConfigCreate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Create a new RAG configuration pattern"""
@@ -361,14 +373,15 @@ async def create_rag_configuration(
             configuration=config.configuration,
             is_active=True,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
+            workspace_id=ctx.workspace_id
         )
         
         db.add(new_config)
         db.commit()
         db.refresh(new_config)
         
-        logger.info(f"Created RAG configuration: {new_config.name} (ID: {new_config.id})")
+        logger.info(f"Created RAG configuration: {new_config.name} (ID: {new_config.id}) in workspace {ctx.workspace_id}")
         
         return {
             "id": new_config.id,
@@ -391,11 +404,12 @@ async def create_rag_configuration(
 
 @router.get("/rag/config")
 async def list_rag_configurations(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """List all RAG configurations"""
     try:
-        configs = db.query(RAGConfiguration).all()
+        configs = db.query(RAGConfiguration).filter(RAGConfiguration.workspace_id == ctx.workspace_id).all()
         
         return [{
             "id": config.id,
@@ -417,11 +431,12 @@ async def list_rag_configurations(
 @router.get("/rag/config/{config_id}")
 async def get_rag_configuration(
     config_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get a specific RAG configuration"""
     try:
-        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.workspace_id == ctx.workspace_id).filter(RAGConfiguration.id == config_id).first()
         
         if not config:
             raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")
@@ -451,11 +466,12 @@ async def get_rag_configuration(
 async def update_rag_configuration(
     config_id: int,
     config_update: RAGConfigUpdate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Update a RAG configuration"""
     try:
-        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.workspace_id == ctx.workspace_id).filter(RAGConfiguration.id == config_id).first()
         
         if not config:
             raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")
@@ -496,11 +512,12 @@ async def update_rag_configuration(
 @router.delete("/rag/config/{config_id}")
 async def delete_rag_configuration(
     config_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Delete a RAG configuration"""
     try:
-        config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
+        config = db.query(RAGConfiguration).filter(RAGConfiguration.workspace_id == ctx.workspace_id).filter(RAGConfiguration.id == config_id).first()
         
         if not config:
             raise HTTPException(status_code=404, detail=f"Configuration {config_id} not found")

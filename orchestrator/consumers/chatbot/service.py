@@ -153,7 +153,8 @@ class ChatService:
         chat_id: str,
         role: str,
         parts: List[Dict[str, Any]],
-        attachments: Optional[List[Dict[str, Any]]] = None
+        attachments: Optional[List[Dict[str, Any]]] = None,
+        workspace_id: Optional[str] = None
     ) -> Message:
         """Save a message to the database."""
         try:
@@ -161,9 +162,19 @@ class ChatService:
         except ValueError:
             raise ValueError(f"Invalid chat_id format: {chat_id}")
         
+        if not workspace_id:
+            raise ValueError("workspace_id is required to save messages")
+        
+        if isinstance(workspace_id, str):
+            try:
+                workspace_id = uuid.UUID(workspace_id)
+            except ValueError:
+                raise ValueError("Invalid workspace_id format")
+        
         message = Message(
             id=uuid.uuid4(),
             chat_id=chat_uuid,
+            workspace_id=workspace_id,
             role=role,
             parts=parts,
             attachments=attachments or [],
@@ -243,18 +254,35 @@ class StreamingChatService:
     Thin orchestrator consuming modules.
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, workspace_id: Optional[str] = None):
         self.db = db
         self.chat_service = ChatService(db)
         self.prompt_analyzer = get_prompt_analyzer()
         self.memory_injector = get_memory_injector()
         self.tool_router = get_tool_router()
         self.streaming_handler = get_streaming_handler()
+        self.workspace_id = workspace_id
         
         # PRD: Unified Agent-Chat System - Initialize AgentFactory
         from modules.agents.factory.agent_factory import AgentFactory
         self.agent_factory = AgentFactory(db_session=db)
         logger.info("StreamingChatService initialized with AgentFactory integration")
+
+    def _resolve_workspace_id(self, agent_id: int) -> Optional[str]:
+        logger.info(f"[chat] resolve_workspace_id current={self.workspace_id} agent={agent_id}")
+        if self.workspace_id:
+            return self.workspace_id
+        try:
+            from core.models import Agent as AgentModel
+            agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+            if agent_row:
+                logger.info(f"[chat] agent workspace_id={agent_row.workspace_id} agent={agent_id}")
+            if agent_row and agent_row.workspace_id:
+                self.workspace_id = agent_row.workspace_id
+                logger.info(f"Resolved workspace_id from agent {agent_id}")
+        except Exception as exc:
+            logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
+        return self.workspace_id
     
     async def stream_response_aisdk(
         self,
@@ -292,19 +320,55 @@ class StreamingChatService:
             else:
                 llm_manager = create_llm_manager(service_name="chatbot")
             
-            # Convert messages to LLM format
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(messages)
+            # Optionally ignore prior context for a fresh run
+            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+            fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
+            if fresh_start:
+                messages = [m for m in messages if m.get("role") == "user"][-1:]
+
+            # Ensure workspace_id for Composio tools
+            self._resolve_workspace_id(agent_id)
+
+            # Convert messages to LLM format (include tool names for stronger tool routing)
+            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                messages,
+                available_tools=tools
+            )
             assistant_parts = []
             full_response = ""
             tool_data = {}
             documents_tool_used = False
             
             # Inject memory context via modules.memory
-            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            memory_context = await self.memory_injector.retrieve_relevant_memories(chat_id, latest_text)
-            if memory_context:
-                logger.info(f"[Memory] Injecting {len(memory_context)} chars")
-                llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
+            memory_context = None
+            if not fresh_start:
+                memory_context = await self.memory_injector.retrieve_relevant_memories(
+                    chat_id,
+                    latest_text,
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                    agent_id=agent_id
+                )
+                if memory_context:
+                    logger.info(f"[Memory] Injecting {len(memory_context)} chars")
+                    llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
+
+            # Add dynamic tool candidates (no hardcoded app mapping)
+            if tools and latest_text:
+                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, tools)
+                if candidates:
+                    candidate_names = ", ".join([c["name"] for c in candidates if c.get("name")])
+                    if candidate_names:
+                        insert_at = 2 if memory_context else 1
+                        llm_messages.insert(
+                            insert_at,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Tool candidates for this request: "
+                                    f"{candidate_names}. Use the most relevant tool instead of answering from memory."
+                                )
+                            }
+                        )
             
             # Determine tool usage
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
@@ -341,7 +405,8 @@ class StreamingChatService:
                         result = await self.tool_router.execute_and_format(
                             tool_name,
                             tool_args,
-                            agent_id=agent_id
+                            agent_id=agent_id,
+                            workspace_id=self.workspace_id
                         )
 
                         yield self.streaming_handler.format_aisdk_tool_end(
@@ -373,11 +438,21 @@ class StreamingChatService:
 
                     # Save assistant message
                     assistant_parts.append({'type': 'text', 'text': full_response})
-                    self.chat_service.save_message(chat_id=chat_id, role="assistant", parts=assistant_parts)
+                    self.chat_service.save_message(
+                        chat_id=chat_id,
+                        role="assistant",
+                        parts=assistant_parts,
+                        workspace_id=self.workspace_id
+                    )
 
                     # Store memory
                     if latest_text and full_response:
-                        await self.memory_injector.store_conversation_memory(chat_id, latest_text, full_response)
+                        await self.memory_injector.store_conversation_memory(
+                            chat_id,
+                            latest_text,
+                            full_response,
+                            workspace_id=str(self.workspace_id) if self.workspace_id else None
+                        )
 
                     return
             
@@ -452,7 +527,8 @@ class StreamingChatService:
                         result = await self.tool_router.execute_and_format(
                             tool_name,
                             tool_args,
-                            agent_id=agent_id
+                            agent_id=agent_id,
+                            workspace_id=self.workspace_id
                         )
                         return {
                             "tool_call_id": tool_id,
@@ -627,11 +703,21 @@ class StreamingChatService:
             
             # Save assistant message
             assistant_parts.append({'type': 'text', 'text': full_response})
-            self.chat_service.save_message(chat_id=chat_id, role="assistant", parts=assistant_parts)
+            self.chat_service.save_message(
+                chat_id=chat_id,
+                role="assistant",
+                parts=assistant_parts,
+                workspace_id=self.workspace_id
+            )
             
             # Store memory via modules.memory
             if latest_text and full_response:
-                await self.memory_injector.store_conversation_memory(chat_id, latest_text, full_response)
+                await self.memory_injector.store_conversation_memory(
+                    chat_id,
+                    latest_text,
+                    full_response,
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None
+                )
             
         except Exception as e:
             logger.error(f"Error streaming response: {e}")
@@ -672,7 +758,12 @@ class StreamingChatService:
             
             # Start memory retrieval concurrently
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
-            memory_task = asyncio.create_task(self.memory_injector.retrieve_relevant_memories(chat_id, latest_text))
+            fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
+            if fresh_start:
+                messages = [m for m in messages if m.get("role") == "user"][-1:]
+                memory_task = None
+            else:
+                memory_task = asyncio.create_task(self.memory_injector.retrieve_relevant_memories(chat_id, latest_text))
             
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
@@ -683,13 +774,26 @@ class StreamingChatService:
                 agent_runtime = await agent_task
                 logger.info(f"Activating agent {agent_id} for chat {chat_id}")
             except Exception as e:
-                 # Cancel memory task if agent fails
-                memory_task.cancel()
+                # Cancel memory task if agent fails
+                if memory_task:
+                    memory_task.cancel()
                 raise e
             
             if not agent_runtime:
-                memory_task.cancel()
+                if memory_task:
+                    memory_task.cancel()
                 raise Exception(f"Failed to activate agent {agent_id}")
+
+            # Ensure workspace_id is available for Composio tools
+            if not self.workspace_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and agent_row.workspace_id:
+                        self.workspace_id = agent_row.workspace_id
+                        logger.info(f"Resolved workspace_id from agent {agent_id}")
+                except Exception as exc:
+                    logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
             
             # Send agent info to frontend
             yield self.streaming_handler.format_aisdk_data({
@@ -705,22 +809,6 @@ class StreamingChatService:
             
             # Build system prompt from agent's skills and extract tool schemas
             system_prompt, skill_tools = await self._build_agent_system_prompt(agent_runtime)
-            
-            # Convert messages to LLM format and inject system prompt
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(messages)
-            
-            # Replace or prepend system message with agent's system prompt
-            if llm_messages and llm_messages[0].get('role') == 'system':
-                llm_messages[0]['content'] = system_prompt
-            else:
-                llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
-            
-            # Await memory result
-            memory_context = await memory_task
-            
-            if memory_context:
-                logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
-                llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
             
             # Determine tool usage
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
@@ -738,6 +826,57 @@ class StreamingChatService:
                 else:
                     use_tools = use_tools + skill_tools
             
+            # Convert messages to LLM format and inject system prompt
+            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                messages,
+                available_tools=use_tools
+            )
+            
+            # Replace or prepend system message with agent's system prompt
+            if llm_messages and llm_messages[0].get('role') == 'system':
+                llm_messages[0]['content'] = system_prompt
+            else:
+                llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
+            
+            # Await memory result
+            memory_context = None
+            if memory_task:
+                memory_context = await memory_task
+                if memory_context:
+                    logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
+                    llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
+
+            # Add dynamic tool candidates (no hardcoded app mapping)
+            if use_tools and latest_text:
+                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, use_tools)
+                if candidates:
+                    candidate_names = [c["name"] for c in candidates if c.get("name")]
+                    if candidate_names:
+                        # Narrow tool list to top candidates to reduce overload
+                        candidate_set = set(candidate_names)
+                        filtered_tools = [
+                            tool for tool in use_tools
+                            if tool.get("function", {}).get("name") in candidate_set
+                        ]
+                        if filtered_tools:
+                            logger.info(
+                                f"🔍 Narrowing tools from {len(use_tools)} to {len(filtered_tools)} "
+                                f"based on ranked candidates"
+                            )
+                            use_tools = filtered_tools
+
+                        insert_at = 2 if memory_context else 1
+                        llm_messages.insert(
+                            insert_at,
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Tool candidates for this request: "
+                                    f"{', '.join(candidate_names)}. "
+                                    "You MUST call one of these tools to answer."
+                                )
+                            }
+                        )
             
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
@@ -816,14 +955,20 @@ class StreamingChatService:
             
             # Save assistant message
             assistant_parts.append({'type': 'text', 'text': full_response})
-            self.chat_service.save_message(chat_id=chat_id, role="assistant", parts=assistant_parts)
+            self.chat_service.save_message(
+                chat_id=chat_id,
+                role="assistant",
+                parts=assistant_parts,
+                workspace_id=self.workspace_id
+            )
             
             # Store memory (shared user-level)
             if latest_text and full_response:
                 await self.memory_injector.store_conversation_memory(
-                    chat_id, 
-                    latest_text, 
-                    full_response
+                    chat_id,
+                    latest_text,
+                    full_response,
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None
                 )
             
             # Update agent metrics
@@ -857,7 +1002,13 @@ class StreamingChatService:
         
         try:
             llm_manager = create_llm_manager(service_name="chatbot")
-            llm_messages = self.prompt_analyzer.convert_to_llm_messages(messages)
+            latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
+            if self.prompt_analyzer.is_fresh_start_request(latest_text):
+                messages = [m for m in messages if m.get("role") == "user"][-1:]
+            llm_messages = self.prompt_analyzer.convert_to_llm_messages(
+                messages,
+                available_tools=tools
+            )
             assistant_parts = []
             
             # Check for streaming support
@@ -918,7 +1069,12 @@ class StreamingChatService:
             
             # Save message
             if assistant_parts:
-                self.chat_service.save_message(chat_id=chat_id, role='assistant', parts=assistant_parts)
+                self.chat_service.save_message(
+                    chat_id=chat_id,
+                    role='assistant',
+                    parts=assistant_parts,
+                    workspace_id=self.workspace_id
+                )
             
             yield self.streaming_handler.format_sse_done()
             
@@ -1075,6 +1231,7 @@ YOUR SPECIALIZED SKILLS:
             
             start_times = {}
             tool_calls_prepared = []
+            fatal_errors: List[Dict[str, Any]] = []
             
             for tool_call in current_response.tool_calls:
                 tool_name = tool_call.get('function', {}).get('name', 'unknown')
@@ -1115,6 +1272,9 @@ YOUR SPECIALIZED SKILLS:
                         'name': tool_name,
                         'content': llm_context
                     })
+
+                    if result.get('fatal_error'):
+                        fatal_errors.append(result)
                     
                     # Emit tool-result as data event
                     yield self.streaming_handler.format_aisdk_data('tool-result', {
@@ -1161,6 +1321,15 @@ YOUR SPECIALIZED SKILLS:
             
             # Then add tool results to message history
             llm_messages.extend(tool_results)
+
+            if fatal_errors:
+                from types import SimpleNamespace
+                message = (
+                    "I ran into a server configuration issue while executing that tool. "
+                    "Please restart the backend and try again."
+                )
+                yield {'_final_response': SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                return
             
             # Get next LLM response
             current_response = await agent_runtime.llm_manager.generate_response(
@@ -1285,7 +1454,9 @@ YOUR SPECIALIZED SKILLS:
                     "role": "tool", 
                     "content": result['llm_context'],
                     "frontend_data": result.get('frontend_data', {}),
-                    "success": result['success']
+                    "success": result['success'],
+                    "fatal_error": result.get('fatal_error', False),
+                    "error_type": result.get('error_type')
                 }
             
             # Execute all tools in parallel
@@ -1310,6 +1481,13 @@ YOUR SPECIALIZED SKILLS:
                 "tool_calls": current_response.tool_calls
             })
             llm_messages.extend(tool_results)
+
+            fatal_errors = [r for r in results if r.get("fatal_error")]
+            if fatal_errors:
+                return (
+                    "I ran into a server configuration issue while executing that tool. "
+                    "Please restart the backend and try again."
+                ), tool_data
             
             # Get next response - allow more tool calls if needed
             # Only pass tools if we haven't hit max iterations

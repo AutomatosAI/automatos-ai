@@ -108,7 +108,8 @@ class CodeGraphService:
         github_url: str,
         branch: str = 'main',
         auth_token: Optional[str] = None,
-        exclude_patterns: Optional[List[str]] = None
+        exclude_patterns: Optional[List[str]] = None,
+        workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Index a GitHub repository
@@ -127,10 +128,10 @@ class CodeGraphService:
         
         logger.info(f"Starting GitHub indexing: {project_name} from {github_url}")
         
-        # Check if project already exists
+        # Check if project already exists in this workspace
         existing = self.db.execute(
-            text("SELECT id, status, updated_at FROM codegraph_projects WHERE name = :name"),
-            {"name": project_name}
+            text("SELECT id, status, updated_at FROM codegraph_projects WHERE name = :name AND workspace_id = :workspace_id"),
+            {"name": project_name, "workspace_id": workspace_id}
         ).fetchone()
         
         if existing and existing.status == 'indexing':
@@ -192,15 +193,16 @@ class CodeGraphService:
         else:
             result = self.db.execute(
                 text("""
-                    INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, exclude_patterns)
-                    VALUES (:name, 'github', :url, :branch, 'indexing', CAST(:excludes AS json))
+                    INSERT INTO codegraph_projects (name, source_type, source_url, branch, status, exclude_patterns, workspace_id)
+                    VALUES (:name, 'github', :url, :branch, 'indexing', CAST(:excludes AS json), :workspace_id)
                     RETURNING id
                 """),
                 {
                     "name": project_name,
                     "url": github_url,
                     "branch": branch,
-                    "excludes": json.dumps(exclude_patterns or [])
+                    "excludes": json.dumps(exclude_patterns or []),
+                    "workspace_id": workspace_id
                 }
             )
             project_id = result.fetchone()[0]
@@ -236,7 +238,8 @@ class CodeGraphService:
                             "file_hash": parse_result.file_hash,
                             "file_size": os.path.getsize(file_path),
                             "lines_of_code": parse_result.lines_of_code,
-                            "language": parse_result.language
+                            "language": parse_result.language,
+                            "workspace_id": workspace_id
                         })
                         
                         # Store symbols
@@ -251,7 +254,9 @@ class CodeGraphService:
                                 "signature": symbol.signature,
                                 "docstring": symbol.docstring,
                                 "code_snippet": symbol.code_snippet,
-                                "metadata": symbol.metadata
+                                "code_snippet": symbol.code_snippet,
+                                "metadata": symbol.metadata,
+                                "workspace_id": workspace_id
                             })
                         
                         # NEW: Store relationships
@@ -261,7 +266,8 @@ class CodeGraphService:
                                 "from_symbol": rel.from_symbol,
                                 "to_symbol": rel.to_symbol,
                                 "relationship_type": rel.relationship_type,
-                                "metadata": rel.metadata
+                                "metadata": rel.metadata,
+                                "workspace_id": workspace_id
                             })
                         
                         total_files += 1
@@ -276,8 +282,8 @@ class CodeGraphService:
                     self.db.execute(
                         text("""
                             INSERT INTO codegraph_files 
-                            (project_id, file_path, file_hash, file_size, lines_of_code, language)
-                            VALUES (:project_id, :file_path, :file_hash, :file_size, :lines_of_code, :language)
+                            (project_id, file_path, file_hash, file_size, lines_of_code, language, workspace_id)
+                            VALUES (:project_id, :file_path, :file_hash, :file_size, :lines_of_code, :language, :workspace_id)
                             ON CONFLICT (project_id, file_path) DO UPDATE
                             SET file_hash = EXCLUDED.file_hash,
                                 indexed_at = NOW()
@@ -839,17 +845,18 @@ class CodeGraphService:
                             "docstring": symbol.get('docstring'),
                             "code_snippet": symbol.get('code_snippet'),
                             "embedding": embedding_str,
-                            "metadata": json.dumps(symbol.get('metadata', {}))
+                            "metadata": json.dumps(symbol.get('metadata', {})),
+                            "workspace_id": symbol.get('workspace_id')
                         }
                         
                         self.db.execute(
                             text("""
                                 INSERT INTO codegraph_symbols
                                 (project_id, symbol_type, name, qualified_name, file_path, line_number,
-                                 signature, docstring, code_snippet, embedding, metadata)
+                                 signature, docstring, code_snippet, embedding, metadata, workspace_id)
                                 VALUES (:project_id, :symbol_type, :name, :qualified_name, :file_path,
                                         :line_number, :signature, :docstring, :code_snippet,
-                                        CAST(:embedding AS vector), :metadata)
+                                        CAST(:embedding AS vector), :metadata, :workspace_id)
                             """),
                             params
                         )
@@ -947,15 +954,16 @@ class CodeGraphService:
                         self.db.execute(
                             text("""
                                 INSERT INTO codegraph_relationships 
-                                (project_id, from_symbol_id, to_symbol_id, relationship_type, metadata)
-                                VALUES (:project_id, :from_symbol_id, :to_symbol_id, :relationship_type, CAST(:metadata AS jsonb))
+                                (project_id, from_symbol_id, to_symbol_id, relationship_type, metadata, workspace_id)
+                                VALUES (:project_id, :from_symbol_id, :to_symbol_id, :relationship_type, CAST(:metadata AS jsonb), :workspace_id)
                             """),
                             {
                                 "project_id": project_id,
                                 "from_symbol_id": from_symbol_id,
                                 "to_symbol_id": to_symbol_id,
                                 "relationship_type": rel['relationship_type'],
-                                "metadata": json.dumps(rel['metadata'])
+                                "metadata": json.dumps(rel['metadata']),
+                                "workspace_id": rel.get('workspace_id')
                             }
                         )
                         relationships_inserted += 1
@@ -986,8 +994,8 @@ class CodeGraphService:
         
         # Get project ID
         project = self.db.execute(
-            text("SELECT id FROM codegraph_projects WHERE name = :name"),
-            {"name": project_name}
+            text("SELECT id FROM codegraph_projects WHERE name = :name AND workspace_id = :workspace_id"),
+            {"name": project_name, "workspace_id": workspace_id}
         ).fetchone()
         
         if not project:
@@ -1097,8 +1105,8 @@ class CodeGraphService:
         
         # Get project ID
         project = self.db.execute(
-            text("SELECT id FROM codegraph_projects WHERE name = :name"),
-            {"name": project_name}
+            text("SELECT id FROM codegraph_projects WHERE name = :name AND workspace_id = :workspace_id"),
+            {"name": project_name, "workspace_id": workspace_id}
         ).fetchone()
         
         if not project:
@@ -1283,29 +1291,32 @@ class CodeGraphService:
         
         return "\n".join(parts)
     
-    def list_projects(self) -> List[Dict[str, Any]]:
-        """List all indexed projects"""
-        results = self.db.execute(
-            text("""
-                SELECT
-                    id,
-                    name,
-                    source_type,
-                    source_url,
-                    branch,
-                    language,
-                    total_files,
-                    total_symbols,
-                    total_relationships,
-                    last_indexed,
-                    index_duration_seconds,
-                    status,
-                    auto_reindex,
-                    created_at
-                FROM codegraph_projects
-                ORDER BY last_indexed DESC NULLS LAST
-            """)
-        ).fetchall()
+    def list_projects(self, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List all indexed projects for a workspace"""
+        
+        # Build query specific to workspace
+        sql = """
+            SELECT
+                id,
+                name,
+                source_type,
+                source_url,
+                branch,
+                language,
+                total_files,
+                total_symbols,
+                total_relationships,
+                last_indexed,
+                index_duration_seconds,
+                status,
+                auto_reindex,
+                created_at
+            FROM codegraph_projects
+            WHERE workspace_id = :workspace_id
+            ORDER BY last_indexed DESC NULLS LAST
+        """
+        
+        results = self.db.execute(text(sql), {"workspace_id": workspace_id}).fetchall()
         
         projects = []
         for row in results:
@@ -1328,12 +1339,21 @@ class CodeGraphService:
         
         return projects
     
-    def delete_project(self, project_id: int) -> Dict[str, Any]:
+    def delete_project(self, project_id: int, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """Delete a project and all associated data"""
+        
+        # Build query with workspace isolation if provided
+        check_sql = "SELECT name, total_files, total_symbols FROM codegraph_projects WHERE id = :id"
+        params = {"id": project_id}
+        
+        if workspace_id:
+            check_sql += " AND workspace_id = :workspace_id"
+            params["workspace_id"] = workspace_id
+            
         # Get project stats before deletion
         project = self.db.execute(
-            text("SELECT name, total_files, total_symbols FROM codegraph_projects WHERE id = :id"),
-            {"id": project_id}
+            text(check_sql),
+            params
         ).fetchone()
         
         if not project:
@@ -1358,7 +1378,8 @@ class CodeGraphService:
         project_name: str,
         symbol: str,
         depth: int = 1,
-        direction: str = "outgoing"
+        direction: str = "outgoing",
+        workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate call graph for a symbol showing function calls and dependencies
@@ -1371,8 +1392,8 @@ class CodeGraphService:
         """
         # Get project ID
         project = self.db.execute(
-            text("SELECT id FROM codegraph_projects WHERE name = :name"),
-            {"name": project_name}
+            text("SELECT id FROM codegraph_projects WHERE name = :name AND workspace_id = :workspace_id"),
+            {"name": project_name, "workspace_id": workspace_id}
         ).fetchone()
         
         if not project:

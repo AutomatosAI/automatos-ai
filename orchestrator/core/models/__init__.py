@@ -12,3 +12,5 @@ from .code_graph import *
 from .context_policy import *
 from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
+from .composio import *  # PRD-36: Composio integration
+from core.workspaces.models import * # PRD-37: Workspaces

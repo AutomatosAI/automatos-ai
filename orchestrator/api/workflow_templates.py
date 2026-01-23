@@ -19,10 +19,13 @@ router = APIRouter(prefix="/api/workflow-templates", tags=["workflow-templates"]
 
 # Import the model from main models file
 from core.models import WorkflowTemplate
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 
 @router.get("")
 async def list_workflow_templates(
+    ctx: RequestContext = Depends(get_request_context_hybrid), 
     category: Optional[str] = None,
     difficulty: Optional[str] = None,
     is_featured: Optional[bool] = None,
@@ -47,7 +50,7 @@ async def list_workflow_templates(
     - sort_by: Sort field (popularity, created_at, use_count, average_rating, name)
     """
     try:
-        query = db.query(WorkflowTemplate)
+        query = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id)
         
         # Apply filters
         if category:
@@ -108,7 +111,7 @@ async def get_workflow_template(
 ):
     """Get a single workflow template by its template_id"""
     try:
-        template = db.query(WorkflowTemplate).filter(
+        template = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             WorkflowTemplate.template_id == template_id
         ).first()
         
@@ -157,7 +160,7 @@ async def create_workflow_template(
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
         
         # Check if template_id already exists
-        existing = db.query(WorkflowTemplate).filter(
+        existing = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             WorkflowTemplate.template_id == template_data['template_id']
         ).first()
         
@@ -219,7 +222,7 @@ async def update_workflow_template(
     System templates cannot be modified.
     """
     try:
-        template = db.query(WorkflowTemplate).filter(
+        template = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             WorkflowTemplate.template_id == template_id
         ).first()
         
@@ -273,7 +276,7 @@ async def delete_workflow_template(
     System templates cannot be deleted.
     """
     try:
-        template = db.query(WorkflowTemplate).filter(
+        template = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             WorkflowTemplate.template_id == template_id
         ).first()
         
@@ -314,7 +317,7 @@ async def record_template_usage(
     Updates use_count and last_used_at.
     """
     try:
-        template = db.query(WorkflowTemplate).filter(
+        template = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             WorkflowTemplate.template_id == template_id
         ).first()
         
@@ -373,7 +376,7 @@ async def list_featured_templates(
 ):
     """Get featured workflow templates"""
     try:
-        templates = db.query(WorkflowTemplate).filter(
+        templates = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id).filter(
             and_(
                 WorkflowTemplate.is_featured == True,
                 WorkflowTemplate.is_public == True

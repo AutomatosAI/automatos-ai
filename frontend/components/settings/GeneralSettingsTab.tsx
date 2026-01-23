@@ -462,35 +462,11 @@ export default function GeneralSettingsTab({
             Frontend Configuration
           </CardTitle>
           <CardDescription>
-            NextJS frontend and authentication settings
+            NextJS frontend settings
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="nextauth_secret">NextAuth Secret</Label>
-              <Input
-                id="nextauth_secret"
-                type="password"
-                value={formData.nextauth_secret || ''}
-                onChange={(e) => handleInputChange('nextauth_secret', e.target.value)}
-                placeholder="your-nextauth-secret-here"
-              />
-              {getSetting('nextauth_secret')?.is_sensitive && (
-                <Badge variant="destructive" className="text-xs">Sensitive</Badge>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="nextauth_url">NextAuth URL</Label>
-              <Input
-                id="nextauth_url"
-                value={formData.nextauth_url || ''}
-                onChange={(e) => handleInputChange('nextauth_url', e.target.value)}
-                placeholder="https://your-frontend-url.com"
-              />
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="next_public_api_url">Public API URL</Label>
               <Input

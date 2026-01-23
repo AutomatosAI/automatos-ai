@@ -28,6 +28,8 @@ from core.credentials.service import CredentialStore
 from modules.nl2sql import DatabaseIntrospectionService
 # NEW import for auditing
 from core.models.database_knowledge import DatabaseQueryAudit
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
 
@@ -70,7 +72,8 @@ def _map_dialect_to_introspector(dialect_value: Optional[str]) -> str:
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def list_database_sources(
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid), 
     db: Session = Depends(get_db),
     active_only: bool = False  # Show all sources by default
 ):
@@ -78,7 +81,7 @@ async def list_database_sources(
     List all database knowledge sources for the current tenant.
     """
     try:
-        query = db.query(DatabaseKnowledgeSource).filter(
+        query = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
             DatabaseKnowledgeSource.tenant_id == 1  # TODO: Get from auth context
         )
         
@@ -189,7 +192,7 @@ async def introspect_schema(
     Re-introspect database schema and update metadata.
     """
     # Fetch source
-    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(
+    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
         DatabaseKnowledgeSource.id == source_id
     ).first()
     if not source:
@@ -252,7 +255,7 @@ async def get_schema(
             pass
     
     # Load from DB
-    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(
+    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
         DatabaseKnowledgeSource.id == source_id
     ).first()
     if not source:
@@ -312,7 +315,7 @@ async def get_database_source(
     Get database source details.
     """
     # Query database for source details
-    source = db.query(DatabaseKnowledgeSource).filter(
+    source = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
         DatabaseKnowledgeSource.id == source_id
     ).first()
     
@@ -342,7 +345,7 @@ async def delete_database_source(
     Delete a database source and its associated schema/semantic data.
     """
     # Query database for source details
-    source = db.query(DatabaseKnowledgeSource).filter(
+    source = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
         DatabaseKnowledgeSource.id == source_id
     ).first()
     
@@ -442,7 +445,7 @@ async def execute_validated_sql(
         raise HTTPException(status_code=400, detail="Missing sql")
 
     # Fetch source
-    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(
+    source: Optional[DatabaseKnowledgeSource] = db.query(DatabaseKnowledgeSource).filter(DatabaseKnowledgeSource.workspace_id == ctx.workspace_id).filter(
         DatabaseKnowledgeSource.id == source_id
     ).first()
     if not source:

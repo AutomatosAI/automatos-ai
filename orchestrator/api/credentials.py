@@ -37,6 +37,8 @@ from core.credentials.service import (
 )
 from core.credentials.encryption import EncryptionKeyError
 from core.utils.logging_adapter import set_request_id
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +152,10 @@ async def get_credential_type_by_name(
 # ============================================================================
 
 @router.post("/", response_model=CredentialResponse)
-async def create_credential(
+async def handle_request(
     credential: CredentialCreate,
     request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     user_id: Optional[str] = Query(None, description="User ID"),
     store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
@@ -236,7 +239,8 @@ async def create_credential(
 
 
 @router.get("/")
-async def list_credentials(
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid), 
     credential_type_id: Optional[int] = Query(None, description="Filter by type"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
     active_only: bool = Query(True, description="Only active credentials"),
@@ -257,7 +261,7 @@ async def list_credentials(
     
     try:
         # Build query
-        query = db.query(Credential)
+        query = db.query(Credential).filter(Credential.workspace_id == ctx.workspace_id)
         
         # Apply filters
         if credential_type_id:

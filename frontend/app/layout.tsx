@@ -3,6 +3,9 @@ import type { Metadata } from 'next'
 import { Providers } from '../components/providers'
 import './globals.css'
 
+// Force dynamic rendering to prevent build-time Clerk errors
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Automatos AI Platform',
   description: 'Enterprise AI automation and agent management platform',

@@ -19,7 +19,21 @@ from modules.agents.services.agent_platform_tools import AgentPlatformTools
 from modules.agents.services.agent_action_executor import ActionExecutor
 from modules.tools.execution.mcp_executor import MCPToolExecutor
 from modules.tools.registry import ToolRegistry
-from modules.tools.services.tool_access_service import ToolAccessService, get_tool_access_service
+from modules.tools.registry.tool_registry import ToolSpec
+
+# PRD-36: Composio Integration (lazy import to avoid startup overhead)
+_composio_executor = None
+
+def _get_composio_executor(db):
+    """Lazy import of Composio executor."""
+    global _composio_executor
+    if _composio_executor is None:
+        try:
+            from core.composio.tool_executor import ComposioToolExecutor
+            _composio_executor = ComposioToolExecutor
+        except ImportError:
+            return None
+    return _composio_executor(db) if _composio_executor else None
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +62,7 @@ class UnifiedToolExecutor:
         self._action_executor = None  # For file/shell operations
         self._mcp_executor = None  # For MCP tools
         self._tool_registry = None  # For tool metadata
-        self._tool_access_service = None  # PRD-35: Tool access validation
+        self._composio_executor = None  # PRD-36: Composio tools
         
         # Tool routing map
         self.tool_routes = {
@@ -101,9 +115,19 @@ class UnifiedToolExecutor:
             'write_document': self._execute_writing_tool,
             
             # MCP tools handled dynamically
+            
+            # PRD-36: Composio tools routed dynamically by prefix
         }
         
         logger.info("🔧 UnifiedToolExecutor initialized (lazy-loading enabled)")
+    
+    @property
+    def composio_executor(self):
+        """Lazy-load Composio executor (PRD-36) only when needed."""
+        if self._composio_executor is None:
+            logger.info("  🔧 Initializing Composio executor (PRD-36)...")
+            self._composio_executor = _get_composio_executor(self.db)
+        return self._composio_executor
     
     @property
     def platform_tools(self):
@@ -136,14 +160,6 @@ class UnifiedToolExecutor:
             logger.info("  🔧 Initializing tool registry...")
             self._tool_registry = ToolRegistry(self.db)
         return self._tool_registry
-    
-    @property
-    def tool_access_service(self):
-        """Lazy-load tool access service only when needed (PRD-35)."""
-        if self._tool_access_service is None:
-            logger.info("  🔧 Initializing tool access service...")
-            self._tool_access_service = get_tool_access_service(self.db)
-        return self._tool_access_service
     
     def _check_agent_permission(self, agent_id: int, tool_name: str) -> bool:
         """
@@ -189,7 +205,9 @@ class UnifiedToolExecutor:
         tool_name: str,
         parameters: Dict[str, Any],
         agent_id: int = 0,
-        tenant_id: Optional[UUID] = None
+        tenant_id: Optional[UUID] = None,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute a tool by name, routing to the appropriate executor.
@@ -198,33 +216,44 @@ class UnifiedToolExecutor:
             tool_name: Name of the tool to execute
             parameters: Tool parameters
             agent_id: ID of the agent calling the tool
-            tenant_id: UUID of the tenant (required for external/adapter tools)
+            tenant_id: UUID of the tenant (reserved for future use)
             
         Returns:
             Tool execution result with standard format
         """
         try:
-            logger.info(f"🔧 Executing tool '{tool_name}' for agent {agent_id}")
-            logger.info(f"  📋 Parameters: {parameters}")
-            
-            # PRD-35: Check if this is an external/adapter tool (mcp_ prefix)
-            if tool_name.startswith("mcp_") and tenant_id and agent_id:
-                return await self._execute_external_tool(tool_name, parameters, agent_id, tenant_id)
+            trace = trace_id or "no-trace"
+            logger.info(
+                f"[tool-trace {trace}] Executing tool '{tool_name}' for agent={agent_id} "
+                f"workspace={workspace_id}"
+            )
+            logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
             
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
-                logger.warning(f"⚠️  Tool '{tool_name}' not in registry, checking MCP tools...")
+                logger.warning(f"[tool-trace {trace}] Tool '{tool_name}' not in registry, checking MCP tools...")
                 # Check MCP tools
                 mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
                 if mcp_tool:
-                    return await self._execute_mcp_tool(tool_name, parameters, agent_id)
+                    return await self._execute_mcp_tool(tool_name, parameters, agent_id, trace_id=trace)
                 else:
                     return {
                         "success": False,
                         "error": f"Unknown tool: {tool_name}",
                         "tool": tool_name
                     }
+            
+            # PRD-36: Route Composio tools explicitly
+            if tool_spec.metadata and tool_spec.metadata.get("adapter_type") == "composio":
+                logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
+                return await self._execute_composio_tool(
+                    tool_spec,
+                    parameters,
+                    agent_id,
+                    workspace_id,
+                    trace_id=trace
+                )
             
             # Route to appropriate executor
             executor_func = self.tool_routes.get(tool_name)
@@ -234,154 +263,15 @@ class UnifiedToolExecutor:
                 return result
             else:
                 # Try MCP tool
-                return await self._execute_mcp_tool(tool_name, parameters, agent_id)
+                return await self._execute_mcp_tool(tool_name, parameters, agent_id, trace_id=trace)
                 
         except Exception as e:
-            logger.error(f"❌ Tool execution failed: {tool_name} - {e}")
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Tool execution failed: {tool_name} - {e}")
             return {
                 "success": False,
                 "error": str(e),
                 "tool": tool_name
             }
-    
-    async def _execute_external_tool(
-        self,
-        tool_name: str,
-        parameters: Dict[str, Any],
-        agent_id: int,
-        tenant_id: UUID
-    ) -> Dict[str, Any]:
-        """
-        PRD-35: Execute an external/adapter tool with access validation.
-        
-        External tools have the format: mcp_{adapter_tool_id}_{method}
-        
-        Args:
-            tool_name: Full tool name (mcp_github_repos_list)
-            parameters: Tool parameters
-            agent_id: ID of the agent calling the tool
-            tenant_id: UUID of the tenant
-            
-        Returns:
-            Tool execution result
-        """
-        logger.info(f"  🌐 Executing external tool via ToolAccessService: {tool_name}")
-        
-        # Parse tool name: mcp_{adapter_tool_id}_{method}
-        parts = tool_name.split("_", 2)
-        if len(parts) < 3:
-            return {
-                "success": False,
-                "error": f"Invalid external tool name format: {tool_name}",
-                "tool": tool_name
-            }
-        
-        adapter_tool_id = parts[1]
-        method = parts[2] if len(parts) > 2 else "default"
-        
-        # Validate agent has access to this tool
-        has_access, error_msg, credential_id = await self.tool_access_service.validate_tool_access(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            adapter_tool_id=adapter_tool_id
-        )
-        
-        if not has_access:
-            logger.warning(f"⚠️  Access denied: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg,
-                "tool": tool_name
-            }
-        
-        logger.info(f"  ✅ Access validated for tool '{adapter_tool_id}', credential_id={credential_id}")
-        
-        # [NEW] Just-in-Time Execution utilizing Factory Pattern
-        try:
-            from modules.tools.executors.jit_mcp_client import JITMCPClient
-            
-            # 1. Fetch TenantToolConfig to get cached metadata (URL)
-            from core.models.tool_assignments import TenantToolConfig
-            tenant_config = self.db.query(TenantToolConfig).filter(
-                TenantToolConfig.tenant_id == tenant_id,
-                TenantToolConfig.tool_id == adapter_tool_id,
-                TenantToolConfig.enabled == True
-            ).first()
-            
-            if not tenant_config or not tenant_config.cached_metadata:
-                 # Fallback to legacy path if no metadata (shouldn't happen with migration)
-                 logger.warning(f"Cache miss in JIT execution for {adapter_tool_id}, falling back to legacy executor")
-                 execution_context = {
-                    "tenant_id": str(tenant_id),
-                    "credential_mode": "hosted",
-                    "credential_id": credential_id
-                 }
-                 params_with_context = {**parameters, "_execution_context": execution_context}
-                 return await self._execute_mcp_tool(tool_name, parameters=params_with_context, agent_id=agent_id)
-
-            # 2. Resolve Credentials
-            from modules.credentials.service import CredentialService
-            cred_service = CredentialService(self.db)
-            resolved_creds = await cred_service.resolve_credential(credential_id, tenant_id) if credential_id else {}
-            
-            # 3. Instantiate Ephemeral Client
-            # Metadata should contain 'url' or we assume a pattern or fetch from Adapter if missing
-            # For now, let's assume metadata has what we need or we fetch it from Adapter for the URL
-            # Actually, TenantToolConfig doesn't have URL, 'ToolRecord' in Adapter has it.
-            # We might need to fetch the tool definition from Adapter if URL not in cache.
-            # To be safe for this "cherry-pick", if URL is missing, we fetch it.
-            
-            tool_url = tenant_config.cached_metadata.get('url')
-            if not tool_url:
-                # One-time fetch to populate URL if missing (self-healing)
-                adapter_tool = await self.tool_access_service.adapter_client.get_tool(adapter_tool_id)
-                tool_url = adapter_tool.get('url') # Assuming adapter returns URL
-                # If still no URL (Adapter might mask it), we might need another approach. 
-                # Converting Adapter's 'mcp_server_url' logic here.
-                # Let's assume for now we fall back to legacy if can't construct client.
-                pass
-            
-            # If we don't have a URL, we can't use JIT client. Fallback.
-            if not tool_url:
-                 # Logic for finding URL might be complex (Adapter responsibility). 
-                 # For this step, let's stick to Legacy Fallback if we can't easily JIT.
-                 # BUT the goal is JIT. 
-                 # Let's assume AdapterToolDefinition in tool_assignments.py *should* have had URL? 
-                 # It doesn't. 
-                 # Plan B: The `cached_metadata` schema I added SHOULD include URL.
-                 # I need to update `ToolAccessService` to also cache `mcp_server_url`.
-                 logger.info("URL not found in cache, using legacy executor")
-                 execution_context = {
-                    "tenant_id": str(tenant_id),
-                    "credential_mode": "hosted",
-                    "credential_id": credential_id
-                 }
-                 params_with_context = {**parameters, "_execution_context": execution_context}
-                 return await self._execute_mcp_tool(tool_name, parameters=params_with_context, agent_id=agent_id)
-
-            # 4. Execute
-            headers = {}
-            # Context Forge / Adapter Authentication
-            if resolved_creds:
-                 # Standard Bearer token (for valid MCP servers that use it)
-                 if 'token' in resolved_creds:
-                     headers['Authorization'] = f"Bearer {resolved_creds['token']}"
-                 headers.update(resolved_creds.get('headers', {}))
-
-            client = JITMCPClient(url=tool_url, headers=headers)
-            
-            # [HOTFIX] Inject token dependencies for Adapter tools
-            # Adapters often require 'token' in the arguments
-            jit_params = parameters.copy() if parameters else {}
-            if resolved_creds and 'token' in resolved_creds:
-                jit_params['token'] = resolved_creds['token']
-
-            # method is valid tool name on the MCP server
-            return await client.execute_tool(method, jit_params)
-
-        except Exception as e:
-            logger.error(f"JIT Execution failed: {e}")
-            return {"success": False, "error": str(e)}
     
     async def _execute_platform_tool(
         self,
@@ -1018,14 +908,16 @@ class UnifiedToolExecutor:
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        agent_id: int
+        agent_id: int,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute MCP tools via MCPToolExecutor.
         
         Connects to actual MCP servers via JSON-RPC protocol.
         """
-        logger.info(f"  🌐 Routing to MCP server: {tool_name}")
+        trace = trace_id or "no-trace"
+        logger.info(f"[tool-trace {trace}] Routing to MCP server: {tool_name}")
         
         # Extract method/operation - support both 'method' and 'operation' keys
         # 'operation' is used by adapter tools, 'method' is used by MCP protocol
@@ -1047,7 +939,10 @@ class UnifiedToolExecutor:
             method = "default"
             params = {}
         
-        logger.info(f"  📋 MCP execution: method={method}, params_keys={list(params.keys())}")
+        logger.info(
+            f"[tool-trace {trace}] MCP execution: method={method}, "
+            f"params_keys={list(params.keys())}"
+        )
         
         # Prefer registry metadata for MCP tools
         tool_spec = self.tool_registry.get_tool(tool_name)
@@ -1061,7 +956,8 @@ class UnifiedToolExecutor:
                 tool_id=tool_id,
                 method=method,
                 params=params,
-                execution_id=None
+                execution_id=None,
+                trace_id=trace
             )
         
         # Fallback: direct MCP tool name lookup
@@ -1074,7 +970,58 @@ class UnifiedToolExecutor:
             tool_id=mcp_tool.id,
             method=method,
             params=params,
-            execution_id=None
+            execution_id=None,
+            trace_id=trace
+        )
+    
+    async def _execute_composio_tool(
+        self,
+        tool_spec: ToolSpec,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        trace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute a Composio action via ComposioToolExecutor."""
+        if not self.composio_executor:
+            return {
+                "success": False,
+                "error": "Composio executor not available",
+                "tool": tool_spec.name
+            }
+        
+        action = tool_spec.metadata.get("action") if tool_spec.metadata else None
+        if not action and tool_spec.name.startswith("composio_"):
+            action = tool_spec.name.replace("composio_", "", 1)
+        
+        if not action:
+            return {
+                "success": False,
+                "error": "Missing Composio action name",
+                "tool": tool_spec.name
+            }
+        
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "Workspace ID required for Composio tool execution",
+                "tool": tool_spec.name
+            }
+        
+        params = parameters.get("params") if isinstance(parameters, dict) else None
+        if params is None:
+            params = parameters or {}
+        trace = trace_id or "no-trace"
+        logger.info(
+            f"[tool-trace {trace}] Composio execute action={action} "
+            f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys()) if isinstance(params, dict) else type(params).__name__}"
+        )
+        
+        return await self.composio_executor.execute(
+            action=action,
+            params=params,
+            agent_id=agent_id,
+            workspace_id=workspace_id
         )
     
     def get_available_tools(self, categories: Optional[list] = None) -> list:
@@ -1102,15 +1049,11 @@ class UnifiedToolExecutor:
         include_core: bool = True
     ) -> list:
         """
-        PRD-35: Get all tools available to an agent.
-        
-        Combines:
-        - Core platform tools (always available if include_core=True)
-        - External tools assigned to the agent via ToolAccessService
+        Get all tools available to an agent.
         
         Args:
             agent_id: ID of the agent
-            tenant_id: UUID of the tenant
+            tenant_id: UUID of the tenant (reserved for future use)
             include_core: Whether to include core platform tools
             
         Returns:
@@ -1122,49 +1065,6 @@ class UnifiedToolExecutor:
         if include_core:
             core_tools = self.get_available_tools()
             tools.extend(core_tools)
-        
-        # Add external tools from ToolAccessService
-        try:
-            external_tools = await self.tool_access_service.get_tools_for_agent(
-                agent_id=agent_id,
-                tenant_id=tenant_id
-            )
-            
-            # Convert AgentTool to ToolSpec format for consistency
-            from modules.tools.registry.tool_registry import ToolSpec, ToolParameter, ToolCategory, SecurityLevel
-            
-            for ext_tool in external_tools:
-                for method in ext_tool.methods or ["call"]:
-                    tool_name = f"mcp_{ext_tool.adapter_tool_id}_{method}"
-                    tools.append(ToolSpec(
-                        name=tool_name,
-                        category=ToolCategory.MCP_TOOLS,
-                        description=f"{ext_tool.description or ext_tool.name} - Method: {method}",
-                        executor_class="MCPToolExecutor",
-                        executor_method="execute_tool",
-                        parameters=[
-                            ToolParameter(
-                                name="params",
-                                type="object",
-                                description=f"Parameters for {method}",
-                                required=False,
-                                default={}
-                            )
-                        ],
-                        security_level=SecurityLevel.CAUTIOUS,
-                        metadata={
-                            "adapter_tool_id": ext_tool.adapter_tool_id,
-                            "method": method,
-                            "credential_id": ext_tool.credential_id,
-                            "provider": ext_tool.provider,
-                            "category": ext_tool.category
-                        }
-                    ))
-            
-            logger.info(f"Loaded {len(external_tools)} external tools for agent {agent_id}")
-            
-        except Exception as e:
-            logger.error(f"Error loading external tools for agent: {e}")
         
         return tools
     

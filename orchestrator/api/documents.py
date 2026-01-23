@@ -30,6 +30,8 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 from core.credentials.resolver import get_credential_resolver
 from urllib.parse import urlparse
 import os
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 def parse_database_url(url: str) -> dict:
     """Parse DATABASE_URL into psycopg2 connection dict format"""
@@ -73,7 +75,9 @@ db_config = {
 doc_manager = DocumentManager(db_config)
 
 @router.post("/upload", response_model=DocumentUploadResponse)
-async def upload_document(
+async def handle_request(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
@@ -142,6 +146,7 @@ async def upload_document(
         # Tags are cosmetic metadata - not needed for embeddings, RAG, or semantic search
         # Will add back with proper fix after core functionality is validated
         document = Document(
+        workspace_id=ctx.workspace_id,
             filename=file.filename,
             original_filename=file.filename,
             file_type=file_type,
@@ -302,7 +307,10 @@ async def get_document_content(path: str = Query(..., description="Full path to 
 
 
 @router.get("/analytics")
-async def get_document_analytics(db: Session = Depends(get_db)):
+async def get_document_analytics(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get document analytics and statistics
     
@@ -317,39 +325,41 @@ async def get_document_analytics(db: Session = Depends(get_db)):
         from sqlalchemy import func
         
         # Total documents count
-        total_docs = db.query(func.count(Document.id)).scalar() or 0
+        total_docs = db.query(func.count(Document.id)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
         
         # Documents by status
         status_counts = db.query(
             Document.status, 
             func.count(Document.id)
-        ).group_by(Document.status).all()
+        ).filter(Document.workspace_id == ctx.workspace_id).group_by(Document.status).all()
         
         status_distribution = {status: count for status, count in status_counts}
         
         # Total storage used
-        total_storage = db.query(func.sum(Document.file_size)).scalar() or 0
+        total_storage = db.query(func.sum(Document.file_size)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
         
         # File type distribution
         file_type_counts = db.query(
             Document.file_type,
             func.count(Document.id)
-        ).group_by(Document.file_type).all()
+        ).filter(Document.workspace_id == ctx.workspace_id).group_by(Document.file_type).all()
         
         file_types = {file_type: count for file_type, count in file_type_counts}
         
         # Total chunks processed
-        total_chunks = db.query(func.sum(Document.chunk_count)).scalar() or 0
+        total_chunks = db.query(func.sum(Document.chunk_count)).filter(Document.workspace_id == ctx.workspace_id).scalar() or 0
         
         # Recent uploads (last 24 hours)
         from datetime import datetime, timedelta
         recent_cutoff = datetime.utcnow() - timedelta(days=1)
         recent_uploads = db.query(func.count(Document.id)).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.upload_date >= recent_cutoff
         ).scalar() or 0
         
         # Average chunk count
         avg_chunks = db.query(func.avg(Document.chunk_count)).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.chunk_count > 0
         ).scalar() or 0
         
@@ -377,7 +387,9 @@ async def get_document_analytics(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
 
 @router.get("/", response_model=List[DocumentResponse])
-async def list_documents(
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[str] = None,
@@ -387,7 +399,7 @@ async def list_documents(
 ):
     """List documents with filtering and pagination"""
     try:
-        query = db.query(Document)
+        query = db.query(Document).filter(Document.workspace_id == ctx.workspace_id)
         
         # Apply filters
         if status:
@@ -426,10 +438,11 @@ async def list_documents(
         raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
 
 @router.get("/{document_id}", response_model=DocumentResponse)
-async def get_document(document_id: int, db: Session = Depends(get_db)):
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid),  db: Session = Depends(get_db)):
     """Get document by ID"""
     try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -468,7 +481,7 @@ async def get_delete_impact(document_id: int, db: Session = Depends(get_db)):
     """
     try:
         # Get document
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -520,7 +533,7 @@ async def get_delete_impact(document_id: int, db: Session = Depends(get_db)):
 async def delete_document(document_id: int, db: Session = Depends(get_db)):
     """Delete document"""
     try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -553,7 +566,7 @@ async def reprocess_document(document_id: int, db: Session = Depends(get_db)):
     For test documents with fake file paths, this will return an appropriate error.
     """
     try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -616,7 +629,7 @@ async def reprocess_document(document_id: int, db: Session = Depends(get_db)):
 async def get_document_content(document_id: int, db: Session = Depends(get_db)):
     """Get document content/chunks"""
     try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
@@ -667,6 +680,7 @@ async def semantic_search(
     limit: int = Query(10, ge=1, le=50, description="Maximum number of results"),
     min_similarity: float = Query(0.70, ge=0.0, le=1.0, description="Minimum similarity score"),
     document_ids: Optional[List[int]] = Query(None, description="Optional filter by document IDs"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -718,6 +732,7 @@ async def semantic_search(
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE dc.embedding IS NOT NULL
+                AND d.workspace_id = :workspace_id
                 {doc_filter}
                 AND (1 - (dc.embedding <=> '{embedding_str}'::vector)) >= :min_similarity
             ORDER BY dc.embedding <=> '{embedding_str}'::vector
@@ -726,7 +741,8 @@ async def semantic_search(
         
         params = {
             "min_similarity": min_similarity,
-            "limit": limit
+            "limit": limit,
+            "workspace_id": ctx.workspace_id
         }
         
         if document_ids:

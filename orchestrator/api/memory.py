@@ -34,6 +34,8 @@ from core.models import (
     MemoryItemCreate, MemoryItemResponse, 
     ExternalKnowledgeCreate, ExternalKnowledgeResponse
 )
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 # Import database (if using persistence)
 # from core.database import get_db
