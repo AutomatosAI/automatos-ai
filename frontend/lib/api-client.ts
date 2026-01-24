@@ -801,6 +801,15 @@ class ApiClient {
       ...(options.headers as Record<string, string>),
     }
 
+    // [FIX] Inject Workspace ID from LocalStorage to ensure correct backend context
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) {
+        headers['X-Workspace-ID'] = workspaceId
+        // console.log('🏢 injected workspace context:', workspaceId)
+      }
+    }
+
     // Add Clerk JWT token if available
     if (token) {
       headers['Authorization'] = `Bearer ${token}`

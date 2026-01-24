@@ -80,6 +80,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 role: data.role,
                 planLimits: data.plan_limits,
             })
+
+            // Persist for api-client.ts
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('last_active_workspace', data.id)
+            }
+
             setError(null)
         } catch (err) {
             console.error('Error fetching workspace:', err)

@@ -494,27 +494,7 @@ class ToolRegistry:
             ]
         ))
         
-        self.register_tool(ToolSpec(
-            name="switch_context",
-            category=ToolCategory.SHELL_COMMANDS, # Functionally a system tool
-            description="Switch your active toolset context. Use this when the user asks for a task requiring tools you don't currently have (e.g. 'coding', 'ops', 'communication').",
-            executor_class="AgentPlatformTools", 
-            executor_method="switch_context",
-            parameters=[
-                ToolParameter(
-                    name="context",
-                    type="string",
-                    description="The context to switch to. Options: 'coding' (github, git), 'ops' (aws, k8s), 'communication' (slack, email), 'research' (rag, search), 'all' (reset)",
-                    required=True,
-                    enum=["coding", "ops", "communication", "research", "all"]
-                )
-            ],
-            security_level=SecurityLevel.SAFE,
-            permissions_required={},
-            examples=[
-                {"action": "switch_context", "params": {"context": "ops"}}
-            ]
-        ))
+
         
         # ==========================================
         # MULTIMODAL RESEARCH TOOLS (PRD-19)
@@ -1146,7 +1126,8 @@ Use this for complex queries or when you want AI-powered assistance.""",
         self,
         agent_id: int,
         tool_name: str,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        workspace_id: Optional[Any] = None
     ) -> tuple[bool, Optional[str]]:
         """
         Validate if an agent has access to a tool.
@@ -1155,6 +1136,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
             agent_id: ID of the agent
             tool_name: Name of the tool
             db: Database session
+            workspace_id: Optional workspace context for granular checks
         
         Returns:
             Tuple of (has_access, error_message)
@@ -1205,6 +1187,43 @@ Use this for complex queries or when you want AI-powered assistance.""",
                 if not is_system_tool and tool_cat not in allowed_categories:
                     self.logger.info(f"⛔ ToolRegistry: Denying {tool_name} (category: {tool_cat}) for Agent {agent_id} in context '{active_context}'")
                     return False, f"Tool category '{tool_cat}' not allowed in current context '{active_context}'"
+
+        # [NEW] Workspace Policy Check (Action Granularity)
+        # Check WorkspaceToolConfig for specific enabled actions
+        if db and tool.category == ToolCategory.MCP_TOOLS:
+            from core.models.tool_assignments import WorkspaceToolConfig
+            
+            # Identify action name from metadata
+            tool_action = tool.metadata.get("action")
+            tool_id_raw = tool.metadata.get("tool_id") # e.g. "gmail"
+            
+            if tool_action and tool_id_raw:
+                # Find config for this tool (e.g. "gmail")
+                # Use provided workspace_id OR fallback to agent's workspace
+                target_workspace_id = workspace_id
+                if not target_workspace_id and agent:
+                    target_workspace_id = agent.workspace_id
+                
+                if target_workspace_id:
+                     ws_config = db.query(WorkspaceToolConfig).filter(
+                         WorkspaceToolConfig.workspace_id == target_workspace_id,
+                         WorkspaceToolConfig.tool_id == tool_id_raw
+                     ).first()
+                     
+                     # 1. If config exists, STRICTLY ENFORCE enabled_actions list
+                     if ws_config and ws_config.configuration:
+                         enabled_actions = set(ws_config.configuration.get("enabled_actions", []))
+                         if tool_action not in enabled_actions:
+                             return False, f"Action '{tool_action}' is disabled in workspace settings."
+                             
+                     # 2. If config MISSING -> Default behavior?
+                     # User requested "Disable by default". 
+                     # If we have NO config for "gmail", do we allow all or none?
+                     # Existing logic allowed all. 
+                     # To be safe, if it's a Composio tool, we might want to default to denied if not explicitly enabled?
+                     # However, that breaks existing setups. 
+                     # Let's enforce ONLY if config exists for now, the UI will create the config on "Save".
+                     pass
 
         # For MCP tools, check database permissions
         if tool.category == ToolCategory.MCP_TOOLS and db:

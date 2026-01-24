@@ -45,4 +45,4 @@ echo ""
 echo "Press CTRL+C to stop"
 echo ""
 
-uvicorn main:app --host 0.0.0.0 --port $PORT --reload
+python -m uvicorn main:app --host 0.0.0.0 --port $PORT --reload

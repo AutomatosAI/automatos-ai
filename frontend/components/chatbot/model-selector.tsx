@@ -11,6 +11,7 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 import { useModels } from '@/hooks/use-model-api'
+import { useWorkspace } from '@/components/workspace-provider'
 import { chatModels, getModelById } from '@/lib/ai/models'
 
 export interface ModelSelectorProps {
@@ -20,13 +21,14 @@ export interface ModelSelectorProps {
 
 export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorProps) {
   // Load models from API (same as System LLM Settings)
-  const { data: apiModels = [], isLoading } = useModels(undefined, 'active')
-  
+  const { isLoading: isWorkspaceLoading } = useWorkspace()
+  const { data: apiModels = [], isLoading } = useModels(undefined, 'active', { enabled: !isWorkspaceLoading })
+
   // Use API models if available, fallback to hardcoded for offline
   const models = apiModels.length > 0 ? apiModels : chatModels
-  
+
   // Find selected model (check both API format and local format)
-  const selectedModel = models.find((m: any) => 
+  const selectedModel = models.find((m: any) =>
     m.model_id === selectedModelId || m.id === selectedModelId
   ) || getModelById(selectedModelId)
 
@@ -65,8 +67,8 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
           <ChevronDown className="w-3 h-3 text-orange-400" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent 
-        align="start" 
+      <DropdownMenuContent
+        align="start"
         className="w-[340px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-2xl"
         style={{ maxHeight: '70vh' }}
       >
@@ -80,14 +82,14 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
               const modelName = model.display_name || model.name
               const modelDesc = model.description || ''
               const isSelected = selectedModelId === modelId
-              
+
               return (
-          <DropdownMenuItem
+                <DropdownMenuItem
                   key={modelId}
                   onClick={() => onModelChange(modelId)}
                   className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
-          >
-            <div className="flex items-start justify-between w-full">
+                >
+                  <div className="flex items-start justify-between w-full">
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm">{modelName}</div>
                       {modelDesc && (
@@ -95,12 +97,12 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
                           {modelDesc}
                         </div>
                       )}
-              </div>
+                    </div>
                     {isSelected && (
                       <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
-              )}
-            </div>
-          </DropdownMenuItem>
+                    )}
+                  </div>
+                </DropdownMenuItem>
               )
             })}
             <DropdownMenuSeparator />
@@ -110,4 +112,3 @@ export function ModelSelector({ selectedModelId, onModelChange }: ModelSelectorP
     </DropdownMenu>
   )
 }
-

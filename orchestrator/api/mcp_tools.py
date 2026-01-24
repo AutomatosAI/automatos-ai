@@ -139,16 +139,29 @@ async def list_mcp_tools(
 
 @router.get("/{tool_id}/actions")
 async def get_tool_actions(
-    tool_id: int,
+    tool_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Get all available actions (sub-tools) for a specific tool/app"""
     try:
-        # Get tool name from DB or ID
-        tool = db.query(MCPTool).filter(MCPTool.id == tool_id).first()
+        # Parse ID
+        resolved_id = None
+        if tool_id.isdigit():
+            resolved_id = int(tool_id)
+
+        # 1. Try finding by ID
+        tool = None
+        if resolved_id is not None:
+             tool = db.query(MCPTool).filter(MCPTool.id == resolved_id).first()
+        
+        # 2. If not found, try by name/tool_id string
         if not tool:
-             # Fallback: check if we can resolve ID to a composio app name directly? 
-             # For now require tool to exist in DB (which it should if it was listed)
+             tool = db.query(MCPTool).filter(
+                 or_(MCPTool.tool_id == tool_id, MCPTool.name == tool_id)
+             ).first()
+             
+        if not tool:
              raise HTTPException(status_code=404, detail="Tool not found")
         
         if tool.provider != "Composio":
@@ -157,12 +170,134 @@ async def get_tool_actions(
         composio_client = get_composio_client()
         # tool.name is the app name (e.g. "gmail", "github")
         actions = composio_client.get_app_actions(tool.name)
+        
+        # [NEW] Merge with enabled state from WorkspaceToolConfig
+        from core.models.tool_assignments import WorkspaceToolConfig
+        
+        # Consistent ID logic
+        clean_tool_id = tool.tool_id 
+        if not clean_tool_id:
+             clean_tool_id = tool.name
+        if not clean_tool_id: 
+             clean_tool_id = str(tool.id)
+
+        config = db.query(WorkspaceToolConfig).filter(
+            WorkspaceToolConfig.workspace_id == ctx.workspace_id,
+            WorkspaceToolConfig.tool_id == clean_tool_id
+        ).first()
+        
+        enabled_actions = set()
+        if config and config.configuration:
+             enabled_actions = set(config.configuration.get("enabled_actions", []))
+             
+        # Map enabled state
+        for action in actions:
+            # Default to FALSE if config exists, specific check. 
+            # If no config exists, we default to FALSE as per user request (disable by default).
+            action["enabled"] = action["name"] in enabled_actions
+            
         return actions
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching actions for tool {tool_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{tool_id}/actions")
+async def save_tool_actions(
+    tool_id: str,
+    action_data: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Save enabled actions configuration for a tool in the current workspace.
+    Body: { "actions": ["ACTION_NAME_1", "ACTION_NAME_2"] }
+    """
+    # Parse ID: functionality to handle both numeric IDs (local) and string IDs (if applicable in future)
+    resolved_id = None
+    if tool_id.isdigit():
+        resolved_id = int(tool_id)
+        
+    logger.info(f"POST /actions hit for tool_id={tool_id} (resolved={resolved_id}). Data: {action_data}")
+    
+    # [FIX] Ensure workspace_id is present
+    workspace_id = ctx.workspace_id
+    if not workspace_id:
+        logger.warning("No workspace_id found in context! Attempting fallback or using UUID-nil.")
+        # Try to get from header directly if ctx failed? 
+        # For now, let's fail gracefully or use a dev default if ENVIRONMENT=development?
+        # Better: Fail with 400 so we know it's a context issue, not a DB crash.
+        logger.error(f"Context Dump: {ctx}")
+        # raise HTTPException(status_code=400, detail="Workspace context missing. Please refresh or select a workspace.")
+        # TEMPORARY FIX: Fallback to a default UUID for local dev if missing?
+        # workspace_id = uuid.UUID('00000000-0000-0000-0000-000000000000') 
+        
+        # Actually, let's look at the logs. User is authenticated. 
+        # If we raise 500 here, we know it's this.
+        if not workspace_id:
+             raise HTTPException(status_code=400, detail="Missing Workspace ID in request context")
+
+    try:
+        # 1. Try finding by ID
+        tool = None
+        if resolved_id is not None:
+             tool = db.query(MCPTool).filter(MCPTool.id == resolved_id).first()
+        
+        # 2. If not found, try by name/tool_id string
+        if not tool:
+             tool = db.query(MCPTool).filter(
+                 or_(MCPTool.tool_id == tool_id, MCPTool.name == tool_id)
+             ).first()
+             
+        if not tool:
+             logger.error(f"Tool not found for id/name: {tool_id}")
+             raise HTTPException(status_code=404, detail=f"Tool {tool_id} not found")
+
+        enabled_actions = action_data.get("actions", [])
+        
+        # [FIX] Integrity Error: Ensure clean_tool_id is NEVER None
+        # Some MCPTool records might have missing tool_id field. Use name or ID as fallback.
+        clean_tool_id = tool.tool_id 
+        if not clean_tool_id:
+             clean_tool_id = tool.name
+        if not clean_tool_id: # fallback to numeric ID if name is somehow missing (unlikely)
+             clean_tool_id = str(tool.id)
+             
+        from core.models.tool_assignments import WorkspaceToolConfig
+        config = db.query(WorkspaceToolConfig).filter(
+            WorkspaceToolConfig.workspace_id == workspace_id,
+            WorkspaceToolConfig.tool_id == clean_tool_id
+        ).first()
+        
+        logger.info(f"Existing config for {clean_tool_id} in ws {workspace_id}: {config}")
+        
+        if not config:
+            # Upsert logic - create if missing
+            config = WorkspaceToolConfig(
+                workspace_id=workspace_id,
+                tool_id=clean_tool_id,
+                adapter_tool_name=tool.name,
+                enabled=True,
+                configuration={"enabled_actions": enabled_actions}
+            )
+            db.add(config)
+        else:
+            current_config = dict(config.configuration or {})
+            current_config["enabled_actions"] = enabled_actions
+            config.configuration = current_config
+            # Ensure tool itself is enabled if we are enabling actions
+            config.enabled = True 
+            
+        db.commit()
+        logger.info(f"Updated actions for tool {tool.name} (Workspace {ctx.workspace_id}): Enabled {len(enabled_actions)} actions")
+        
+        return {"status": "success", "enabled_count": len(enabled_actions)}
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error saving actions for tool {tool_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{tool_id}")

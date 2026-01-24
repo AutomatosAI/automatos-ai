@@ -53,7 +53,7 @@ def _session_scope():
         session.close()
 
 
-def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[Dict[str, Any]]:
+def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None, workspace_id: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Get tools from modules.tools.ToolRegistry in OpenAI function format.
     SINGLE SOURCE OF TRUTH - no duplicate definitions.
@@ -73,7 +73,8 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None) -> List[D
                 allowed, reason = registry.validate_tool_access(
                     agent_id=agent_id,
                     tool_name=tool.name,
-                    db=session_used
+                    db=session_used,
+                    workspace_id=workspace_id
                 )
                 if allowed:
                     filtered_tools.append(tool)
@@ -448,11 +449,11 @@ def get_tool_router() -> ToolRouter:
 
 
 # Expose commonly used functions at module level
-def get_chat_tools(agent_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_chat_tools(agent_id: Optional[int] = None, workspace_id: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Get chatbot tools. Do NOT cache globally because availability can
     depend on agent permissions (especially MCP).
     """
     with _session_scope() as session:
-        return get_chatbot_tools(agent_id=agent_id, db_session=session)
+        return get_chatbot_tools(agent_id=agent_id, db_session=session, workspace_id=workspace_id)
 

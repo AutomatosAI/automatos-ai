@@ -253,6 +253,11 @@ class PromptAnalyzer:
                 })
 
         scored.sort(key=lambda x: (-x["score"], x["name"]))
+        
+        # Debug logging for ranking
+        top_debug = [f"{t['name']} ({t['score']})" for t in scored[:10]]
+        logger.info(f"🔍 Query: '{query}' | Top ranked tools: {top_debug}")
+        
         return scored[:max_tools]
     
     def convert_to_llm_messages(

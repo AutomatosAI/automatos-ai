@@ -86,9 +86,10 @@ export function ToolDetailsModal({
     setActionsLoading(true)
     try {
       const actionsResponse = await (apiClient as any).get(`/api/mcp-tools/${tool.id}/actions`)
+      // Backend now returns correct enabled state
       const mapped = (actionsResponse.data || actionsResponse || []).map((a: any) => ({
         ...a,
-        enabled: true // Default enabled
+        enabled: !!a.enabled // Respect backend state
       }))
       setActions(mapped)
     } catch (error) {
@@ -98,9 +99,24 @@ export function ToolDetailsModal({
     }
   }
 
-  const handleToggleAction = (name: string) => {
-    setActions(prev => prev.map(a => a.name === name ? { ...a, enabled: !a.enabled } : a))
-    toast({ title: "Updated", description: "Feature preference saved locally." })
+  const handleToggleAction = async (name: string) => {
+    // 1. Optimistic update
+    const newActions = actions.map(a => a.name === name ? { ...a, enabled: !a.enabled } : a)
+    setActions(newActions)
+
+    // 2. Persist to Backend
+    try {
+      const enabledList = newActions.filter(a => a.enabled).map(a => a.name)
+      await (apiClient as any).post(`/api/mcp-tools/${tool.id}/actions`, {
+        actions: enabledList
+      })
+      toast({ title: "Updated", description: "Permissions saved." })
+    } catch (error) {
+      console.error("Failed to save permissions", error)
+      toast({ title: "Error", description: "Failed to save permissions", variant: "destructive" })
+      // Revert on error
+      setActions(actions)
+    }
   }
 
   const filteredActions = actions.filter(a =>
@@ -210,7 +226,7 @@ export function ToolDetailsModal({
                             </div>
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-2 mb-4">
                             {actionsLoading ? (
                               <div className="flex justify-center p-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
                             ) : filteredActions.length === 0 ? (
@@ -222,11 +238,19 @@ export function ToolDetailsModal({
                                     <div className="font-medium text-sm">{action.display_name || action.name}</div>
                                     <div className="text-xs text-muted-foreground truncate">{action.description}</div>
                                   </div>
-                                  <Switch checked={action.enabled} onCheckedChange={() => handleToggleAction(action.name)} />
+                                  <Switch
+                                    checked={action.enabled}
+                                    onCheckedChange={() => {
+                                      // Update local state ONLY
+                                      setActions(prev => prev.map(a => a.name === action.name ? { ...a, enabled: !a.enabled } : a))
+                                    }}
+                                  />
                                 </div>
                               ))
                             )}
                           </div>
+
+
                         </div>
                       )}
 
@@ -282,18 +306,49 @@ export function ToolDetailsModal({
 
               </CardContent>
 
-              <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur">
+              <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
                 <div className="flex gap-3">
                   {tool.isInstalled ? (
                     <>
-                      <Button
-                        variant="outline"
-                        className="flex-1 hover:border-blue-500/50"
-                        onClick={() => setActiveTab('features')}
-                      >
-                        <Settings className="w-4 h-4 mr-2" />
-                        Manage Features
-                      </Button>
+                      {/* Show Save button if on features tab */}
+                      {activeTab === 'features' ? (
+                        <Button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              console.log("DEBUG: Save clicked")
+                              const enabledList = actions.filter(a => a.enabled).map(a => a.name)
+                              console.log("DEBUG: Saving actions:", enabledList)
+
+                              // Visual confirmation for user debugging
+                              // alert(`DEBUG: Attempting to save ${enabledList.length} actions for tool ${tool.id}`)
+
+                              await (apiClient as any).post(`/api/mcp-tools/${tool.id}/actions`, {
+                                actions: enabledList
+                              })
+
+                              toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
+                            } catch (e: any) {
+                              console.error("Save failed:", e)
+                              alert(`DEBUG ERROR: ${e.message || JSON.stringify(e)}`)
+                              toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
+                            }
+                          }}
+                          className="flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+                        >
+                          Save Changes
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          className="flex-1 hover:border-blue-500/50"
+                          onClick={() => setActiveTab('features')}
+                        >
+                          <Settings className="w-4 h-4 mr-2" />
+                          Manage Features
+                        </Button>
+                      )}
+
                       <Button
                         variant="outline"
                         onClick={onUninstall}

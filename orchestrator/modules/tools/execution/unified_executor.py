@@ -72,7 +72,6 @@ class UnifiedToolExecutor:
             'search_codebase': self._execute_platform_tool,
             'search_documents': self._execute_platform_tool,  # Alias
             'search_code': self._execute_platform_tool,  # Alias
-            'switch_context': self._execute_platform_tool, # Meta-tool for dynamic context switching
             
             # Database tools (natural language SQL)
             'query_database': self._execute_database_tool,

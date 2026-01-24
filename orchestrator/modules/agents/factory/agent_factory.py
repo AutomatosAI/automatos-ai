@@ -1162,6 +1162,36 @@ To use actions, respond with JSON blocks like:
                 tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
                 self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
             
+            # FIX: Inject Assigned MCP Tools (Composio, etc.) from Runtime
+            if agent_runtime.tools:
+                for tool in agent_runtime.tools:
+                    # Construct OpenAI function schema from tool metadata
+                    # Assuming 'capabilities' or 'tool_metadata' contains the parameters schema
+                    # Fallback to generic schema if detailed parameters are missing
+                    
+                    tool_name = tool.get('name', 'unknown')
+                    # Sanitize name for OpenAI (letters, numbers, underscores)
+                    import re
+                    sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', tool_name)[:64]
+                    
+                    schema = {
+                        "type": "function",
+                        "function": {
+                            "name": sanitized_name,
+                            "description": tool.get('description', f"External tool: {tool_name}"),
+                            "parameters": tool.get('capabilities', {}).get('parameters') or {
+                                "type": "object", 
+                                "properties": {
+                                    "params": {"type": "object", "description": "Tool parameters"}
+                                }
+                            }
+                        }
+                    }
+                    tool_schemas.append(schema)
+                
+                mcp_tool_names = [t.get('name') for t in agent_runtime.tools]
+                self.logger.info(f"🔌 Injected {len(agent_runtime.tools)} assigned MCP tools: {mcp_tool_names}")
+
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
             
@@ -1184,10 +1214,49 @@ To use actions, respond with JSON blocks like:
                         tool_results = []
                         tool_executor = agent_runtime.tool_executor  # PRD-17: Reuse executor (no re-init!)
                         
+                        # Track executed calls in this turn to prevent duplicates
+                        executed_calls_hashes = set()
+                        
                         for tool_call in response.tool_calls:
                             func_name = tool_call['function']['name']
-                            func_args = json.loads(tool_call['function']['arguments'])
-                            self.logger.info(f"  🛠️  Calling {func_name}({func_args})")
+                            func_args_str = tool_call['function']['arguments']
+                            
+                            try:
+                                # Normalization: Parse JSON then canonicalize
+                                func_args = json.loads(func_args_str)
+                                canonical_args = json.dumps(func_args, sort_keys=True)
+                            except json.JSONDecodeError:
+                                # If invalid JSON, use raw string for hash (will likely fail later but consistent)
+                                canonical_args = func_args_str.strip()
+                                func_args = {}
+
+                            # Create a hash of name + canonical args
+                            call_hash = f"{func_name}:{canonical_args}"
+                            
+                            if call_hash in executed_calls_hashes:
+                                self.logger.warning(f"⚠️  [DEDUPE] Skipping duplicate tool call in same turn: {func_name}")
+                                tool_results.append({
+                                    "tool_call_id": tool_call['id'],
+                                    "role": "tool",
+                                    "name": func_name,
+                                    "content": json.dumps({"error": "Duplicate tool call skipped (already executed in this turn)"})
+                                })
+                                continue
+                            
+                            # Filter empty parameters for critical tools if they usually require them
+                            if not func_args and "SLACK" in func_name:
+                                self.logger.warning(f"⚠️  [FILTER] Skipping empty parameters for {func_name}")
+                                tool_results.append({
+                                    "tool_call_id": tool_call['id'],
+                                    "role": "tool",
+                                    "name": func_name,
+                                    "content": json.dumps({"error": "Skipped: Empty parameters provided for tool requiring input."})
+                                })
+                                continue
+
+                            executed_calls_hashes.add(call_hash)
+                            
+                            self.logger.info(f"  🛠️  [TRACE] Calling {func_name}({func_args})")
                             
                             try:
                                 result = await tool_executor.execute_tool(
@@ -1201,9 +1270,9 @@ To use actions, respond with JSON blocks like:
                                     "name": func_name,
                                     "content": json.dumps(result)
                                 })
-                                self.logger.info(f"    ✅ {func_name} completed successfully")
+                                self.logger.info(f"    ✅ [TRACE] {func_name} completed successfully")
                             except Exception as e:
-                                self.logger.error(f"    ❌ {func_name} failed: {e}")
+                                self.logger.error(f"    ❌ [TRACE] {func_name} failed: {e}")
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
                                     "role": "tool",

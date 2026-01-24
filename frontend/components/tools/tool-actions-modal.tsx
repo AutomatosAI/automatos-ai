@@ -43,32 +43,18 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
         setLoading(true)
         try {
             // 1. Fetch available actions from Composio (via backend)
+            // Backend now merges this with enabled state from workspace config
             const actionsResponse = await apiClient.get(`/api/mcp-tools/${tool.id}/actions`)
             const availableActions = actionsResponse || []
-
-            // 2. Fetch current permissions (enabled actions)
-            // We assume if no specific permission is set, all are enabled by default for simplicity 
-            // OR we can fetch assignment to get specific overrides. 
-            // For now, let's fetch assignment to be accurate.
-            // NOTE: We fallback to "all enabled" if no assignment exists yet.
-
-            const enabledSet = new Set<string>(availableActions.map((a: any) => a.name))
-
-            try {
-                // We'll use the agents/{id}/tools endpoint locally to get permissions? 
-                // Or simpler: Just init all to true for now as "Connect" implies full access initially.
-                // If we want fine-grained control per agent, that's complex. 
-                // For the "App Management" view, we are likely configuring GLOBAL or DEFAULT permissions for this workspace.
-                // Let's stick to the UI request: display list and toggle.
-            } catch (e) {
-                console.warn("Could not fetch existing permissions")
-            }
 
             const mappedActions = availableActions.map((a: any) => ({
                 name: a.name,
                 display_name: a.display_name || a.name,
                 description: a.description,
-                enabled: true // Default to true for now
+                // Backend provides 'enabled' state based on WorkspaceToolConfig
+                // If no config exists, backend currently returns FALSE (implicit disable by default for safety)
+                // OR we can force it here. Let's trust the backend.
+                enabled: !!a.enabled
             }))
 
             setActions(mappedActions)
@@ -97,16 +83,21 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
     const handleSave = async () => {
         setSaving(true)
         try {
-            // Just a mock save for now as we haven't implemented the specific permissions endpoint yet
-            // In a real flow, we'd update the WorkspaceToolConfig or specific AgentToolAssignment permissions
-            await new Promise(resolve => setTimeout(resolve, 800))
+            // Filter only enabled actions to save
+            const enabledActions = actions.filter(a => a.enabled).map(a => a.name)
+
+            // Call the NEW backend endpoint to save permissions
+            await apiClient.post(`/api/mcp-tools/${tool.id}/actions`, {
+                actions: enabledActions
+            })
 
             toast({
                 title: 'Settings Saved',
-                description: `Updated permissions for ${tool.name}. ${actions.filter(a => a.enabled).length} actions enabled.`,
+                description: `Updated permissions for ${tool.name}. ${enabledActions.length} actions enabled.`,
             })
             onClose()
         } catch (error) {
+            console.error(error)
             toast({
                 title: 'Save Failed',
                 description: 'Could not save permission changes.',

@@ -301,14 +301,17 @@ class StreamingChatService:
         from core.llm import create_llm_manager
         import asyncio
         
-        # Get tools from modules.tools if not provided (agent-scoped)
-        if tools is None:
-            tools = get_chat_tools(agent_id=agent_id)
-        
         try:
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
             await asyncio.sleep(0)
+
+            # Ensure workspace_id for Composio tools permissions
+            self._resolve_workspace_id(agent_id)
+            
+            # Get tools from modules.tools with permissions for this workspace
+            if tools is None:
+                tools = get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
             
             # Determine provider/model from selection
             provider, model = self._parse_model_selection(selected_model)
@@ -329,10 +332,60 @@ class StreamingChatService:
             # Ensure workspace_id for Composio tools
             self._resolve_workspace_id(agent_id)
 
+            # Determine tool usage
+            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
+            supports_native_tools = provider in ['openai', 'anthropic', 'grok'] if provider else False
+            
+            # --- TOOL FILTERING (PRD Refinement) ---
+            # To prevent context overload (600+ tools), we filter to the top N relevant tools.
+            use_tools = None
+            if not is_simple and tools and supports_native_tools:
+                # 1. Identify Core Tools (always included)
+                core_tool_names = {
+                    "search_knowledge", "semantic_search", "search_codebase", 
+                    "query_database", "smart_query_database", 
+                    "read_file", "write_file", "switch_context",
+                    "search_tables", "search_images", "search_formulas", "search_multimodal"
+                }
+                
+                # 2. Get relevant tools via ranking
+                ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
+                    latest_text, 
+                    tools, 
+                    max_tools=25
+                )
+                
+                # 3. Build final allowed list
+                filtered_tools = []
+                included_names = set()
+                
+                # Add core tools first
+                for tool in tools:
+                    t_name = tool.get("function", {}).get("name")
+                    if t_name in core_tool_names:
+                        filtered_tools.append(tool)
+                        included_names.add(t_name)
+                
+                # Add top ranked tools
+                for candidate in ranked_candidates:
+                    c_name = candidate.get("name")
+                    if c_name not in included_names:
+                        # Find the full tool definition
+                        full_tool = next((t for t in tools if t.get("function", {}).get("name") == c_name), None)
+                        if full_tool:
+                            filtered_tools.append(full_tool)
+                            included_names.add(c_name)
+                
+                use_tools = filtered_tools
+                logger.info(f"Filtering tools: {len(tools)} -> {len(use_tools)} relevant tools")
+            
+            # Use filtered tools (if applicable) for LLM context generation
+            context_tools = use_tools if use_tools is not None else tools
+
             # Convert messages to LLM format (include tool names for stronger tool routing)
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages,
-                available_tools=tools
+                available_tools=context_tools
             )
             assistant_parts = []
             full_response = ""
@@ -352,9 +405,9 @@ class StreamingChatService:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars")
                     llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
 
-            # Add dynamic tool candidates (no hardcoded app mapping)
-            if tools and latest_text:
-                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, tools)
+            # Add dynamic tool candidates (hint)
+            if context_tools and latest_text:
+                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, context_tools)
                 if candidates:
                     candidate_names = ", ".join([c["name"] for c in candidates if c.get("name")])
                     if candidate_names:
@@ -369,11 +422,6 @@ class StreamingChatService:
                                 )
                             }
                         )
-            
-            # Determine tool usage
-            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-            supports_native_tools = provider in ['openai', 'anthropic', 'grok'] if provider else False
-            use_tools = None if is_simple else tools if supports_native_tools else None
 
             # Explicit tool call bypass (e.g., "Use tool X with params {...}")
             explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
@@ -491,6 +539,8 @@ class StreamingChatService:
                 current_response = response
                 sent_tool_data = False
 
+                executed_tool_signatures = set()
+
                 while current_response.tool_calls and iteration < max_iterations:
                     iteration += 1
                     logger.info(
@@ -510,9 +560,16 @@ class StreamingChatService:
                             tool_args = json.loads(tool_args_raw) if isinstance(tool_args_raw, str) else (tool_args_raw or {})
                         except Exception:
                             tool_args = {"raw": tool_args_raw}
-
+                        
                         start_times[tool_id] = time.time()
-                        tool_calls_prepared.append((tool_id, tool_name, tool_args))
+                        
+                        # Deduplication check
+                        tool_sig = (tool_name, json.dumps(tool_args, sort_keys=True))
+                        is_duplicate = tool_sig in executed_tool_signatures
+                        if not is_duplicate:
+                            executed_tool_signatures.add(tool_sig)
+                        
+                        tool_calls_prepared.append((tool_id, tool_name, tool_args, is_duplicate))
 
                         yield self.streaming_handler.format_aisdk_tool_start(
                             tool_call_id=tool_id,
@@ -522,7 +579,20 @@ class StreamingChatService:
                         await asyncio.sleep(0)
 
                     # Execute all tools in parallel
-                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any]):
+                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], is_duplicate: bool):
+                        if is_duplicate:
+                            logger.warning(f"⚠️ Skipping duplicate tool execution: {tool_name}")
+                            return {
+                                "tool_call_id": tool_id,
+                                "tool_name": tool_name,
+                                "tool_args": tool_args,
+                                "role": "tool",
+                                "content": f"Error: Tool '{tool_name}' was already executed with these parameters in this turn. Do not call it again.",
+                                "frontend_data": {},
+                                "success": False,
+                                "error": "Duplicate execution skipped",
+                            }
+
                         logger.info(f"Executing tool: {tool_name}")
                         result = await self.tool_router.execute_and_format(
                             tool_name,
@@ -542,8 +612,8 @@ class StreamingChatService:
                         }
 
                     results = await asyncio.gather(*[
-                        execute_single_tool(tool_id, tool_name, tool_args)
-                        for (tool_id, tool_name, tool_args) in tool_calls_prepared
+                        execute_single_tool(tool_id, tool_name, tool_args, is_dup)
+                        for (tool_id, tool_name, tool_args, is_dup) in tool_calls_prepared
                     ])
 
                     tool_results = []

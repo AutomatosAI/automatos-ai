@@ -898,7 +898,12 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
 
             except Exception as e:
                 last_error = e
+                self.logger.error(f"❌ Execution attempt {attempt} failed: {str(e)}")
+                import traceback
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
+                
                 if attempt < self.max_retries:
+                    self.logger.info(f"⏳ Waiting {2 ** attempt}s before retry...")
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                 continue
         
