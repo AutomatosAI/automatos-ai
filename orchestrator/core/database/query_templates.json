@@ -1,0 +1,289 @@
+{
+  "postgresql": {
+    "analytics": [
+      {
+        "name": "Top N by Revenue",
+        "natural_language": "Show top {n} customers by revenue in the last {days} days",
+        "sql_template": "SELECT customer_id, customer_name, SUM(amount) as total_revenue FROM orders WHERE order_date >= CURRENT_DATE - INTERVAL '{days} days' GROUP BY customer_id, customer_name ORDER BY total_revenue DESC LIMIT {n}",
+        "parameters": [
+          {"name": "n", "type": "integer", "default": 10},
+          {"name": "days", "type": "integer", "default": 30}
+        ],
+        "visualization_type": "bar",
+        "tags": ["revenue", "customers", "top-n"]
+      },
+      {
+        "name": "Revenue Trend",
+        "natural_language": "Show revenue trend over the last {months} months",
+        "sql_template": "SELECT DATE_TRUNC('month', order_date) as month, SUM(amount) as revenue FROM orders WHERE order_date >= CURRENT_DATE - INTERVAL '{months} months' GROUP BY month ORDER BY month",
+        "parameters": [
+          {"name": "months", "type": "integer", "default": 12}
+        ],
+        "visualization_type": "line",
+        "tags": ["revenue", "trend", "time-series"]
+      },
+      {
+        "name": "Category Performance",
+        "natural_language": "Compare performance across product categories",
+        "sql_template": "SELECT p.category, COUNT(DISTINCT o.order_id) as orders, SUM(oi.quantity) as units_sold, SUM(oi.amount) as revenue FROM products p JOIN order_items oi ON p.product_id = oi.product_id JOIN orders o ON oi.order_id = o.order_id WHERE o.order_date >= CURRENT_DATE - INTERVAL '90 days' GROUP BY p.category ORDER BY revenue DESC",
+        "parameters": [],
+        "visualization_type": "bar",
+        "tags": ["products", "categories", "performance"]
+      },
+      {
+        "name": "Customer Cohort Analysis",
+        "natural_language": "Analyze customer cohorts by signup month",
+        "sql_template": "WITH cohorts AS (SELECT DATE_TRUNC('month', created_at) as cohort_month, customer_id FROM customers) SELECT c.cohort_month, COUNT(DISTINCT c.customer_id) as cohort_size, AVG(o.total_orders) as avg_orders, AVG(o.total_spent) as avg_revenue FROM cohorts c LEFT JOIN (SELECT customer_id, COUNT(*) as total_orders, SUM(amount) as total_spent FROM orders GROUP BY customer_id) o ON c.customer_id = o.customer_id GROUP BY c.cohort_month ORDER BY c.cohort_month DESC LIMIT 12",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["customers", "cohorts", "retention"]
+      },
+      {
+        "name": "Geographic Distribution",
+        "natural_language": "Show sales distribution by region",
+        "sql_template": "SELECT c.region, c.country, COUNT(DISTINCT o.order_id) as orders, SUM(o.amount) as revenue FROM customers c JOIN orders o ON c.customer_id = o.customer_id WHERE o.order_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY c.region, c.country ORDER BY revenue DESC",
+        "parameters": [],
+        "visualization_type": "pie",
+        "tags": ["geography", "sales", "distribution"]
+      }
+    ],
+    "reporting": [
+      {
+        "name": "Daily Summary",
+        "natural_language": "Daily business summary for {date}",
+        "sql_template": "SELECT COUNT(DISTINCT order_id) as total_orders, COUNT(DISTINCT customer_id) as unique_customers, SUM(amount) as revenue, AVG(amount) as avg_order_value FROM orders WHERE DATE(order_date) = '{date}'",
+        "parameters": [
+          {"name": "date", "type": "date", "default": "CURRENT_DATE"}
+        ],
+        "visualization_type": "table",
+        "tags": ["daily", "summary", "kpi"]
+      },
+      {
+        "name": "Weekly Report",
+        "natural_language": "Weekly performance report",
+        "sql_template": "SELECT DATE_TRUNC('week', order_date) as week, COUNT(*) as orders, SUM(amount) as revenue, COUNT(DISTINCT customer_id) as customers FROM orders WHERE order_date >= CURRENT_DATE - INTERVAL '4 weeks' GROUP BY week ORDER BY week DESC",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["weekly", "report", "performance"]
+      },
+      {
+        "name": "Monthly KPIs",
+        "natural_language": "Key performance indicators for the month",
+        "sql_template": "WITH current_month AS (SELECT * FROM orders WHERE DATE_TRUNC('month', order_date) = DATE_TRUNC('month', CURRENT_DATE)), prev_month AS (SELECT * FROM orders WHERE DATE_TRUNC('month', order_date) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')) SELECT 'Revenue' as metric, SUM(amount) as current_value, (SELECT SUM(amount) FROM prev_month) as previous_value, ROUND(((SUM(amount) - (SELECT SUM(amount) FROM prev_month)) / NULLIF((SELECT SUM(amount) FROM prev_month), 0) * 100), 2) as change_pct FROM current_month UNION ALL SELECT 'Orders', COUNT(*), (SELECT COUNT(*) FROM prev_month), ROUND(((COUNT(*) - (SELECT COUNT(*) FROM prev_month))::NUMERIC / NULLIF((SELECT COUNT(*) FROM prev_month), 0) * 100), 2) FROM current_month",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["monthly", "kpi", "comparison"]
+      },
+      {
+        "name": "Year-over-Year Comparison",
+        "natural_language": "Compare this year vs last year performance",
+        "sql_template": "WITH current_year AS (SELECT DATE_TRUNC('month', order_date) as month, SUM(amount) as revenue FROM orders WHERE EXTRACT(YEAR FROM order_date) = EXTRACT(YEAR FROM CURRENT_DATE) GROUP BY month), last_year AS (SELECT DATE_TRUNC('month', order_date + INTERVAL '1 year') as month, SUM(amount) as revenue FROM orders WHERE EXTRACT(YEAR FROM order_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1 GROUP BY month) SELECT TO_CHAR(COALESCE(c.month, l.month), 'Month') as month_name, c.revenue as current_year_revenue, l.revenue as last_year_revenue, ROUND(((c.revenue - l.revenue) / NULLIF(l.revenue, 0) * 100), 2) as yoy_growth FROM current_year c FULL OUTER JOIN last_year l ON c.month = l.month ORDER BY COALESCE(c.month, l.month)",
+        "parameters": [],
+        "visualization_type": "line",
+        "tags": ["yearly", "comparison", "growth"]
+      }
+    ],
+    "monitoring": [
+      {
+        "name": "Active Users",
+        "natural_language": "Show active users in the last {hours} hours",
+        "sql_template": "SELECT COUNT(DISTINCT user_id) as active_users, COUNT(*) as total_actions FROM user_activity WHERE activity_time >= NOW() - INTERVAL '{hours} hours'",
+        "parameters": [
+          {"name": "hours", "type": "integer", "default": 24}
+        ],
+        "visualization_type": "table",
+        "tags": ["users", "activity", "monitoring"]
+      },
+      {
+        "name": "System Performance",
+        "natural_language": "Database performance metrics",
+        "sql_template": "SELECT datname as database, numbackends as active_connections, xact_commit as transactions_committed, xact_rollback as transactions_rolled_back, blks_read as blocks_read, blks_hit as blocks_hit, ROUND(blks_hit::NUMERIC / NULLIF(blks_hit + blks_read, 0) * 100, 2) as cache_hit_ratio FROM pg_stat_database WHERE datname NOT IN ('template0', 'template1', 'postgres') ORDER BY numbackends DESC",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["system", "performance", "database"]
+      },
+      {
+        "name": "Slow Queries",
+        "natural_language": "Find slow running queries",
+        "sql_template": "SELECT query, calls, total_time, mean_time, max_time FROM pg_stat_statements WHERE mean_time > {threshold_ms} ORDER BY mean_time DESC LIMIT 20",
+        "parameters": [
+          {"name": "threshold_ms", "type": "integer", "default": 1000}
+        ],
+        "visualization_type": "table",
+        "tags": ["performance", "queries", "optimization"]
+      },
+      {
+        "name": "Table Sizes",
+        "natural_language": "Show largest tables by size",
+        "sql_template": "SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size, pg_total_relation_size(schemaname||'.'||tablename) as size_bytes FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY size_bytes DESC LIMIT 20",
+        "parameters": [],
+        "visualization_type": "bar",
+        "tags": ["storage", "tables", "size"]
+      }
+    ],
+    "troubleshooting": [
+      {
+        "name": "Failed Transactions",
+        "natural_language": "Show failed transactions in the last {hours} hours",
+        "sql_template": "SELECT transaction_id, error_message, created_at, customer_id, amount FROM transactions WHERE status = 'failed' AND created_at >= NOW() - INTERVAL '{hours} hours' ORDER BY created_at DESC",
+        "parameters": [
+          {"name": "hours", "type": "integer", "default": 24}
+        ],
+        "visualization_type": "table",
+        "tags": ["errors", "transactions", "troubleshooting"]
+      },
+      {
+        "name": "Duplicate Records",
+        "natural_language": "Find duplicate records in {table}",
+        "sql_template": "SELECT {column}, COUNT(*) as occurrences FROM {table} GROUP BY {column} HAVING COUNT(*) > 1 ORDER BY occurrences DESC",
+        "parameters": [
+          {"name": "table", "type": "string", "required": true},
+          {"name": "column", "type": "string", "required": true}
+        ],
+        "visualization_type": "table",
+        "tags": ["duplicates", "data-quality", "troubleshooting"]
+      },
+      {
+        "name": "Missing Data",
+        "natural_language": "Check for missing required data",
+        "sql_template": "SELECT 'customers_without_email' as check, COUNT(*) as count FROM customers WHERE email IS NULL OR email = '' UNION ALL SELECT 'orders_without_customer', COUNT(*) FROM orders WHERE customer_id IS NULL UNION ALL SELECT 'products_without_price', COUNT(*) FROM products WHERE price IS NULL OR price <= 0",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["data-quality", "validation", "troubleshooting"]
+      },
+      {
+        "name": "Orphaned Records",
+        "natural_language": "Find orphaned records in relationships",
+        "sql_template": "SELECT 'orders_without_valid_customer' as type, COUNT(*) as count FROM orders o LEFT JOIN customers c ON o.customer_id = c.customer_id WHERE c.customer_id IS NULL UNION ALL SELECT 'order_items_without_valid_order', COUNT(*) FROM order_items oi LEFT JOIN orders o ON oi.order_id = o.order_id WHERE o.order_id IS NULL",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["data-integrity", "relationships", "troubleshooting"]
+      }
+    ],
+    "data_exploration": [
+      {
+        "name": "Table Preview",
+        "natural_language": "Preview first rows of {table}",
+        "sql_template": "SELECT * FROM {table} LIMIT {limit}",
+        "parameters": [
+          {"name": "table", "type": "string", "required": true},
+          {"name": "limit", "type": "integer", "default": 10}
+        ],
+        "visualization_type": "table",
+        "tags": ["exploration", "preview", "data"]
+      },
+      {
+        "name": "Column Statistics",
+        "natural_language": "Get statistics for {column} in {table}",
+        "sql_template": "SELECT COUNT(*) as total_rows, COUNT(DISTINCT {column}) as unique_values, COUNT({column}) as non_null_values, MIN({column}::TEXT) as min_value, MAX({column}::TEXT) as max_value FROM {table}",
+        "parameters": [
+          {"name": "table", "type": "string", "required": true},
+          {"name": "column", "type": "string", "required": true}
+        ],
+        "visualization_type": "table",
+        "tags": ["statistics", "exploration", "analysis"]
+      },
+      {
+        "name": "Value Distribution",
+        "natural_language": "Show distribution of values in {column}",
+        "sql_template": "SELECT {column}, COUNT(*) as count, ROUND(COUNT(*)::NUMERIC / SUM(COUNT(*)) OVER () * 100, 2) as percentage FROM {table} GROUP BY {column} ORDER BY count DESC LIMIT 20",
+        "parameters": [
+          {"name": "table", "type": "string", "required": true},
+          {"name": "column", "type": "string", "required": true}
+        ],
+        "visualization_type": "pie",
+        "tags": ["distribution", "analysis", "exploration"]
+      }
+    ]
+  },
+  "mysql": {
+    "analytics": [
+      {
+        "name": "Top Customers",
+        "natural_language": "Show top {n} customers by total purchases",
+        "sql_template": "SELECT customer_id, customer_name, SUM(amount) as total_spent, COUNT(*) as order_count FROM orders GROUP BY customer_id, customer_name ORDER BY total_spent DESC LIMIT {n}",
+        "parameters": [
+          {"name": "n", "type": "integer", "default": 10}
+        ],
+        "visualization_type": "bar",
+        "tags": ["customers", "revenue", "top-n"]
+      },
+      {
+        "name": "Product Performance",
+        "natural_language": "Analyze product sales performance",
+        "sql_template": "SELECT p.product_name, p.category, COUNT(oi.order_item_id) as times_ordered, SUM(oi.quantity) as total_quantity, SUM(oi.amount) as total_revenue FROM products p JOIN order_items oi ON p.product_id = oi.product_id GROUP BY p.product_id, p.product_name, p.category ORDER BY total_revenue DESC LIMIT 20",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["products", "sales", "performance"]
+      },
+      {
+        "name": "Sales by Hour",
+        "natural_language": "Show sales pattern by hour of day",
+        "sql_template": "SELECT HOUR(order_date) as hour_of_day, COUNT(*) as orders, SUM(amount) as revenue FROM orders WHERE order_date >= DATE_SUB(NOW(), INTERVAL 7 DAY) GROUP BY HOUR(order_date) ORDER BY hour_of_day",
+        "parameters": [],
+        "visualization_type": "line",
+        "tags": ["time-pattern", "sales", "hourly"]
+      }
+    ],
+    "reporting": [
+      {
+        "name": "Daily Revenue",
+        "natural_language": "Daily revenue for the last {days} days",
+        "sql_template": "SELECT DATE(order_date) as date, COUNT(*) as orders, SUM(amount) as revenue FROM orders WHERE order_date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY) GROUP BY DATE(order_date) ORDER BY date DESC",
+        "parameters": [
+          {"name": "days", "type": "integer", "default": 30}
+        ],
+        "visualization_type": "line",
+        "tags": ["daily", "revenue", "trend"]
+      },
+      {
+        "name": "Customer Lifetime Value",
+        "natural_language": "Calculate customer lifetime value",
+        "sql_template": "SELECT customer_id, customer_name, MIN(order_date) as first_order, MAX(order_date) as last_order, COUNT(*) as total_orders, SUM(amount) as lifetime_value, AVG(amount) as avg_order_value FROM orders GROUP BY customer_id, customer_name HAVING COUNT(*) > 1 ORDER BY lifetime_value DESC LIMIT 100",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["customers", "ltv", "analytics"]
+      }
+    ],
+    "monitoring": [
+      {
+        "name": "Database Status",
+        "natural_language": "Show current database status and metrics",
+        "sql_template": "SHOW STATUS WHERE Variable_name IN ('Connections', 'Threads_connected', 'Threads_running', 'Queries', 'Slow_queries', 'Uptime')",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["database", "status", "monitoring"]
+      },
+      {
+        "name": "Active Connections",
+        "natural_language": "Show active database connections",
+        "sql_template": "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE FROM INFORMATION_SCHEMA.PROCESSLIST WHERE COMMAND != 'Sleep' ORDER BY TIME DESC",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["connections", "monitoring", "performance"]
+      }
+    ]
+  },
+  "snowflake": {
+    "analytics": [
+      {
+        "name": "Warehouse Credit Usage",
+        "natural_language": "Show credit usage by warehouse over last {days} days",
+        "sql_template": "SELECT WAREHOUSE_NAME, DATE(START_TIME) as DATE, SUM(CREDITS_USED) as CREDITS FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY WHERE START_TIME >= DATEADD(DAY, -{days}, CURRENT_DATE()) GROUP BY WAREHOUSE_NAME, DATE ORDER BY DATE DESC, CREDITS DESC",
+        "parameters": [
+          {"name": "days", "type": "integer", "default": 7}
+        ],
+        "visualization_type": "bar",
+        "tags": ["snowflake", "credits", "usage"]
+      },
+      {
+        "name": "Query Performance",
+        "natural_language": "Analyze query performance statistics",
+        "sql_template": "SELECT QUERY_TYPE, COUNT(*) as QUERY_COUNT, AVG(EXECUTION_TIME)/1000 as AVG_EXEC_TIME_SEC, MAX(EXECUTION_TIME)/1000 as MAX_EXEC_TIME_SEC, SUM(CREDITS_USED_CLOUD_SERVICES) as TOTAL_CREDITS FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY WHERE START_TIME >= DATEADD(HOUR, -24, CURRENT_TIMESTAMP()) GROUP BY QUERY_TYPE ORDER BY QUERY_COUNT DESC",
+        "parameters": [],
+        "visualization_type": "table",
+        "tags": ["performance", "queries", "snowflake"]
+      }
+    ]
+  }
+}
