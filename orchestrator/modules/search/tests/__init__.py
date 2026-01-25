@@ -1,0 +1,2 @@
+"""Search module tests"""
+
