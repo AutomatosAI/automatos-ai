@@ -1,0 +1,67 @@
+High-Level Assessment
+I agree with the sync-time classification + runtime filtering approach. It is a natural extension of your existing architecture and aligns with how your system is supposed to work:
+
+You already have a tool router validation step that should gate what the LLM can see and execute.
+
+You already have dynamic tool assignment and task-to-tool mapping in the design docs, which implies intent-based selection rather than token overlap.
+
+Claude’s design turns those architectural goals into a concrete action-level capability system, which is the right direction.
+
+What I’d Keep As-Is
+✅ Sync-time classification
+Classifying once and caching metadata locally matches the centralized registry concept and avoids runtime API calls. It’s consistent with the platform’s “single source of truth” tool registry idea.
+
+✅ Capability taxonomy
+A stable taxonomy helps convert vague user intent into deterministic tool eligibility. This is consistent with the “task-to-tool mapping” pattern already documented, just at finer granularity (action vs. tool).
+
+✅ Runtime filtering in the tool router
+Your architecture already calls out a router validation step before the registry resolves and executes tools. This is the right place to enforce “only actions tagged message.send can be used for send intent.”
+
+What I’d Adjust Before Implementing
+1) Make the tool router the enforcement gate (not just selection)
+Claude’s design focuses on filtering actions for the LLM. I’d go one step further: enforce that execution is also blocked unless action capabilities match intent. This ensures correctness even if the model “hallucinates” an action.
+
+This aligns with the repo’s intended tool router validation step.
+
+2) Keep “capabilities” distinct from “destructive”
+I’d avoid overloading “capabilities” with risk classification. Use:
+
+capabilities: semantic affordances (message.send, channel.list)
+
+risk_level or destructive flags: safety policy
+
+That separation makes the router logic clearer and more deterministic.
+
+3) Don’t require LLM classification for every capability
+Start with simple heuristic mapping (name/description keyword + allowlist per app) and only use LLM classification for ambiguous cases. This reduces cost and makes the system more maintainable early on, while still enabling manual overrides.
+
+This also preserves the philosophy of a centralized tool registry with predictable metadata, as described in the docs.
+
+4) Add a fallback tier for “no capability match”
+When the intent classifier fails or the capability filter yields zero actions, you should:
+
+either ask a clarification question, or
+
+fall back to a safe “search/list” capability if applicable.
+
+This avoids dead-ends and keeps the interaction robust.
+
+5) Unify tool-loop behavior
+Your architecture implies a single path: API → router validation → registry → executor. If multiple loops exist, they must all read from the same metadata table and enforce the same rules. Otherwise you’ll still see randomness and mismatched tool-start payloads.
+
+Final Recommendation Before Implementation
+Implement Claude’s structure with two additional constraints:
+
+Validation must be enforced at execution time, not just selection time.
+
+Capabilities should be deterministic and minimally LLM-dependent. Use LLM classification only where needed, and keep a manual override path.
+
+This keeps the system aligned with the documented tool router/registry flow and makes it robust at scale.
+
+Summary
+Claude’s structure is solid and aligns with your system architecture.
+
+I’d harden it by enforcing capability checks at execution, splitting semantic “capabilities” from safety/risk metadata, and reducing LLM reliance during classification.
+
+This is consistent with the repo’s centralized tool registry and tool router validation design.
+
