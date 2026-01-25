@@ -1,0 +1,735 @@
+Deep Review: Composio Tool Integration - Analysis & Recommendations
+Executive Summary
+After reviewing your codebase, the PRD documentation, and researching Composio's best practices, I've identified the fundamental issue: you're not using Composio's built-in action selection capabilities. Instead, you've implemented a simplistic token-overlap scoring system (rank_tools_for_query) that fundamentally cannot scale to 800+ apps with 100s of actions each.
+
+The fix is not adding more code—it's using Composio's existing find_actions_by_use_case() method.
+
+What You're Doing (Current Implementation)
+1. Token Overlap Scoring (prompt_analyzer.py:212-261)
+def rank_tools_for_query(self, query: str, available_tools, max_tools=12):
+    # Tokenizes query and tool name/description
+    query_tokens = tokenize(query)
+    for tool in available_tools:
+        tool_tokens = tokenize(f"{name} {desc}")
+        score = len(query_tokens & tool_tokens)  # Simple intersection count
+        if name.lower() in query.lower():
+            score += 3  # Boost for name match
+
+Why this fails at scale:
+
+User Request	Query Tokens	Matched Tool	Problem
+"send message to #general"	{send, message, general}	SLACK_ARCHIVE_A_PUBLIC_OR_PRIVATE_CHANNEL	"channel" matches, archive executed
+"post to Slack"	{post, slack}	SLACK_SET_CHANNEL_TOPIC	"slack" matches, wrong action
+"create GitHub issue"	{create, github, issue}	GITHUB_DELETE_AN_ISSUE	"issue" matches, destructive action
+The token overlap approach has no understanding of intent (send vs. archive) or action semantics (create vs. delete).
+
+2. Hardcoded Tool Hints (service.py:409-424)
+You inject tool candidate hints into the system prompt:
+
+llm_messages.insert(
+    insert_at,
+    {
+        "role": "system",
+        "content": f"Tool candidates for this request: {candidate_names}. "
+                   "Use the most relevant tool instead of answering from memory."
+    }
+)
+
+But the candidates are still selected via token overlap, so you're hinting wrong tools.
+
+3. No Use of Composio's Semantic Selection
+Your tool_registry.py loads Composio actions but doesn't use any of:
+
+find_actions_by_use_case() - semantic intent matching
+find_actions_by_tags() - category filtering
+get_tools(actions=[...]) - explicit action whitelisting
+Default "important" tag filtering
+What Composio Provides (That You're Not Using)
+Based on Composio documentation and SDK reference:
+
+1. find_actions_by_use_case() - This is the solution
+from composio_openai import ComposioToolSet, App
+
+toolset = ComposioToolSet()
+
+# Semantic search for relevant actions
+use_case = "send a message to a Slack channel"
+action_enums = toolset.find_actions_by_use_case(
+    App.SLACK,
+    use_case=use_case,
+    advanced=False  # Set True for multi-step workflows
+)
+
+# Get only those actions
+tools = toolset.get_tools(actions=action_enums)
+# Returns: [SLACK_CHAT_POST_MESSAGE] - not ARCHIVE!
+
+This uses Composio's semantic search to match user intent to correct actions.
+
+2. find_actions_by_tags() - Category filtering
+# Get only "messaging" tagged actions
+action_enums = toolset.find_actions_by_tags(
+    App.SLACK,
+    tags=["messaging", "chat"]
+)
+
+3. Default "Important" Action Filtering
+From Fetching Tools documentation:
+
+"By default, fetching tools using only the apps filter returns actions tagged as important. This prevents overwhelming the LLM's context window with too many tools."
+
+You're not using this - you're loading ALL actions.
+
+4. Action Limit Recommendations
+From the same documentation:
+
+"Empirical evidence indicates that agents perform optimally when limited to fewer than 20 actions."
+
+You're providing up to 25 tools (max_tools=25 in service.py:355), but more critically, you're selecting the wrong 25.
+
+What I Would Do Differently
+Architecture Change 1: Intent Classification Layer
+Before selecting actions, classify the user's intent:
+
+class IntentClassifier:
+    """Classify user intent before action selection."""
+    
+    INTENT_PATTERNS = {
+        "message.send": ["send", "post", "message", "tell", "notify", "dm", "write to"],
+        "message.read": ["get messages", "read", "show messages", "what did"],
+        "channel.create": ["create channel", "new channel", "make channel"],
+        "channel.archive": ["archive", "close channel", "shut down channel"],
+        "channel.list": ["list channels", "show channels", "what channels"],
+        "issue.create": ["create issue", "file issue", "open issue", "new issue"],
+        "issue.close": ["close issue", "resolve issue"],
+        "file.upload": ["upload", "attach", "send file"],
+    }
+    
+    def classify(self, user_text: str) -> str:
+        """Returns intent like 'message.send' or 'issue.create'."""
+        text_lower = user_text.lower()
+        
+        for intent, patterns in self.INTENT_PATTERNS.items():
+            if any(p in text_lower for p in patterns):
+                return intent
+        
+        return "general"
+
+Architecture Change 2: Use Composio's Semantic Selection
+Replace token overlap with Composio's find_actions_by_use_case:
+
+# In tool_router.py or a new composio_selector.py
+
+from composio_openai import ComposioToolSet, App
+
+class ComposioActionSelector:
+    def __init__(self):
+        self.toolset = ComposioToolSet()
+    
+    def select_actions_for_intent(
+        self, 
+        user_text: str, 
+        apps: List[str],
+        max_actions: int = 10
+    ) -> List[Dict]:
+        """
+        Use Composio's semantic search instead of token overlap.
+        """
+        all_actions = []
+        
+        for app_name in apps:
+            try:
+                app = getattr(App, app_name.upper())
+                
+                # Use Composio's semantic matching
+                action_enums = self.toolset.find_actions_by_use_case(
+                    app,
+                    use_case=user_text,
+                    advanced=False  # Set True for complex workflows
+                )
+                
+                # Limit per app
+                all_actions.extend(action_enums[:5])
+                
+            except AttributeError:
+                logger.warning(f"Unknown app: {app_name}")
+        
+        # Get tool definitions for selected actions only
+        return self.toolset.get_tools(actions=all_actions[:max_actions])
+
+Architecture Change 3: Destructive Action Guard (Layered Defense)
+Your current guard is reactive. Make it proactive by excluding destructive actions from selection:
+
+DESTRUCTIVE_ACTIONS = {
+    "archive", "delete", "remove", "destroy", "close", "disable",
+    "revoke", "terminate", "drop", "purge", "clear", "reset"
+}
+
+def filter_safe_actions(actions: List, user_intent: str) -> List:
+    """Remove destructive actions unless explicitly requested."""
+    
+    intent_is_destructive = any(
+        d in user_intent.lower() 
+        for d in ["delete", "archive", "remove", "close"]
+    )
+    
+    if intent_is_destructive:
+        return actions  # User explicitly wants destruction
+    
+    return [
+        a for a in actions
+        if not any(d in a.name.lower() for d in DESTRUCTIVE_ACTIONS)
+    ]
+
+Architecture Change 4: Two-Phase Tool Resolution
+For actions requiring ID resolution (like "send to #general"):
+
+async def resolve_and_execute(
+    self,
+    user_text: str,
+    app: str,
+    action: str,
+    params: Dict
+) -> Dict:
+    """Two-phase: resolve identifiers, then execute action."""
+    
+    # Phase 1: Resolve human-readable names to IDs
+    if app == "SLACK" and "channel" in params:
+        channel_name = params["channel"]
+        if not channel_name.startswith("C"):  # Not an ID
+            # Find channel ID first
+            channels = await self.execute_composio(
+                action="SLACK_LIST_CONVERSATIONS",
+                params={}
+            )
+            channel_id = self._find_channel_by_name(channels, channel_name)
+            params["channel"] = channel_id
+    
+    # Phase 2: Execute actual action
+    return await self.execute_composio(action=action, params=params)
+
+Architecture Change 5: Tool Router Meta-Abstraction
+Your PRD mentions Composio's Tool Router but it's not implemented. This is the pattern that solves the "many tools" problem:
+
+# Instead of exposing 500+ tools to the LLM, expose 3 meta-tools:
+
+META_TOOLS = [
+    {
+        "name": "search_tools",
+        "description": "Find the right tool for a task. Use this first.",
+        "parameters": {
+            "use_case": "What you want to accomplish"
+        }
+    },
+    {
+        "name": "execute_tool", 
+        "description": "Execute a specific tool after searching.",
+        "parameters": {
+            "tool_name": "Name from search_tools result",
+            "params": "Parameters for the tool"
+        }
+    },
+    {
+        "name": "get_tool_schema",
+        "description": "Get parameter schema for a tool.",
+        "parameters": {
+            "tool_name": "Tool to get schema for"
+        }
+    }
+]
+
+The LLM sees 3 tools, not 500+. The search_tools meta-tool uses find_actions_by_use_case() internally.
+
+Implementation Recommendations
+Priority 1: Replace Token Overlap with Semantic Selection (1-2 days)
+In prompt_analyzer.py, replace rank_tools_for_query():
+
+def rank_tools_for_query(self, query: str, available_tools, max_tools=12):
+    """
+    BEFORE: Token overlap (broken at scale)
+    AFTER: Composio semantic search
+    """
+    # Extract connected apps from available_tools metadata
+    apps = self._extract_apps_from_tools(available_tools)
+    
+    # Use Composio's semantic matching
+    from core.composio.selector import ComposioActionSelector
+    selector = ComposioActionSelector()
+    
+    return selector.select_actions_for_intent(
+        user_text=query,
+        apps=apps,
+        max_actions=max_tools
+    )
+
+Priority 2: Add Intent Classification (1 day)
+Before calling rank_tools_for_query, classify intent:
+
+# In service.py stream_response_aisdk()
+
+intent = self.intent_classifier.classify(latest_text)
+logger.info(f"Classified intent: {intent}")
+
+# Only get tools matching this intent
+ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
+    latest_text,
+    tools,
+    max_tools=15,  # Reduced from 25
+    intent=intent   # New parameter
+)
+
+Priority 3: Implement Destructive Action Guard at Selection Time (1 day)
+Move the guard from execution time to selection time:
+
+# In tool selection, not execution
+filtered_tools = filter_safe_actions(ranked_candidates, latest_text)
+
+Priority 4: Add Capability Tags at Sync Time (2-3 days)
+When syncing Composio actions, add capability tags:
+
+# During _register_mcp_tools() in tool_registry.py
+
+def _compute_capability_tags(self, action_name: str, description: str) -> List[str]:
+    """Compute semantic capability tags for an action."""
+    tags = []
+    
+    name_lower = action_name.lower()
+    desc_lower = (description or "").lower()
+    
+    CAPABILITY_MAP = {
+        "message.send": ["post", "send", "chat", "message", "dm", "notify"],
+        "message.read": ["get_message", "list_message", "read", "fetch_message"],
+        "channel.manage": ["create_channel", "archive", "topic", "rename"],
+        "file.upload": ["upload", "attach", "file"],
+        "issue.create": ["create_issue", "open_issue", "new_issue"],
+        "pr.review": ["review", "pull_request", "approve", "comment"],
+    }
+    
+    for capability, patterns in CAPABILITY_MAP.items():
+        if any(p in name_lower or p in desc_lower for p in patterns):
+            tags.append(capability)
+    
+    return tags or ["general"]
+
+Store tags in composio_actions_cache.capabilities column.
+
+Priority 5: Reduce Tool Count Per Request (Immediate)
+Change max_tools=25 to max_tools=15 immediately in service.py:355:
+
+ranked_candidates = self.prompt_analyzer.rank_tools_for_query(
+    latest_text, 
+    tools, 
+    max_tools=15  # Was 25, Composio recommends <20
+)
+
+What Not To Do
+Don't add more token overlap heuristics - The approach is fundamentally flawed at scale
+
+Don't rely solely on system prompt hints - The LLM still sees wrong tools in the function list
+
+Don't implement your own semantic search - Composio already has find_actions_by_use_case()
+
+Don't expose 500+ tools to the LLM - Use meta-tool abstraction or pre-filter aggressively
+
+Don't treat destructive action guard as the primary defense - It should be the last line, not the only line
+
+Root Cause Summary
+Issue	Root Cause	Fix
+Wrong action selected	Token overlap ≠ semantic understanding	Use find_actions_by_use_case()
+Archive instead of Send	No intent classification	Add intent layer before selection
+200 OK with wrong effect	No validation of action vs. intent	Two-phase validation
+LLM confused by 500+ tools	No tool count management	Meta-tool abstraction or limit to 15
+Legacy ghost tool names	Stale examples in prompts	Clean prompts, remove legacy patterns
+Immediate Action Items
+Today: Change max_tools=25 → max_tools=15
+
+This Week: Implement find_actions_by_use_case() wrapper and replace token overlap
+
+Next Week: Add intent classification layer
+
+Following Week: Implement capability tagging at sync time
+
+Future: Consider Tool Router meta-abstraction for true scalability
+
+Sources
+Composio: Using Specific Actions
+Composio: Fetching Tools
+Composio SDK Reference
+Composio GitHub Repository
+AI Agent Tools Best Practices
+How to Build Tools for AI Agents
+Why AI Agent Pilots Fail
+The bottom line: You've built a sophisticated system around a fundamentally broken action selection approach. The fix is to use Composio's built-in semantic selection (find_actions_by_use_case()) rather than inventing your own. This is exactly what the SDK was designed for.
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+UPDATED REVIEW:
+
+
+That's the right call. LLM classification at sync time gives you:
+
+Scalable - Classify once, use forever
+Fast runtime - Local lookup, no API calls
+Consistent - Same classification for all users of that action
+Maintainable - Manual override for edge cases
+Let me sketch out the design.
+
+Proposed Architecture: Action Capability Sync
+The Flow
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           SYNC TIME (Daily + On-Enable)                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Workspace enables "Slack"                                              │
+│         │                                                               │
+│         ▼                                                               │
+│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────────────┐   │
+│  │   Composio   │───▶│  Action Sync    │───▶│  LLM Classification  │   │
+│  │  get_actions │    │    Service      │    │   (batch process)    │   │
+│  └──────────────┘    └─────────────────┘    └──────────────────────┘   │
+│                                                      │                  │
+│                                                      ▼                  │
+│                              ┌─────────────────────────────────────┐    │
+│                              │     composio_action_metadata        │    │
+│                              │  ─────────────────────────────────  │    │
+│                              │  action_id, app_id, capabilities,   │    │
+│                              │  destructive, requires_confirm,     │    │
+│                              │  parameter_requirements, etc.       │    │
+│                              └─────────────────────────────────────┘    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           RUNTIME (Every Request)                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  User: "Send a message to #general"                                     │
+│         │                                                               │
+│         ▼                                                               │
+│  ┌──────────────┐    ┌─────────────────┐    ┌──────────────────────┐   │
+│  │    Intent    │───▶│   Capability    │───▶│   Local DB Lookup    │   │
+│  │  Extraction  │    │     Filter      │    │   (no API calls)     │   │
+│  └──────────────┘    └─────────────────┘    └──────────────────────┘   │
+│   "message.send"      caps: [message.send]         │                    │
+│                                                    ▼                    │
+│                              ┌─────────────────────────────────────┐    │
+│                              │  Filtered actions (5-10 relevant)  │    │
+│                              │  SLACK_SENDS_A_MESSAGE ✓           │    │
+│                              │  SLACK_REPLY_TO_THREAD ✓           │    │
+│                              │  SLACK_DELETE_MESSAGE ✗ (destructive)   │
+│                              └─────────────────────────────────────┘    │
+│                                                    │                    │
+│                                                    ▼                    │
+│                                            LLM sees 5 tools,            │
+│                                            not 150                      │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Database Schema
+# New table: composio_action_metadata
+class ComposioActionMetadata(Base):
+    __tablename__ = "composio_action_metadata"
+    
+    id = Column(UUID, primary_key=True)
+    
+    # Identity
+    app_id = Column(String, index=True)              # "slack", "github", "gmail"
+    action_id = Column(String, unique=True)          # "SLACK_SENDS_A_MESSAGE_TO_A_SLACK_CHANNEL"
+    action_name_normalized = Column(String)          # "slack_send_message" (LLM-friendly)
+    
+    # Classification (LLM-generated at sync)
+    capabilities = Column(ARRAY(String))             # ["message.send", "channel.write"]
+    intent_keywords = Column(ARRAY(String))          # ["send", "post", "message", "notify"]
+    
+    # Safety
+    destructive = Column(Boolean, default=False)     # True for delete/revoke/remove
+    requires_confirmation = Column(Boolean, default=False)
+    risk_level = Column(String)                      # "safe", "cautious", "dangerous"
+    
+    # Parameter hints (for validation)
+    required_params = Column(JSONB)                  # ["channel", "message"]
+    optional_params = Column(JSONB)                  # ["thread_ts", "attachments"]
+    
+    # Metadata
+    description_short = Column(String)               # LLM-summarized, <100 chars
+    description_original = Column(Text)              # Original from Composio
+    
+    # Sync tracking
+    composio_hash = Column(String)                   # Hash of original action spec
+    classified_at = Column(DateTime)
+    classification_model = Column(String)            # "gpt-4o-mini" or "claude-haiku"
+    manually_overridden = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, onupdate=utcnow)
+
+Capability Taxonomy
+Start with a focused taxonomy that covers 90% of use cases:
+
+# orchestrator/modules/tools/capabilities/taxonomy.py
+
+CAPABILITY_TAXONOMY = {
+    # Communication
+    "message.send": "Send messages, posts, or notifications",
+    "message.read": "Read or list messages",
+    "message.reply": "Reply to existing messages or threads",
+    "message.delete": "Delete messages",
+    
+    # Channels/Spaces
+    "channel.list": "List channels, rooms, or spaces",
+    "channel.join": "Join or leave channels",
+    "channel.create": "Create new channels",
+    "channel.manage": "Modify channel settings",
+    
+    # Users/Members
+    "user.lookup": "Find or get user information",
+    "user.invite": "Invite users to workspace/channel",
+    "user.manage": "Modify user roles or permissions",
+    
+    # Files/Documents
+    "file.read": "Read or download files",
+    "file.write": "Create or upload files",
+    "file.update": "Modify existing files",
+    "file.delete": "Delete files",
+    
+    # Data/Records
+    "data.query": "Search or filter records",
+    "data.create": "Create new records",
+    "data.update": "Modify existing records",
+    "data.delete": "Delete records",
+    
+    # Code/Repos (GitHub, GitLab, etc.)
+    "repo.read": "Read repository information",
+    "repo.write": "Create or modify repositories",
+    "issue.read": "Read issues or tickets",
+    "issue.write": "Create or modify issues",
+    "pr.read": "Read pull requests",
+    "pr.write": "Create or modify pull requests",
+    "pr.review": "Review or approve pull requests",
+    
+    # Calendar/Events
+    "event.read": "Read calendar events",
+    "event.create": "Create calendar events",
+    "event.update": "Modify calendar events",
+    "event.delete": "Delete calendar events",
+    
+    # Auth/Admin (high risk)
+    "auth.token": "Generate or manage tokens",
+    "auth.revoke": "Revoke access or permissions",
+    "admin.settings": "Modify workspace/org settings",
+}
+
+# Risk classification
+DESTRUCTIVE_CAPABILITIES = {
+    "message.delete", "file.delete", "data.delete", 
+    "event.delete", "auth.revoke", "channel.delete"
+}
+
+REQUIRES_CONFIRMATION = {
+    "admin.settings", "auth.revoke", "user.manage",
+    "repo.write",  # Creating repos is significant
+}
+
+LLM Classification Prompt
+# orchestrator/modules/tools/sync/action_classifier.py
+
+CLASSIFICATION_PROMPT = """Classify this API action for a tool routing system.
+
+ACTION: {action_id}
+DESCRIPTION: {description}
+PARAMETERS: {parameters}
+
+CAPABILITY TAXONOMY:
+{taxonomy}
+
+Respond in JSON:
+{{
+    "capabilities": ["capability.name", ...],  // 1-3 most relevant
+    "intent_keywords": ["keyword", ...],       // 3-5 words users might say
+    "destructive": boolean,                    // Does it delete/remove/revoke?
+    "risk_level": "safe|cautious|dangerous",
+    "short_description": "..."                 // <100 chars, action-oriented
+}}
+
+Examples:
+- SLACK_SENDS_A_MESSAGE → {{"capabilities": ["message.send"], "destructive": false, ...}}
+- GITHUB_DELETE_REPOSITORY → {{"capabilities": ["repo.write"], "destructive": true, "risk_level": "dangerous", ...}}
+"""
+
+Sync Service
+# orchestrator/modules/tools/sync/composio_action_sync.py
+
+class ComposioActionSyncService:
+    """
+    Syncs Composio actions and classifies them via LLM.
+    Runs on: app enable, daily refresh, manual trigger.
+    """
+    
+    async def sync_app(self, app_id: str, force: bool = False) -> SyncResult:
+        """Sync all actions for a Composio app."""
+        
+        # 1. Fetch actions from Composio
+        actions = await self.composio_client.get_app_actions(app_id)
+        
+        # 2. Check what needs classification
+        to_classify = []
+        for action in actions:
+            existing = await self.db.get_action_metadata(action.id)
+            action_hash = self._hash_action(action)
+            
+            if existing and existing.manually_overridden:
+                continue  # Never overwrite manual overrides
+            
+            if not existing or existing.composio_hash != action_hash or force:
+                to_classify.append(action)
+        
+        # 3. Batch classify (reduces API calls)
+        if to_classify:
+            classifications = await self._batch_classify(to_classify)
+            await self._save_classifications(classifications)
+        
+        return SyncResult(
+            app_id=app_id,
+            total_actions=len(actions),
+            classified=len(to_classify),
+            skipped=len(actions) - len(to_classify)
+        )
+    
+    async def _batch_classify(
+        self, 
+        actions: list[ComposioAction], 
+        batch_size: int = 10
+    ) -> list[ActionClassification]:
+        """Classify actions in batches to reduce LLM calls."""
+        
+        results = []
+        for batch in chunked(actions, batch_size):
+            # Single LLM call for batch of 10 actions
+            prompt = self._build_batch_prompt(batch)
+            response = await self.llm.complete(prompt, model="gpt-4o-mini")
+            results.extend(self._parse_batch_response(response, batch))
+        
+        return results
+
+Integration with ToolCapabilityMapper
+# Extend existing tool_capability_mapper.py
+
+class ToolCapabilityMapper:
+    # ... existing code ...
+    
+    async def get_actions_for_intent(
+        self,
+        intent: str,
+        enabled_apps: list[str],
+        include_destructive: bool = False,
+        max_actions: int = 15
+    ) -> list[ActionRecommendation]:
+        """
+        Get relevant Composio actions for a user intent.
+        Uses locally-stored capability metadata (no API calls).
+        """
+        
+        # 1. Extract capabilities from intent
+        required_caps = self._intent_to_capabilities(intent)
+        
+        # 2. Query local metadata
+        query = (
+            select(ComposioActionMetadata)
+            .where(ComposioActionMetadata.app_id.in_(enabled_apps))
+            .where(ComposioActionMetadata.capabilities.overlap(required_caps))
+        )
+        
+        if not include_destructive:
+            query = query.where(ComposioActionMetadata.destructive == False)
+        
+        actions = await self.db.execute(query)
+        
+        # 3. Rank by relevance (keyword overlap, capability match strength)
+        ranked = self._rank_actions(actions, intent, required_caps)
+        
+        return ranked[:max_actions]
+    
+    def _intent_to_capabilities(self, intent: str) -> list[str]:
+        """Map user intent to capability tags."""
+        
+        intent_lower = intent.lower()
+        caps = []
+        
+        # Keyword matching (fast, deterministic)
+        if any(w in intent_lower for w in ["send", "post", "notify", "tell"]):
+            caps.append("message.send")
+        if any(w in intent_lower for w in ["read", "get", "fetch", "list", "show"]):
+            caps.append("message.read")
+            caps.append("data.query")
+        if any(w in intent_lower for w in ["create", "add", "new"]):
+            caps.append("data.create")
+            caps.append("file.write")
+        if any(w in intent_lower for w in ["delete", "remove"]):
+            caps.append("data.delete")
+            caps.append("file.delete")
+        # ... etc
+        
+        return caps
+
+Daily Refresh Job
+# orchestrator/jobs/sync_composio_actions.py
+
+@celery.task
+async def daily_composio_sync():
+    """
+    Daily job to refresh action metadata.
+    - Detects new/changed actions
+    - Re-classifies only what changed
+    - Preserves manual overrides
+    """
+    
+    sync_service = ComposioActionSyncService()
+    
+    # Get all apps that any workspace has enabled
+    enabled_apps = await get_all_enabled_composio_apps()
+    
+    for app_id in enabled_apps:
+        try:
+            result = await sync_service.sync_app(app_id)
+            logger.info(f"Synced {app_id}: {result.classified} classified, {result.skipped} skipped")
+        except Exception as e:
+            logger.error(f"Failed to sync {app_id}: {e}")
+            # Continue with other apps
+
+Manual Override API
+# For when classification is wrong
+
+@router.patch("/api/admin/actions/{action_id}/metadata")
+async def override_action_metadata(
+    action_id: str,
+    update: ActionMetadataUpdate,
+    current_user: User = Depends(require_admin)
+):
+    """Manually override LLM classification for an action."""
+    
+    metadata = await db.get_action_metadata(action_id)
+    if not metadata:
+        raise HTTPException(404, "Action not found")
+    
+    # Apply overrides
+    if update.capabilities:
+        metadata.capabilities = update.capabilities
+    if update.destructive is not None:
+        metadata.destructive = update.destructive
+    if update.risk_level:
+        metadata.risk_level = update.risk_level
+    
+    metadata.manually_overridden = True
+    metadata.updated_at = utcnow()
+    
+    await db.save(metadata)
+    return {"status": "updated", "action_id": action_id}
+
+Summary
+Component	Purpose	When it runs
+ComposioActionMetadata table	Store classified action data locally	-
+ComposioActionSyncService	Fetch + classify actions via LLM	On app enable, daily
+CAPABILITY_TAXONOMY	Standardized capability tags	Static, expand as needed
+ToolCapabilityMapper.get_actions_for_intent()	Filter actions by intent	Every request (local DB only)
+Manual override API	Fix misclassifications	As needed
+The key insight: classification happens once at sync time, filtering happens at runtime with zero external calls.
+
+What's your take on this structure? Anything you'd adjust before we start implementing?
