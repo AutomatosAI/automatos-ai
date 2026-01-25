@@ -222,9 +222,18 @@ class PromptAnalyzer:
         if not query or not available_tools:
             return []
 
-        def tokenize(text: str) -> set:
+        # Stopwords to prevent accidental matches like "from" → delete_file, etc.
+        stopwords = {
+            "the", "and", "for", "with", "from", "into", "onto", "over", "under",
+            "this", "that", "these", "those", "here", "there",
+            "today", "tomorrow", "yesterday", "now", "latest", "recent",
+            "please", "can", "could", "would", "should", "just",
+            "my", "your", "our", "their",
+        }
+
+        def tokenize(text: str) -> set[str]:
             tokens = re.split(r"[^a-z0-9]+", (text or "").lower())
-            return {t for t in tokens if len(t) > 2}
+            return {t for t in tokens if len(t) > 2 and t not in stopwords}
 
         query_tokens = tokenize(query)
         if not query_tokens:
@@ -244,6 +253,12 @@ class PromptAnalyzer:
             # Lightweight boost for direct name match
             if name and name.lower() in (query or "").lower():
                 score += 3
+
+            # Safety bias: avoid suggesting destructive tools unless explicitly requested.
+            if name in {"delete_file", "execute_command"}:
+                destructive_tokens = {"delete", "remove", "destroy", "erase", "rm", "wipe", "exec", "run", "command"}
+                if not (query_tokens & destructive_tokens):
+                    score -= 2
 
             if score > 0:
                 scored.append({

@@ -6,7 +6,6 @@ Single entry point for all tool execution, routing to appropriate executors:
 - Research tools (search_knowledge, semantic_search, search_codebase)
 - File operations (read_file, write_file, list_directory)
 - Shell commands (execute_command)
-- MCP tools (third-party integrations)
 """
 
 import logging
@@ -17,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from modules.agents.services.agent_platform_tools import AgentPlatformTools
 from modules.agents.services.agent_action_executor import ActionExecutor
-from modules.tools.execution.mcp_executor import MCPToolExecutor
 from modules.tools.registry import ToolRegistry
 from modules.tools.registry.tool_registry import ToolSpec
 
@@ -60,7 +58,6 @@ class UnifiedToolExecutor:
         # Lazy-loaded executors (only initialize when needed)
         self._platform_tools = None  # For research tools (RAG, CodeGraph)
         self._action_executor = None  # For file/shell operations
-        self._mcp_executor = None  # For MCP tools
         self._tool_registry = None  # For tool metadata
         self._composio_executor = None  # PRD-36: Composio tools
         
@@ -92,6 +89,9 @@ class UnifiedToolExecutor:
             
             # Shell commands
             'execute_command': self._execute_shell,
+
+            # Composio (external apps via DB cache + Composio OAuth)
+            'composio_execute': self._execute_composio_execute,
             
             # PRD-22: Document creation tools (skill-based)
             'create_pdf': self._execute_document_tool,
@@ -112,8 +112,6 @@ class UnifiedToolExecutor:
             'research_topic': self._execute_analysis_tool,
             'analyze_data': self._execute_analysis_tool,
             'write_document': self._execute_writing_tool,
-            
-            # MCP tools handled dynamically
             
             # PRD-36: Composio tools routed dynamically by prefix
         }
@@ -143,14 +141,6 @@ class UnifiedToolExecutor:
             logger.info("  🔧 Initializing file/shell executor...")
             self._action_executor = ActionExecutor(self.workspace_dir)
         return self._action_executor
-    
-    @property
-    def mcp_executor(self):
-        """Lazy-load MCP executor only when needed."""
-        if self._mcp_executor is None:
-            logger.info("  🔧 Initializing MCP executor...")
-            self._mcp_executor = MCPToolExecutor(self.db)
-        return self._mcp_executor
     
     @property
     def tool_registry(self):
@@ -231,20 +221,26 @@ class UnifiedToolExecutor:
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
-                logger.warning(f"[tool-trace {trace}] Tool '{tool_name}' not in registry, checking MCP tools...")
-                # Check MCP tools
-                mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
-                if mcp_tool:
-                    return await self._execute_mcp_tool(tool_name, parameters, agent_id, trace_id=trace)
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Unknown tool: {tool_name}",
-                        "tool": tool_name
-                    }
+                return {
+                    "success": False,
+                    "error": f"Unknown tool: {tool_name}",
+                    "tool": tool_name,
+                }
             
             # PRD-36: Route Composio tools explicitly
-            if tool_spec.metadata and tool_spec.metadata.get("adapter_type") == "composio":
+            # IMPORTANT: `composio_execute` is a GENERIC dispatcher and must read `action`
+            # from parameters. Do NOT derive action from tool name (would become "execute").
+            if tool_name == "composio_execute":
+                logger.info(f"[tool-trace {trace}] Routing to Composio generic executor: {tool_name}")
+                return await self._execute_composio_execute(
+                    tool_name,
+                    parameters,
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace,
+                )
+
+            if tool_spec.metadata and tool_spec.metadata.get("integration_type") == "composio":
                 logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
                 return await self._execute_composio_tool(
                     tool_spec,
@@ -257,12 +253,26 @@ class UnifiedToolExecutor:
             # Route to appropriate executor
             executor_func = self.tool_routes.get(tool_name)
             if executor_func:
-                result = await executor_func(tool_name, parameters, agent_id)
+                # Some executors need workspace context (e.g. Composio).
+                # Prefer passing workspace_id when supported, otherwise fallback.
+                try:
+                    result = await executor_func(
+                        tool_name,
+                        parameters,
+                        agent_id,
+                        workspace_id=workspace_id,
+                        trace_id=trace,
+                    )
+                except TypeError:
+                    result = await executor_func(tool_name, parameters, agent_id)
                 logger.info(f"  ✅ Tool '{tool_name}' executed successfully")
                 return result
             else:
-                # Try MCP tool
-                return await self._execute_mcp_tool(tool_name, parameters, agent_id, trace_id=trace)
+                return {
+                    "success": False,
+                    "error": f"Unknown tool: {tool_name}",
+                    "tool": tool_name,
+                }
                 
         except Exception as e:
             logger.error(f"[tool-trace {trace_id or 'no-trace'}] Tool execution failed: {tool_name} - {e}")
@@ -903,76 +913,6 @@ class UnifiedToolExecutor:
                 "tool": "create_pdf"
             }
     
-    async def _execute_mcp_tool(
-        self,
-        tool_name: str,
-        parameters: Dict[str, Any],
-        agent_id: int,
-        trace_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Execute MCP tools via MCPToolExecutor.
-        
-        Connects to actual MCP servers via JSON-RPC protocol.
-        """
-        trace = trace_id or "no-trace"
-        logger.info(f"[tool-trace {trace}] Routing to MCP server: {tool_name}")
-        
-        # Extract method/operation - support both 'method' and 'operation' keys
-        # 'operation' is used by adapter tools, 'method' is used by MCP protocol
-        if isinstance(parameters, dict):
-            method = parameters.get("method") or parameters.get("operation") or "default"
-            
-            # Build params - handle nested 'parameters' or 'params' keys
-            # GPT-4 may send: {'operation': 'postMessage', 'parameters': {'channel': '...', 'text': '...'}}
-            if "parameters" in parameters and isinstance(parameters["parameters"], dict):
-                # Use the nested 'parameters' dict
-                params = parameters["parameters"]
-            elif "params" in parameters and isinstance(parameters["params"], dict):
-                # Use the nested 'params' dict  
-                params = parameters["params"]
-            else:
-                # Extract all params except the operation/method key
-                params = {k: v for k, v in parameters.items() if k not in ("method", "operation", "params", "parameters")}
-        else:
-            method = "default"
-            params = {}
-        
-        logger.info(
-            f"[tool-trace {trace}] MCP execution: method={method}, "
-            f"params_keys={list(params.keys())}"
-        )
-        
-        # Prefer registry metadata for MCP tools
-        tool_spec = self.tool_registry.get_tool(tool_name)
-        if tool_spec and (tool_spec.metadata or {}).get("tool_id"):
-            tool_id = tool_spec.metadata.get("tool_id")
-            # Use metadata method only if no explicit method provided
-            if method == "default":
-                method = tool_spec.metadata.get("method") or method
-            return await self.mcp_executor.execute_tool(
-                agent_id=agent_id,
-                tool_id=tool_id,
-                method=method,
-                params=params,
-                execution_id=None,
-                trace_id=trace
-            )
-        
-        # Fallback: direct MCP tool name lookup
-        mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
-        if not mcp_tool:
-            return {"success": False, "error": f"MCP tool '{tool_name}' not found"}
-        
-        return await self.mcp_executor.execute_tool(
-            agent_id=agent_id,
-            tool_id=mcp_tool.id,
-            method=method,
-            params=params,
-            execution_id=None,
-            trace_id=trace
-        )
-    
     async def _execute_composio_tool(
         self,
         tool_spec: ToolSpec,
@@ -1021,6 +961,57 @@ class UnifiedToolExecutor:
             params=params,
             agent_id=agent_id,
             workspace_id=workspace_id
+        )
+
+    async def _execute_composio_execute(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute an arbitrary Composio action for an assigned/connected app.
+
+        Expected input:
+        - app_name: "GMAIL" / "SLACK" / ...
+        - action: action name as stored in composio_actions_cache (e.g., "GMAIL_LIST_EMAILS")
+        - params: object passed to the Composio action
+        """
+        if not self.composio_executor:
+            return {"success": False, "error": "Composio executor not available", "tool": tool_name}
+        if not workspace_id:
+            return {"success": False, "error": "workspace_id required for Composio execution", "tool": tool_name}
+
+        if not isinstance(parameters, dict):
+            return {"success": False, "error": "Invalid parameters (expected object)", "tool": tool_name}
+
+        action = parameters.get("action") or parameters.get("action_name")
+        # Accept both `params` (preferred) and `parameters` (some models emit this).
+        params = None
+        if isinstance(parameters.get("params"), dict):
+            params = parameters.get("params")
+        elif isinstance(parameters.get("parameters"), dict):
+            params = parameters.get("parameters")
+        else:
+            params = {}
+        app_name = parameters.get("app_name") or parameters.get("app")
+
+        if not action:
+            return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+
+        trace = trace_id or "no-trace"
+        logger.info(
+            f"[tool-trace {trace}] Composio execute app={app_name} action={action} "
+            f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
+        )
+
+        return await self.composio_executor.execute(
+            action=str(action),
+            params=params,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
         )
     
     def get_available_tools(self, categories: Optional[list] = None) -> list:
@@ -1376,6 +1367,4 @@ Analysis complete.
             }
 
 
-# Import MCPTool model at the bottom to avoid circular imports
-from core.models import MCPTool
 

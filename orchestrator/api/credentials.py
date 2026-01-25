@@ -163,8 +163,6 @@ async def handle_request(
     """
     Create a new credential with encryption.
     Credential values are immediately encrypted and never stored in plaintext.
-    
-    PRD-20: Auto-activates matching MCP servers when credential is created!
     """
     set_request_id(str(uuid.uuid4()))
     
@@ -208,22 +206,6 @@ async def handle_request(
             has_credentials=True,
             field_names=field_names
         )
-        
-        # PRD-20: AUTO-ACTIVATE matching MCP servers! 🚀
-        try:
-            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
-            
-            activation_service = MCPAutoActivationService(db)
-            activation_result = await activation_service.activate_mcp_servers_for_credential(
-                credential_id=created_cred.id,
-                credential_type_name=cred_type.name
-            )
-            
-            logger.info(f"🎉 Auto-activated {activation_result['activated_count']} MCP servers for credential '{created_cred.name}'")
-            
-        except Exception as e:
-            # Don't fail credential creation if auto-activation fails
-            logger.warning(f"⚠️  Auto-activation failed (credential still created): {e}")
         
         return response
     
@@ -460,29 +442,11 @@ async def delete_credential(
 ):
     """
     Securely delete a credential
-    
-    PRD-20: Auto-deactivates linked MCP servers when credential is deleted!
     """
     set_request_id(str(uuid.uuid4()))
     
     try:
         ip_address = get_client_ip(request)
-        
-        # PRD-20: DEACTIVATE linked MCP servers before deleting credential
-        try:
-            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
-            
-            activation_service = MCPAutoActivationService(db)
-            deactivation_result = await activation_service.deactivate_mcp_servers_for_credential(
-                credential_id=credential_id
-            )
-            
-            if deactivation_result['deactivated_count'] > 0:
-                logger.info(f"🔌 Auto-deactivated {deactivation_result['deactivated_count']} MCP servers")
-            
-        except Exception as e:
-            # Don't fail deletion if deactivation fails
-            logger.warning(f"⚠️  Auto-deactivation failed (continuing with deletion): {e}")
         
         # Delete the credential
         store.delete_credential(

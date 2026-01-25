@@ -1,15 +1,18 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, text
+from sqlalchemy.exc import SQLAlchemyError
 import time
 import logging
 
 from core.database.database import get_db
 from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
-# Import MCP tool models from database.models (SQLAlchemy models)
-from core.models import AgentToolAssignment, MCPTool
+# New cache tables (rewrite)
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+# Composio connection manager (used to restrict assignments to connected apps)
+from core.composio.entity_manager import EntityManager
 # Import Pydantic models from database.models (not models.py)
 from core.models import (
     AgentCreate, AgentUpdate, AgentResponse,
@@ -24,6 +27,67 @@ from core.auth.dependencies import RequestContext
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+
+
+def _stable_tool_id(name: str) -> int:
+    """Match frontend stableId() hash (negative int)."""
+    h = 0
+    for ch in (name or ""):
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        # convert to signed 32-bit
+        if h & 0x80000000:
+            h = -((~h + 1) & 0xFFFFFFFF)
+    if h == 0:
+        return -1
+    return -abs(int(h))
+
+
+def _resolve_tool_ids_to_app_names(db: Session, ctx: RequestContext, tool_ids: List[int]) -> List[str]:
+    """Resolve incoming tool IDs (ComposioAppCache.id or frontend stable hash) into app_name strings.
+
+    The Agent UI uses the *connected tools* list, so we only allow tools that are
+    connected for the current workspace.
+    """
+    if not tool_ids:
+        return []
+
+    # Connected apps for this workspace
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    connected_app_names: List[str] = []
+    if entity:
+        connected_app_names = [
+            (c.get("app_name") or "").upper()
+            for c in entity_manager.get_entity_connections(entity["id"])
+            if c.get("status") == "active"
+        ]
+
+    connected_set = {a for a in connected_app_names if a}
+    if not connected_set:
+        return []
+
+    id_to_app: Dict[int, str] = {}
+
+    # Map stable negative IDs for connected apps
+    for app_name in connected_set:
+        id_to_app[_stable_tool_id(app_name)] = app_name
+
+    # Map DB IDs for connected apps if cached
+    cached_apps = (
+        db.query(ComposioAppCache)
+        .filter(ComposioAppCache.app_name.in_(list(connected_set)))
+        .all()
+    )
+    for a in cached_apps:
+        id_to_app[int(a.id)] = a.app_name
+
+    resolved: List[str] = []
+    for tid in tool_ids:
+        app_name = id_to_app.get(int(tid))
+        if app_name and app_name not in resolved:
+            resolved.append(app_name)
+    return resolved
+
 
 def _normalize_tags(raw_tags) -> List[str]:
     """Normalize incoming tags into a list of unique, lower-trimmed strings."""
@@ -59,35 +123,38 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
     model_cfg = getattr(agent, 'model_config', None)
     logger.info(f"Agent {agent.id} model_config: {model_cfg}")
     
-    # Build tools list - CLEAN ARCHITECTURE
-    # Simple: tool_id is 'slack', 'github', etc. (no prefix, no transformation)
-    tools = []
-    if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
-        from core.models.core import MCPTool
-        for assignment in agent.tool_assignments:
-            if assignment.enabled:
-                # Fetch tool metadata from mcp_tools
-                tool = db.query(MCPTool).filter(
-                    (MCPTool.tool_id == assignment.tool_id) | (MCPTool.name == assignment.tool_id)
-                ).first()
-                
-                if tool:
-                    tools.append({
-                        "id": tool.id,  # Fix: Use MCPTool ID (PK) for frontend matching
-                        "assignment_id": assignment.id, # Keep assignment ID for reference
-                        "name": assignment.tool_id,  # Clean: 'slack', 'github'
-                        "description": tool.description,
-                        "provider": tool.provider,
-                        "category": tool.category,
-                        "icon": tool.logo or tool.icon,
-                        "permissions": {},
-                        "configuration": {},
-                        "assigned_at": assignment.created_at
-                    })
-                else:
-                    logger.warning(f"Skipping assignment {assignment.id}: Tool '{assignment.tool_id}' not found.")
+    # Build tools list from the NEW assignment table (agent_app_assignments).
+    tools: List[Dict[str, Any]] = []
+    assignments = (
+        db.query(AgentAppAssignment)
+        .filter(AgentAppAssignment.agent_id == agent.id, AgentAppAssignment.is_active == True)
+        .all()
+    )
+    if assignments:
+        app_names = [a.app_name.upper() for a in assignments if a.app_name]
+        cache = {
+            a.app_name: a
+            for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
+        }
+        for assignment in assignments:
+            app_name = (assignment.app_name or "").upper()
+            cached = cache.get(app_name)
+            tools.append(
+                {
+                    "id": cached.id if cached else None,
+                    "assignment_id": assignment.id,
+                    "name": app_name,
+                    "description": (cached.description if cached else "") or "",
+                    "provider": "Composio" if cached else None,
+                    "category": ((cached.categories or [None])[0] if cached else None),
+                    "icon": cached.logo_url if cached else None,
+                    "permissions": {},
+                    "configuration": assignment.config or {},
+                    "assigned_at": assignment.assigned_at,
+                }
+            )
     
-    # Read-time adapter: Remove tags from configuration if present (legacy data cleanup)
+    # Read-time legacy cleanup: remove tags from configuration if present
     # agent.tags is the single source of truth, configuration should not contain tags
     configuration = agent.configuration.copy() if agent.configuration else {}
     if "tags" in configuration:
@@ -293,44 +360,21 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         # Tags are NOT stored in agent.configuration to avoid duplicate state.
         # Legacy clients reading tags from configuration should migrate to use agent.tags.
         
-        # Add tools if provided (NEW FEATURE)
+        # Add tools (NEW: agent_app_assignments)
         if agent_data.tool_ids:
-            logger.info(f"🛠️ Processing tool_ids: {agent_data.tool_ids}")
-            # Enhanced validation: Check that all tool IDs exist and are active
-            tools = db.query(MCPTool).filter(
-                MCPTool.id.in_(agent_data.tool_ids),
-                MCPTool.status == "active"
-            ).all()
-            logger.info(f"🔍 Found {len(tools)} active tools out of {len(agent_data.tool_ids)} requested")
-            if len(tools) != len(agent_data.tool_ids):
-                found_ids = [tool.id for tool in tools]
-                missing_ids = [tid for tid in agent_data.tool_ids if tid not in found_ids]
-                # Check if missing tools exist but are inactive
-                inactive_tools = db.query(MCPTool).filter(
-                    MCPTool.id.in_(missing_ids),
-                    MCPTool.status != "active"
-                ).all()
-                if inactive_tools:
-                    inactive_names = [tool.name for tool in inactive_tools]
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"Tools are inactive and cannot be assigned: {inactive_names}"
+            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_data.tool_ids)
+            for app_name in desired_apps:
+                db.add(
+                    AgentAppAssignment(
+                        agent_id=agent.id,
+                        app_name=app_name,
+                        app_type="EXTERNAL",
+                        assigned_by=getattr(ctx.user, "id", None),
+                        is_active=True,
+                        priority=0,
+                        config={},
                     )
-                else:
-                    raise HTTPException(status_code=404, detail=f"Tools not found: {missing_ids}")
-            
-            # Additional validation: Check for duplicate tool IDs
-            if len(set(agent_data.tool_ids)) != len(agent_data.tool_ids):
-                raise HTTPException(status_code=400, detail="Duplicate tool IDs are not allowed")
-            
-            # Create tool assignments
-            for tool in tools:
-                assignment = AgentToolAssignment(
-                    agent_id=agent.id,
-                    tool_id=tool.id,
-                    enabled=True
                 )
-                db.add(assignment)
         
         db.commit()
         db.refresh(agent)
@@ -338,7 +382,6 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
         # Load skills and tools for response
         agent_with_skills_and_tools = db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments)
         ).filter(Agent.id == agent.id).first()
         
         return _build_agent_response(agent_with_skills_and_tools, db)
@@ -364,10 +407,7 @@ async def list_agents(
     """List agents with enhanced filtering and pagination"""
     try:
         # Filter by workspace
-        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(
-            joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments)
-        )
+        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills))
         
         # Apply filters
         if status:
@@ -454,10 +494,12 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestCo
 async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get a specific agent by ID with skills and tools"""
     try:
-        agent = db.query(Agent).options(
-            joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments)
-        ).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
+        agent = (
+            db.query(Agent)
+            .options(joinedload(Agent.skills))
+            .filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)
+            .first()
+        )
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
@@ -550,60 +592,39 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
                 config.pop("tags", None)
                 agent.configuration = config
 
-        # Handle tool updates (NEW)
+        # Handle tool updates (NEW: agent_app_assignments)
         if agent_update.tool_ids is not None:
-            logger.info(f"🛠️ Updating tool assignments for agent {agent.id} to: {agent_update.tool_ids}")
-            
-            # Validate tools exist (allow available/inactive for Composio apps)
-            tools = db.query(MCPTool).filter(
-                MCPTool.id.in_(agent_update.tool_ids)
-            ).all()
-            
-            if len(tools) != len(agent_update.tool_ids):
-                found_ids = [t.id for t in tools]
-                missing_ids = [tid for tid in agent_update.tool_ids if tid not in found_ids]
-                raise HTTPException(status_code=404, detail=f"Tools not found or inactive: {missing_ids}")
-            
-            # Create map of PK -> String ID for resolution
-            tool_pk_map = {t.id: (t.tool_id or t.name) for t in tools}
-            
-            # Create a set of NEW clean IDs being requested
-            new_tool_ids_set = set()
-            for tid in agent_update.tool_ids:
-                if tid in tool_pk_map:
-                    new_tool_ids_set.add(tool_pk_map[tid])
-            
-            # Get current assignments
-            current_assignments = db.query(AgentToolAssignment).filter(
-                AgentToolAssignment.agent_id == agent.id
-            ).all()
-            current_map = {a.tool_id: a for a in current_assignments}
-            
-            # 1. Remove assignments not in the new list
-            for tool_id, assignment in current_map.items():
-                if tool_id not in new_tool_ids_set:
-                    logger.info(f"Removing assignment {assignment.id} for Agent {agent.id}: Tool '{tool_id}' deselected.")
-                    db.delete(assignment)
-             
-            # 2. Add or update assignments
-            for tool_pk in agent_update.tool_ids:
-                clean_tool_id = tool_pk_map.get(tool_pk)
-                if not clean_tool_id:
-                    logger.error(f"Could not resolve String ID for Tool PK {tool_pk}")
-                    continue
+            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_update.tool_ids)
+            desired_set = {a.upper() for a in desired_apps}
 
-                if clean_tool_id in current_map:
-                    # Ensure enabled if it was disabled
-                    current_map[clean_tool_id].enabled = True
+            current = (
+                db.query(AgentAppAssignment)
+                .filter(AgentAppAssignment.agent_id == agent.id)
+                .all()
+            )
+            current_map = {c.app_name.upper(): c for c in current if c.app_name}
+
+            # Disable anything no longer selected
+            for app_name, row in current_map.items():
+                if app_name not in desired_set:
+                    row.is_active = False
+
+            # Add or re-enable selected apps
+            for app_name in desired_set:
+                if app_name in current_map:
+                    current_map[app_name].is_active = True
                 else:
-                    # Create new assignment using the CLEAN STRING ID
-                    logger.info(f"Creating NEW assignment for Agent {agent.id}: Tool '{clean_tool_id}' (PK: {tool_pk})")
-                    new_assignment = AgentToolAssignment(
-                        agent_id=agent.id,
-                        tool_id=clean_tool_id,
-                        enabled=True
+                    db.add(
+                        AgentAppAssignment(
+                            agent_id=agent.id,
+                            app_name=app_name,
+                            app_type="EXTERNAL",
+                            assigned_by=getattr(ctx.user, "id", None),
+                            is_active=True,
+                            priority=0,
+                            config={},
+                        )
                     )
-                    db.add(new_assignment)
         
         db.commit()
         db.refresh(agent)

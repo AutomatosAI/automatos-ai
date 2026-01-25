@@ -12,7 +12,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from pydantic import BaseModel
 
 from core.database.database import get_db
@@ -84,6 +84,66 @@ def get_user_id(db: Session) -> int:
     if not result:
         raise HTTPException(status_code=500, detail="No users found")
     return result[0]
+
+def get_default_agent_id(db: Session, workspace_id) -> int:
+    """
+    Pick a sensible default agent for chat when the client does not send agentId.
+
+    Preference:
+    - Any agent in this workspace with active EXTERNAL app assignments (Composio),
+      ordered by number of assignments (desc).
+    - Fallback to agent id=1.
+    """
+    try:
+        from core.models import Agent
+        from core.models.composio_cache import AgentAppAssignment
+        from core.composio.entity_manager import EntityManager
+
+        # Connected apps for this workspace (must be connected, otherwise Composio gating will deny)
+        connected_apps: set[str] = set()
+        try:
+            manager = EntityManager(db)
+            connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
+        except Exception:
+            connected_apps = set()
+
+        # Candidate agents with EXTERNAL app assignments (descending by assignment count)
+        candidates = (
+            db.query(AgentAppAssignment.agent_id)
+            .join(Agent, Agent.id == AgentAppAssignment.agent_id)
+            .filter(
+                Agent.workspace_id == workspace_id,
+                AgentAppAssignment.is_active == True,  # noqa: E712
+                AgentAppAssignment.app_type == "EXTERNAL",
+            )
+            .group_by(AgentAppAssignment.agent_id)
+            .order_by(func.count(AgentAppAssignment.id).desc(), AgentAppAssignment.agent_id.asc())
+            .limit(10)
+            .all()
+        )
+
+        # Pick the first candidate that has at least one assigned app connected in this workspace.
+        for (agent_id,) in candidates:
+            if not agent_id:
+                continue
+            if connected_apps:
+                assigned_apps = {
+                    (r[0] or "").upper().strip()
+                    for r in db.query(AgentAppAssignment.app_name)
+                    .filter(
+                        AgentAppAssignment.agent_id == agent_id,
+                        AgentAppAssignment.is_active == True,  # noqa: E712
+                        AgentAppAssignment.app_type == "EXTERNAL",
+                    )
+                    .all()
+                }
+                assigned_apps.discard("")
+                if not assigned_apps.intersection(connected_apps):
+                    continue
+            return int(agent_id)
+    except Exception:
+        pass
+    return 1
 
 
 # Endpoints
@@ -189,6 +249,10 @@ async def stream_chat(
     
     # DEBUG: Log incoming request
     logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")
+
+    effective_agent_id = request.agentId or get_default_agent_id(db, ctx.workspace_id)
+    if not request.agentId:
+        logger.info(f"[chat] agentId not provided; using default agent_id={effective_agent_id} for workspace={ctx.workspace_id}")
     
     # PRD: Unified Agent-Chat System
     # Use agent-based streaming if agentId is provided
@@ -215,9 +279,9 @@ async def stream_chat(
         streaming_service.stream_response_aisdk(
             chat_id=chat_id,
             messages=message_history,
-            tools=get_chat_tools(agent_id=request.agentId or 1),
+            tools=get_chat_tools(agent_id=effective_agent_id, workspace_id=ctx.workspace_id),
             selected_model=request.selectedChatModel,
-            agent_id=request.agentId or 1
+            agent_id=effective_agent_id
         ),
         media_type="text/plain; charset=utf-8",
         headers={

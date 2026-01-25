@@ -7,7 +7,7 @@
  * 
  * Usage:
  * ```tsx
- * <ToolLogo logo="/logos/Discord.png" name="Discord Bot MCP" size={32} />
+ * <ToolLogo logo="/logos/Discord.png" name="Discord" size={32} />
  * ```
  */
 

@@ -67,7 +67,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
 
   // Settings/Admin Pages
   'settings': false,         // ✅ Use real APIs - credentials system ready
-  'tools': false,            // ✅ Use real APIs - MCP tools endpoints working
+  'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
 
   // Testing/Development
@@ -832,6 +832,12 @@ class ApiClient {
 
       if (!response.ok) {
         console.error('❌ API Error:', response.status, response.statusText)
+        if (response.status === 401) {
+          throw new Error(
+            'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
+            'Make sure you are signed in and the API client is configured with Clerk.'
+          )
+        }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
@@ -1476,95 +1482,132 @@ class ApiClient {
     return this.request('/api/analytics/metrics')
   }
 
-  // ===== MCP TOOLS ENDPOINTS (Phase 3) =====
-  async getMCPTools(params?: { status?: string; category?: string; provider?: string; search?: string; skip?: number; limit?: number }) {
-    const queryParams = new URLSearchParams()
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) queryParams.append(key, String(value))
-      })
+  // ===== TOOLS / INTEGRATIONS ENDPOINTS =====
+  async getTools(params?: { status?: string; category?: string; provider?: string; search?: string; skip?: number; limit?: number }) {
+    // Tools UI reads from rewrite `/api/tools/*` endpoints.
+    const status = params?.status
+    const category = params?.category
+    const search = params?.search
+    const skip = params?.skip ?? 0
+    const limit = params?.limit ?? 20
+
+    // Connected tools (what the UI calls "active")
+    if (status === 'active') {
+      const connected = (await this.request('/api/tools/connected')) as any
+      const apps: any[] = connected?.apps || []
+
+      const stableId = (s: string) => {
+        // Simple deterministic hash -> negative int (avoids collisions with DB ids)
+        let h = 0
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+        return h === 0 ? -1 : -Math.abs(h)
+      }
+
+      const normalized = apps.map((a: any) => ({
+        id: a.id ?? stableId(String(a.app_name || '')),
+        name: a.app_name,
+        description: a.description || '',
+        integration_url: 'composio://',
+        capabilities: {},
+        credentials_schema: {},
+        status: 'active',
+        enabled: true,
+        provider: 'Composio',
+        version: '1.0.0',
+        icon: a.logo_url,
+        logo: a.logo_url,
+        category: (a.categories || [])[0] || 'Integration',
+        tags: a.categories || [],
+        metadata: {
+          action_count: a.action_count || 0,
+          trigger_count: a.trigger_count || 0,
+          auth_schemes: a.auth_schemes || [],
+        },
+        updated_at: null,
+      }))
+
+      const paged = normalized.slice(skip, skip + limit)
+      const total = normalized.length
+      const pages = limit ? Math.ceil(total / limit) : 1
+      return {
+        data: paged,
+        pagination: {
+          total,
+          skip,
+          limit,
+          pages,
+          current_page: limit ? Math.floor(skip / limit) + 1 : 1,
+        },
+      }
     }
-    const url = queryParams.toString() ? `/api/mcp-tools/?${queryParams}` : '/api/mcp-tools/'
-    return this.request(url)
-  }
 
-  async getMCPTool(id: number) {
-    return this.request(`/api/mcp-tools/${id}`)
-  }
+    // Marketplace (cached) tools
+    const q = new URLSearchParams()
+    if (category) q.append('category', category)
+    if (search) q.append('search', search)
+    q.append('limit', String(Math.min(limit, 500)))
+    q.append('offset', String(skip))
 
-  async createMCPTool(data: any) {
-    return this.request('/api/mcp-tools/', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
+    const marketplace = (await this.request(`/api/tools/marketplace?${q.toString()}`)) as any
+    const apps: any[] = marketplace?.apps || []
 
-  async updateMCPTool(id: number, data: any) {
-    return this.request(`/api/mcp-tools/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    })
-  }
+    const normalized = apps.map((a: any) => ({
+      id: a.id,
+      name: a.app_name,
+      description: a.description || '',
+      integration_url: 'composio://',
+      capabilities: {},
+      credentials_schema: {},
+      status: a.is_connected ? 'active' : 'available',
+      enabled: !!a.is_connected,
+      provider: 'Composio',
+      version: '1.0.0',
+      icon: a.logo_url,
+      logo: a.logo_url,
+      category: (a.categories || [])[0] || 'Integration',
+      tags: a.categories || [],
+      metadata: {
+        action_count: a.action_count || 0,
+        trigger_count: a.trigger_count || 0,
+        auth_schemes: a.auth_schemes || [],
+      },
+      updated_at: marketplace?.last_synced || null,
+    }))
 
-  async deleteMCPTool(id: number) {
-    return this.request(`/api/mcp-tools/${id}`, {
-      method: 'DELETE'
-    })
-  }
+    const total = marketplace?.total_apps ?? normalized.length
+    const pages = limit ? Math.ceil(total / limit) : 1
 
-  async testMCPToolConnection(id: number, params?: any) {
-    return this.request(`/api/mcp-tools/${id}/test`, {
-      method: 'POST',
-      body: JSON.stringify(params || {})
-    })
-  }
-
-  async getMCPToolCategories() {
-    return this.request('/api/mcp-tools/categories/list')
-  }
-
-  async getMCPToolsStats() {
-    return this.request('/api/mcp-tools/stats/summary')
-  }
-
-  // Agent-Tool Assignment Endpoints
-  async getMCPToolAssignments(enabledOnly: boolean = true) {
-    return this.request(`/api/mcp-tools/assignments?enabled_only=${enabledOnly}`)
-  }
-
-  async getAgentTools(agentId: number, enabledOnly: boolean = true) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools?enabled_only=${enabledOnly}`)
-  }
-
-  async assignToolToAgent(agentId: number, toolId: number, data?: { enabled?: boolean; permissions?: any; configuration?: any }) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
-      method: 'POST',
-      body: JSON.stringify(data || { tool_id: toolId, enabled: true, permissions: {}, configuration: {} })
-    })
-  }
-
-  async removeToolFromAgent(agentId: number, toolId: number) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
-      method: 'DELETE'
-    })
-  }
-
-  async updateToolPermissions(agentId: number, toolId: number, permissions: any) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}/permissions`, {
-      method: 'PUT',
-      body: JSON.stringify(permissions)
-    })
-  }
-
-  async getToolUsageLogs(params?: { tool_id?: number; agent_id?: number; success_only?: boolean; skip?: number; limit?: number }) {
-    const queryParams = new URLSearchParams()
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) queryParams.append(key, String(value))
-      })
+    return {
+      data: normalized,
+      pagination: {
+        total,
+        skip,
+        limit,
+        pages,
+        current_page: limit ? Math.floor(skip / limit) + 1 : 1,
+      },
     }
-    const url = queryParams.toString() ? `/api/mcp-tools/usage/logs?${queryParams}` : '/api/mcp-tools/usage/logs'
-    return this.request(url)
+  }
+
+  async getToolCategories() {
+    const stats = (await this.request('/api/tools/stats')) as any
+    const categories = stats?.categories || {}
+    return Object.entries(categories).map(([name, count]) => ({ id: name, name, count }))
+  }
+
+  async getToolsStats() {
+    const stats = (await this.request('/api/tools/stats')) as any
+    return {
+      total_tools: stats?.total_apps ?? 0,
+      tools_available: stats?.total_actions ?? 0,
+      connected_apps: stats?.connected_apps ?? 0,
+      categories: stats?.categories ? Object.keys(stats.categories).length : 0,
+      last_synced: stats?.last_synced ?? null,
+    }
+  }
+
+  async syncToolsCache(syncType: 'full' | 'incremental' = 'full') {
+    return this.request(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
   }
 
   // ===== CHATBOT ENDPOINTS =====

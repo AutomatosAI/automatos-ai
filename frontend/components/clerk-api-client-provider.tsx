@@ -1,7 +1,7 @@
 'use client'
 
 import { useAuth } from '@clerk/nextjs'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { apiClient } from '@/lib/api-client'
 
 /**
@@ -13,22 +13,32 @@ import { apiClient } from '@/lib/api-client'
 export function ClerkApiClientProvider({ children }: { children: React.ReactNode }) {
     const { getToken, isLoaded } = useAuth()
 
-    useEffect(() => {
-        if (isLoaded) {
-            // Configure API client to use Clerk tokens
-            apiClient.setClerkTokenGetter(async () => {
-                try {
-                    const token = await getToken()
-                    return token
-                } catch (error) {
-                    console.error('Failed to get Clerk token:', error)
-                    return null
-                }
-            })
+    // Install token getter synchronously (during render) to avoid race conditions
+    // where React Query fires before the first useEffect runs.
+    const configuredRef = useRef(false)
+    const getTokenRef = useRef(getToken)
+    getTokenRef.current = getToken
 
-            console.log('✅ API Client configured with Clerk authentication')
-        }
-    }, [isLoaded, getToken])
+    if (!configuredRef.current) {
+        apiClient.setClerkTokenGetter(async () => {
+            try {
+                // Don't gate on `isLoaded`; `getToken()` is the source of truth and will
+                // throw/return null when not ready.
+                return await getTokenRef.current()
+            } catch (error) {
+                console.error('Failed to get Clerk token:', error)
+                return null
+            }
+        })
+        configuredRef.current = true
+        console.log('✅ API Client configured with Clerk authentication')
+    }
+
+    // Keep a log for debugging (optional, harmless)
+    useEffect(() => {
+        // eslint-disable-next-line no-console
+        console.log('[CLERK] isLoaded:', isLoaded)
+    }, [isLoaded])
 
     return <>{children}</>
 }

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ToolServiceConfig:
     """Configuration for Tool service"""
     workspace_dir: str = "/tmp/automatos_workspace"
-    enable_mcp: bool = True
+    enable_integrations: bool = True
     max_execution_time_seconds: int = 300
 
 
@@ -74,7 +74,6 @@ class ToolService:
     def list_tools(
         self,
         category: str = None,
-        include_mcp: bool = True
     ) -> List[Dict[str, Any]]:
         """List available tools"""
         tools = []
@@ -139,7 +138,7 @@ class ToolService:
             'categories': categories,
             'config': {
                 'workspace': self.config.workspace_dir,
-                'mcp_enabled': self.config.enable_mcp,
+                'integrations_enabled': self.config.enable_integrations,
                 'max_execution_time': self.config.max_execution_time_seconds
             }
         }

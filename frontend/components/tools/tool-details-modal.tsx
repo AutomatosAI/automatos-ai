@@ -85,7 +85,7 @@ export function ToolDetailsModal({
   const fetchActions = async () => {
     setActionsLoading(true)
     try {
-      const actionsResponse = await (apiClient as any).get(`/api/mcp-tools/${tool.id}/actions`)
+      const actionsResponse = await (apiClient as any).get(`/api/tools/${tool.name}/actions`)
       // Backend now returns correct enabled state
       const mapped = (actionsResponse.data || actionsResponse || []).map((a: any) => ({
         ...a,
@@ -107,7 +107,7 @@ export function ToolDetailsModal({
     // 2. Persist to Backend
     try {
       const enabledList = newActions.filter(a => a.enabled).map(a => a.name)
-      await (apiClient as any).post(`/api/mcp-tools/${tool.id}/actions`, {
+      await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
         actions: enabledList
       })
       toast({ title: "Updated", description: "Permissions saved." })
@@ -323,7 +323,7 @@ export function ToolDetailsModal({
                               // Visual confirmation for user debugging
                               // alert(`DEBUG: Attempting to save ${enabledList.length} actions for tool ${tool.id}`)
 
-                              await (apiClient as any).post(`/api/mcp-tools/${tool.id}/actions`, {
+                              await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
                                 actions: enabledList
                               })
 

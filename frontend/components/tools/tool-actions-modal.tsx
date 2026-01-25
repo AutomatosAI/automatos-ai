@@ -44,7 +44,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
         try {
             // 1. Fetch available actions from Composio (via backend)
             // Backend now merges this with enabled state from workspace config
-            const actionsResponse = await apiClient.get(`/api/mcp-tools/${tool.id}/actions`)
+            const actionsResponse = await apiClient.get(`/api/tools/${tool.name}/actions`)
             const availableActions = actionsResponse || []
 
             const mappedActions = availableActions.map((a: any) => ({
@@ -87,7 +87,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
             const enabledActions = actions.filter(a => a.enabled).map(a => a.name)
 
             // Call the NEW backend endpoint to save permissions
-            await apiClient.post(`/api/mcp-tools/${tool.id}/actions`, {
+            await apiClient.post(`/api/tools/${tool.name}/actions`, {
                 actions: enabledActions
             })
 

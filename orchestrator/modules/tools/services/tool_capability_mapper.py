@@ -46,19 +46,19 @@ class ToolCapabilityMapper:
         # Code-related tasks
         "code_review": {
             "required": ["research", "file_ops"],
-            "optional": ["mcp"],
-            "specific": ["search_codebase", "search_knowledge", "GitHub MCP"],  # PRD-17 Phase 3
+            "optional": [],
+            "specific": ["search_codebase", "search_knowledge"],
             "rationale": "Code review requires reading files and researching best practices"
         },
         "bug_fix": {
             "required": ["research", "file_ops", "shell"],
-            "optional": ["mcp"],
-            "specific": ["search_codebase", "GitHub MCP"],  # PRD-17 Phase 3
+            "optional": [],
+            "specific": ["search_codebase"],
             "rationale": "Bug fixing requires code analysis, file modifications, and testing via shell"
         },
         "code_refactor": {
             "required": ["research", "file_ops"],
-            "optional": ["shell", "mcp"],
+            "optional": ["shell"],
             "specific": [],
             "rationale": "Refactoring requires code analysis and file modifications"
         },
@@ -72,19 +72,19 @@ class ToolCapabilityMapper:
         # Security-related tasks
         "security_audit": {
             "required": ["research", "file_ops", "shell"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": ["search_codebase"],
             "rationale": "Security audits require code analysis, file inspection, and running security tools"
         },
         "vulnerability_scan": {
             "required": ["research", "file_ops", "shell"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": [],
             "rationale": "Vulnerability scanning requires file analysis and running security scanners"
         },
         "penetration_test": {
             "required": ["shell", "file_ops"],
-            "optional": ["ssh", "mcp"],
+            "optional": ["ssh"],
             "specific": [],
             "rationale": "Penetration testing requires command execution and file operations"
         },
@@ -92,25 +92,25 @@ class ToolCapabilityMapper:
         # Infrastructure tasks
         "server_restart": {
             "required": ["shell"],
-            "optional": ["ssh", "mcp"],
+            "optional": ["ssh"],
             "specific": [],
             "rationale": "Server restart requires shell command execution"
         },
         "deployment": {
             "required": ["shell", "file_ops"],
-            "optional": ["ssh", "mcp"],
+            "optional": ["ssh"],
             "specific": [],
             "rationale": "Deployment requires file operations and command execution"
         },
         "infrastructure_management": {
             "required": ["shell"],
-            "optional": ["ssh", "mcp", "file_ops"],
+            "optional": ["ssh", "file_ops"],
             "specific": [],
             "rationale": "Infrastructure management requires shell commands and potentially SSH access"
         },
         "container_management": {
             "required": ["shell"],
-            "optional": ["mcp", "file_ops"],
+            "optional": ["file_ops"],
             "specific": [],
             "rationale": "Container management requires docker commands via shell"
         },
@@ -124,51 +124,51 @@ class ToolCapabilityMapper:
         },
         "database_migration": {
             "required": ["database", "file_ops", "shell"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": [],
             "rationale": "Migrations require SQL operations, file reading, and command execution"
         },
         "data_backup": {
             "required": ["shell", "file_ops"],
-            "optional": ["ssh", "mcp"],
+            "optional": ["ssh"],
             "specific": [],
             "rationale": "Backups require command execution and file operations"
         },
         
         # Development tasks
         "create_pr": {
-            "required": ["file_ops", "mcp"],
+            "required": ["file_ops"],
             "optional": ["shell", "research"],
-            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: Specific GitHub integration
+            "specific": [],
             "rationale": "Creating PRs requires file operations and GitHub integration"
         },
         "repository_management": {
-            "required": ["mcp"],
+            "required": ["file_ops"],
             "optional": ["file_ops", "research"],
-            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: GitHub operations
+            "specific": [],
             "rationale": "Repository management requires GitHub API access"
         },
         "clone_repository": {
-            "required": ["mcp", "shell"],
-            "optional": ["file_ops"],
-            "specific": ["GitHub MCP"],  # PRD-17 Phase 3: Get repo details before cloning
+            "required": ["shell"],
+            "optional": ["file_ops", "research"],
+            "specific": [],
             "rationale": "Cloning requires GitHub API access and shell commands"
         },
         "api_design": {
             "required": ["research", "file_ops"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": [],
             "rationale": "API design requires research and file creation"
         },
         "testing": {
             "required": ["file_ops", "shell"],
-            "optional": ["research", "mcp"],
+            "optional": ["research"],
             "specific": [],
             "rationale": "Testing requires file operations and running test commands"
         },
         "ci_cd_setup": {
             "required": ["file_ops", "shell"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": [],
             "rationale": "CI/CD setup requires configuration files and shell commands"
         },
@@ -202,7 +202,7 @@ class ToolCapabilityMapper:
         },
         "etl_pipeline": {
             "required": ["database", "file_ops", "shell"],
-            "optional": ["mcp"],
+            "optional": [],
             "specific": [],
             "rationale": "ETL pipelines require database operations, file handling, and command execution"
         },
@@ -470,7 +470,6 @@ class ToolCapabilityMapper:
             # Check for code-related keywords
             if any(key in additional_context for key in ["repository", "code", "branch", "pr"]):
                 context_hints.append("file_ops")
-                context_hints.append("mcp")
             
             # Check for infrastructure keywords
             if any(key in additional_context for key in ["server", "deploy", "infrastructure"]):

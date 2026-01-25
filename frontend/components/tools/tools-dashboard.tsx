@@ -1,18 +1,10 @@
 
 /**
- * Tools Dashboard - MCP Tools Management
- * ========================================
- * 
- * Phase 3: Updated to use REAL API data from MCP Tools endpoints
- * - Replaced mock data with useMCPTools() hook
- * - Real-time stats from useMCPToolsStats()
- * - Category counts from useMCPToolCategories()
- * 
- * TODO: Complete implementation of:
- * - Installation status tracking
- * - Tool configuration management  
- * - Ratings system
- * - Usage analytics integration
+ * Tools Dashboard
+ * ===============
+ *
+ * UI for marketplace + connected integrations.
+ * Data source: rewrite `/api/tools/*` endpoints (DB-backed cache + connections).
  */
 
 'use client'
@@ -59,19 +51,21 @@ import { ToolConfigModal } from './tool-config-modal'
 import { ToolDetailsModal } from './tool-details-modal'
 // import { AgentToolAssignment } from './agent-tool-assignment'
 import { EnhancedPagination } from '@/components/ui/pagination'
-import { useMCPTools, useMCPToolsStats, useMCPToolCategories, useMCPToolAssignments, useUpdateMCPTool } from '@/hooks/use-mcp-tools-api'
+import { useTools, useToolsStats, useToolCategories } from '@/hooks/use-tools-api'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { ComposioAppsSection } from './composio-apps-section' // PRD-36: Composio Integration
 import { ToolActionsModal } from './tool-actions-modal'
 import { useInitiateConnection, useDisconnectApp } from '@/hooks/use-composio-api'
 import { Loader2, ExternalLink, Wrench } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useToast } from '@/hooks/use-toast'
 
 // Tool Categories are now loaded dynamically from the API
 // See toolCategories useMemo below for the dynamic implementation
 
 
-// MCP Tools data comes from the database via useMCPTools hook
-// No mock data needed - using real MCP server metadata
+// Tools data comes from the database via `/api/tools/*`
+// No mock data needed - using cached marketplace metadata + connections.
 
 const statusIcons = {
   available: CheckCircle,
@@ -110,11 +104,12 @@ interface Tool {
   metadata?: Record<string, any>
   logo?: string
   composio_app_name?: string
-  source?: 'mcp' | 'composio'
-  mcp_server_url?: string
+  source?: 'composio' | 'internal'
+  integration_url?: string
 }
 
 export function ToolsDashboard() {
+  const { toast } = useToast()
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -151,36 +146,54 @@ export function ToolsDashboard() {
   })
 
   const {
-    data: mcpToolsData,
+    data: toolsData,
     isLoading: toolsLoading,
     isFetching: toolsFetching,
     error: toolsError
-  } = useMCPTools({
+  } = useTools({
     skip: (currentPage - 1) * pageSize,
     limit: pageSize,
     search: debouncedSearch || undefined,
     category: categoryParam
   })
-  const { data: enabledToolsData, isLoading: enabledToolsLoading, error: enabledToolsError } = useMCPTools({
+  const { data: enabledToolsData, isLoading: enabledToolsLoading, error: enabledToolsError } = useTools({
     status: 'active',
     limit: 1000
   })
-  const { data: statsData, error: statsError } = useMCPToolsStats()
-  const { data: categoriesData, error: categoriesError } = useMCPToolCategories()
-  // Temporarily disable assignments API until backend endpoint is ready
-  // const { data: toolAssignments = [], error: assignmentsError } = useMCPToolAssignments(false)
-  const toolAssignments: any[] = [] // Mock empty assignments for now
-  const updateToolMutation = useUpdateMCPTool()
+  const { data: statsData, error: statsError } = useToolsStats()
+  const { data: categoriesData, error: categoriesError } = useToolCategories()
   const disconnectAppMutation = useDisconnectApp()
+  const queryClient = useQueryClient()
+  const syncCacheMutation = useMutation({
+    mutationFn: async () => apiClient.syncToolsCache('full'),
+    onSuccess: () => {
+      // Refresh marketplace + stats
+      queryClient.invalidateQueries({ queryKey: ['tools'] })
+      queryClient.invalidateQueries({ queryKey: ['tools', 'stats'] })
+      queryClient.invalidateQueries({ queryKey: ['tools', 'categories'] })
+      toast({
+        title: 'Sync started/completed',
+        description: 'Marketplace cache sync finished. Refreshing tools list…',
+      })
+    },
+    onError: (err: any) => {
+      console.error('[TOOLS_SYNC] Failed', err)
+      toast({
+        title: 'Sync failed',
+        description: err?.message || 'Failed to sync tools cache.',
+        variant: 'destructive',
+      })
+    },
+  })
 
   useEffect(() => {
-    if (mcpToolsData) setCachedToolsData(mcpToolsData)
-  }, [mcpToolsData])
+    if (toolsData) setCachedToolsData(toolsData)
+  }, [toolsData])
 
-  const effectiveToolsData = mcpToolsData ?? cachedToolsData
+  const effectiveToolsData = toolsData ?? cachedToolsData
 
   // Extract tools and pagination data
-  const mcpTools = (effectiveToolsData as any)?.data || []
+  const rawTools = (effectiveToolsData as any)?.data || []
   const paginationData = (effectiveToolsData as any)?.pagination || { total: 0, pages: 0, current_page: 1 }
 
   // Build dynamic categories from API data
@@ -240,7 +253,7 @@ export function ToolsDashboard() {
         // Trigger a refetch of tools to update status
         // We can treat this as "connected" optimistically too if needed
         // But invalidating query is safer
-        // queryClient.invalidateQueries(['mcp-tools']) (need queryClient access or just wait for poll)
+        // queryClient.invalidateQueries(['tools']) (need queryClient access or just wait for poll)
         window.location.reload() // Brute force refresh for now to ensure state sync, or use queryClient if available
       }
     }
@@ -249,19 +262,17 @@ export function ToolsDashboard() {
   }, [])
 
 
-  // Convert MCP tools to match Tool interface for UI compatibility
+  // Convert raw tools to match Tool interface for UI compatibility
   const normalizeTools = useCallback(
     (rawTools: any[]) => {
       try {
         return (rawTools || []).map((tool: any) => {
-          const isAssigned = (toolAssignments as any[]).some((assignment: any) =>
-            assignment.tool_id === tool.id && assignment.enabled
-          )
-
           const baseTool = {
             ...tool,
             isInstalled: tool.status === 'active',
-            isConfigured: isAssigned,
+            // Configuration lives in Composio connection + agent app assignments.
+            // The Tools marketplace doesn't track "configured" state per app here.
+            isConfigured: false,
             rating: 0,
             usageCount: 0,
             permissions: [],
@@ -279,10 +290,10 @@ export function ToolsDashboard() {
         return []
       }
     },
-    [toolAssignments, toolModifications]
+    [toolModifications]
   )
 
-  const tools = useMemo(() => normalizeTools(mcpTools as any[]), [normalizeTools, mcpTools])
+  const tools = useMemo(() => normalizeTools(rawTools as any[]), [normalizeTools, rawTools])
   const enabledTools = useMemo(
     () => normalizeTools((enabledToolsData as any)?.data || []),
     [normalizeTools, enabledToolsData]
@@ -442,48 +453,6 @@ export function ToolsDashboard() {
     )
   }
 
-  const handleToolToggle = async (tool: Tool, enabled: boolean) => {
-    setLoading(true)
-    try {
-      // Update local state immediately for better UX
-      setToolModifications(prev => ({
-        ...prev,
-        [tool.id]: { isInstalled: enabled, isConfigured: enabled }
-      }))
-
-      // Update the tool status in the database
-      await updateToolMutation.mutateAsync({
-        id: tool.id,
-        data: {
-          status: enabled ? 'active' : 'inactive',
-          // Add metadata to track installation state
-          metadata: {
-            ...(tool.metadata || {}),
-            is_installed: enabled,
-            installed_at: enabled ? new Date().toISOString() : null
-          }
-        }
-      })
-
-      console.log(`✅ Successfully ${enabled ? 'enabled' : 'disabled'} tool: ${tool.name}`)
-      if (enabled) {
-        setSelectedTool(tool)
-        setConfigModalOpen(true)
-      }
-
-    } catch (error) {
-      console.error(`❌ Failed to ${enabled ? 'enable' : 'disable'} tool:`, error)
-      // Revert local state on error
-      setToolModifications(prev => ({
-        ...prev,
-        [tool.id]: { isInstalled: !enabled, isConfigured: !enabled }
-      }))
-      alert(`❌ Failed to ${enabled ? 'enable' : 'disable'} ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleToolConfigure = (tool: Tool) => {
     setSelectedTool(tool)
     // For Composio tools, the configuration (Feature Toggles) is now in the Details modal
@@ -579,9 +548,9 @@ export function ToolsDashboard() {
   const handleToolDelete = async (tool: Tool) => {
     setLoading(true)
     try {
-      const mcpServerUrl = tool.mcp_server_url || tool.metadata?.mcp_server_url
-      const composioFromUrl = mcpServerUrl?.startsWith('composio://')
-        ? mcpServerUrl.replace('composio://', '').split('/')[0]
+      const integrationUrl = (tool as any).integration_url || tool.metadata?.integration_url
+      const composioFromUrl = integrationUrl?.startsWith('composio://')
+        ? integrationUrl.replace('composio://', '').split('/')[0]
         : null
       const composioAppName =
         tool.composio_app_name ||
@@ -604,16 +573,7 @@ export function ToolsDashboard() {
         console.log('Composio app disconnected successfully')
         return
       }
-
-      console.log(`Deleting tool: ${tool.name} (ID: ${tool.id})`)
-
-      // Use the mutation hook which automatically invalidates queries
-      await updateToolMutation.mutateAsync({
-        id: tool.id,
-        data: { status: 'inactive' }
-      })
-
-      console.log('Tool deleted successfully')
+      throw new Error('Non-Composio tools are not supported in the new tools catalog.')
 
     } catch (error) {
       console.error('Failed to delete tool:', error)
@@ -648,6 +608,25 @@ export function ToolsDashboard() {
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
+
+          <Button
+            variant="outline"
+            disabled={(syncCacheMutation as any).isLoading}
+            onClick={() => syncCacheMutation.mutate()}
+            className="border-orange-500/30 hover:border-orange-500/60"
+          >
+            {(syncCacheMutation as any).isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Syncing…
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-2" />
+                Sync marketplace
+              </>
+            )}
+          </Button>
 
           {/* Agent Assignment Button Removed */}
         </div>
@@ -807,8 +786,6 @@ export function ToolsDashboard() {
                         onInstall={() => {
                           if (tool.provider === 'Composio') {
                             handleToolConnect(tool)
-                          } else {
-                            handleToolToggle(tool, true)
                           }
                         }}
                         onDetails={() => handleToolDetails(tool)}
@@ -857,8 +834,6 @@ export function ToolsDashboard() {
                     onInstall={() => {
                       if (tool.provider === 'Composio') {
                         handleToolConnect(tool)
-                      } else {
-                        handleToolToggle(tool, true)
                       }
                     }}
                     onDetails={() => handleToolDetails(tool)}
@@ -935,7 +910,7 @@ export function ToolsDashboard() {
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Total Agents</span>
                     <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
-                      {new Set((toolAssignments as any[]).map((a: any) => a.agent_id)).size}
+                      —
                     </Badge>
                   </div>
                 </CardContent>
@@ -950,24 +925,11 @@ export function ToolsDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {(toolAssignments as any[]).slice(0, 5).map((assignment: any, index: number) => (
-                      <div key={index} className="flex items-center space-x-3">
-                        <div className="w-2 h-2 rounded-full bg-green-400" />
-                        <div className="flex-1">
-                          <p className="text-sm">
-                            {assignment.tool?.name || `Tool ${assignment.tool_id}`} → Agent {assignment.agent_id}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {assignment.enabled ? 'Active' : 'Disabled'}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                    {(toolAssignments as any[]).length === 0 && (
-                      <div className="text-center py-4">
-                        <p className="text-sm text-muted-foreground">No tool assignments yet</p>
-                      </div>
-                    )}
+                    <div className="text-center py-4">
+                      <p className="text-sm text-muted-foreground">
+                        Agent↔tool assignments are managed on the Agents page.
+                      </p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

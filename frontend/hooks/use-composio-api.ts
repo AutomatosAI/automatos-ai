@@ -10,7 +10,14 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '@clerk/nextjs'
 import { apiClient } from '@/lib/api-client'
+
+function shouldRetry(error: any) {
+    const msg = String(error?.message || '')
+    if (msg.includes('HTTP 401')) return false
+    return true
+}
 
 // Types
 export interface ComposioApp {
@@ -67,7 +74,8 @@ export interface TriggerSubscription {
 /**
  * Fetch all available Composio apps
  */
-export function useAvailableApps(category?: string) {
+export function useAvailableApps(category?: string, opts?: { enabled?: boolean }) {
+    const { isLoaded, isSignedIn } = useAuth()
     return useQuery({
         queryKey: ['composio', 'apps', category],
         queryFn: async () => {
@@ -76,20 +84,28 @@ export function useAvailableApps(category?: string) {
             return response.data as ComposioApp[]
         },
         staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+        enabled: (opts?.enabled ?? true) && isLoaded && isSignedIn,
+        retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     })
 }
 
 /**
  * Get actions for a specific app
  */
-export function useAppActions(appName: string) {
+export function useAppActions(appName: string, opts?: { enabled?: boolean }) {
+    const { isLoaded, isSignedIn } = useAuth()
     return useQuery({
         queryKey: ['composio', 'apps', appName, 'actions'],
         queryFn: async () => {
             const response = await apiClient.get(`/api/composio/apps/${appName}/actions`)
             return response.data as ComposioAction[]
         },
-        enabled: !!appName,
+        enabled: (opts?.enabled ?? true) && !!appName && isLoaded && isSignedIn,
+        retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     })
 }
 
@@ -100,13 +116,19 @@ export function useAppActions(appName: string) {
 /**
  * Fetch connected apps for the workspace
  */
-export function useConnectedApps() {
+export function useConnectedApps(opts?: { enabled?: boolean }) {
+    const { isLoaded, isSignedIn } = useAuth()
     return useQuery({
         queryKey: ['composio', 'connections'],
         queryFn: async () => {
             const response = await apiClient.get('/api/composio/connections')
             return response.data as ComposioConnection[]
         },
+        staleTime: 30 * 1000,
+        enabled: (opts?.enabled ?? true) && isLoaded && isSignedIn,
+        retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     })
 }
 
@@ -185,13 +207,17 @@ export function useDisconnectApp() {
  * Get enabled features for an agent-app combination
  */
 export function useAgentAppFeatures(agentId: number, appName: string) {
+    const { isLoaded, isSignedIn } = useAuth()
     return useQuery({
         queryKey: ['composio', 'agents', agentId, 'apps', appName, 'features'],
         queryFn: async () => {
             const response = await apiClient.get(`/api/composio/agents/${agentId}/apps/${appName}/features`)
             return response.data as ComposioAction[]
         },
-        enabled: !!agentId && !!appName,
+        enabled: !!agentId && !!appName && isLoaded && isSignedIn,
+        retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     })
 }
 
@@ -275,12 +301,17 @@ export function useDisableAllFeatures() {
  * Get trigger subscriptions for the workspace
  */
 export function useTriggerSubscriptions() {
+    const { isLoaded, isSignedIn } = useAuth()
     return useQuery({
         queryKey: ['composio', 'triggers'],
         queryFn: async () => {
             const response = await apiClient.get('/api/composio/triggers')
             return response.data as TriggerSubscription[]
         },
+        enabled: isLoaded && isSignedIn,
+        retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
     })
 }
 

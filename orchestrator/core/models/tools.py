@@ -4,7 +4,7 @@ Tools Management Database Models
 ================================
 
 Comprehensive data models for tools, credentials, configurations, and permissions
-with support for MCP (Model Context Protocol) integration.
+for the platform tool registry and marketplace UI.
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, ARRAY
@@ -51,9 +51,6 @@ class Tool(Base):
     required_credentials = Column(ARRAY(String), default=list)  # Required credential keys
     supported_environments = Column(ARRAY(String), default=list)  # dev, staging, prod
     
-    # MCP (Model Context Protocol) configuration
-    mcp_config = Column(JSON)  # MCP server configuration
-    
     # Timestamps
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -63,7 +60,7 @@ class Tool(Base):
     credentials = relationship("ToolCredentials", back_populates="tool", cascade="all, delete-orphan")
     configurations = relationship("ToolConfiguration", back_populates="tool", cascade="all, delete-orphan")
     permissions_assignments = relationship("AgentToolPermission", back_populates="tool", cascade="all, delete-orphan")
-    # Note: ToolUsageLog is defined in core.py and references mcp_tools, not tools
+    # Note: Usage tracking is implemented separately (not tied to legacy tool tables).
 
 class ToolCredentials(Base):
     """
@@ -146,7 +143,6 @@ class AgentToolPermission(Base):
     tool = relationship("Tool", back_populates="permissions_assignments")
     agent = relationship("Agent")  # Assumes Agent model exists in main models.py
 
-# ToolUsageLog is defined in core.py for MCP tools
 # This file defines Tool model for the UI tool registry
 
 # ====================================
@@ -179,75 +175,6 @@ class PermissionAuditLog(Base):
     # Relationships
     agent = relationship("Agent")
     tool = relationship("Tool")
-
-# ====================================
-# MCP Integration Models
-# ====================================
-
-class MCPServer(Base):
-    """
-    Model Context Protocol server registry.
-    Manages connections to external MCP servers for tool integration.
-    """
-    __tablename__ = 'mcp_servers'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    
-    # Server identification
-    name = Column(String(255), nullable=False, unique=True)
-    server_url = Column(String(500), nullable=False)
-    protocol_version = Column(String(50), default='1.0')
-    
-    # Authentication and configuration
-    auth_config = Column(JSON, default=dict)  # Server-specific auth
-    server_config = Column(JSON, default=dict)  # Additional server settings
-    
-    # Status and health
-    status = Column(String(50), default='disconnected', index=True)  # connected, disconnected, error
-    last_ping = Column(DateTime)
-    health_check_interval = Column(Integer, default=300)  # Seconds
-    
-    # Capabilities
-    supported_tools = Column(ARRAY(String), default=list)  # Tools this server provides
-    capabilities = Column(JSON, default=dict)  # Server capabilities
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool_connections = relationship("MCPToolConnection", back_populates="server", cascade="all, delete-orphan")
-
-class MCPToolConnection(Base):
-    """
-    Connection mapping between tools and MCP servers.
-    Manages tool-specific MCP integration settings.
-    """
-    __tablename__ = 'mcp_tool_connections'
-    __table_args__ = {'extend_existing': True}  # PRD-17: Prevent duplicate table definition errors
-    
-    id = Column(Integer, primary_key=True)
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=False, index=True)
-    server_id = Column(Integer, ForeignKey('mcp_servers.id'), nullable=False, index=True)
-    
-    # Connection details
-    tool_endpoint = Column(String(255))  # Tool-specific endpoint on the MCP server
-    connection_config = Column(JSON, default=dict)  # Tool-specific MCP config
-    is_active = Column(Boolean, default=True, index=True)
-    
-    # Performance and reliability
-    last_used = Column(DateTime)
-    success_rate = Column(Float, default=1.0)  # Rolling success rate
-    avg_response_time = Column(Float)  # Average response time in ms
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool = relationship("Tool")
-    server = relationship("MCPServer", back_populates="tool_connections")
 
 # ====================================
 # Tool Marketplace Models

@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
-from core.models import Agent, Skill, AgentToolAssignment, WorkflowExecution
+from core.models import Agent, Skill, WorkflowExecution
+from core.models.composio_cache import AgentAppAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,6 @@ class AgentRegistry:
         # Load from database
         agent = self.db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments)
         ).filter(Agent.id == agent_id).first()
         
         if not agent:
@@ -118,6 +118,19 @@ class AgentRegistry:
                     logger.error(f"Error extracting tools from skill {skill.name}: {e}")
             
             skills.append(skill_info)
+
+        # Include explicitly assigned external/internal apps for completeness.
+        try:
+            assignments = (
+                self.db.query(AgentAppAssignment.app_name)
+                .filter(AgentAppAssignment.agent_id == agent_id, AgentAppAssignment.is_active.is_(True))
+                .all()
+            )
+            for (app_name,) in assignments:
+                if app_name:
+                    all_tool_names.add(str(app_name).upper())
+        except Exception as e:
+            logger.warning(f"Failed to load assigned apps for agent {agent_id}: {e}")
         
         # Get performance metrics
         performance = self._get_agent_performance(agent_id)

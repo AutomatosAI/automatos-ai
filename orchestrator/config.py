@@ -84,12 +84,6 @@ class Config:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
 
-    # =============================================================================
-    # UNIFIED ADAPTER (Tool Metadata Source)
-    # =============================================================================
-    ADAPTER_ADMIN_BASE_URL: str = os.getenv("ADAPTER_ADMIN_BASE_URL")
-    ADAPTER_ADMIN_TOKEN: str = os.getenv("ADAPTER_ADMIN_TOKEN")
-    
     # LLM settings - loaded from database system_settings (NO hardcoded defaults)
     @property
     def LLM_PROVIDER(self) -> str:

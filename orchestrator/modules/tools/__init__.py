@@ -29,7 +29,6 @@ from .registry import (
 # Execution exports
 from .execution import (
     UnifiedToolExecutor,
-    MCPToolExecutor
 )
 
 __all__ = [
@@ -47,5 +46,4 @@ __all__ = [
     
     # Execution
     "UnifiedToolExecutor",
-    "MCPToolExecutor"
 ]

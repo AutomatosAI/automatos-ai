@@ -135,7 +135,7 @@ class Agent(Base):
     skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
-    tool_assignments = relationship("AgentToolAssignment", back_populates="agent", cascade="all, delete-orphan")
+    # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
 
 class Skill(Base):
     __tablename__ = 'skills'
@@ -297,57 +297,6 @@ class Pattern(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
-
-# ===================================================================
-# MCP TOOLS MODELS (Phase 3: Skills & Tools Integration)
-# ===================================================================
-
-class MCPTool(Base):
-    """MCP Tool Model - represents external tools agents can use"""
-    __tablename__ = 'mcp_tools'
-    
-    id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text)
-    mcp_server_url = Column(String(500))
-    capabilities = Column(JSON, default={})
-    credentials_schema = Column(JSON, default={})
-    status = Column(String(50), default='active')
-    provider = Column(String(255))
-    tool_id = Column(String(255), unique=True, nullable=False, index=True)  # Clean: 'slack', 'github', etc.
-    version = Column(String(50))
-    icon = Column(String(500))
-    logo = Column(String(500))  # Logo file path, e.g. "/logos/Discord.png"
-    category = Column(String(255))
-    tags = Column(PG_ARRAY(String))
-    tool_metadata = Column('metadata', JSON, default={})  # Renamed from metadata (reserved in SQLAlchemy)
-    created_by = Column(String(255))
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    usage_logs = relationship("ToolUsageLog", back_populates="tool", cascade="all, delete-orphan")
-
-
-class ToolUsageLog(Base):
-    """Tool Usage Tracking for MCP Tools"""
-    __tablename__ = 'tool_usage_logs'
-    __table_args__ = {'extend_existing': True}  # Allow extension by tools.py
-    
-    id = Column(Integer, primary_key=True)
-    execution_id = Column(Integer, ForeignKey('workflow_executions.id'))
-    agent_id = Column(Integer, ForeignKey('agents.id'), nullable=False)
-    tool_id = Column(Integer, ForeignKey('mcp_tools.id'), nullable=False)
-    method_called = Column(String(255))
-    input_data = Column(JSON)
-    output_data = Column(JSON)
-    success = Column(Boolean)
-    execution_time_ms = Column(Integer)
-    error_message = Column(Text)
-    created_at = Column(DateTime, default=func.now())
-    
-    # Relationships
-    tool = relationship("MCPTool", back_populates="usage_logs")
 
 class Workflow(Base):
     __tablename__ = 'workflows'
@@ -536,7 +485,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str] = None
     skills: List[Dict[str, Any]] = []
-    tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools assigned to agent
+    tools: List[Dict[str, Any]] = []  # Assigned apps/integrations (Composio)
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):
@@ -565,84 +514,6 @@ class SkillResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = ""
-
-# ===================================================================
-# MCP TOOLS PYDANTIC MODELS (Phase 3: Skills & Tools Integration)
-# ===================================================================
-
-class MCPToolBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = {}
-    credentials_schema: Optional[Dict[str, Any]] = {}
-    status: Optional[str] = 'active'
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[List[str]] = []
-    tool_metadata: Optional[Dict[str, Any]] = Field(default={}, alias='metadata')  # Use alias for API compatibility
-
-class MCPToolCreate(MCPToolBase):
-    pass
-
-class MCPToolUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = None
-    credentials_schema: Optional[Dict[str, Any]] = None
-    status: Optional[str] = None
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[List[str]] = None  # Fixed: should be List[str] not str
-    tool_metadata: Optional[Dict[str, Any]] = Field(default=None, alias='metadata')
-
-class MCPToolResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = {}
-    credentials_schema: Optional[Dict[str, Any]] = {}
-    status: Optional[str] = 'active'
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    logo: Optional[str] = None  # Logo file path
-    category: Optional[str] = None
-    tags: Optional[List[str]] = []
-    # Use Field with validation_alias to map from SQLAlchemy attribute
-    metadata: Optional[Dict[str, Any]] = Field(default={}, validation_alias='tool_metadata')
-    created_at: datetime
-    updated_at: datetime
-    created_by: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-        populate_by_name = True
-
-class AgentToolAssignmentCreate(BaseModel):
-    tool_id: int
-    enabled: bool = True
-    permissions: Optional[Dict[str, Any]] = {}
-    configuration: Optional[Dict[str, Any]] = {}
-
-class AgentToolAssignmentResponse(BaseModel):
-    id: int
-    agent_id: int
-    tool_id: int
-    enabled: bool
-    permissions: Dict[str, Any]
-    configuration: Dict[str, Any]
-    assigned_at: datetime
-    tool: MCPToolResponse
-    
-    class Config:
-        from_attributes = True
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)

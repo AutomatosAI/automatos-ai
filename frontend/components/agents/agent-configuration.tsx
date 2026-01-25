@@ -45,7 +45,7 @@ import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-mode
 import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
 import { apiClient } from '@/lib/api-client'
-import { useMCPTools } from '@/hooks/use-mcp-tools-api'
+import { useTools } from '@/hooks/use-tools-api'
 
 interface AgentConfigurationProps {
   agents: any[]
@@ -76,7 +76,7 @@ export function AgentConfiguration({
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
   // Tools API
-  const { data: toolsData } = useMCPTools({ status: 'active', limit: 100 })
+  const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools: any[] = (toolsData as any)?.data || []
 
   // Initialize assigned skills when agent or agentSkills loads

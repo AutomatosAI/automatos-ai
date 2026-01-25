@@ -1,7 +1,7 @@
 /**
- * Edit MCP Tool Modal
- * ===================
- * Complete edit functionality matching create modal
+ * Tool Configuration Modal
+ * ========================
+ * Configure credentials and view integration features
  */
 
 'use client'
@@ -49,10 +49,10 @@ interface Tool {
   capabilities: any
   credentials_schema: any
   metadata: any
-  mcp_server_url?: string
+  integration_url?: string
   requiredCredentials?: string[]
   composio_app_name?: string  // PRD-36: Composio app identifier
-  source?: 'mcp' | 'composio'  // PRD-36: Tool source
+  source?: 'composio' | 'internal'  // Tool source
 }
 
 interface ToolConfigModalProps {
@@ -82,33 +82,23 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
   // PRD-36: Composio Integration
   const isComposioApp = !!(tool?.composio_app_name || tool?.metadata?.composio_app_name || tool?.source === 'composio')
   const composioAppName = tool?.composio_app_name || tool?.metadata?.composio_app_name || ''
-  const { data: appActions = [] } = useAppActions(composioAppName)
-  const { data: connections = [] } = useConnectedApps()
+  // IMPORTANT: do not hit Composio endpoints unless the modal is actually open.
+  const { data: connections = [] } = useConnectedApps({ enabled: open && isComposioApp })
   const initiateConnectionMutation = useInitiateConnection()
   const disconnectMutation = useDisconnectApp()
 
   const isConnected = connections.some(
     (c) => c.app_name.toUpperCase() === composioAppName.toUpperCase() && c.status === 'active'
   )
+  const { data: appActions = [] } = useAppActions(composioAppName, { enabled: open && isComposioApp && isConnected })
 
   // Fetch full tool details when modal opens
   useEffect(() => {
     const fetchFullTool = async () => {
       if (tool && tool.id && open) {
         try {
-          console.log(`🔍 Fetching full tool details for ID: ${tool.id}, Name: ${tool.name}`)
-          const response = await apiClient.getMCPTool(tool.id)
-          // Handle different response structures
-          const fullToolData = response?.data || response
-          console.log(`✅ Received tool data:`, {
-            id: fullToolData?.id,
-            name: fullToolData?.name,
-            hasMetadata: !!fullToolData?.metadata,
-            metadata: fullToolData?.metadata,
-            credentialType: fullToolData?.metadata?.credential_type,
-            rawResponse: response
-          })
-          setFullTool(fullToolData)
+          // Tool details are already provided by the Tools list.
+          setFullTool(tool)
         } catch (error: any) {
           console.error('❌ Failed to fetch full tool details:', {
             error: error?.message || error,

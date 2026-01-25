@@ -480,50 +480,7 @@ export default function GeneralSettingsTab({
         </CardContent>
       </Card>
 
-      {/* Context Forge Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Key className="h-5 w-5" />
-            Context Forge Configuration
-          </CardTitle>
-          <CardDescription>
-            API key for MCP Gateway bulk import and tool sync
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="context_forge_url">Context Forge URL</Label>
-              <Input
-                id="context_forge_url"
-                value={formData.context_forge_url || ''}
-                onChange={(e) => handleInputChange('context_forge_url', e.target.value)}
-                placeholder="https://mcp.automatos.app"
-              />
-              <p className="text-xs text-muted-foreground">
-                Base URL for the MCP Gateway (admin UI + API).
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="context_forge_api_key">Context Forge API Key</Label>
-              <Input
-                id="context_forge_api_key"
-                type="password"
-                value={formData.context_forge_api_key || ''}
-                onChange={(e) => handleInputChange('context_forge_api_key', e.target.value)}
-                placeholder="Paste API key from Context Forge"
-              />
-              <p className="text-xs text-muted-foreground">
-                Used for admin bulk imports and automated tool sync. Store as a sensitive setting.
-              </p>
-              {getSetting('context_forge_api_key')?.is_sensitive && (
-                <Badge variant="destructive" className="text-xs">Sensitive</Badge>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Legacy tool gateway settings removed (Composio-backed tools cache is source-of-truth) */}
 
       {/* Actions */}
       <div className="flex justify-end gap-2">

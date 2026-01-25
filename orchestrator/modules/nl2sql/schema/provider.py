@@ -179,7 +179,7 @@ System Domain Context:
 - Configuration managed via system_settings table
 - Logging and auditing via audit_service
 - Tool registry manages available capabilities
-- MCP (Model Context Protocol) integrates external tools
+- Integrations catalog provides external tools
 - Credentials managed securely with encryption
 """,
 

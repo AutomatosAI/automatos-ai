@@ -210,7 +210,7 @@ class AgentResponse(BaseModel):
     max_concurrent_tasks: int = Field(5, description="Maximum concurrent tasks")
     auto_start: bool = Field(False, description="Auto-start on system boot")
     skills: List[Dict[str, Any]] = Field([], description="Associated skills")
-    tools: List[Dict[str, Any]] = Field([], description="MCP Tools assigned to agent")
+    tools: List[Dict[str, Any]] = Field([], description="Assigned apps/integrations (Composio)")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator")

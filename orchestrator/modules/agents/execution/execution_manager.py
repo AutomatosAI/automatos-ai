@@ -663,7 +663,6 @@ class AgentExecutionManager:
                     "file_operations": "file_ops",
                     "shell": "shell",
                     "shell_commands": "shell",
-                    "mcp": "mcp",
                     "database": "database"
                 }
                 for skill in skills:
@@ -685,21 +684,9 @@ class AgentExecutionManager:
                 if agent_skill_tool_names:
                     self.logger.info(f"🦸 Agent {agent_id} has {len(agent_skill_tool_names)} skill tools: {agent_skill_tool_names}")
             
-            # 🔧 PRD-20 FIX: Extract MCP tools from agent's tool assignments
-            agent_mcp_tool_names = []
-            if agent.tool_assignments:
-                for assignment in agent.tool_assignments:
-                    # Fix: tool is string ID now, fetch from mcp_tools
-                    if assignment.tool_id:
-                        agent_mcp_tool_names.append(assignment.tool_id)
-                
-                if agent_mcp_tool_names:
-                    self.logger.info(f"🔧 Agent {agent_id} has {len(agent_mcp_tool_names)} MCP tools: {agent_mcp_tool_names}")
-            
-            # Merge all tools together: subtask tools + agent skill tools + agent MCP tools
+            # Merge all tools together: subtask tool categories + agent skill tools
             all_tools = set(required_tools)
             all_tools.update(agent_skill_tool_names)
-            all_tools.update(agent_mcp_tool_names)
             required_tools = list(all_tools)
             
             # Default to research only if agent has absolutely NO tools

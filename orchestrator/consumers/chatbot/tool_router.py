@@ -17,6 +17,7 @@ import time
 from typing import List, Dict, Any, Optional
 from uuid import UUID, uuid4
 from contextlib import contextmanager
+import re
 
 # Use modules.tools directly - NO duplicate tool definitions
 from modules.tools import ToolCategory, UnifiedToolExecutor
@@ -67,6 +68,17 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None, workspace
         filtered_tools = all_candidates
         denied: List[Dict[str, Any]] = []
 
+        # Resolve workspace_id from agent if not provided (needed for Composio gating)
+        if agent_id is not None and workspace_id is None:
+            try:
+                from core.models import Agent as AgentModel
+                agent_row = session_used.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                if agent_row and getattr(agent_row, "workspace_id", None):
+                    workspace_id = agent_row.workspace_id
+                    logger.info(f"[tool-trace {trace_id}] Resolved workspace_id from agent {agent_id} for tool list gating")
+            except Exception as exc:
+                logger.warning(f"[tool-trace {trace_id}] Failed to resolve workspace_id for agent {agent_id}: {exc}")
+
         if agent_id is not None:
             filtered_tools = []
             for tool in all_candidates:
@@ -90,11 +102,10 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None, workspace
                 "function": schema
             })
         
-        has_mcp = any(t.category == ToolCategory.MCP_TOOLS for t in filtered_tools)
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
             f"[tool-trace {trace_id}] Loaded {len(openai_tools)} tools "
-            f"(agent_id={agent_id}, includes MCP={has_mcp}, denied={len(denied)}, "
+            f"(agent_id={agent_id}, denied={len(denied)}, "
             f"candidates={len(all_candidates)}, {elapsed_ms}ms)"
         )
         if denied:
@@ -190,6 +201,72 @@ class ToolRouter:
                 'raw_result': dict      # Original result
             }
         """
+        # ------------------------------------------------------------------
+        # Compatibility aliases (LLM sometimes emits "helper" tool names).
+        # We do NOT register these as real tools; we transparently route them
+        # to the correct ToolRegistry tool to avoid "Unknown tool" loops.
+        #
+        # IMPORTANT: This must stay generic for 800+ apps. We map patterns like:
+        # - send_slack_message
+        # - send_<app>_message
+        # to composio_execute with a mapped action from composio_actions_cache.
+        # ------------------------------------------------------------------
+        normalized_name = (tool_name or "").strip()
+        alias_app: Optional[str] = None
+
+        if normalized_name in {"send_slack_message", "slack_send_message"}:
+            alias_app = "SLACK"
+        else:
+            m = re.match(r"^send_(?P<app>[a-z0-9]+)_message$", normalized_name, flags=re.I)
+            if m:
+                alias_app = str(m.group("app") or "").upper().strip()
+
+        if alias_app:
+            channel = None
+            text = None
+            if isinstance(tool_args, dict):
+                channel = tool_args.get("channel") or tool_args.get("channel_id") or tool_args.get("conversation")
+                text = tool_args.get("message") or tool_args.get("text") or tool_args.get("content")
+
+            # Pick a safe mapped action for this app that looks like "send message".
+            # If not found, still route to composio_execute and let the executor return a mapped-action error.
+            action_name: Optional[str] = None
+            try:
+                from core.models.composio_cache import ComposioActionCache
+
+                with _session_scope() as s:
+                    rows = (
+                        s.query(ComposioActionCache.action_name)
+                        .filter(ComposioActionCache.app_name == alias_app)
+                        .filter(
+                            (ComposioActionCache.action_name.ilike("%send%"))
+                            | (ComposioActionCache.action_name.ilike("%message%"))
+                            | (ComposioActionCache.description.ilike("%send%"))
+                            | (ComposioActionCache.description.ilike("%message%"))
+                        )
+                        .limit(20)
+                        .all()
+                    )
+                candidates = [str(r[0]) for r in rows if r and r[0]]
+                dangerous = ("archive", "delete", "remove", "revoke", "clear", "close", "disable", "ban", "kick")
+                for c in candidates:
+                    cl = c.lower()
+                    if any(tok in cl for tok in dangerous):
+                        continue
+                    action_name = c
+                    break
+            except Exception:
+                action_name = None
+
+            mapped_args: Dict[str, Any] = {
+                "app_name": alias_app,
+                "action": action_name or "",
+                "params": {"channel": channel, "text": text},
+            }
+            mapped_args["params"] = {k: v for k, v in mapped_args["params"].items() if v is not None}
+            tool_name = "composio_execute"
+            tool_args = mapped_args
+
         trace_id = _new_trace_id()
         logger.info(
             f"[tool-trace {trace_id}] ToolRouter execute_and_format "
@@ -452,7 +529,7 @@ def get_tool_router() -> ToolRouter:
 def get_chat_tools(agent_id: Optional[int] = None, workspace_id: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Get chatbot tools. Do NOT cache globally because availability can
-    depend on agent permissions (especially MCP).
+    depend on agent permissions.
     """
     with _session_scope() as session:
         return get_chatbot_tools(agent_id=agent_id, db_session=session, workspace_id=workspace_id)

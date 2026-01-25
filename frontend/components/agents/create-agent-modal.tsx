@@ -25,8 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Slider } from '@/components/ui/slider'
-import { apiClient } from '@/lib/api-client'
-import { useMCPTools } from '@/hooks/use-mcp-tools-api'
+import { useTools } from '@/hooks/use-tools-api'
 
 // API hooks
 import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
@@ -123,7 +122,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   // API hooks
   const createAgentMutation = useCreateAgent()
   const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
-  const { data: toolsResponse, isLoading: toolsLoading } = useMCPTools({ status: 'active', limit: 100 })
+  const { data: toolsResponse, isLoading: toolsLoading } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
@@ -172,6 +171,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         agent_type: agentData.type,
         description: agentData.description || '',
         skill_ids: agentData.skills, // Backend expects skill_ids array
+        tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         priority_level: agentData.priority || 'medium', // Backend expects priority_level
         max_concurrent_tasks: agentData.maxConcurrentTasks || 3, // Backend expects snake_case
         auto_start: agentData.autoStart !== undefined ? agentData.autoStart : true, // Backend expects snake_case
@@ -205,21 +205,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
           // Don't alert, just log - non-critical
         }
 
-        // Assign Tools
-        if (agentData.tools.length > 0) {
-          try {
-            console.log('Assigning tools to agent:', agentData.tools)
-            await Promise.all(
-              agentData.tools.map((toolId) =>
-                apiClient.assignToolToAgent(newAgent.id, toolId, { enabled: true })
-              )
-            )
-            console.log('Tools assigned successfully')
-          } catch (error) {
-            console.error('Failed to assign tools:', error)
-            toast.error('Agent created but tool assignment failed')
-          }
-        }
       }
 
       toast.success(`Agent "${agentData.name}" created successfully!`)

@@ -42,7 +42,7 @@ import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddS
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
-import { useMCPTools } from '@/hooks/use-mcp-tools-api'
+import { useTools } from '@/hooks/use-tools-api'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -133,7 +133,7 @@ export function AgentConfigurationModal({
   const removeSkillMutation = useRemoveSkillFromAgent()
 
   // Tools API
-  const { data: toolsData } = useMCPTools({ status: 'active', limit: 100 })
+  const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsData?.data || []
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading

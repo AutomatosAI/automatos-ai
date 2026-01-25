@@ -19,7 +19,7 @@ import re
 from typing import List, Optional, Dict, Any, AsyncGenerator
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, or_
 
 from core.models import Chat, Message, Vote
 from config import config
@@ -423,6 +423,108 @@ class StreamingChatService:
                             }
                         )
 
+            # Provide Composio app/action hints based on agent assignments (DB-backed).
+            # IMPORTANT: This must remain generic (no per-feature hardcoding).
+            try:
+                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+                from core.composio.entity_manager import EntityManager
+
+                if latest_text and agent_id:
+                    # Assigned EXTERNAL apps for this agent
+                    assigned = (
+                        self.db.query(AgentAppAssignment)
+                        .filter(
+                            AgentAppAssignment.agent_id == agent_id,
+                            AgentAppAssignment.is_active == True,
+                            AgentAppAssignment.app_type == "EXTERNAL",
+                        )
+                        .all()
+                    )
+                    assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
+
+                    # Optionally intersect with connected apps in this workspace
+                    connected_apps: List[str] = []
+                    if self.workspace_id:
+                        manager = EntityManager(self.db)
+                        entity = manager.get_entity_by_workspace(self.workspace_id)
+                        if entity:
+                            connected_apps = [
+                                (c.get("app_name") or "").upper()
+                                for c in manager.get_entity_connections(entity["id"])
+                                if c.get("status") == "active"
+                            ]
+
+                    allowed_apps = assigned_apps
+                    if connected_apps:
+                        connected_set = set(connected_apps)
+                        allowed_apps = [a for a in assigned_apps if a in connected_set]
+
+                    if allowed_apps:
+                        # Tokenize query once; use DB filtering instead of hardcoded synonyms.
+                        q = (latest_text or "").lower()
+                        q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+                        # Keep token set small and meaningful (avoid stopword-like tokens).
+                        stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+                        q_tokens = [t for t in q_tokens if t not in stop]
+                        q_tokens = q_tokens[:10]
+
+                        # Generic safety: if the user is trying to "send/post/message", avoid suggesting
+                        # destructive actions like ARCHIVE/DELETE/CLEAR/etc.
+                        is_messaging_intent = bool(re.search(r"\b(send|message|post|dm|chat)\b", q))
+                        dangerous_tokens = {
+                            "archive", "delete", "remove", "revoke", "clear", "close", "disable",
+                            "ban", "kick", "deactivate", "destroy", "purge",
+                        }
+
+                        hint_lines = [
+                            "You have these external apps assigned for this agent (via Composio): "
+                            + ", ".join(sorted(set(allowed_apps))) + ".",
+                            "When you need external data/actions (email, Slack, etc.), use `composio_execute`.",
+                        ]
+
+                        # Pull candidate actions *from the DB* using a filtered query per app.
+                        # This avoids loading thousands of actions into Python for scoring.
+                        if q_tokens:
+                            app_matches: List[tuple[str, List[str]]] = []
+                            for app in allowed_apps[:12]:
+                                token_filters = []
+                                for tok in q_tokens:
+                                    like = f"%{tok}%"
+                                    token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                    token_filters.append(ComposioActionCache.description.ilike(like))
+
+                                rows = (
+                                    self.db.query(ComposioActionCache.action_name)
+                                    .filter(ComposioActionCache.app_name == app)
+                                    .filter(or_(*token_filters))
+                                    .limit(24)
+                                    .all()
+                                )
+                                actions = [str(r[0]) for r in rows if r and r[0]]
+                                if is_messaging_intent:
+                                    filtered = []
+                                    for a in actions:
+                                        al = a.lower()
+                                        if any(tok in al for tok in dangerous_tokens):
+                                            continue
+                                        filtered.append(a)
+                                    actions = filtered
+                                # Deduplicate while preserving order
+                                seen = set()
+                                actions = [a for a in actions if not (a in seen or seen.add(a))]
+                                if actions:
+                                    app_matches.append((app, actions[:6]))
+
+                            # Prefer apps with more matches
+                            app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
+                            for app, actions in app_matches[:6]:
+                                hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
+
+                        insert_at = 2 if memory_context else 1
+                        llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
+            except Exception as exc:
+                logger.debug(f"Composio hint injection skipped: {exc}")
+
             # Explicit tool call bypass (e.g., "Use tool X with params {...}")
             explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
             if explicit_call and tools:
@@ -538,6 +640,8 @@ class StreamingChatService:
                 iteration = 0
                 current_response = response
                 sent_tool_data = False
+                # Allow one recovery if the model calls composio_execute with missing args.
+                composio_invalid_parameters_retry_budget = 1
 
                 executed_tool_signatures = set()
 
@@ -593,6 +697,34 @@ class StreamingChatService:
                                 "error": "Duplicate execution skipped",
                             }
 
+                        # ------------------------------------------------------------------
+                        # Generic safety guard for Composio:
+                        # Do NOT allow destructive actions unless the user explicitly asked.
+                        # This prevents "archive/delete/clear" style side-effects for requests
+                        # like "send a message".
+                        # ------------------------------------------------------------------
+                        if tool_name == "composio_execute" and isinstance(tool_args, dict):
+                            action = str(tool_args.get("action") or "").upper().strip()
+                            if action:
+                                user_text = (latest_text or "").lower()
+                                wants_destructive = bool(re.search(r"\b(archive|delete|remove|revoke|clear|close|disable)\b", user_text))
+                                is_destructive = bool(re.search(r"(ARCHIVE|DELETE|REMOVE|REVOKE|CLEAR|CLOSE|DISABLE)", action))
+                                is_messaging = bool(re.search(r"\b(send|message|post|dm|chat)\b", user_text))
+                                if is_messaging and is_destructive and not wants_destructive:
+                                    return {
+                                        "tool_call_id": tool_id,
+                                        "tool_name": tool_name,
+                                        "tool_args": tool_args,
+                                        "role": "tool",
+                                        "content": (
+                                            f"Refused to execute destructive action '{action}' for a messaging request. "
+                                            "Pick a non-destructive mapped action that sends a message."
+                                        ),
+                                        "frontend_data": {},
+                                        "success": False,
+                                        "error": "Refused destructive action for messaging intent",
+                                    }
+
                         logger.info(f"Executing tool: {tool_name}")
                         result = await self.tool_router.execute_and_format(
                             tool_name,
@@ -617,6 +749,7 @@ class StreamingChatService:
                     ])
 
                     tool_results = []
+                    followup_system_messages: List[Dict[str, Any]] = []
 
                     # Emit tool-end + stream tool-data for each tool
                     for r in results:
@@ -647,6 +780,98 @@ class StreamingChatService:
                             "content": r.get("content", ""),
                         })
 
+                        # If Composio execution failed due to invalid parameters (often the model sent {}),
+                        # inject ONE follow-up instruction with candidate mapped actions from DB.
+                        if (
+                            (not r.get("success"))
+                            and r.get("tool_name") == "composio_execute"
+                            and (r.get("error") or "").lower().find("missing") != -1
+                            and composio_invalid_parameters_retry_budget > 0
+                        ):
+                            composio_invalid_parameters_retry_budget -= 1
+                            try:
+                                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+                                from core.composio.entity_manager import EntityManager
+                                from sqlalchemy import or_
+
+                                q = (latest_text or "").lower()
+                                q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+                                stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+                                q_tokens = [t for t in q_tokens if t not in stop][:10]
+
+                                # Allowed apps = assigned EXTERNAL apps, optionally intersect with connected apps
+                                assigned = (
+                                    self.db.query(AgentAppAssignment)
+                                    .filter(
+                                        AgentAppAssignment.agent_id == agent_id,
+                                        AgentAppAssignment.is_active == True,  # noqa: E712
+                                        AgentAppAssignment.app_type == "EXTERNAL",
+                                    )
+                                    .all()
+                                )
+                                assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
+                                allowed_apps = assigned_apps
+                                if self.workspace_id:
+                                    manager = EntityManager(self.db)
+                                    entity = manager.get_entity_by_workspace(self.workspace_id)
+                                    if entity:
+                                        connected_apps = [
+                                            (c.get("app_name") or "").upper()
+                                            for c in manager.get_entity_connections(entity["id"])
+                                            if c.get("status") == "active"
+                                        ]
+                                        if connected_apps:
+                                            connected_set = set(connected_apps)
+                                            allowed_apps = [a for a in assigned_apps if a in connected_set]
+
+                                suggestions: List[str] = []
+                                if q_tokens and allowed_apps:
+                                    for app in allowed_apps[:12]:
+                                        token_filters = []
+                                        for tok in q_tokens:
+                                            like = f"%{tok}%"
+                                            token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                            token_filters.append(ComposioActionCache.description.ilike(like))
+                                        rows = (
+                                            self.db.query(ComposioActionCache.action_name)
+                                            .filter(ComposioActionCache.app_name == app)
+                                            .filter(or_(*token_filters))
+                                            .limit(12)
+                                            .all()
+                                        )
+                                        for (action_name,) in rows:
+                                            if action_name:
+                                                suggestions.append(str(action_name))
+                                        if len(suggestions) >= 12:
+                                            break
+                                suggestions = list(dict.fromkeys(suggestions))[:10]
+
+                                followup_system_messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "Your previous `composio_execute` call was missing required fields. "
+                                            "Retry `composio_execute` with an explicit mapped `action` from "
+                                            "`composio_actions_cache` plus the required `params`.\n"
+                                            + (
+                                                f"Candidate actions for this request: {', '.join(suggestions)}"
+                                                if suggestions
+                                                else "Pick the correct mapped action for the assigned app (e.g., Slack send message)."
+                                            )
+                                        ),
+                                    }
+                                )
+                            except Exception:
+                                followup_system_messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "Your previous `composio_execute` call was missing required fields. "
+                                            "Retry with an explicit mapped `action` and any required `params`."
+                                        ),
+                                    }
+                                )
+
                     # Add assistant message with tool calls and results
                     llm_messages.append({
                         "role": "assistant",
@@ -654,6 +879,8 @@ class StreamingChatService:
                         "tool_calls": current_response.tool_calls,
                     })
                     llm_messages.extend(tool_results)
+                    if followup_system_messages:
+                        llm_messages.extend(followup_system_messages)
 
                     # Get next response - allow more tool calls if needed
                     allow_more_tools = iteration < max_iterations - 1
@@ -887,7 +1114,9 @@ class StreamingChatService:
             # agent_runtime.tools contains METADATA, not OpenAI function schemas!
             # get_chat_tools returns proper OpenAI function schemas based on agent permissions
             from consumers.chatbot.tool_router import get_chat_tools
-            use_tools = None if is_simple else get_chat_tools(agent_id=agent_id)
+            # IMPORTANT: pass workspace_id so tool availability can be gated
+            # (e.g., only expose Composio execution when apps are assigned+connected).
+            use_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
             
             # Add skill tools if available
             if not is_simple and skill_tools:
@@ -1202,22 +1431,21 @@ CRITICAL INSTRUCTIONS:
 - DO NOT explain how to do something - ACTUALLY DO IT using function calls
 - If you have a write_file or create_document tool, USE IT to create files
 - If you have database query tools, USE THEM to get real data
-- If you have communication tools (adapter_slack, adapter_github, etc.), USE THEM to send messages, post updates, create issues, etc.
+- If you need external apps (Gmail/Slack/etc.), use `composio_execute` with a mapped action name (e.g., SLACK_POST_MESSAGE, GMAIL_FETCH_EMAILS)
 - EXECUTE first, explain later (if needed)
 
 Examples:
 - "Create a report" → Call write_file tool with the report content
 - "Query the database" → Call smart_query_database tool
 - "Search for code" → Call search_codebase tool
-- "Post a message to Slack" → Call adapter_slack tool with operation="chat.postMessage"
-- "Send a message" → Call adapter_slack tool to actually send it
-- "Create a GitHub issue" → Call adapter_github tool with appropriate operation
+- "Post a message to Slack" → Call composio_execute with action="SLACK_POST_MESSAGE" and params {channel, text}
+- "Summarize my emails" → Call composio_execute with action="GMAIL_FETCH_EMAILS" and params (query/date filters), then summarize
+- "Create a GitHub issue" → Call composio_execute with a mapped GitHub action (from the cache)
 
 COMMUNICATION TOOLS:
-- adapter_slack: Use this to POST messages to Slack channels, read conversations, upload files, add reactions
-  - When user asks to "post", "send", "message" in Slack → Use adapter_slack with operation="chat.postMessage"
-  - Required params: {"channel": "C123456", "text": "your message"}
-- adapter_github: Use this to interact with GitHub repositories, create issues, manage PRs
+- composio_execute: Use this to call external app actions (Gmail, Slack, GitHub, etc.)
+  - The `action` MUST be an exact mapped action name from `composio_actions_cache` (we will provide examples in-system).
+  - Use `params` (or `parameters`) for the action inputs.
 
 Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
         
@@ -1294,6 +1522,12 @@ YOUR SPECIALIZED SKILLS:
         max_iterations = 5
         iteration = 0
         current_response = response
+        # Allow ONE recovery attempt when the model picks an unmapped action name.
+        action_not_mapped_retry_budget = 1
+        # Allow ONE recovery attempt when the model calls composio_execute without required args.
+        invalid_parameters_retry_budget = 1
+        # Detect repeated tool calls (prevents infinite loops / API spam).
+        seen_call_keys: set[str] = set()
         
         while current_response.tool_calls and iteration < max_iterations:
             iteration += 1
@@ -1308,7 +1542,12 @@ YOUR SPECIALIZED SKILLS:
                 tool_id = tool_call.get('id', f'call_{int(time.time() * 1000)}')
                 
                 # Emit tool-start
-                yield self.streaming_handler.format_aisdk_tool_start(tool_id, tool_name)
+                try:
+                    args_str = tool_call.get('function', {}).get('arguments', '{}')
+                    tool_input = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
+                except Exception:
+                    tool_input = {}
+                yield self.streaming_handler.format_aisdk_tool_start(tool_id, tool_name, tool_input=tool_input)
                 await asyncio.sleep(0)
                 
                 start_times[tool_id] = time.time()
@@ -1316,11 +1555,25 @@ YOUR SPECIALIZED SKILLS:
             
             # Execute tools
             tool_results = []
+            followup_system_messages: List[Dict[str, Any]] = []
+            executed_any_success = False
+            executed_call_key_repeat = False
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
                     # Parse arguments
                     args_str = tool_call.get('function', {}).get('arguments', '{}')
                     tool_args = json.loads(args_str) if isinstance(args_str, str) else args_str
+
+                    # Loop detection key (same tool + same args)
+                    try:
+                        args_key = json.dumps(tool_args or {}, sort_keys=True, default=str)
+                    except Exception:
+                        args_key = str(tool_args)
+                    call_key = f"{tool_name}:{args_key}"
+                    if call_key in seen_call_keys:
+                        executed_call_key_repeat = True
+                    else:
+                        seen_call_keys.add(call_key)
                     
                     # Execute tool via tool router
                     result = await self.tool_router.execute_and_format(
@@ -1328,7 +1581,7 @@ YOUR SPECIALIZED SKILLS:
                         tool_args=tool_args,
                         agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1
                     )
-                    
+
                     # Extract LLM context from result and truncate to prevent context overflow
                     llm_context = result.get('llm_context', str(result.get('raw_result', '')))
                     # Truncate to max 1000 chars to keep context manageable
@@ -1342,6 +1595,192 @@ YOUR SPECIALIZED SKILLS:
                         'name': tool_name,
                         'content': llm_context
                     })
+                    if result.get("success"):
+                        executed_any_success = True
+
+                    # Stop immediately on deterministic "unavailable" errors (no point retrying),
+                    # EXCEPT: allow a single recovery attempt for "action not mapped" so the model
+                    # can pick from the provided mapped action examples.
+                    error_type = result.get("error_type")
+                    raw_error = (result.get("raw_result") or {}).get("error") if isinstance(result.get("raw_result"), dict) else None
+                    if (not result.get("success")) and error_type == "composio_action_not_mapped" and action_not_mapped_retry_budget > 0:
+                        action_not_mapped_retry_budget -= 1
+                        # Add a follow-up system instruction to pick an exact mapped action name.
+                        if raw_error and "Examples of mapped actions:" in raw_error:
+                            examples = raw_error.split("Examples of mapped actions:", 1)[1].strip()
+
+                            # IMPORTANT: don't let the model "pick any Slack action" if the requested
+                            # capability isn't actually present in cache (prevents wrong side-effects).
+                            user_text = ""
+                            for m in reversed(llm_messages):
+                                if m.get("role") == "user":
+                                    user_text = m.get("content") or ""
+                                    break
+                            q = (user_text or "").lower()
+                            q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+                            stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+                            q_tokens = [t for t in q_tokens if t not in stop][:12]
+
+                            candidates = [c.strip() for c in examples.split(",") if c.strip()]
+                            scored: List[tuple[int, str]] = []
+                            for c in candidates:
+                                ct = c.lower()
+                                score = sum(1 for tok in q_tokens if tok in ct)
+                                scored.append((score, c))
+                            scored.sort(key=lambda x: (-x[0], x[1]))
+                            top = [c for score, c in scored if score > 0][:8]
+
+                            # If none of the suggested actions match the user's request at all,
+                            # stop and ask for a cache sync rather than executing unrelated actions.
+                            if not top:
+                                from types import SimpleNamespace
+                                message = (
+                                    "That action is not available in the local integrations cache for this workspace/agent. "
+                                    "The system won't guess a different action (to avoid doing the wrong thing). "
+                                    "Please run a Composio sync to refresh `composio_actions_cache` for this app, then retry."
+                                )
+                                yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                                return
+
+                            followup_system_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "The previous Composio action name was not mapped. "
+                                        "Retry using ONE of these exact mapped action names that best matches the user's request:\n"
+                                        f"{', '.join(top)}\n"
+                                        "Use `composio_execute` again with the corrected `action`."
+                                    ),
+                                }
+                            )
+                        else:
+                            followup_system_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "The previous Composio action name was not mapped. "
+                                        "Retry using a valid mapped action from `composio_actions_cache`."
+                                    ),
+                                }
+                            )
+                    else:
+                        # Recovery: composio_execute called with missing/invalid parameters.
+                        # Give ONE chance to retry with an explicit mapped action.
+                        if (
+                            (not result.get("success"))
+                            and tool_name == "composio_execute"
+                            and error_type == "invalid_parameters"
+                            and invalid_parameters_retry_budget > 0
+                        ):
+                            invalid_parameters_retry_budget -= 1
+                            try:
+                                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+                                from core.composio.entity_manager import EntityManager
+
+                                # Find last user message
+                                user_text = ""
+                                for m in reversed(llm_messages):
+                                    if m.get("role") == "user":
+                                        user_text = m.get("content") or ""
+                                        break
+
+                                q = (user_text or "").lower()
+                                q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+                                stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+                                q_tokens = [t for t in q_tokens if t not in stop][:10]
+
+                                # Allowed apps = assigned EXTERNAL apps, optionally intersect with connected apps
+                                aid = agent_runtime.agent_id if hasattr(agent_runtime, "agent_id") else 0
+                                assigned = (
+                                    self.db.query(AgentAppAssignment)
+                                    .filter(
+                                        AgentAppAssignment.agent_id == aid,
+                                        AgentAppAssignment.is_active == True,  # noqa: E712
+                                        AgentAppAssignment.app_type == "EXTERNAL",
+                                    )
+                                    .all()
+                                )
+                                assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
+                                allowed_apps = assigned_apps
+
+                                if self.workspace_id:
+                                    manager = EntityManager(self.db)
+                                    entity = manager.get_entity_by_workspace(self.workspace_id)
+                                    if entity:
+                                        connected_apps = [
+                                            (c.get("app_name") or "").upper()
+                                            for c in manager.get_entity_connections(entity["id"])
+                                            if c.get("status") == "active"
+                                        ]
+                                        if connected_apps:
+                                            connected_set = set(connected_apps)
+                                            allowed_apps = [a for a in assigned_apps if a in connected_set]
+
+                                suggestions: List[str] = []
+                                if q_tokens and allowed_apps:
+                                    for app in allowed_apps[:12]:
+                                        token_filters = []
+                                        for tok in q_tokens:
+                                            like = f"%{tok}%"
+                                            token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                            token_filters.append(ComposioActionCache.description.ilike(like))
+                                        rows = (
+                                            self.db.query(ComposioActionCache.action_name)
+                                            .filter(ComposioActionCache.app_name == app)
+                                            .filter(or_(*token_filters))
+                                            .limit(12)
+                                            .all()
+                                        )
+                                        for (action_name,) in rows:
+                                            if action_name:
+                                                suggestions.append(str(action_name))
+                                        if len(suggestions) >= 12:
+                                            break
+
+                                suggestions = list(dict.fromkeys(suggestions))[:10]
+                                followup_system_messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "Your previous `composio_execute` call was missing required parameters. "
+                                            "Retry by calling `composio_execute` again with an explicit mapped `action` "
+                                            "from `composio_actions_cache` and any required `params`. "
+                                            + (
+                                                f"Candidate actions for this request: {', '.join(suggestions)}"
+                                                if suggestions
+                                                else "Pick a valid mapped action for one of the agent's assigned + connected apps."
+                                            )
+                                        ),
+                                    }
+                                )
+                            except Exception:
+                                followup_system_messages.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "Your previous `composio_execute` call was missing required parameters. "
+                                            "Retry with an explicit mapped `action` and any required `params`."
+                                        ),
+                                    }
+                                )
+
+                        deterministic_error_types = {
+                            # Composio gating
+                            "composio_not_assigned",
+                            "composio_not_connected",
+                            "composio_action_not_allowed",
+                            "composio_missing_workspace",
+                            # Generic parameter issues
+                            "invalid_parameters",
+                        }
+                        # If we injected a follow-up retry instruction, don't stop here.
+                        if followup_system_messages:
+                            pass
+                        elif (not result.get("success")) and error_type in deterministic_error_types:
+                            from types import SimpleNamespace
+                            message = raw_error or llm_context or "That tool is not available for this agent/workspace."
+                            yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                            return
 
                     if result.get('fatal_error'):
                         fatal_errors.append(result)
@@ -1391,6 +1830,29 @@ YOUR SPECIALIZED SKILLS:
             
             # Then add tool results to message history
             llm_messages.extend(tool_results)
+
+            # Add any follow-up instructions (e.g., one retry for action-not-mapped)
+            if followup_system_messages:
+                llm_messages.extend(followup_system_messages)
+
+            # If the model is repeating the same tool call, or we have a successful "read" result,
+            # force synthesis WITHOUT tools to prevent repeated external API calls.
+            # (This avoids the observed loop where the model keeps calling `composio_execute`.)
+            if executed_call_key_repeat or (executed_any_success and not followup_system_messages):
+                from types import SimpleNamespace
+                llm_messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "You now have the tool results needed. "
+                            "Do NOT call any more tools. "
+                            "Write the final answer for the user using the tool output above."
+                        ),
+                    }
+                )
+                final_response = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
+                yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
+                return
 
             if fatal_errors:
                 from types import SimpleNamespace

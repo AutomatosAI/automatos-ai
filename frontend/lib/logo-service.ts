@@ -125,48 +125,19 @@ const TOOL_DOMAINS: Record<string, string> = {
     'yarn': 'yarnpkg.com',
     'pip': 'pypi.org',
 
-    // ========================================================================
-    // GOOGLE SERVICES - Service-specific domains for better logo matching
-    // ========================================================================
     'google_ads': 'ads.google.com',
-    'google_ads_oauth2_mcp': 'ads.google.com',
     'google_analytics': 'analytics.google.com',
-    'google_analytics_oauth2_mcp': 'analytics.google.com',
     'google_bigquery': 'cloud.google.com',
-    'google_bigquery_oauth2_mcp': 'cloud.google.com',
     'google_books': 'books.google.com',
-    'google_books_oauth2_mcp': 'books.google.com',
     'google_business_profile': 'business.google.com',
-    'google_business_profile_oauth2_mcp': 'business.google.com',
     'google_calendar': 'calendar.google.com',
-    'google_calendar_oauth2_mcp': 'calendar.google.com',
     'google_cloud': 'cloud.google.com',
-    'google_cloud_natural_language_oauth2_mcp': 'cloud.google.com',
     'google_drive': 'drive.google.com',
-    'google_drive_oauth2_mcp': 'drive.google.com',
     'google_gmail': 'gmail.com',
-    'google_gmail_oauth2_mcp': 'gmail.com',
     'google_sheets': 'sheets.google.com',
-    'google_sheets_oauth2_mcp': 'sheets.google.com',
     'google_docs': 'docs.google.com',
-    'google_docs_oauth2_mcp': 'docs.google.com',
-    'gong_oauth2_mcp': 'gong.io',
-
-    // ========================================================================
-    // MICROSOFT SERVICES - Service-specific domains for better logo matching
-    // ========================================================================
-    'microsoft_azure_monitor_oauth2_mcp': 'azure.microsoft.com',
-    'microsoft_drive_oauth2_mcp': 'onedrive.live.com',
-    'microsoft_dynamics_oauth2_mcp': 'dynamics.microsoft.com',
-    'microsoft_entra_id_oauth2_mcp': 'entra.microsoft.com',
-    'microsoft_excel_oauth2_mcp': 'office.com',
-    'microsoft_graph_security_oauth2_mcp': 'security.microsoft.com',
-    'microsoft_oauth2_mcp': 'microsoft.com',
-    'microsoft_outlook_oauth2_mcp': 'outlook.com',
-    'microsoft_sharepoint_oauth2_mcp': 'sharepoint.com',
-    'microsoft_teams_oauth2_mcp': 'teams.microsoft.com',
+    'gong': 'gong.io',
     'microsoft_onedrive': 'onedrive.live.com',
-    'microsoft_onedrive_oauth2_mcp': 'onedrive.live.com',
 }
 
 /**
@@ -181,10 +152,7 @@ interface LogoConfig {
 /**
  * Extract brand name from tool name
  * Examples:
- * - "Discord Bot MCP" → "Discord"
  * - "AWS Services" → "AWS"
- * - "GitHub OAuth2 MCP" → "GitHub"
- * - "Google Analytics OAuth2 MCP" → "GoogleAnalytics"
  */
 export function getBrandFromToolName(toolName: string): string | null {
     if (!toolName) return null;

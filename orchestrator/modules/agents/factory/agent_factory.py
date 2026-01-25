@@ -27,8 +27,8 @@ from core.llm import (
 )
 from core.models import (
     Agent, Skill, PriorityLevel, Base,
-    AgentToolAssignment, MCPTool  # Phase 3: MCP Tools
 )
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 from modules.agents.services.skill_loader import get_skill_loader
 
 # Import new services (lazy import to avoid circular deps)
@@ -221,56 +221,6 @@ def _build_tool_schemas(required_tools: List[str]) -> List[Dict]:
                         }
                     },
                     "required": ["command"]
-                }
-            }
-        })
-    
-    # PRD-17 Phase 3: MCP tools (GitHub integration)
-    if "mcp" in required_tools:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "GitHub MCP",
-                "description": "Access GitHub API for repository operations, PRs, issues, and file management.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "method": {
-                            "type": "string",
-                            "description": "GitHub API method (repos.get, repos.getContent, pulls.create, issues.create, etc.)",
-                            "enum": ["repos.get", "repos.getContent", "repos.listForAuthenticatedUser", "pulls.create", "pulls.list", "issues.create", "issues.list"]
-                        },
-                        "owner": {
-                            "type": "string",
-                            "description": "Repository owner (username or organization)",
-                            "default": "AutomatosAI"
-                        },
-                        "repo": {
-                            "type": "string",
-                            "description": "Repository name"
-                        },
-                        "path": {
-                            "type": "string",
-                            "description": "File path in repository (for getContent)"
-                        },
-                        "title": {
-                            "type": "string",
-                            "description": "Title for PR or issue"
-                        },
-                        "body": {
-                            "type": "string",
-                            "description": "Description/body for PR or issue"
-                        },
-                        "head": {
-                            "type": "string",
-                            "description": "Head branch for PR"
-                        },
-                        "base": {
-                            "type": "string",
-                            "description": "Base branch for PR (default: main)"
-                        }
-                    },
-                    "required": ["method"]
                 }
             }
         })
@@ -507,7 +457,7 @@ class AgentRuntime:
     last_execution: Optional[datetime] = None
     performance_metrics: Dict[str, Any] = field(default_factory=dict)
     memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
-    tools: List[Dict[str, Any]] = field(default_factory=list)  # Phase 3: MCP Tools assigned to agent
+    tools: List[Dict[str, Any]] = field(default_factory=list)  # Assigned external apps (Composio)
     tool_executor: Any = None  # PRD-17: Shared UnifiedToolExecutor (initialized once, reused)
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
@@ -821,7 +771,7 @@ Available Shell Tools:
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
-                tools=agent_tools  # Phase 3: MCP Tools
+                tools=agent_tools  # Assigned external apps (Composio)
             )
             
             # Update database status
@@ -1162,36 +1112,6 @@ To use actions, respond with JSON blocks like:
                 tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
                 self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
             
-            # FIX: Inject Assigned MCP Tools (Composio, etc.) from Runtime
-            if agent_runtime.tools:
-                for tool in agent_runtime.tools:
-                    # Construct OpenAI function schema from tool metadata
-                    # Assuming 'capabilities' or 'tool_metadata' contains the parameters schema
-                    # Fallback to generic schema if detailed parameters are missing
-                    
-                    tool_name = tool.get('name', 'unknown')
-                    # Sanitize name for OpenAI (letters, numbers, underscores)
-                    import re
-                    sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', tool_name)[:64]
-                    
-                    schema = {
-                        "type": "function",
-                        "function": {
-                            "name": sanitized_name,
-                            "description": tool.get('description', f"External tool: {tool_name}"),
-                            "parameters": tool.get('capabilities', {}).get('parameters') or {
-                                "type": "object", 
-                                "properties": {
-                                    "params": {"type": "object", "description": "Tool parameters"}
-                                }
-                            }
-                        }
-                    }
-                    tool_schemas.append(schema)
-                
-                mcp_tool_names = [t.get('name') for t in agent_runtime.tools]
-                self.logger.info(f"🔌 Injected {len(agent_runtime.tools)} assigned MCP tools: {mcp_tool_names}")
-
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
             
@@ -1758,56 +1678,43 @@ To use actions, respond with JSON blocks like:
             except Exception:
                 pass
         
-        # Explicitly add assigned adapter/MCP tools to the prompt (Generic & Scalable)
+        # Explicitly add assigned Composio apps (from the new assignment table)
         if db and agent.id:
             try:
-                # Need to import here to avoid circular dependencies
-                from core.models import AgentToolAssignment, MCPTool
-                
-                # Query enabled assignments
-                assignments = db.query(AgentToolAssignment).filter(
-                    AgentToolAssignment.agent_id == agent.id,
-                    AgentToolAssignment.enabled == True
-                ).all()
-                
+                assignments = (
+                    db.query(AgentAppAssignment)
+                    .filter(
+                        AgentAppAssignment.agent_id == agent.id,
+                        AgentAppAssignment.is_active == True,
+                        AgentAppAssignment.app_type == "EXTERNAL",
+                    )
+                    .all()
+                )
+
                 if assignments:
-                    helper_tools_section = ["\n## Available External Tools\n"]
-                    helper_tools_section.append("You have access to the following external tools. You MUST use them when their capabilities are needed to fulfill the user's request. Do not make up information if you can query these tools instead.\n")
-                    
-                    found_tools = False
+                    app_names = [a.app_name.upper() for a in assignments if a.app_name]
+                    cache = {
+                        a.app_name: a
+                        for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
+                    }
+
+                    helper_section = ["\n## Available External Apps (Composio)\n"]
+                    helper_section.append(
+                        "You have access to these external apps via Composio. When you need to read/send emails or post messages, "
+                        "use the `composio_execute` tool with an appropriate action for the relevant app.\n"
+                    )
                     for assignment in assignments:
-                        # Find the tool definition
-                        tool_def = db.query(MCPTool).filter(
-                            MCPTool.tool_id == assignment.tool_id,
-                            MCPTool.status == 'active'
-                        ).first()
-                        
-                        if tool_def:
-                            found_tools = True
-                            # Construct tool name (matching registry convention)
-                            # Check provider to be sure
-                            tool_name = tool_def.name
-                            if not tool_def.mcp_server_url: # Adapter tool
-                                tool_name = f"adapter_{tool_def.name.lower().replace(' ', '_')}"
-                            
-                            helper_tools_section.append(f"### {tool_name}")
-                            helper_tools_section.append(f"**Description**: {tool_def.description}")
-                            
-                            # Add capabilities hint dynamically from metadata
-                            if tool_def.capabilities:
-                                caps = tool_def.capabilities
-                                methods = caps.get('methods') or caps.get('tools') or []
-                                if isinstance(methods, dict):
-                                    methods = list(methods.keys())
-                                if methods:
-                                    helper_tools_section.append(f"**Available Operations**: {', '.join(str(m) for m in methods)}")
-                                    helper_tools_section.append(f"**Usage**: This tool wraps the underlying API. Select the appropriate operation from the list above and provide the standard API parameters in the `params` object.")
-                                    
-                    if found_tools:
-                        sections.append("\n".join(helper_tools_section))
-                        self.logger.info(f"✨ Added {len(assignments)} helper tools to system prompt")
+                        app_name = (assignment.app_name or "").upper()
+                        app = cache.get(app_name)
+                        if not app_name:
+                            continue
+                        helper_section.append(f"### {app_name}")
+                        if app and app.description:
+                            helper_section.append(f"**Description**: {app.description}")
+
+                    sections.append("\n".join(helper_section))
             except Exception as e:
-                self.logger.warning(f"Failed to append helper tools to prompt: {e}")
+                self.logger.warning(f"Failed to append Composio apps to prompt: {e}")
 
         # Add instructions for handling dependency context
         sections.append("\n## IMPORTANT: Working with Context and Dependencies\n")
@@ -2033,62 +1940,56 @@ To use actions, respond with JSON blocks like:
         return results
     
     # ======================================================================
-    # PHASE 3: MCP TOOLS INTEGRATION METHODS
+    # Assigned apps/integrations (Composio)
     # ======================================================================
     
     async def _load_agent_tools(self, agent_id: int) -> List[Dict[str, Any]]:
         """
-        Load MCP tools assigned to an agent from the database.
-        
-        Phase 3: Tools Integration
-        Returns tool metadata for agent's assigned tools (only enabled ones).
+        Load Composio apps assigned to an agent from the database (schema v2).
+
+        This is DB-backed and does not rely on legacy tool tables.
         """
         try:
-            # Query agent_tool_assignments with eagerly loaded tool data
-            from sqlalchemy.orm import joinedload
-            
             assignments = (
-                self.db_session.query(AgentToolAssignment)
-                
+                self.db_session.query(AgentAppAssignment)
                 .filter(
-                    AgentToolAssignment.agent_id == agent_id,
-                    AgentToolAssignment.enabled == True
+                    AgentAppAssignment.agent_id == agent_id,
+                    AgentAppAssignment.is_active == True,
+                    AgentAppAssignment.app_type == "EXTERNAL",
                 )
                 .all()
             )
-            
-            # CLEAN ARCHITECTURE: Query tools separately by tool_id (string)
-            from core.models.core import MCPTool
-            tools = []
+
+            if not assignments:
+                return []
+
+            app_names = [a.app_name.upper() for a in assignments if a.app_name]
+            cache = {
+                a.app_name: a
+                for a in self.db_session.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
+            }
+
+            tools: List[Dict[str, Any]] = []
             for assignment in assignments:
-                # Fetch tool metadata using string tool_id
-                tool = self.db_session.query(MCPTool).filter(
-                    MCPTool.tool_id == assignment.tool_id,
-                    MCPTool.status == 'active'
-                ).first()
-                
-                if tool:  # Tool exists and is active
-                    tools.append({
-                        "tool_id": tool.id,  # Numeric ID for legacy compat
-                        "name": tool.name,
-                        "description": tool.description,
-                        "provider": tool.provider,
-                        "category": tool.category,
-                        "icon": tool.icon,
-                        "mcp_server_url": tool.mcp_server_url,
-                        "capabilities": tool.capabilities or {},
-                        "permissions": {},  # Not stored in AgentToolAssignment anymore
-                        "configuration": {},  # Not stored in AgentToolAssignment anymore  
-                        "assigned_at": assignment.created_at.isoformat() if assignment.created_at else None
-                    })
-            
-            if tools:
-                self.logger.info(f"✅ Loaded {len(tools)} tools for agent {agent_id}")
-            
+                app_name = (assignment.app_name or "").upper()
+                app = cache.get(app_name)
+                if not app_name:
+                    continue
+                tools.append(
+                    {
+                        "name": app_name,
+                        "description": (app.description if app else "") or "",
+                        "provider": "Composio",
+                        "category": ((app.categories or [None])[0] if app else None),
+                        "icon": app.logo_url if app else None,
+                        "assigned_at": assignment.assigned_at.isoformat() if assignment.assigned_at else None,
+                    }
+                )
+
+            self.logger.info(f"✅ Loaded {len(tools)} Composio app assignment(s) for agent {agent_id}")
             return tools
-            
         except Exception as e:
-            self.logger.warning(f"Failed to load tools for agent {agent_id}: {e}")
+            self.logger.warning(f"Failed to load Composio apps for agent {agent_id}: {e}")
             return []
     
     def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
