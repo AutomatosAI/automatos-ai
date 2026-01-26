@@ -10,8 +10,16 @@ import os
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# SINGLE-TENANT MODE CONSTANTS
+# =============================================================================
+
+# Default tenant UUID for single-tenant deployments
+DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000000")
 
 # Load .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -62,14 +70,20 @@ class Config:
     # =============================================================================
     # CORS (Frontend origins)
     # =============================================================================
-    CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000")
+    # Allow multiple origins (comma-separated) for Railway deployment
+    # Default includes localhost for local dev and Railway frontend domain
+    # Set CORS_ALLOW_ORIGINS in Railway to include your frontend domain
+    # For Railway: https://automotas-ai-frontend-production.up.railway.app
+    # For custom domain: https://ui.automatos.app
+    _cors_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,https://automotas-ai-frontend-production.up.railway.app")
+    CORS_ALLOW_ORIGINS: str = ",".join([origin.strip() for origin in _cors_origins.split(",") if origin.strip()])
     
     # =============================================================================
     # LLM KEYS (Optional - LLM Manager handles these)
     # =============================================================================
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY")
-    
+
     # LLM settings - loaded from database system_settings (NO hardcoded defaults)
     @property
     def LLM_PROVIDER(self) -> str:

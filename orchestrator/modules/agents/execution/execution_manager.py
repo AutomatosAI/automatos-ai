@@ -663,7 +663,6 @@ class AgentExecutionManager:
                     "file_operations": "file_ops",
                     "shell": "shell",
                     "shell_commands": "shell",
-                    "mcp": "mcp",
                     "database": "database"
                 }
                 for skill in skills:
@@ -685,20 +684,9 @@ class AgentExecutionManager:
                 if agent_skill_tool_names:
                     self.logger.info(f"🦸 Agent {agent_id} has {len(agent_skill_tool_names)} skill tools: {agent_skill_tool_names}")
             
-            # 🔧 PRD-20 FIX: Extract MCP tools from agent's tool assignments
-            agent_mcp_tool_names = []
-            if agent.tool_assignments:
-                for assignment in agent.tool_assignments:
-                    if assignment.tool and assignment.tool.name:
-                        agent_mcp_tool_names.append(assignment.tool.name)
-                
-                if agent_mcp_tool_names:
-                    self.logger.info(f"🔧 Agent {agent_id} has {len(agent_mcp_tool_names)} MCP tools: {agent_mcp_tool_names}")
-            
-            # Merge all tools together: subtask tools + agent skill tools + agent MCP tools
+            # Merge all tools together: subtask tool categories + agent skill tools
             all_tools = set(required_tools)
             all_tools.update(agent_skill_tool_names)
-            all_tools.update(agent_mcp_tool_names)
             required_tools = list(all_tools)
             
             # Default to research only if agent has absolutely NO tools
@@ -897,7 +885,12 @@ REMEMBER: You are a PROFESSIONAL delivering a FINAL PRODUCT, not a draft."""
 
             except Exception as e:
                 last_error = e
+                self.logger.error(f"❌ Execution attempt {attempt} failed: {str(e)}")
+                import traceback
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
+                
                 if attempt < self.max_retries:
+                    self.logger.info(f"⏳ Waiting {2 ** attempt}s before retry...")
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                 continue
         

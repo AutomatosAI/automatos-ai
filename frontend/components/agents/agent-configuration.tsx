@@ -3,9 +3,9 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  Settings, 
-  Save, 
+import {
+  Settings,
+  Save,
   RotateCcw,
   AlertTriangle,
   CheckCircle,
@@ -15,7 +15,8 @@ import {
   Zap,
   Shield,
   Database,
-  Bot
+  Bot,
+  Wrench
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,8 +24,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { ToolLogo } from '@/components/ui/tool-logo'
 import { Slider } from '@/components/ui/slider'
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -43,6 +45,7 @@ import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-mode
 import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
 import { apiClient } from '@/lib/api-client'
+import { useTools } from '@/hooks/use-tools-api'
 
 interface AgentConfigurationProps {
   agents: any[]
@@ -50,15 +53,16 @@ interface AgentConfigurationProps {
   onAgentSelect: (agentId: string | null) => void
 }
 
-export function AgentConfiguration({ 
-  agents, 
-  selectedAgentId, 
-  onAgentSelect 
+export function AgentConfiguration({
+  agents,
+  selectedAgentId,
+  onAgentSelect
 }: AgentConfigurationProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [configData, setConfigData] = useState<any>({})
   const [modelConfigData, setModelConfigData] = useState<any>({})
   const [assignedSkills, setAssignedSkills] = useState<number[]>([])
+  const [assignedTools, setAssignedTools] = useState<number[]>([])
 
   // Fetch agent and configuration data
   const { data: agent, isLoading: agentLoading } = useAgent(selectedAgentId)
@@ -66,10 +70,14 @@ export function AgentConfiguration({
   const { data: availableSkills } = useSkills() // Get ALL available skills
   const { data: agentSkills } = useAgentSkills(selectedAgentId) // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
-  
+
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(selectedAgentId ? Number(selectedAgentId) : null)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
+
+  // Tools API
+  const { data: toolsData } = useTools({ status: 'active', limit: 100 })
+  const availableTools: any[] = (toolsData as any)?.data || []
 
   // Initialize assigned skills when agent or agentSkills loads
   useEffect(() => {
@@ -83,6 +91,14 @@ export function AgentConfiguration({
       setAssignedSkills(skillIds)
     } else {
       setAssignedSkills([])
+    }
+
+    // Initialize tools
+    if ((agent as any)?.tools && (agent as any).tools.length > 0) {
+      const toolIds = (agent as any).tools.map((tool: any) => tool.id)
+      setAssignedTools(toolIds)
+    } else {
+      setAssignedTools([])
     }
   }, [agentSkills, agent])
 
@@ -99,7 +115,7 @@ export function AgentConfiguration({
       setHasUnsavedChanges(false)
     }
   }, [agentConfig, agent])
-  
+
   // PRD-15: Initialize model config data
   useEffect(() => {
     if (agentModelConfig) {
@@ -148,7 +164,7 @@ export function AgentConfiguration({
     }))
     setHasUnsavedChanges(true)
   }
-  
+
   // PRD-15: Handle model config changes
   const handleModelConfigChange = (key: string, value: any) => {
     setModelConfigData((prev: any) => ({
@@ -169,6 +185,17 @@ export function AgentConfiguration({
     })
   }
 
+  // Handle tools assignment toggle
+  const toggleToolAssignment = (toolId: number) => {
+    setAssignedTools((prev) => {
+      const newTools = prev.includes(toolId)
+        ? prev.filter((id) => id !== toolId)
+        : [...prev, toolId]
+      setHasUnsavedChanges(true)
+      return newTools
+    })
+  }
+
   // Save configuration
   const handleSave = async () => {
     if (!selectedAgentId) return
@@ -178,35 +205,36 @@ export function AgentConfiguration({
       const normalizedTags = Array.isArray(configData.tags)
         ? configData.tags
         : String(configData.tags || '')
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter((tag) => tag.length > 0)
-      
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0)
+
       // 1. Update basic agent info (name, description)
       await updateConfigMutation.mutateAsync({
         agentId: selectedAgentId,
         config: {
           name: configData.name || (agent as any)?.name,
           description: configData.description || (agent as any)?.description,
-          tags: normalizedTags
+          tags: normalizedTags,
+          tool_ids: assignedTools
         }
       })
-      
+
       // 2. Handle skill assignments separately
       // Get current skills
       const currentSkillIds = (agent as any)?.skills?.map((s: any) => s.id) || []
       const newSkillIds = assignedSkills
-      
+
       console.log('Skill assignment - Current:', currentSkillIds)
       console.log('Skill assignment - New:', newSkillIds)
-      
+
       // Find skills to add and remove
       const skillsToAdd = newSkillIds.filter((id: number) => !currentSkillIds.includes(id))
       const skillsToRemove = currentSkillIds.filter((id: number) => !newSkillIds.includes(id))
-      
+
       console.log('Skills to add:', skillsToAdd)
       console.log('Skills to remove:', skillsToRemove)
-      
+
       // Add new skills
       for (const skillId of skillsToAdd) {
         try {
@@ -218,7 +246,7 @@ export function AgentConfiguration({
           toast.error(`Failed to add skill ${skillId}`)
         }
       }
-      
+
       // Remove old skills
       for (const skillId of skillsToRemove) {
         try {
@@ -230,7 +258,7 @@ export function AgentConfiguration({
           toast.error(`Failed to remove skill ${skillId}`)
         }
       }
-      
+
       // 3. Save model configuration (PRD-15)
       if (modelConfigData && Object.keys(modelConfigData).length > 0) {
         try {
@@ -243,11 +271,11 @@ export function AgentConfiguration({
           toast.error('Some settings saved, but model configuration failed')
         }
       }
-      
+
       toast.dismiss()
       toast.success(`Configuration saved! Added ${skillsToAdd.length} skills, removed ${skillsToRemove.length} skills.`)
       setHasUnsavedChanges(false)
-      
+
       // Force refresh agent data
       console.log('Reloading page to refresh agent data...')
       setTimeout(() => window.location.reload(), 500)
@@ -286,6 +314,12 @@ export function AgentConfiguration({
       setAssignedSkills(skillIds)
     } else {
       setAssignedSkills([])
+    }
+    if (agent && (agent as any).tools && Array.isArray((agent as any).tools)) {
+      const toolIds = (agent as any).tools.map((tool: any) => tool.id)
+      setAssignedTools(toolIds)
+    } else {
+      setAssignedTools([])
     }
     setHasUnsavedChanges(false)
   }
@@ -374,17 +408,17 @@ export function AgentConfiguration({
               Unsaved Changes
             </Badge>
           )}
-          
-          <Button 
-            variant="outline" 
+
+          <Button
+            variant="outline"
             onClick={handleReset}
             disabled={!hasUnsavedChanges || updateConfigMutation.isLoading}
           >
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset
           </Button>
-          
-          <Button 
+
+          <Button
             onClick={handleSave}
             disabled={!hasUnsavedChanges || updateConfigMutation.isLoading}
           >
@@ -752,6 +786,68 @@ export function AgentConfiguration({
         </Card>
       </div>
 
+      {/* Tools Assignment */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-blue-400" />
+            Tool Assignment
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Select tools to grant this agent access to
+          </p>
+        </CardHeader>
+        <CardContent>
+          {availableTools && availableTools.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {availableTools.map((tool: any) => (
+                <div key={tool.id} className="flex items-start space-x-3 p-3 bg-background/50 rounded-lg border border-border/50">
+                  <Checkbox
+                    id={`page-tool-${tool.id}`}
+                    checked={assignedTools.includes(tool.id)}
+                    onCheckedChange={() => toggleToolAssignment(tool.id)}
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <Label htmlFor={`page-tool-${tool.id}`} className="cursor-pointer">
+                      <div className="flex flex-col space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium flex items-center gap-2">
+                            <div className="flex items-center justify-center">
+                              <ToolLogo
+                                name={tool.name}
+                                logo={tool.icon}
+                                size={20}
+                                showBackground={false}
+                              />
+                            </div>
+                            {tool.name}
+                          </span>
+                          <Badge variant="outline" className="text-xs scale-90">
+                            {tool.provider}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {tool.description || 'No description available'}
+                        </p>
+                      </div>
+                    </Label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Wrench className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Active Tools</h3>
+              <p className="text-muted-foreground">
+                No active tools available. Enable tools in Settings &gt; Tools first.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* PRD-15: Model Configuration */}
       <Card className="glass-card">
         <CardHeader>
@@ -821,7 +917,7 @@ export function AgentConfiguration({
           {/* Advanced Model Settings */}
           <div className="space-y-4 pt-4 border-t border-border/50">
             <h4 className="text-sm font-medium">Advanced Model Settings</h4>
-            
+
             {/* Top P */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">

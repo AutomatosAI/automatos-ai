@@ -12,7 +12,8 @@ import httpx
 import logging
 import json
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
+from urllib.parse import urlparse
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -40,14 +41,23 @@ class MCPToolExecutor:
         self.db = db
         self.http_client = httpx.AsyncClient(timeout=30.0)
         logger.info("MCPToolExecutor initialized")
+
+    def _sanitize_url(self, url: str) -> str:
+        try:
+            parsed = urlparse(url)
+            host = parsed.netloc or parsed.path
+            return f"{parsed.scheme}://{host}"
+        except Exception:
+            return url
     
     async def execute_tool(
         self,
         agent_id: int,
-        tool_id: int,
+        tool_id: Union[int, str],
         method: str,
         params: Optional[Dict[str, Any]] = None,
-        execution_id: Optional[int] = None
+        execution_id: Optional[int] = None,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute an MCP tool method for a specific agent.
@@ -66,35 +76,58 @@ class MCPToolExecutor:
             MCPToolNotFoundError: If tool doesn't exist or agent doesn't have access
             MCPToolExecutionError: If execution fails
         """
+        trace = trace_id or "no-trace"
         start_time = time.time()
         success = False
         error_message = None
         output_data = None
         
+        tool_db_id: Optional[int] = None
+
         try:
+            logger.info(
+                f"[tool-trace {trace}] MCP execute start agent={agent_id} "
+                f"tool_id={tool_id} method={method} params_keys={list((params or {}).keys())}"
+            )
             # 1. Verify tool exists and is active
-            tool = self.db.query(MCPTool).filter(
-                MCPTool.id == tool_id,
-                MCPTool.status == 'active'
-            ).first()
+            tool = None
+            if isinstance(tool_id, int):
+                tool = self.db.query(MCPTool).filter(
+                    MCPTool.id == tool_id,
+                    MCPTool.status == 'active'
+                ).first()
+            else:
+                tool = self.db.query(MCPTool).filter(
+                    MCPTool.tool_id == str(tool_id),
+                    MCPTool.status == 'active'
+                ).first()
             
             if not tool:
                 raise MCPToolNotFoundError(f"Tool {tool_id} not found or inactive")
+            tool_db_id = tool.id
             
             # 2. Verify agent has permission to use this tool
+            assignment_tool_id = tool.tool_id
             assignment = self.db.query(AgentToolAssignment).filter(
                 AgentToolAssignment.agent_id == agent_id,
-                AgentToolAssignment.tool_id == tool_id,
+                AgentToolAssignment.tool_id == assignment_tool_id,
                 AgentToolAssignment.enabled == True
             ).first()
             
             if not assignment:
-                raise MCPToolNotFoundError(
-                    f"Agent {agent_id} does not have access to tool {tool_id}"
-                )
+                # Allow Chatbot (agent 1) to use tools assigned to any agent
+                if agent_id == 1:
+                    assignment = self.db.query(AgentToolAssignment).filter(
+                        AgentToolAssignment.tool_id == assignment_tool_id,
+                        AgentToolAssignment.enabled == True
+                    ).first()
+                if not assignment:
+                    raise MCPToolNotFoundError(
+                        f"Agent {agent_id} does not have access to tool {tool_id}"
+                    )
             
             # 3. Check permissions for the requested method
-            permissions = assignment.permissions or {}
+            permissions = getattr(assignment, "permissions", None) or {}
             if not self._check_method_permission(method, permissions):
                 raise MCPToolExecutionError(
                     f"Agent {agent_id} does not have permission to execute method '{method}'"
@@ -111,11 +144,16 @@ class MCPToolExecutor:
             
             # 5. Execute the tool via MCP server
             if tool.mcp_server_url:
+                logger.info(
+                    f"[tool-trace {trace}] MCP call server={self._sanitize_url(tool.mcp_server_url)} "
+                    f"method={method}"
+                )
                 output_data = await self._call_mcp_server(
                     tool.mcp_server_url,
                     method,
                     params or {},
-                    assignment.configuration
+                    getattr(assignment, "configuration", None) or {},
+                    trace_id=trace
                 )
             else:
                 # If no server URL, return a simulated success (for tools that are metadata-only)
@@ -128,12 +166,13 @@ class MCPToolExecutor:
             
             success = True
             logger.info(
-                f"Tool executed successfully: agent={agent_id}, tool={tool.name}, method={method}"
+                f"[tool-trace {trace}] MCP execute success agent={agent_id} tool={tool.name} "
+                f"method={method} time_ms={int((time.time() - start_time) * 1000)}"
             )
             
             return {
                 "success": True,
-                "tool_id": tool_id,
+                "tool_id": tool_db_id,
                 "tool_name": tool.name,
                 "method": method,
                 "output": output_data,
@@ -142,39 +181,41 @@ class MCPToolExecutor:
             
         except MCPToolNotFoundError as e:
             error_message = str(e)
-            logger.warning(error_message)
+            logger.warning(f"[tool-trace {trace}] {error_message}")
             raise
             
         except MCPToolExecutionError as e:
             error_message = str(e)
-            logger.error(error_message)
+            logger.error(f"[tool-trace {trace}] {error_message}")
             raise
             
         except Exception as e:
             error_message = f"Unexpected error executing tool: {str(e)}"
-            logger.exception(error_message)
+            logger.exception(f"[tool-trace {trace}] {error_message}")
             raise MCPToolExecutionError(error_message)
             
         finally:
             # Log the execution attempt
-            self._log_tool_usage(
-                execution_id=execution_id,
-                agent_id=agent_id,
-                tool_id=tool_id,
-                method=method,
-                input_data=params,
-                output_data=output_data,
-                success=success,
-                execution_time_ms=int((time.time() - start_time) * 1000),
-                error_message=error_message
-            )
+            if tool_db_id is not None:
+                self._log_tool_usage(
+                    execution_id=execution_id,
+                    agent_id=agent_id,
+                    tool_id=tool_db_id,
+                    method=method,
+                    input_data=params,
+                    output_data=output_data,
+                    success=success,
+                    execution_time_ms=int((time.time() - start_time) * 1000),
+                    error_message=error_message
+                )
     
     async def _call_mcp_server(
         self,
         server_url: str,
         method: str,
         params: Dict[str, Any],
-        configuration: Optional[Dict[str, Any]] = None
+        configuration: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Call the MCP server to execute the tool method.
@@ -188,6 +229,8 @@ class MCPToolExecutor:
         Returns:
             Response data from the MCP server
         """
+        trace = trace_id or "no-trace"
+        start_time = time.time()
         try:
             # Build the request payload according to MCP protocol
             payload = {
@@ -201,6 +244,11 @@ class MCPToolExecutor:
             if configuration:
                 payload["config"] = configuration
             
+            logger.info(
+                f"[tool-trace {trace}] MCP request "
+                f"url={self._sanitize_url(server_url)} method={method} "
+                f"params_keys={list(params.keys())}"
+            )
             # Make the HTTP request
             response = await self.http_client.post(
                 server_url,
@@ -217,6 +265,12 @@ class MCPToolExecutor:
                     f"MCP server returned error: {result['error']}"
                 )
             
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                f"[tool-trace {trace}] MCP response ok "
+                f"status={response.status_code} time_ms={elapsed_ms} "
+                f"result_keys={list(result.keys())}"
+            )
             return result.get("result", result)
             
         except httpx.HTTPError as e:
@@ -299,7 +353,7 @@ class MCPToolExecutor:
             List of tool dictionaries with details and permissions
         """
         query = self.db.query(AgentToolAssignment, MCPTool).join(
-            MCPTool, AgentToolAssignment.tool_id == MCPTool.id
+            MCPTool, AgentToolAssignment.tool_id == MCPTool.tool_id
         ).filter(
             AgentToolAssignment.agent_id == agent_id
         )
@@ -319,8 +373,8 @@ class MCPToolExecutor:
                 "category": tool.category,
                 "icon": tool.icon,
                 "capabilities": tool.capabilities,
-                "permissions": assignment.permissions,
-                "configuration": assignment.configuration,
+                "permissions": getattr(assignment, "permissions", None) or {},
+                "configuration": getattr(assignment, "configuration", None) or {},
                 "enabled": assignment.enabled
             })
         

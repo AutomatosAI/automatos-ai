@@ -15,7 +15,7 @@ FROM python:3.11-slim as base
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     curl \
@@ -23,16 +23,23 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     tesseract-ocr \
     ghostscript \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Copy requirements (Dockerfile is in orchestrator/, so copy from current dir)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (clean cache after)
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip cache purge && \
+    rm -rf /root/.cache/pip
 
 # Download NLTK data (punkt tokenizer, stopwords) for memory operations
-RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True)"
+# Set NLTK_DATA to a system-wide location accessible to all users
+ENV NLTK_DATA=/usr/local/nltk_data
+RUN python -c "import nltk; nltk.download('punkt', quiet=True, download_dir='/usr/local/nltk_data'); nltk.download('stopwords', quiet=True, download_dir='/usr/local/nltk_data')" && \
+    chmod -R 755 /usr/local/nltk_data && \
+    rm -rf /root/.cache/nltk
 
 # =============================================================================
 # Development Stage - Hot Reload & Debugging
@@ -48,7 +55,7 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
 
 # Expose port
 EXPOSE 8000
@@ -69,6 +76,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 FROM base as production
 
 # Copy application code only (no dev tools)
+# .dockerignore will exclude unnecessary files
 COPY . .
 
 # Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
@@ -77,10 +85,14 @@ RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh 
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/vector_stores /app/projects
+RUN mkdir -p /app/logs /app/vector_stores /app/projects /app/exports
 
-# Remove dev dependencies
-RUN pip uninstall -y pytest pytest-asyncio black isort
+# Remove dev dependencies and clean up
+RUN pip uninstall -y pytest pytest-asyncio black isort 2>/dev/null || true && \
+    pip cache purge && \
+    rm -rf /root/.cache/pip /root/.cache/pytest /tmp/* && \
+    find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
+    find /app -type f -name "*.pyc" -delete 2>/dev/null || true
 
 # Create non-root user for security
 RUN useradd -m -u 1000 automatos && \
@@ -93,7 +105,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Set entrypoint
 ENTRYPOINT ["docker-entrypoint.sh"]
@@ -101,4 +113,3 @@ ENTRYPOINT ["docker-entrypoint.sh"]
 # Production command - use PORT env var (Railway provides this)
 # Default to 8000 if PORT not set
 CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 4"
-

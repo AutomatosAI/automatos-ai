@@ -168,10 +168,22 @@ export async function listCredentials(params?: {
   environment?: string
   active_only?: boolean
   tags?: string
-}): Promise<Credential[]> {
-  const response = await apiClient.request('/api/credentials/', {
-    method: 'GET',
-    query: params
+  skip?: number
+  limit?: number
+  search?: string
+}): Promise<Credential[] | { items: Credential[], total: number }> {
+  // Build query params into URL (apiClient doesn't handle 'query' option)
+  const queryParams = new URLSearchParams()
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        queryParams.append(key, String(value))
+      }
+    })
+  }
+  const url = queryParams.toString() ? `/api/credentials/?${queryParams}` : '/api/credentials/'
+  const response = await apiClient.request(url, {
+    method: 'GET'
   })
   return response.data || response
 }

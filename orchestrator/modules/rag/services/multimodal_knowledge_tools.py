@@ -358,6 +358,28 @@ class MultimodalKnowledgeTools:
             
             if kb_types is None:
                 kb_types = ["document", "table", "image", "formula", "codegraph"]
+            else:
+                # Normalize common aliases from older UI/tool prompts
+                alias_map = {
+                    "docs": "document",
+                    "doc": "document",
+                    "documents": "document",
+                    "tables": "table",
+                    "images": "image",
+                    "img": "image",
+                    "formulas": "formula",
+                    # IMPORTANT: the DB kb_type for code is `codegraph`
+                    "code": "codegraph",
+                    "codebase": "codegraph",
+                    "source": "codegraph",
+                }
+                normalized: List[str] = []
+                for t in kb_types:
+                    tt = (t or "").strip().lower()
+                    if not tt:
+                        continue
+                    normalized.append(alias_map.get(tt, tt))
+                kb_types = normalized or ["document", "table", "image", "formula", "codegraph"]
             
             if not self.db:
                 from core.database.database import SessionLocal

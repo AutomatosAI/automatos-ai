@@ -1,0 +1,14 @@
+{
+  "watch": [
+    "**/*.py",
+    "requirements.txt"
+  ],
+  "ignore": [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/logs/**",
+    "**/*.log"
+  ]
+}

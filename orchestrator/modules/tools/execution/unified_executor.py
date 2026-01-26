@@ -6,18 +6,48 @@ Single entry point for all tool execution, routing to appropriate executors:
 - Research tools (search_knowledge, semantic_search, search_codebase)
 - File operations (read_file, write_file, list_directory)
 - Shell commands (execute_command)
-- MCP tools (third-party integrations)
+
+PRD-37: Added capability-based validation for Composio actions.
+Enforces capability checks at EXECUTION time (defense in depth).
 """
 
 import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+from uuid import UUID
 from sqlalchemy.orm import Session
 
 from modules.agents.services.agent_platform_tools import AgentPlatformTools
 from modules.agents.services.agent_action_executor import ActionExecutor
-from modules.tools.execution.mcp_executor import MCPToolExecutor
 from modules.tools.registry import ToolRegistry
+from modules.tools.registry.tool_registry import ToolSpec
+
+# PRD-36: Composio Integration (lazy import to avoid startup overhead)
+_composio_executor = None
+
+# PRD-37: Capability-based validation (lazy import)
+_capability_filter = None
+
+
+def _get_capability_filter(db):
+    """Lazy import of capability filter for execution-time validation."""
+    global _capability_filter
+    try:
+        from modules.tools.services.action_capability_filter import ActionCapabilityFilter
+        return ActionCapabilityFilter(db)
+    except ImportError:
+        return None
+
+def _get_composio_executor(db):
+    """Lazy import of Composio executor."""
+    global _composio_executor
+    if _composio_executor is None:
+        try:
+            from core.composio.tool_executor import ComposioToolExecutor
+            _composio_executor = ComposioToolExecutor
+        except ImportError:
+            return None
+    return _composio_executor(db) if _composio_executor else None
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +74,8 @@ class UnifiedToolExecutor:
         # Lazy-loaded executors (only initialize when needed)
         self._platform_tools = None  # For research tools (RAG, CodeGraph)
         self._action_executor = None  # For file/shell operations
-        self._mcp_executor = None  # For MCP tools
         self._tool_registry = None  # For tool metadata
+        self._composio_executor = None  # PRD-36: Composio tools
         
         # Tool routing map
         self.tool_routes = {
@@ -75,6 +105,9 @@ class UnifiedToolExecutor:
             
             # Shell commands
             'execute_command': self._execute_shell,
+
+            # Composio (external apps via DB cache + Composio OAuth)
+            'composio_execute': self._execute_composio_execute,
             
             # PRD-22: Document creation tools (skill-based)
             'create_pdf': self._execute_document_tool,
@@ -96,10 +129,75 @@ class UnifiedToolExecutor:
             'analyze_data': self._execute_analysis_tool,
             'write_document': self._execute_writing_tool,
             
-            # MCP tools handled dynamically
+            # PRD-36: Composio tools routed dynamically by prefix
         }
         
         logger.info("🔧 UnifiedToolExecutor initialized (lazy-loading enabled)")
+    
+    @property
+    def composio_executor(self):
+        """Lazy-load Composio executor (PRD-36) only when needed."""
+        if self._composio_executor is None:
+            logger.info("  🔧 Initializing Composio executor (PRD-36)...")
+            self._composio_executor = _get_composio_executor(self.db)
+        return self._composio_executor
+
+    @property
+    def capability_filter(self):
+        """Lazy-load capability filter (PRD-37) for execution-time validation."""
+        if not hasattr(self, '_capability_filter') or self._capability_filter is None:
+            self._capability_filter = _get_capability_filter(self.db)
+        return self._capability_filter
+
+    def validate_composio_action(
+        self,
+        action_id: str,
+        original_intent: Optional[str] = None,
+        allow_destructive: bool = False
+    ) -> Tuple[bool, str]:
+        """
+        PRD-37: Validate that a Composio action is eligible for execution.
+
+        This is the EXECUTION-TIME validation gate (per GPT-5.2 recommendation).
+        Called before executing any Composio action to ensure the action
+        matches the original intent's capabilities.
+
+        Args:
+            action_id: The Composio action ID to validate
+            original_intent: The original user intent (optional)
+            allow_destructive: Whether destructive actions are allowed
+
+        Returns:
+            (eligible, reason) tuple
+        """
+        if not self.capability_filter:
+            # Fail open if capability filter not available
+            logger.debug("Capability filter not available, skipping validation")
+            return True, "Capability filter not available (fail open)"
+
+        if not original_intent:
+            # If no intent provided, can't validate - allow by default
+            return True, "No intent provided for validation"
+
+        try:
+            eligible, reason = self.capability_filter.check_action_eligibility(
+                action_id=action_id,
+                intent=original_intent,
+                allow_destructive=allow_destructive
+            )
+
+            if not eligible:
+                logger.warning(
+                    f"Action validation failed: action={action_id} "
+                    f"intent='{original_intent[:30]}...' reason={reason}"
+                )
+
+            return eligible, reason
+
+        except Exception as e:
+            logger.error(f"Action validation error: {e}")
+            # Fail open on errors to avoid blocking legitimate actions
+            return True, f"Validation error (fail open): {e}"
     
     @property
     def platform_tools(self):
@@ -116,14 +214,6 @@ class UnifiedToolExecutor:
             logger.info("  🔧 Initializing file/shell executor...")
             self._action_executor = ActionExecutor(self.workspace_dir)
         return self._action_executor
-    
-    @property
-    def mcp_executor(self):
-        """Lazy-load MCP executor only when needed."""
-        if self._mcp_executor is None:
-            logger.info("  🔧 Initializing MCP executor...")
-            self._mcp_executor = MCPToolExecutor(self.db)
-        return self._mcp_executor
     
     @property
     def tool_registry(self):
@@ -176,7 +266,10 @@ class UnifiedToolExecutor:
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        agent_id: int = 0
+        agent_id: int = 0,
+        tenant_id: Optional[UUID] = None,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute a tool by name, routing to the appropriate executor.
@@ -185,50 +278,77 @@ class UnifiedToolExecutor:
             tool_name: Name of the tool to execute
             parameters: Tool parameters
             agent_id: ID of the agent calling the tool
+            tenant_id: UUID of the tenant (reserved for future use)
             
         Returns:
             Tool execution result with standard format
         """
         try:
-            logger.info(f"🔧 Executing tool '{tool_name}' for agent {agent_id}")
-            logger.info(f"  📋 Parameters: {parameters}")
-            
-            # PRD-17: Check agent permissions (except for research tools which are always allowed)
-            # if not self._check_agent_permission(agent_id, tool_name):
-            #     logger.warning(f"⚠️  Agent {agent_id} does not have permission to use '{tool_name}'")
-            #     return {
-            #         "success": False,
-            #         "error": f"Permission denied: Agent {agent_id} cannot use tool '{tool_name}'",
-            #         "tool": tool_name
-            #     }
+            trace = trace_id or "no-trace"
+            logger.info(
+                f"[tool-trace {trace}] Executing tool '{tool_name}' for agent={agent_id} "
+                f"workspace={workspace_id}"
+            )
+            logger.info(f"[tool-trace {trace}] Parameters keys={list(parameters.keys()) if isinstance(parameters, dict) else type(parameters).__name__}")
             
             # Check if tool exists in registry
             tool_spec = self.tool_registry.get_tool(tool_name)
             if not tool_spec:
-                logger.warning(f"⚠️  Tool '{tool_name}' not in registry, checking MCP tools...")
-                # Check MCP tools
-                mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
-                if mcp_tool:
-                    return await self._execute_mcp_tool(tool_name, parameters, agent_id)
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Unknown tool: {tool_name}",
-                        "tool": tool_name
-                    }
+                return {
+                    "success": False,
+                    "error": f"Unknown tool: {tool_name}",
+                    "tool": tool_name,
+                }
+            
+            # PRD-36: Route Composio tools explicitly
+            # IMPORTANT: `composio_execute` is a GENERIC dispatcher and must read `action`
+            # from parameters. Do NOT derive action from tool name (would become "execute").
+            if tool_name == "composio_execute":
+                logger.info(f"[tool-trace {trace}] Routing to Composio generic executor: {tool_name}")
+                return await self._execute_composio_execute(
+                    tool_name,
+                    parameters,
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace,
+                )
+
+            if tool_spec.metadata and tool_spec.metadata.get("integration_type") == "composio":
+                logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
+                return await self._execute_composio_tool(
+                    tool_spec,
+                    parameters,
+                    agent_id,
+                    workspace_id,
+                    trace_id=trace
+                )
             
             # Route to appropriate executor
             executor_func = self.tool_routes.get(tool_name)
             if executor_func:
-                result = await executor_func(tool_name, parameters, agent_id)
+                # Some executors need workspace context (e.g. Composio).
+                # Prefer passing workspace_id when supported, otherwise fallback.
+                try:
+                    result = await executor_func(
+                        tool_name,
+                        parameters,
+                        agent_id,
+                        workspace_id=workspace_id,
+                        trace_id=trace,
+                    )
+                except TypeError:
+                    result = await executor_func(tool_name, parameters, agent_id)
                 logger.info(f"  ✅ Tool '{tool_name}' executed successfully")
                 return result
             else:
-                # Try MCP tool
-                return await self._execute_mcp_tool(tool_name, parameters, agent_id)
+                return {
+                    "success": False,
+                    "error": f"Unknown tool: {tool_name}",
+                    "tool": tool_name,
+                }
                 
         except Exception as e:
-            logger.error(f"❌ Tool execution failed: {tool_name} - {e}")
+            logger.error(f"[tool-trace {trace_id or 'no-trace'}] Tool execution failed: {tool_name} - {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -866,32 +986,106 @@ class UnifiedToolExecutor:
                 "tool": "create_pdf"
             }
     
-    async def _execute_mcp_tool(
+    async def _execute_composio_tool(
+        self,
+        tool_spec: ToolSpec,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID],
+        trace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute a Composio action via ComposioToolExecutor."""
+        if not self.composio_executor:
+            return {
+                "success": False,
+                "error": "Composio executor not available",
+                "tool": tool_spec.name
+            }
+        
+        action = tool_spec.metadata.get("action") if tool_spec.metadata else None
+        if not action and tool_spec.name.startswith("composio_"):
+            action = tool_spec.name.replace("composio_", "", 1)
+        
+        if not action:
+            return {
+                "success": False,
+                "error": "Missing Composio action name",
+                "tool": tool_spec.name
+            }
+        
+        if not workspace_id:
+            return {
+                "success": False,
+                "error": "Workspace ID required for Composio tool execution",
+                "tool": tool_spec.name
+            }
+        
+        params = parameters.get("params") if isinstance(parameters, dict) else None
+        if params is None:
+            params = parameters or {}
+        trace = trace_id or "no-trace"
+        logger.info(
+            f"[tool-trace {trace}] Composio execute action={action} "
+            f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys()) if isinstance(params, dict) else type(params).__name__}"
+        )
+        
+        return await self.composio_executor.execute(
+            action=action,
+            params=params,
+            agent_id=agent_id,
+            workspace_id=workspace_id
+        )
+
+    async def _execute_composio_execute(
         self,
         tool_name: str,
         parameters: Dict[str, Any],
-        agent_id: int
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Execute MCP tools via MCPToolExecutor.
-        
-        Connects to actual MCP servers via JSON-RPC protocol.
+        Execute an arbitrary Composio action for an assigned/connected app.
+
+        Expected input:
+        - app_name: "GMAIL" / "SLACK" / ...
+        - action: action name as stored in composio_actions_cache (e.g., "GMAIL_LIST_EMAILS")
+        - params: object passed to the Composio action
         """
-        logger.info(f"  🌐 Routing to MCP server: {tool_name}")
-        
-        # Get tool from database
-        mcp_tool = self.db.query(MCPTool).filter_by(name=tool_name).first()
-        if not mcp_tool:
-            return {"success": False, "error": f"MCP tool '{tool_name}' not found"}
-        
-        # Execute via MCP protocol (JSON-RPC to actual MCP server)
-        method = parameters.get("method", "default")
-        return await self.mcp_executor.execute_tool(
+        if not self.composio_executor:
+            return {"success": False, "error": "Composio executor not available", "tool": tool_name}
+        if not workspace_id:
+            return {"success": False, "error": "workspace_id required for Composio execution", "tool": tool_name}
+
+        if not isinstance(parameters, dict):
+            return {"success": False, "error": "Invalid parameters (expected object)", "tool": tool_name}
+
+        action = parameters.get("action") or parameters.get("action_name")
+        # Accept both `params` (preferred) and `parameters` (some models emit this).
+        params = None
+        if isinstance(parameters.get("params"), dict):
+            params = parameters.get("params")
+        elif isinstance(parameters.get("parameters"), dict):
+            params = parameters.get("parameters")
+        else:
+            params = {}
+        app_name = parameters.get("app_name") or parameters.get("app")
+
+        if not action:
+            return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+
+        trace = trace_id or "no-trace"
+        logger.info(
+            f"[tool-trace {trace}] Composio execute app={app_name} action={action} "
+            f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
+        )
+
+        return await self.composio_executor.execute(
+            action=str(action),
+            params=params,
             agent_id=agent_id,
-            tool_id=mcp_tool.id,
-            method=method,
-            params=parameters,
-            execution_id=None
+            workspace_id=workspace_id,
+            app_name=str(app_name).upper().strip() if app_name else None,
         )
     
     def get_available_tools(self, categories: Optional[list] = None) -> list:
@@ -911,6 +1105,32 @@ class UnifiedToolExecutor:
             return tools
         else:
             return list(self.tool_registry.tools.values())
+    
+    async def get_tools_for_agent(
+        self,
+        agent_id: int,
+        tenant_id: UUID,
+        include_core: bool = True
+    ) -> list:
+        """
+        Get all tools available to an agent.
+        
+        Args:
+            agent_id: ID of the agent
+            tenant_id: UUID of the tenant (reserved for future use)
+            include_core: Whether to include core platform tools
+            
+        Returns:
+            List of tool specifications
+        """
+        tools = []
+        
+        # Add core platform tools
+        if include_core:
+            core_tools = self.get_available_tools()
+            tools.extend(core_tools)
+        
+        return tools
     
     async def _execute_planning_tool(
         self,
@@ -1221,6 +1441,4 @@ Analysis complete.
             }
 
 
-# Import MCPTool model at the bottom to avoid circular imports
-from core.models import MCPTool
 

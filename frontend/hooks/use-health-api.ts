@@ -13,7 +13,6 @@ export const healthQueryKeys = {
   systemMetrics: ['health', 'metrics'] as const,
   agentHealth: (agentId: string) => ['health', 'agent', agentId] as const,
   multiAgentHealth: ['health', 'multi-agent'] as const,
-  toolsHealth: ['health', 'tools'] as const,
   permissionsHealth: ['health', 'permissions'] as const,
   credentialsHealth: ['health', 'credentials'] as const,
   fieldTheoryHealth: ['health', 'field-theory'] as const,
@@ -56,16 +55,6 @@ export function useMultiAgentHealth() {
   return useQuery({
     queryKey: healthQueryKeys.multiAgentHealth,
     queryFn: () => apiClient.getMultiAgentHealth(),
-    refetchInterval: 30000,
-    staleTime: 15000,
-  })
-}
-
-// Get tools health
-export function useToolsHealth() {
-  return useQuery({
-    queryKey: healthQueryKeys.toolsHealth,
-    queryFn: () => apiClient.getToolsHealth(),
     refetchInterval: 30000,
     staleTime: 15000,
   })

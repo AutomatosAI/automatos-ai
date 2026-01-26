@@ -38,6 +38,7 @@ class DatabaseKnowledgeSource(Base):
     )
     
     id = Column(Integer, primary_key=True)
+    workspace_id = Column(ForeignKey("workspaces.id"), nullable=False, index=True)
     tenant_id = Column(Integer, nullable=False, index=True)  # Multi-tenant isolation
     name = Column(String(255), nullable=False)
     description = Column(Text)

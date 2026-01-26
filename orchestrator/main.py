@@ -55,7 +55,11 @@ from api.context import router as context_router
 from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
-from api.mcp_tools import router as mcp_tools_router  # Phase 3: MCP Tools - Fixed import
+# PRD-36: Composio Integration (optional module)
+try:
+    from api.composio import router as composio_router
+except ImportError:
+    composio_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -81,6 +85,11 @@ from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
+# PRD-37: Workspace context (optional module - may not exist in all branches)
+try:
+    from api.workspaces import router as workspaces_router
+except ImportError:
+    workspaces_router = None
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.execution_history import router as execution_history_router  # Enhanced execution history
@@ -303,9 +312,13 @@ app = FastAPI(
 )
 
 # CORS middleware - use centralized config
+# Parse and clean CORS origins (handle comma-separated list with whitespace)
+cors_origins = [origin.strip() for origin in config.CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
+logger.info(f"🌐 CORS configured with allowed origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.CORS_ALLOW_ORIGINS.split(","),
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -328,8 +341,8 @@ async def add_request_id_middleware(request, call_next):
 @app.middleware("http")
 async def api_tracking_middleware(request, call_next):
     """Track API calls and response times"""
-    # Skip tracking for websockets and static files
-    if request.url.path.startswith(("/ws/", "/static/", "/docs", "/openapi.json")):
+    # Skip tracking for websockets, static files, and OPTIONS (CORS preflight)
+    if request.url.path.startswith(("/ws/", "/static/", "/docs", "/openapi.json")) or request.method == "OPTIONS":
         return await call_next(request)
     
     start_time = time.time()
@@ -362,10 +375,16 @@ async def api_tracking_middleware(request, call_next):
             stats["error_count"] += 1
 
 # Simple API key auth dependency - use centralized config
+# Note: OPTIONS requests (CORS preflight) are handled by CORS middleware before this
 def require_api_key(x_api_key: str = Header(None)):
-    if config.REQUIRE_API_KEY and x_api_key != config.API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
+    # Skip API key check if not required
+    if not config.REQUIRE_API_KEY:
+        return True
+    # Allow if API key matches
+    if x_api_key == config.API_KEY:
+        return True
+    # Reject if API key is required but missing/invalid
+    raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 # Include API routers
 app.include_router(agents_router)
@@ -392,7 +411,8 @@ app.include_router(context_router)
 app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
-app.include_router(mcp_tools_router)  # Phase 3: MCP Tools API
+if composio_router is not None:
+    app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
@@ -418,6 +438,8 @@ app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
+if workspaces_router is not None:
+    app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 
@@ -460,14 +482,11 @@ async def health_check():
     - `unhealthy`: Critical issues detected
     """
     try:
-        # Check WebSocket manager
-        websocket_status = "healthy" if manager else "unavailable"
-        websocket_connections = manager.get_connection_count() if manager else 0
-        
         # Check system components
+        # Note: WebSocket manager removed - using AI SDK SSE streaming instead
         components = {
             "api_server": "healthy",
-            "websocket_manager": websocket_status,
+            "streaming": "healthy (AI SDK SSE)",
             "multi_agent_systems": "healthy",
             "field_theory": "healthy",
             "context_engineering": "healthy",
@@ -488,7 +507,7 @@ async def health_check():
             "🔧 components": components,
             
             "📊 metrics": {
-                "websocket_connections": websocket_connections,
+                "streaming_connections": "SSE-based",
                 "uptime": "operational",
                 "memory_usage": "optimal",
                 "cpu_usage": "normal",
@@ -502,7 +521,7 @@ async def health_check():
             },
             
             "🔌 connectivity": {
-                "websocket": f"✅ Active ({websocket_connections} connections)",
+                "streaming": "✅ Active (AI SDK SSE)",
                 "http": "✅ Active",
                 "cors": "✅ Enabled"
             },

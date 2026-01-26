@@ -13,6 +13,8 @@ import {
 import { useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api-client'
 
+import { useWorkspace } from '@/components/workspace-provider'
+
 export interface Agent {
   id: number
   name: string
@@ -33,8 +35,14 @@ export interface AgentSelectorProps {
 export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorProps) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const { workspace, isLoading: isWorkspaceLoading } = useWorkspace()
 
   useEffect(() => {
+    if (isWorkspaceLoading) return
+
+    // Even if workspace is null (e.g. auth failed), we try to fetch active agents
+    // The apiClient will pick up the header if it exists in localStorage (set by WorkspaceProvider)
+
     apiClient.request('/api/agents/?status=active')
       .then((data: any) => {
         const agentList = Array.isArray(data) ? data : (data.agents || [])
@@ -45,7 +53,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
         console.error('Failed to load agents:', error)
         setIsLoading(false)
       })
-  }, [])
+  }, [isWorkspaceLoading, workspace])
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId)
 
@@ -89,8 +97,8 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
           <ChevronDown className="w-3 h-3 text-orange-400" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent 
-        align="start" 
+      <DropdownMenuContent
+        align="start"
         className="w-[380px] max-h-[500px] overflow-y-auto bg-background border-orange-500/20 rounded-2xl"
         style={{ maxHeight: '70vh' }}
       >
@@ -120,7 +128,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
             {typeAgents.map((agent) => {
               const isSelected = selectedAgentId === agent.id
               const modelName = agent.model_config?.model_id || 'Unknown'
-              
+
               return (
                 <DropdownMenuItem
                   key={agent.id}

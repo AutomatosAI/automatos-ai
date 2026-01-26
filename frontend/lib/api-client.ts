@@ -67,7 +67,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
 
   // Settings/Admin Pages
   'settings': false,         // ✅ Use real APIs - credentials system ready
-  'tools': false,            // ✅ Use real APIs - MCP tools endpoints working
+  'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
 
   // Testing/Development
@@ -81,20 +81,29 @@ class ApiClient {
   private mockConfig: MockConfig
   private mockData: Record<string, () => any>
   private currentPage: string = '' // Track which page is making requests
+  private getClerkToken: (() => Promise<string | null>) | null = null
 
   constructor() {
     // CRITICAL: Point directly to production backend since Next.js proxy is disabled
     // Frontend runs locally on Mac, backend on remote server
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || ''
 
-    // Get API key from environment variables
-    const apiKey = typeof window !== 'undefined'
-      ? (window as any).NEXT_PUBLIC_API_KEY || process.env.NEXT_PUBLIC_API_KEY
-      : process.env.NEXT_PUBLIC_API_KEY
+    // Try multiple ways to get the API URL (build-time and runtime)
+    this.baseUrl =
+      (typeof window !== 'undefined' && (window as any).__NEXT_PUBLIC_API_URL__) || // Runtime injection
+      process.env.NEXT_PUBLIC_API_URL || // Build-time env var
+      (typeof window !== 'undefined' && (window as any).NEXT_PUBLIC_API_URL) || // Runtime fallback
+      ''
 
+    // Warn if baseUrl is not set (will cause 404s)
+    if (!this.baseUrl && typeof window !== 'undefined') {
+      console.error('❌ NEXT_PUBLIC_API_URL is not set! API calls will fail.')
+      console.error('Set NEXT_PUBLIC_API_URL in Railway frontend service variables')
+      console.error('Current env:', process.env.NEXT_PUBLIC_API_URL || 'NOT SET')
+    }
+
+    // Default headers - NO API KEY, will use Clerk JWT
     this.defaultHeaders = {
       'Content-Type': 'application/json',
-      ...(apiKey && { 'x-api-key': apiKey }), // Add API key if available
     }
 
     // Initialize mock config
@@ -117,12 +126,22 @@ class ApiClient {
 
     console.log('🚀 API Client initialized')
     console.log(`📍 Base URL: ${this.baseUrl || 'relative URLs (Next.js)'}`)
-    console.log(`🔐 API Key: ${apiKey ? '✅ Configured' : '❌ Missing'}`)
+    console.log(`📍 NEXT_PUBLIC_API_URL env: ${process.env.NEXT_PUBLIC_API_URL || 'NOT SET'}`)
+    console.log('🔐 Auth: Clerk JWT (workspace-aware)')
     if (this.mockConfig.enabled) {
       console.warn('⚠️  Mock mode is ENABLED - Disable for production!')
     } else {
       console.log('✅ Real API mode enabled')
     }
+  }
+
+  /**
+   * Set the Clerk token getter function
+   * Call this from a React component that has access to useAuth()
+   */
+  public setClerkTokenGetter(getter: () => Promise<string | null>) {
+    this.getClerkToken = getter
+    console.log('✅ Clerk token getter configured')
   }
 
   // Load mock config from localStorage or use defaults
@@ -409,49 +428,6 @@ class ApiClient {
         ],
         overall_improvement: 0.35,
         last_updated: new Date().toISOString()
-      }),
-
-      // Tools endpoints
-      '/api/tools': () => [
-        {
-          id: 1,
-          name: 'API Tester',
-          type: 'debugging',
-          status: 'available',
-          description: 'Test API endpoints with custom payloads',
-          icon: 'bug'
-        },
-        {
-          id: 2,
-          name: 'Log Analyzer',
-          type: 'monitoring',
-          status: 'available',
-          description: 'Analyze and search through system logs',
-          icon: 'file-text'
-        },
-        {
-          id: 3,
-          name: 'Performance Profiler',
-          type: 'optimization',
-          status: 'maintenance',
-          description: 'Profile system performance and identify bottlenecks',
-          icon: 'activity'
-        },
-        {
-          id: 4,
-          name: 'Database Explorer',
-          type: 'data',
-          status: 'available',
-          description: 'Browse and query database tables',
-          icon: 'database'
-        }
-      ],
-      '/api/tools/health': () => ({
-        status: 'healthy',
-        available: 3,
-        maintenance: 1,
-        total: 4,
-        last_check: new Date().toISOString()
       }),
 
       // Legacy/Additional endpoints
@@ -804,19 +780,48 @@ class ApiClient {
 
     console.log('🔍 API Call:', { url, method: options.method || 'GET' })
 
+    // Get Clerk token if available
+    let token: string | null = null
+    if (this.getClerkToken) {
+      try {
+        token = await this.getClerkToken()
+      } catch (error) {
+        console.warn('⚠️ Failed to get Clerk token:', error)
+      }
+    }
+
     // Auto-stringify body if it's an object and not FormData
     let body = options.body
     if (body && typeof body === 'object' && !(body instanceof FormData)) {
       body = JSON.stringify(body)
     }
 
+    const headers: Record<string, string> = {
+      ...this.defaultHeaders,
+      ...(options.headers as Record<string, string>),
+    }
+
+    // [FIX] Inject Workspace ID from LocalStorage to ensure correct backend context
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) {
+        headers['X-Workspace-ID'] = workspaceId
+        // console.log('🏢 injected workspace context:', workspaceId)
+      }
+    }
+
+    // Add Clerk JWT token if available
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+      console.log('🔐 Added Clerk JWT to request')
+    } else {
+      console.warn('⚠️ No Clerk token available - request may fail')
+    }
+
     const config: RequestInit = {
       ...options,
       body,
-      headers: {
-        ...this.defaultHeaders,
-        ...options.headers,
-      },
+      headers,
     }
 
     try {
@@ -827,6 +832,12 @@ class ApiClient {
 
       if (!response.ok) {
         console.error('❌ API Error:', response.status, response.statusText)
+        if (response.status === 401) {
+          throw new Error(
+            'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
+            'Make sure you are signed in and the API client is configured with Clerk.'
+          )
+        }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
       }
 
@@ -867,6 +878,24 @@ class ApiClient {
   }
 
   // ===== SYSTEM ENDPOINTS =====
+
+  // Generic HTTP methods
+  async get<T = any>(endpoint: string, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'GET' })
+  }
+
+  async post<T = any>(endpoint: string, body?: any, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'POST', body })
+  }
+
+  async put<T = any>(endpoint: string, body?: any, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'PUT', body })
+  }
+
+  async delete<T = any>(endpoint: string, options?: RequestInit) {
+    return this.request<T>(endpoint, { ...options, method: 'DELETE' })
+  }
+
   async getSystemHealth() {
     return this.request('/api/system/health')
   }
@@ -1453,115 +1482,140 @@ class ApiClient {
     return this.request('/api/analytics/metrics')
   }
 
-  // ===== TOOLS ENDPOINTS =====
-  async getTools() {
-    return this.request('/api/tools')
-  }
+  // ===== TOOLS / INTEGRATIONS ENDPOINTS =====
+  async getTools(params?: { status?: string; category?: string; provider?: string; search?: string; skip?: number; limit?: number }) {
+    // Tools UI reads from rewrite `/api/tools/*` endpoints.
+    const status = params?.status
+    const category = params?.category
+    const search = params?.search
+    const skip = params?.skip ?? 0
+    const limit = params?.limit ?? 20
 
-  async getTool(id: string) {
-    return this.request(`/api/tools/${id}`)
-  }
+    // Connected tools (what the UI calls "active")
+    if (status === 'active') {
+      const connected = (await this.request('/api/tools/connected')) as any
+      const apps: any[] = connected?.apps || []
 
-  async getToolsHealth() {
-    return this.request('/api/tools/health')
-  }
+      const stableId = (s: string) => {
+        // Simple deterministic hash -> negative int (avoids collisions with DB ids)
+        let h = 0
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+        return h === 0 ? -1 : -Math.abs(h)
+      }
 
-  async executeToolAction(toolId: string, action: string, data?: any) {
-    return this.request(`/api/tools/${toolId}/${action}`, {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
+      const normalized = apps.map((a: any) => ({
+        id: a.id ?? stableId(String(a.app_name || '')),
+        name: a.app_name,
+        description: a.description || '',
+        integration_url: 'composio://',
+        capabilities: {},
+        credentials_schema: {},
+        status: 'active',
+        enabled: true,
+        provider: 'Composio',
+        version: '1.0.0',
+        icon: a.logo_url,
+        logo: a.logo_url,
+        category: (a.categories || [])[0] || 'Integration',
+        tags: a.categories || [],
+        metadata: {
+          action_count: a.action_count || 0,
+          trigger_count: a.trigger_count || 0,
+          auth_schemes: a.auth_schemes || [],
+        },
+        updated_at: null,
+      }))
 
-  // ===== MCP TOOLS ENDPOINTS (Phase 3) =====
-  async getMCPTools(params?: { status?: string; category?: string; provider?: string; search?: string; skip?: number; limit?: number }) {
-    const queryParams = new URLSearchParams()
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) queryParams.append(key, String(value))
-      })
+      const paged = normalized.slice(skip, skip + limit)
+      const total = normalized.length
+      const pages = limit ? Math.ceil(total / limit) : 1
+      return {
+        data: paged,
+        pagination: {
+          total,
+          skip,
+          limit,
+          pages,
+          current_page: limit ? Math.floor(skip / limit) + 1 : 1,
+        },
+      }
     }
-    const url = queryParams.toString() ? `/api/mcp-tools/?${queryParams}` : '/api/mcp-tools/'
-    return this.request(url)
-  }
 
-  async getMCPTool(id: number) {
-    return this.request(`/api/mcp-tools/${id}`)
-  }
+    // Marketplace (cached) tools
+    const q = new URLSearchParams()
+    if (category) q.append('category', category)
+    if (search) q.append('search', search)
+    q.append('limit', String(Math.min(limit, 500)))
+    q.append('offset', String(skip))
 
-  async createMCPTool(data: any) {
-    return this.request('/api/mcp-tools/', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
+    const marketplace = (await this.request(`/api/tools/marketplace?${q.toString()}`)) as any
+    const apps: any[] = marketplace?.apps || []
 
-  async updateMCPTool(id: number, data: any) {
-    return this.request(`/api/mcp-tools/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    })
-  }
+    const normalized = apps.map((a: any) => ({
+      id: a.id,
+      name: a.app_name,
+      description: a.description || '',
+      integration_url: 'composio://',
+      capabilities: {},
+      credentials_schema: {},
+      status: a.is_connected ? 'active' : 'available',
+      enabled: !!a.is_connected,
+      provider: 'Composio',
+      version: '1.0.0',
+      icon: a.logo_url,
+      logo: a.logo_url,
+      category: (a.categories || [])[0] || 'Integration',
+      tags: a.categories || [],
+      metadata: {
+        action_count: a.action_count || 0,
+        trigger_count: a.trigger_count || 0,
+        auth_schemes: a.auth_schemes || [],
+        triggers: a.triggers || [],  // Include triggers array from API
+      },
+      updated_at: marketplace?.last_synced || null,
+    }))
 
-  async deleteMCPTool(id: number) {
-    return this.request(`/api/mcp-tools/${id}`, {
-      method: 'DELETE'
-    })
-  }
+    const total = marketplace?.total_apps ?? normalized.length
+    const pages = limit ? Math.ceil(total / limit) : 1
 
-  async testMCPToolConnection(id: number, params?: any) {
-    return this.request(`/api/mcp-tools/${id}/test`, {
-      method: 'POST',
-      body: JSON.stringify(params || {})
-    })
-  }
-
-  async getMCPToolCategories() {
-    return this.request('/api/mcp-tools/categories/list')
-  }
-
-  async getMCPToolsStats() {
-    return this.request('/api/mcp-tools/stats/summary')
-  }
-
-  // Agent-Tool Assignment Endpoints
-  async getMCPToolAssignments(enabledOnly: boolean = true) {
-    return this.request(`/api/mcp-tools/assignments?enabled_only=${enabledOnly}`)
-  }
-
-  async getAgentTools(agentId: number, enabledOnly: boolean = true) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools?enabled_only=${enabledOnly}`)
-  }
-
-  async assignToolToAgent(agentId: number, toolId: number, data?: { enabled?: boolean; permissions?: any; configuration?: any }) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
-      method: 'POST',
-      body: JSON.stringify(data || { tool_id: toolId, enabled: true, permissions: {}, configuration: {} })
-    })
-  }
-
-  async removeToolFromAgent(agentId: number, toolId: number) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}`, {
-      method: 'DELETE'
-    })
-  }
-
-  async updateToolPermissions(agentId: number, toolId: number, permissions: any) {
-    return this.request(`/api/mcp-tools/agents/${agentId}/tools/${toolId}/permissions`, {
-      method: 'PUT',
-      body: JSON.stringify(permissions)
-    })
-  }
-
-  async getToolUsageLogs(params?: { tool_id?: number; agent_id?: number; success_only?: boolean; skip?: number; limit?: number }) {
-    const queryParams = new URLSearchParams()
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) queryParams.append(key, String(value))
-      })
+    return {
+      data: normalized,
+      pagination: {
+        total,
+        skip,
+        limit,
+        pages,
+        current_page: limit ? Math.floor(skip / limit) + 1 : 1,
+      },
     }
-    const url = queryParams.toString() ? `/api/mcp-tools/usage/logs?${queryParams}` : '/api/mcp-tools/usage/logs'
-    return this.request(url)
+  }
+
+  async getToolCategories() {
+    const stats = (await this.request('/api/tools/stats')) as any
+    const categories = stats?.categories || {}
+    // Return top 15 categories by app count (sorted descending)
+    // This keeps the category filter dropdown manageable (734 categories is unusable)
+    // Note: All apps remain fully searchable - this only limits the category filter options
+    const allCategories = Object.entries(categories)
+      .map(([name, count]) => ({ id: name, name, count: count as number }))
+      .sort((a, b) => b.count - a.count) // Sort by count descending (most popular first)
+      .slice(0, 15) // Take top 15 most popular categories
+    return allCategories
+  }
+
+  async getToolsStats() {
+    const stats = (await this.request('/api/tools/stats')) as any
+    return {
+      total_tools: stats?.total_apps ?? 0,
+      tools_available: stats?.total_actions ?? 0,
+      connected_apps: stats?.connected_apps ?? 0,
+      categories: stats?.categories ? Object.keys(stats.categories).length : 0,
+      last_synced: stats?.last_synced ?? null,
+    }
+  }
+
+  async syncToolsCache(syncType: 'full' | 'incremental' = 'full') {
+    return this.request(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
   }
 
   // ===== CHATBOT ENDPOINTS =====

@@ -22,10 +22,13 @@ Design Principles:
 """
 
 import logging
+import hashlib
+import re
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -36,11 +39,13 @@ class ToolCategory(Enum):
     RESEARCH = "research"              # RAG, semantic search, CodeGraph
     FILE_OPERATIONS = "file_ops"       # read, write, delete files
     SHELL_COMMANDS = "shell"           # execute shell commands
-    MCP_TOOLS = "mcp"                  # Third-party MCP integrations
     DATABASE_TOOLS = "database"        # SQL operations (future)
     SSH_TOOLS = "ssh"                  # SSH operations (future)
     API_TOOLS = "api"                  # REST API calls (future)
     GIT_OPERATIONS = "git"             # Git operations (future)
+    COMMUNICATION = "communication"    # Slack, Email, etc.
+    DEVELOPER = "developer"            # GitHub, GitLab, etc.
+    PRODUCTIVITY = "productivity"      # Jira, Linear, etc.
 
 
 class SecurityLevel(Enum):
@@ -153,7 +158,7 @@ class ToolRegistry:
     Centralized registry for all platform tools.
     
     Responsibilities:
-    - Register tools from all executors (platform, action, MCP)
+    - Register tools from all executors (platform, action, integrations)
     - Provide unified query interface
     - Map task types to tool requirements
     - Export tools in multiple formats (OpenAI, markdown, etc.)
@@ -171,11 +176,23 @@ class ToolRegistry:
         # Initialize with core platform tools
         self._register_core_tools()
         
-        # Load MCP tools from database if session provided
-        if self.db:
-            self._register_mcp_tools()
-        
         self.logger.info(f"ToolRegistry initialized with {len(self.tools)} tools")
+
+    def _build_composio_tool_name(self, action_name: str) -> str:
+        """
+        Build a safe OpenAI function name for Composio actions.
+        OpenAI enforces a max length of 64 chars on function names.
+        """
+        if not action_name:
+            return "composio_action"
+        normalized = re.sub(r"[^A-Za-z0-9_]+", "_", action_name.strip())
+        base = f"composio_{normalized}"
+        if len(base) <= 64:
+            return base
+        digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:10]
+        max_slug_len = 64 - len("composio__") - len(digest)
+        trimmed = normalized[:max_slug_len].rstrip("_")
+        return f"composio_{trimmed}_{digest}"
     
     def register_tool(self, tool: ToolSpec) -> None:
         """
@@ -471,6 +488,8 @@ class ToolRegistry:
                 {"action": "search_codebase", "params": {"query": "authenticate_user", "project_name": "Automatos-ai"}}
             ]
         ))
+        
+
         
         # ==========================================
         # MULTIMODAL RESEARCH TOOLS (PRD-19)
@@ -870,63 +889,85 @@ Use this for complex queries or when you want AI-powered assistance.""",
                 "warning": "Only whitelisted commands are allowed for security"
             }
         ))
-    
-    def _register_mcp_tools(self):
-        """Register MCP tools from database - only load configured tools"""
-        try:
-            from core.models import MCPTool
+
+        # ==========================================
+        # COMPOSIO EXECUTION (External Apps)
+        # ==========================================
+
+        self.register_tool(
+            ToolSpec(
+                name="composio_execute",
+                category=ToolCategory.API_TOOLS,
+                description=(
+                    "Execute an external app action via Composio (connected third-party apps). "
+                    "Use this for actions in email/messaging and developer tools—e.g., "
+                    "read/send emails, post messages, create/manage repositories, issues, and pull requests."
+                ),
+                executor_class="ComposioToolExecutor",
+                executor_method="execute",
+                parameters=[
+                    ToolParameter(
+                        name="app_name",
+                        type="string",
+                        description="App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="action",
+                        type="string",
+                        description="Action name from composio_actions_cache (e.g., 'GMAIL_LIST_EMAILS')",
+                        required=True,
+                    ),
+                    ToolParameter(
+                        name="params",
+                        type="object",
+                        description="Action parameters (schema depends on the action)",
+                        required=False,
+                        default={},
+                    ),
+                ],
+                security_level=SecurityLevel.CAUTIOUS,
+                permissions_required={"read": True, "execute": True},
+                examples=[
+                    {
+                        "action": "composio_execute",
+                        "params": {
+                            "app_name": "<APP_NAME>",
+                            "action": "<MAPPED_ACTION_NAME_FROM_COMPOSIO_ACTIONS_CACHE>",
+                            "params": {},
+                        },
+                    },
+                ],
+                metadata={"integration_type": "composio"},
+            )
+        )
+
+    def _extract_methods(self, capabilities: Dict[str, Any]) -> List[str]:
             
-            # PRD-17: Only load tools that are active AND properly configured
-            mcp_tools = self.db.query(MCPTool).filter(
-                MCPTool.status == 'active',
-                MCPTool.mcp_server_url.isnot(None),  # Must have server URL
-                MCPTool.credentials_schema.isnot(None)  # Must have credentials schema
-            ).all()
+        # Try different keys
+        methods = (
+            capabilities.get('methods') or 
+            capabilities.get('tools') or 
+            capabilities.get('actions') or 
+            []
+        )
+        
+        # Handle dict (use keys)
+        if isinstance(methods, dict):
+            return list(methods.keys())
             
-            for mcp_tool in mcp_tools:
-                # Extract methods from capabilities
-                capabilities = mcp_tool.capabilities or {}
-                methods = capabilities.get('methods', [])
-                
-                # Register each method as a separate tool
-                for method in methods:
-                    tool_name = f"mcp_{mcp_tool.name.lower().replace(' ', '_')}_{method.replace('.', '_')}"
-                    
-                    self.register_tool(ToolSpec(
-                        name=tool_name,
-                        category=ToolCategory.MCP_TOOLS,
-                        description=f"{mcp_tool.description} - Method: {method}",
-                        executor_class="MCPToolExecutor",
-                        executor_method="execute_tool",
-                        parameters=[
-                            ToolParameter(
-                                name="params",
-                                type="object",
-                                description=f"Parameters for {method}",
-                                required=False,
-                                default={}
-                            )
-                        ],
-                        security_level=SecurityLevel.CAUTIOUS,
-                        permissions_required={"read": True, "execute": True},
-                        metadata={
-                            "tool_id": mcp_tool.id,
-                            "provider": mcp_tool.provider,
-                            "method": method,
-                            "mcp_server_url": mcp_tool.mcp_server_url
-                        }
-                    ))
+        # Handle list
+        if isinstance(methods, list):
+            return [str(m) for m in methods]
             
-            self.logger.info(f"Registered {len(mcp_tools)} MCP tools from database")
-            
-        except Exception as e:
-            self.logger.warning(f"Could not register MCP tools from database: {e}")
+        return []
     
     def validate_tool_access(
         self,
         agent_id: int,
         tool_name: str,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
+        workspace_id: Optional[Any] = None
     ) -> tuple[bool, Optional[str]]:
         """
         Validate if an agent has access to a tool.
@@ -935,6 +976,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
             agent_id: ID of the agent
             tool_name: Name of the tool
             db: Database session
+            workspace_id: Optional workspace context for granular checks
         
         Returns:
             Tuple of (has_access, error_message)
@@ -946,28 +988,90 @@ Use this for complex queries or when you want AI-powered assistance.""",
         if not tool.is_active:
             return False, f"Tool '{tool_name}' is not active"
         
-        # For MCP tools, check database permissions
-        if tool.category == ToolCategory.MCP_TOOLS and db:
+        # ---------------------------------------------------------------------
+        # Hard gating for Composio execution:
+        # Only expose Composio tools when the agent has EXTERNAL app assignments
+        # AND those apps are connected for the workspace.
+        # ---------------------------------------------------------------------
+        if tool_name == "composio_execute":
+            if not db:
+                return False, "Database session required to validate Composio tool access"
+            if not workspace_id:
+                return False, "Workspace context required for Composio tool access"
+
             try:
-                from core.models import AgentToolAssignment
+                from core.models.composio_cache import AgentAppAssignment
+                from core.composio.entity_manager import EntityManager
+
+                assigned_rows = (
+                    db.query(AgentAppAssignment)
+                    .filter(
+                        AgentAppAssignment.agent_id == agent_id,
+                        AgentAppAssignment.is_active == True,  # noqa: E712
+                        AgentAppAssignment.app_type == "EXTERNAL",
+                    )
+                    .all()
+                )
+                assigned_apps = {str(r.app_name or "").upper().strip() for r in assigned_rows if r and r.app_name}
+                assigned_apps.discard("")
+
+                if not assigned_apps:
+                    return False, "No external apps are assigned to this agent"
+
+                connected_apps = set()
+                try:
+                    manager = EntityManager(db)
+                    connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
+                except Exception:
+                    # If we can't resolve connections, fail closed (don't expose tool)
+                    connected_apps = set()
+
+                eligible = assigned_apps.intersection(connected_apps)
+                if not eligible:
+                    return False, "No assigned external apps are connected for this workspace"
+            except Exception as exc:
+                return False, f"Failed to validate Composio access: {exc}"
+
+        # Context filtering to prevent tool bypass.
+        if db:
+            from core.models import Agent
+            agent = db.query(Agent).get(agent_id)
+            
+            # Default to 'general' context
+            active_context = "general"
+            if agent and agent.configuration:
+                 active_context = agent.configuration.get("active_context", "general")
+            
+            # Force Chatbot (Agent 1) to 'general'
+            if agent_id == 1 and active_context == "all":
+                active_context = "general"
+            
+            # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
+            CONTEXT_MAP = {
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer"],
+                "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
+                "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
+                "communication": ["communication", "slack", "email", "chat", "collaboration"],
+                "research": ["research", "data", "search", "rag"],
+            }
+            
+            allowed_categories = CONTEXT_MAP.get(active_context)
+            
+            if allowed_categories:
+                # Resolve category
+                tool_cat = tool.category.value if hasattr(tool.category, 'value') else str(tool.category)
                 
-                tool_id = tool.metadata.get("tool_id")
-                if not tool_id:
-                    return True, None  # No specific tool_id, allow access
+                # Check cache for category if available (for adapters)
+                if tool.metadata and tool.metadata.get("category"):
+                    tool_cat = tool.metadata.get("category").lower()
                 
-                assignment = db.query(AgentToolAssignment).filter(
-                    AgentToolAssignment.agent_id == agent_id,
-                    AgentToolAssignment.tool_id == tool_id,
-                    AgentToolAssignment.enabled == True
-                ).first()
+                # Exception for System Tools
+                is_system_tool = tool_name in ["switch_context", "search_knowledge"]
                 
-                if not assignment:
-                    return False, f"Agent {agent_id} does not have access to MCP tool {tool_name}"
-                
-            except Exception as e:
-                self.logger.error(f"Error checking MCP tool permissions: {e}")
-                return False, str(e)
-        
+                if not is_system_tool and tool_cat not in allowed_categories:
+                    self.logger.info(f"⛔ ToolRegistry: Denying {tool_name} (category: {tool_cat}) for Agent {agent_id} in context '{active_context}'")
+                    return False, f"Tool category '{tool_cat}' not allowed in current context '{active_context}'"
+
         # All other tools allowed by default (security handled by executors)
         return True, None
 
@@ -981,7 +1085,7 @@ def get_tool_registry(db_session: Optional[Session] = None) -> ToolRegistry:
     Get or create the global tool registry instance.
     
     Args:
-        db_session: Optional database session for MCP tool loading
+        db_session: Optional database session
     
     Returns:
         ToolRegistry instance
@@ -990,10 +1094,6 @@ def get_tool_registry(db_session: Optional[Session] = None) -> ToolRegistry:
     
     if _tool_registry is None:
         _tool_registry = ToolRegistry(db_session=db_session)
-    elif db_session and not _tool_registry.db:
-        # Update with database session if not already set
-        _tool_registry.db = db_session
-        _tool_registry._register_mcp_tools()
     
     return _tool_registry
 

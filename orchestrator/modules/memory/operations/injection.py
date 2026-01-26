@@ -13,6 +13,8 @@ Handles:
 
 import json
 import logging
+import asyncio
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -74,10 +76,43 @@ class MemoryInjector:
     Uses multiple strategies to ensure relevant context is available.
     """
     
+    def __init__(self):
+        self._recent_cache = {"time": 0, "data": []}
+        self._cache_ttl = 60  # Cache recent memories for 60 seconds
+    
+    def should_retrieve_memories(self, query: str, chat_id: str) -> bool:
+        """
+        Intelligent decision on whether to retrieve memories for a given query.
+        Skips retrieval for short greetings, thanks, or irrelevant inputs to save tokens.
+        """
+        if not query:
+            return False
+            
+        # Skip for very short queries
+        if len(query) < 10:
+            return False
+        
+        query_lower = query.lower().strip()
+        
+        # Skip for common greetings and short acknowledgments
+        greetings = {"hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye", "cool", "ok", "okay"}
+        if query_lower in greetings:
+            logger.info("[Memory] Skipping retrieval for greeting/short msg")
+            return False
+        
+        # Check if query references past context - stronger signal to retrieve
+        past_indicators = {"before", "earlier", "remember", "you said", "we discussed", "last time", "previously"}
+        if any(ind in query_lower for ind in past_indicators):
+            return True
+        
+        return True
+
     async def retrieve_relevant_memories(
         self,
         chat_id: str,
-        query: str
+        query: str,
+        workspace_id: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Optional[str]:
         """
         Retrieve relevant memories for injection into LLM context.
@@ -93,6 +128,12 @@ class MemoryInjector:
         Returns:
             Formatted memory context string, or None
         """
+        """
+        Retrieves relevant memories if the query is significant enough.
+        """
+        if not self.should_retrieve_memories(query, chat_id):
+           return None
+           
         if not query or len(query) < 5:
             return None
         
@@ -108,7 +149,12 @@ class MemoryInjector:
             
             # Fallback to basic memory system
             logger.info("[Memory] Using HierarchicalMemorySystem...")
-            return await self._retrieve_with_basic_memory(chat_id, query)
+            return await self._retrieve_with_basic_memory(
+                chat_id,
+                query,
+                workspace_id=workspace_id,
+                agent_id=agent_id
+            )
             
         except Exception as e:
             logger.debug(f"Memory retrieval skipped: {e}")
@@ -130,7 +176,7 @@ class MemoryInjector:
                 text=query,
                 context_types=[ContextType.HISTORICAL],
                 max_results=10,
-                min_relevance=0.3,
+                min_relevance=0.6,
                 include_metadata=True
             )
             
@@ -171,7 +217,9 @@ class MemoryInjector:
     async def _retrieve_with_basic_memory(
         self,
         chat_id: str,
-        query: str
+        query: str,
+        workspace_id: Optional[str] = None,
+        agent_id: Optional[int] = None
     ) -> Optional[str]:
         """
         Retrieve memories using both semantic search and recent memories.
@@ -185,36 +233,47 @@ class MemoryInjector:
         all_memories = []
         seen_ids = set()
         
-        # 1. Get semantically relevant memories
-        logger.info(f"[Memory] Semantic search for: {query[:50]}...")
-        try:
-            semantic_memories = await memory_system.retrieve_relevant_memories(
-                agent_id=1,
-                context=query,
-                memory_types=["experience"],
-                top_k=8
-            ) or []
-            for mem in semantic_memories:
-                mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
-                if mem_id not in seen_ids:
-                    seen_ids.add(mem_id)
-                    all_memories.append(('semantic', mem))
-            logger.info(f"[Memory] Semantic search found {len(semantic_memories)} memories")
-        except Exception as e:
-            logger.error(f"[Memory] Semantic search failed: {e}")
+        # Run searches in parallel
+        semantic_task = memory_system.retrieve_relevant_memories(
+            agent_id=agent_id or 1,
+            context=query,
+            memory_types=["experience"],
+            top_k=8,
+            workspace_id=workspace_id
+        )
+        recent_task = self._get_recent_memories(limit=10, workspace_id=workspace_id)
         
-        # 2. Get recent memories for continuity
-        logger.info("[Memory] Fetching recent memories...")
-        try:
-            recent_memories = await self._get_recent_memories(limit=10)
-            for mem in recent_memories:
-                mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
-                if mem_id not in seen_ids:
-                    seen_ids.add(mem_id)
-                    all_memories.append(('recent', mem))
+        logger.info(f"[Memory] Starting parallel retrieval: Semantic + Recent")
+        results = await asyncio.gather(semantic_task, recent_task, return_exceptions=True)
+        
+        # Process Semantic Results
+        semantic_memories = []
+        if isinstance(results[0], list):
+            semantic_memories = results[0]
+            logger.info(f"[Memory] Semantic search found {len(semantic_memories)} memories")
+        else:
+            logger.error(f"[Memory] Semantic search failed: {results[0]}")
+
+        # Process Recent Results
+        recent_memories = []
+        if isinstance(results[1], list):
+            recent_memories = results[1]
             logger.info(f"[Memory] Recent memories: {len(recent_memories)}")
-        except Exception as e:
-            logger.error(f"[Memory] Recent memory fetch failed: {e}")
+        else:
+            logger.error(f"[Memory] Recent memory fetch failed: {results[1]}")
+            
+        # Combine results
+        for mem in semantic_memories:
+            mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
+            if mem_id not in seen_ids:
+                seen_ids.add(mem_id)
+                all_memories.append(('semantic', mem))
+                
+        for mem in recent_memories:
+            mem_id = mem.get('id') or str(mem.get('content', ''))[:50]
+            if mem_id not in seen_ids:
+                seen_ids.add(mem_id)
+                all_memories.append(('recent', mem))
         
         if not all_memories:
             logger.info("[Memory] No memories found")
@@ -244,20 +303,33 @@ class MemoryInjector:
         
         return "\n".join(memory_lines) if memory_lines else None
     
-    async def _get_recent_memories(self, limit: int = 10) -> List[Dict]:
-        """Fetch the most recent memories regardless of semantic similarity."""
+    async def _get_recent_memories(self, limit: int = 10, workspace_id: Optional[str] = None) -> List[Dict]:
+        """Fetch the most recent memories regardless of semantic similarity. Cached for 60s."""
+        # Check cache
+        now = time.time()
+        if self._recent_cache["data"] and (now - self._recent_cache["time"] < self._cache_ttl):
+            logger.info("[Memory] Using cached recent memories")
+            return self._recent_cache["data"][:limit]
+
         try:
             from core.database.database import get_db_session
             from sqlalchemy import text
             
             with get_db_session() as db:
-                result = db.execute(text("""
+                workspace_filter = ""
+                params = {"limit": limit}
+                if workspace_id:
+                    workspace_filter = "AND workspace_id = :workspace_id"
+                    params["workspace_id"] = str(workspace_id)
+
+                result = db.execute(text(f"""
                     SELECT id, content, metadata, created_at
-                    FROM memory_items 
+                    FROM memory_items
                     WHERE memory_type = 'experience'
+                    {workspace_filter}
                     ORDER BY created_at DESC
                     LIMIT :limit
-                """), {"limit": limit})
+                """), params)
                 
                 memories = []
                 for row in result:
@@ -273,6 +345,11 @@ class MemoryInjector:
                         'metadata': row.metadata,
                         'created_at': row.created_at
                     })
+                # Update cache
+                self._recent_cache = {
+                    "time": time.time(),
+                    "data": memories
+                }
                 return memories
         except Exception as e:
             logger.error(f"[Memory] Direct DB query failed: {e}")
@@ -282,7 +359,8 @@ class MemoryInjector:
         self,
         chat_id: str,
         user_message: str,
-        assistant_response: str
+        assistant_response: str,
+        workspace_id: Optional[str] = None
     ):
         """
         Store conversation as memory for future retrieval.
@@ -311,9 +389,12 @@ class MemoryInjector:
                 "goal_relevant": True
             }
             
+            # Use None for agent_id when no specific agent is selected (general chat)
+            # This avoids foreign key violations when agent_id=1 doesn't exist
             result = await memory_system.store_experience(
-                agent_id=1,
-                experience=experience
+                agent_id=None,
+                experience=experience,
+                workspace_id=workspace_id
             )
             logger.info(f"[Memory] ✅ Stored (id={result}): {user_message[:50]}...")
             

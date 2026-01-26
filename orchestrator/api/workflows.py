@@ -26,6 +26,8 @@ from core.models import (
 )
 # websocket_manager removed - using AI SDK SSE streaming
 from core.services.workspace_manager import WorkspaceManager
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflows", tags=["workflow-enhanced"])
@@ -135,6 +137,7 @@ class WorkflowStageTracker:
 
 @router.get("")
 async def list_workflows(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     q: Optional[str] = None,
@@ -143,7 +146,7 @@ async def list_workflows(
     db: Session = Depends(get_db),
 ):
     try:
-        query = db.query(Workflow)
+        query = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id)
         if q:
             query = query.filter(or_(Workflow.name.ilike(f"%{q}%"), Workflow.description.ilike(f"%{q}%")))
         if owner:
@@ -176,10 +179,10 @@ async def list_workflows(
         raise HTTPException(status_code=500, detail="Error listing workflows")
 
 @router.get("/active")
-async def get_active_workflows(db: Session = Depends(get_db)):
+async def get_active_workflows(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get all currently active workflows with live status"""
     try:
-        active_workflows = db.query(Workflow).options(joinedload(Workflow.agents)).filter(
+        active_workflows = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id).options(joinedload(Workflow.agents)).filter(
             Workflow.status == WorkflowStatus.ACTIVE.value
         ).all()
         
@@ -279,10 +282,10 @@ async def get_active_workflows(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")
 
 @router.get("/{workflow_id}")
-async def get_workflow(workflow_id: int, db: Session = Depends(get_db)):
+async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get individual workflow by ID"""
     try:
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
@@ -313,7 +316,7 @@ async def update_workflow(
 ):
     """Update workflow"""
     try:
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
@@ -364,7 +367,7 @@ async def update_workflow(
 async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
     """Delete workflow"""
     try:
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
@@ -456,6 +459,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
 
 @router.post("")
 async def create_workflow(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     workflow_data: Dict[str, Any] = Body(...),
     db: Session = Depends(get_db)
 ):
@@ -513,6 +517,7 @@ async def create_workflow(
         status = WorkflowStatus.ACTIVE.value if is_active else WorkflowStatus.DRAFT.value
         
         workflow = Workflow(
+            workspace_id=ctx.workspace_id,
             name=name,
             description=description,
             tags=tags,
@@ -569,7 +574,7 @@ async def duplicate_workflow(
     """Duplicate an existing workflow with optional modifications"""
     try:
         # Get the original workflow
-        original = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        original = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not original:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
@@ -631,43 +636,48 @@ async def duplicate_workflow(
         raise HTTPException(status_code=500, detail=f"Error duplicating workflow: {str(e)}")
 
 @router.get("/stats/dashboard")
-async def get_workflow_dashboard_stats(db: Session = Depends(get_db)):
+async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive workflow statistics for dashboard"""
     try:
         # Basic workflow counts
-        total_workflows = db.query(Workflow).count()
-        active_workflows = db.query(Workflow).filter(Workflow.status == WorkflowStatus.ACTIVE.value).count()
+        total_workflows = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id).count()
+        active_workflows = db.query(Workflow).filter(Workflow.workspace_id == ctx.workspace_id, Workflow.status == WorkflowStatus.ACTIVE.value).count()
         draft_workflows = db.query(Workflow).filter(Workflow.status == WorkflowStatus.DRAFT.value).count()
         archived_workflows = db.query(Workflow).filter(Workflow.status == WorkflowStatus.ARCHIVED.value).count()
         
-        # Execution statistics
-        total_executions = db.query(WorkflowExecution).count()
-        running_executions = db.query(WorkflowExecution).filter(
+        # Execution statistics - Filter by workspace via Workflow join
+        total_executions = db.query(WorkflowExecution).join(Workflow).filter(Workflow.workspace_id == ctx.workspace_id).count()
+        running_executions = db.query(WorkflowExecution).join(Workflow).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             WorkflowExecution.status == ExecutionStatus.RUNNING.value
         ).count()
         
         # Today's statistics
         today = datetime.now().date()
-        today_executions = db.query(WorkflowExecution).filter(
+        today_executions = db.query(WorkflowExecution).join(Workflow).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             func.date(WorkflowExecution.started_at) == today
         ).count()
         
-        completed_today = db.query(WorkflowExecution).filter(
+        completed_today = db.query(WorkflowExecution).join(Workflow).filter(
             and_(
+                Workflow.workspace_id == ctx.workspace_id,
                 func.date(WorkflowExecution.started_at) == today,
                 WorkflowExecution.status == ExecutionStatus.COMPLETED.value
             )
         ).count()
         
-        failed_today = db.query(WorkflowExecution).filter(
+        failed_today = db.query(WorkflowExecution).join(Workflow).filter(
             and_(
+                Workflow.workspace_id == ctx.workspace_id,
                 func.date(WorkflowExecution.started_at) == today,
                 WorkflowExecution.status == ExecutionStatus.FAILED.value
             )
         ).count()
         
         # Success rate calculation
-        total_completed = db.query(WorkflowExecution).filter(
+        total_completed = db.query(WorkflowExecution).join(Workflow).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             WorkflowExecution.status == ExecutionStatus.COMPLETED.value
         ).count()
         
@@ -680,7 +690,8 @@ async def get_workflow_dashboard_stats(db: Session = Depends(get_db)):
         
         # Recent activity (last 7 days)
         week_ago = datetime.now() - timedelta(days=7)
-        recent_executions = db.query(WorkflowExecution).filter(
+        recent_executions = db.query(WorkflowExecution).join(Workflow).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= week_ago
         ).order_by(desc(WorkflowExecution.started_at)).limit(20).all()
         
@@ -697,7 +708,8 @@ async def get_workflow_dashboard_stats(db: Session = Depends(get_db)):
         daily_executions = db.query(
             func.date(WorkflowExecution.started_at).label('date'),
             func.count(WorkflowExecution.id).label('count')
-        ).filter(
+        ).join(Workflow).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= thirty_days_ago
         ).group_by(func.date(WorkflowExecution.started_at)).order_by('date').all()
         
@@ -754,7 +766,7 @@ async def get_workflow_live_progress(workflow_id: int, db: Session = Depends(get
     """Get live progress for a specific workflow execution"""
     try:
         # Get the workflow
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         
@@ -851,7 +863,7 @@ async def execute_workflow_advanced(
     """Execute workflow with advanced options and live progress tracking"""
     try:
         # Validate workflow exists
-        workflow = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
         

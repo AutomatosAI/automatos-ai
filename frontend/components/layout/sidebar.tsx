@@ -4,12 +4,12 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  GitBranch, 
-  Brain, 
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  GitBranch,
+  Brain,
   BarChart3,
   Settings,
   ChevronLeft,
@@ -21,6 +21,7 @@ import {
   Lightbulb
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useSystemRole } from '@/contexts/role-context'
 
 interface SidebarProps {
   collapsed: boolean
@@ -68,14 +69,16 @@ const navigationItems = [
     href: '/context',
     icon: Brain,
     iconColor: 'text-pink-400',
-    description: 'RAG system and field theory'
+    description: 'RAG system and field theory',
+    requiredRole: 'admin' as const,  // Admin only
   },
   {
     name: 'Intelligence & Learning',
     href: '/analytics',
     icon: Lightbulb,
     iconColor: 'text-cyan-400',
-    description: 'AI insights and system learning'
+    description: 'AI insights and system learning',
+    requiredRole: 'admin' as const,  // Admin only
   },
   // Move dashboard to bottom (near Settings)
   {
@@ -83,13 +86,21 @@ const navigationItems = [
     href: '/dashboard',
     icon: LayoutDashboard,
     iconColor: 'text-blue-400',
-    description: 'System overview and metrics'
+    description: 'System overview and metrics',
+    requiredRole: 'admin' as const,  // Admin only
   },
 ]
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
-  const isChatPage = pathname.startsWith('/chat')
+  const isChatPage = pathname?.startsWith('/chat') ?? false
+  const { systemRole, isAdmin } = useSystemRole()
+
+  // Filter navigation items based on user's system role
+  const filteredNavItems = navigationItems.filter(item => {
+    if (!item.requiredRole) return true  // No role required, show to everyone
+    return item.requiredRole === 'admin' && isAdmin
+  })
 
   return (
     <motion.div
@@ -115,7 +126,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </div>
           </motion.div>
         )}
-        
+
         <button
           onClick={() => onToggle(!collapsed)}
           className="p-1 rounded-md hover:bg-secondary/50 transition-colors"
@@ -174,7 +185,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </motion.div>
         )}
 
-        {navigationItems.map((item, index) => {
+        {filteredNavItems.map((item, index) => {
           if (!item || !(item as any).href) return null
           const isActive = pathname === item.href
           const Icon = item.icon
@@ -231,30 +242,32 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         })}
       </nav>
 
-      {/* Settings at bottom */}
-      <div className="absolute bottom-4 left-4 right-4">
-        <Link
-          href="/settings"
-          className="sidebar-item group"
-        >
-          <div className="w-10 h-10 rounded-lg bg-secondary/30 group-hover:bg-secondary/50 flex items-center justify-center transition-all duration-200">
-            <Settings className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
-          </div>
-          
-          {!collapsed && (
-            <div className="ml-3">
-              <p className="text-sm font-medium">Settings</p>
-              <p className="text-xs text-muted-foreground">System configuration</p>
+      {/* Settings at bottom - Admin only */}
+      {isAdmin && (
+        <div className="absolute bottom-4 left-4 right-4">
+          <Link
+            href="/settings"
+            className="sidebar-item group"
+          >
+            <div className="w-10 h-10 rounded-lg bg-secondary/30 group-hover:bg-secondary/50 flex items-center justify-center transition-all duration-200">
+              <Settings className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
             </div>
-          )}
 
-          {collapsed && (
-            <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-              Settings
-            </div>
-          )}
-        </Link>
-      </div>
+            {!collapsed && (
+              <div className="ml-3">
+                <p className="text-sm font-medium">Settings</p>
+                <p className="text-xs text-muted-foreground">System configuration</p>
+              </div>
+            )}
+
+            {collapsed && (
+              <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                Settings
+              </div>
+            )}
+          </Link>
+        </div>
+      )}
     </motion.div>
   )
 }

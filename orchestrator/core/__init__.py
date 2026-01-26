@@ -12,12 +12,16 @@ Components:
 - models/    - SQLAlchemy ORM models
 - seeds/     - Seed data for initialization
 - utils/     - Logging, utilities
+- composio/  - Composio SDK integration (500+ tools) [PRD-36]
+- aiml/      - AIML API client (400+ LLMs) [PRD-36]
 
 Usage:
     from core.llm import create_llm_manager
     from core.redis import get_redis_client
     from core.database import get_db
     from core.models import Agent, Workflow
+    from core.composio import ComposioClient
+    from core.aiml import AIMLClient
 """
 
 __all__ = [
@@ -27,5 +31,7 @@ __all__ = [
     'models',
     'seeds',
     'utils',
+    'composio',
+    'aiml',
 ]
 

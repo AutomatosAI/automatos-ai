@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import type { ChatMessage, AppUsage, ToolCall } from '@/types'
 import { toast } from 'sonner'
 
@@ -19,6 +20,7 @@ export function useChat({
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
 }) {
+  const { getToken, isLoaded } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [usage, setUsage] = useState<AppUsage | undefined>()
   const [isLoading, setIsLoading] = useState(false)
@@ -74,7 +76,14 @@ export function useChat({
 
       try {
         abortControllerRef.current = new AbortController()
-        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        const token = isLoaded ? await getToken() : null
+        
+        // API key is handled server-side in /api/chat route to avoid exposing secrets in client bundle
+        // Only use localStorage API key if explicitly set by user (non-sensitive identifier)
+        const apiKey = typeof window !== 'undefined' 
+          ? localStorage.getItem('api_key')
+          : null
+        
         const outgoingParts =
           Array.isArray(messageObj.parts) && messageObj.parts.length > 0
             ? messageObj.parts
@@ -85,6 +94,11 @@ export function useChat({
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            ...(apiKey ? { 'x-api-key': apiKey } : {}),
+            // Ensure backend gets the correct workspace context (prevents dev fallback UUID)
+            ...(typeof window !== 'undefined' && localStorage.getItem('last_active_workspace')
+              ? { 'X-Workspace-ID': localStorage.getItem('last_active_workspace') as string }
+              : {}),
           },
           body: JSON.stringify({
             id: chatId || '',

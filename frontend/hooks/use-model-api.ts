@@ -64,18 +64,19 @@ export interface CostEstimate {
 /**
  * Fetch all available models
  */
-export function useModels(provider?: string, status: string = 'active') {
+export function useModels(provider?: string, status: string = 'active', options?: { enabled?: boolean }) {
   return useQuery<ModelInfo[]>({
     queryKey: ['models', provider, status],
     queryFn: async () => {
       const params = new URLSearchParams()
       if (provider) params.append('provider', provider)
       if (status) params.append('status', status)
-      
+
       const response = await apiClient.request(`/api/models/?${params.toString()}`)
       return response
     },
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    enabled: options?.enabled ?? true,
   })
 }
 
@@ -189,7 +190,7 @@ export function useAgentModelConfig(agentId: number | null) {
  */
 export function useUpdateAgentModelConfig() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: async ({ agentId, modelConfig }: { agentId: number; modelConfig: Record<string, any> }) => {
       const response = await apiClient.request(`/api/agents/${agentId}/model-config`, {
@@ -227,14 +228,14 @@ export function useAgentModelUsage(agentId: number | null) {
  */
 export function useSwitchAgentModel() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
-    mutationFn: async ({ 
-      agentId, 
-      modelId, 
-      temperature, 
-      maxTokens 
-    }: { 
+    mutationFn: async ({
+      agentId,
+      modelId,
+      temperature,
+      maxTokens
+    }: {
       agentId: number
       modelId: string
       temperature?: number

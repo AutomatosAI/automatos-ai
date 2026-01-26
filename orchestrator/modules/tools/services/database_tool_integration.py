@@ -137,7 +137,7 @@ class DatabaseToolIntegration:
                 "source_id": source.id,
                 "dialect": source.dialect,
                 "requires_credential": source.credential_id,
-                "tenant_id": source.tenant_id,
+                "workspace_id": source.workspace_id,
                 "cache_ttl": source.query_cache_ttl
             }
         }
@@ -190,7 +190,7 @@ class DatabaseToolIntegration:
             },
             "metadata": {
                 "source_id": source.id,
-                "tenant_id": source.tenant_id,
+                "workspace_id": source.workspace_id,
                 "cache_ttl": source.schema_cache_ttl
             }
         }
@@ -231,7 +231,7 @@ class DatabaseToolIntegration:
             },
             "metadata": {
                 "source_id": source.id,
-                "tenant_id": source.tenant_id,
+                "workspace_id": source.workspace_id,
                 "dialect": source.dialect
             }
         }

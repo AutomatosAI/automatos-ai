@@ -3,12 +3,12 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Bot, 
-  Code, 
-  Shield, 
-  Zap, 
+import {
+  X,
+  Bot,
+  Code,
+  Shield,
+  Zap,
   Database,
   FileText,
   BarChart,
@@ -25,11 +25,13 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Slider } from '@/components/ui/slider'
+import { useTools } from '@/hooks/use-tools-api'
 
 // API hooks
 import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
+import { ToolLogo } from '@/components/ui/tool-logo'
 
 interface CreateAgentModalProps {
   open: boolean
@@ -98,6 +100,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     description: '',
     tags: '',
     skills: [] as string[],
+    tools: [] as number[],
     specializations: [] as string[],
     maxConcurrentTasks: 3,
     priority: 'medium',  // Backend expects: low, medium, high, critical
@@ -119,6 +122,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   // API hooks
   const createAgentMutation = useCreateAgent()
   const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
+  const { data: toolsResponse, isLoading: toolsLoading } = useTools({ status: 'active', limit: 100 })
+  const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
@@ -131,13 +136,22 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     }))
   }
 
+  const handleToolToggle = (toolId: number) => {
+    setAgentData(prev => ({
+      ...prev,
+      tools: prev.tools.includes(toolId)
+        ? prev.tools.filter(t => t !== toolId)
+        : [...prev.tools, toolId]
+    }))
+  }
+
   const handleModelConfigChange = (key: string, value: any) => {
     setModelConfig(prev => ({ ...prev, [key]: value }))
   }
 
   const handleCreate = async () => {
     console.log('🔥 CREATE AGENT CLICKED', { agentData, modelConfig })
-    
+
     if (!agentData.name || !agentData.type) {
       console.error('❌ Validation failed:', { name: agentData.name, type: agentData.type })
       toast.error('Please provide agent name and type')
@@ -157,6 +171,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         agent_type: agentData.type,
         description: agentData.description || '',
         skill_ids: agentData.skills, // Backend expects skill_ids array
+        tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         priority_level: agentData.priority || 'medium', // Backend expects priority_level
         max_concurrent_tasks: agentData.maxConcurrentTasks || 3, // Backend expects snake_case
         auto_start: agentData.autoStart !== undefined ? agentData.autoStart : true, // Backend expects snake_case
@@ -166,16 +181,16 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
           tags
         }
       }
-      
+
       console.log('Creating agent with payload:', JSON.stringify(agentPayload, null, 2))
       alert('Creating agent: ' + agentData.name)
-      
+
       // Create the agent
       const newAgent: any = await (createAgentMutation as any).mutateAsync(agentPayload)
-      
+
       console.log('Agent created successfully:', newAgent)
       alert('Agent created! ID: ' + newAgent.id)
-      
+
       // PRD-15: Update model configuration
       if (newAgent?.id) {
         try {
@@ -187,23 +202,26 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
           console.log('Model config set successfully')
         } catch (error) {
           console.error('Failed to set model config:', error)
-          alert('Model config failed: ' + JSON.stringify(error))
+          // Don't alert, just log - non-critical
         }
+
       }
-      
+
       toast.success(`Agent "${agentData.name}" created successfully!`)
-      
+
       // Notify parent component and close modal
-      onSuccess() 
+      onSuccess()
       onClose()
-      
+
       // Reset form
       setAgentData({
         name: '',
         type: '',
         description: '',
         tags: '',
+        tags: '',
         skills: [],
+        tools: [],
         specializations: [],
         maxConcurrentTasks: 3,
         priority: 'medium',
@@ -243,7 +261,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
-          
+
           {/* Modal */}
           <motion.div
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -262,21 +280,24 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   <X className="w-5 h-5" />
                 </Button>
               </CardHeader>
-              
+
               <CardContent className="pr-2">
                 <Tabs value={`step-${step}`} className="space-y-6">
-                  <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
+                  <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
                       1. Agent Type
                     </TabsTrigger>
                     <TabsTrigger value="step-2" disabled={step < 2}>
-                      2. Configuration
+                      2. Config
                     </TabsTrigger>
                     <TabsTrigger value="step-3" disabled={step < 3}>
                       3. Model
                     </TabsTrigger>
                     <TabsTrigger value="step-4" disabled={step < 4}>
-                      4. Skills
+                      4. Tools
+                    </TabsTrigger>
+                    <TabsTrigger value="step-5" disabled={step < 5}>
+                      5. Skills
                     </TabsTrigger>
                   </TabsList>
 
@@ -288,16 +309,15 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         Select the type of agent that best fits your needs
                       </p>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {agentTypes.map(type => (
                         <motion.div
                           key={type.type}
-                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
-                            agentData.type === type.type
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border/50 hover:border-primary/30 hover:bg-secondary/20'
-                          }`}
+                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 ${agentData.type === type.type
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border/50 hover:border-primary/30 hover:bg-secondary/20'
+                            }`}
                           onClick={() => setAgentData(prev => ({ ...prev, type: type.type }))}
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
@@ -341,7 +361,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         Configure your agent's basic information and behavior
                       </p>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-4">
                         <div>
@@ -354,7 +374,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             className="bg-secondary/50"
                           />
                         </div>
-                        
+
                         <div>
                           <Label htmlFor="agent-description">Description</Label>
                           <Textarea
@@ -365,27 +385,27 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             className="bg-secondary/50 min-h-[100px]"
                           />
                         </div>
-                    
-                    <div>
-                      <Label htmlFor="agent-tags">Tags (comma separated)</Label>
-                      <Input
-                        id="agent-tags"
-                        placeholder="e.g. writing, pdf, research"
-                        value={agentData.tags}
-                        onChange={(e) => setAgentData(prev => ({ ...prev, tags: e.target.value }))}
-                        className="bg-secondary/50"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Lightweight keywords used for semantic matching (e.g., writing, pdf, research).
-                      </p>
-                    </div>
+
+                        <div>
+                          <Label htmlFor="agent-tags">Tags (comma separated)</Label>
+                          <Input
+                            id="agent-tags"
+                            placeholder="e.g. writing, pdf, research"
+                            value={agentData.tags}
+                            onChange={(e) => setAgentData(prev => ({ ...prev, tags: e.target.value }))}
+                            className="bg-secondary/50"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Lightweight keywords used for semantic matching (e.g., writing, pdf, research).
+                          </p>
+                        </div>
                       </div>
-                      
+
                       <div className="space-y-4">
                         <div>
                           <Label htmlFor="priority">Priority Level</Label>
-                          <Select 
-                            value={agentData.priority} 
+                          <Select
+                            value={agentData.priority}
                             onValueChange={(value) => setAgentData(prev => ({ ...prev, priority: value }))}
                           >
                             <SelectTrigger className="bg-secondary/50">
@@ -399,7 +419,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             </SelectContent>
                           </Select>
                         </div>
-                        
+
                         <div>
                           <Label htmlFor="max-tasks">Max Concurrent Tasks</Label>
                           <Input
@@ -408,14 +428,14 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             min="1"
                             max="10"
                             value={agentData.maxConcurrentTasks}
-                            onChange={(e) => setAgentData(prev => ({ 
-                              ...prev, 
-                              maxConcurrentTasks: parseInt(e.target.value) || 3 
+                            onChange={(e) => setAgentData(prev => ({
+                              ...prev,
+                              maxConcurrentTasks: parseInt(e.target.value) || 3
                             }))}
                             className="bg-secondary/50"
                           />
                         </div>
-                        
+
                         <div className="flex items-center justify-between">
                           <div>
                             <Label htmlFor="auto-start">Auto Start</Label>
@@ -484,7 +504,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                     <div className="space-y-4 pt-4 border-t">
                       <h4 className="font-medium">Model Parameters</h4>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Temperature: {modelConfig.temperature.toFixed(2)}</Label>
@@ -560,8 +580,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                         <div className="space-y-2">
                           <Label>Fallback Model (Optional)</Label>
-                          <Select 
-                            value={modelConfig.fallback_model_id || 'none'} 
+                          <Select
+                            value={modelConfig.fallback_model_id || 'none'}
                             onValueChange={(value) => handleModelConfigChange('fallback_model_id', value === 'none' ? null : value)}
                           >
                             <SelectTrigger className="bg-secondary/50">
@@ -584,15 +604,72 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     </div>
                   </TabsContent>
 
-                  {/* Step 4: Skills & Settings */}
+                  {/* Step 4: Tool Selection */}
                   <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Select Tools</h3>
+                      <p className="text-muted-foreground mb-6">
+                        Choose the tools this agent can use
+                      </p>
+                    </div>
+
+                    {toolsLoading ? (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="h-10 bg-secondary/20 animate-pulse rounded" />
+                        <div className="h-10 bg-secondary/20 animate-pulse rounded" />
+                      </div>
+                    ) : availableTools.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        No active tools found. Enable tools in the Tools Dashboard first.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {(availableTools as any[]).map((tool: any) => {
+                          const actualToolId = tool.id
+
+                          return (
+                            <motion.div
+                              key={tool.id}
+                              className={`p-3 rounded-lg border cursor-pointer flex items-center justify-between transition-all ${agentData.tools.includes(actualToolId)
+                                ? 'border-primary bg-primary/10'
+                                : 'border-border/50 hover:border-primary/30'
+                                }`}
+                              onClick={() => handleToolToggle(actualToolId)}
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.99 }}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center justify-center">
+                                  <ToolLogo
+                                    name={tool.name}
+                                    logo={tool.icon}
+                                    size={32}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="font-medium">{tool.name}</div>
+                                  <div className="text-xs text-muted-foreground">{tool.provider}</div>
+                                </div>
+                              </div>
+                              {agentData.tools.includes(actualToolId) && (
+                                <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                              )}
+                            </motion.div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  {/* Step 5: Skills & Settings */}
+                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
                       <p className="text-muted-foreground mb-6">
                         Customize the agent's skills and advanced configuration
                       </p>
                     </div>
-                    
+
                     <div>
                       <Label className="text-base font-medium">Available Skills</Label>
                       <p className="text-sm text-muted-foreground mb-4">
@@ -613,11 +690,10 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           {availableSkillsData.map((skill) => (
                             <motion.div
                               key={skill.id}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${
-                                agentData.skills.includes(skill.id)
-                                  ? 'border-primary bg-primary/10'
-                                  : 'border-border/50 hover:border-primary/30'
-                              }`}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${agentData.skills.includes(skill.id)
+                                ? 'border-primary bg-primary/10'
+                                : 'border-border/50 hover:border-primary/30'
+                                }`}
                               onClick={() => handleSkillToggle(skill.id)}
                               whileHover={{ scale: 1.02 }}
                               whileTap={{ scale: 0.98 }}
@@ -651,14 +727,14 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   >
                     Previous
                   </Button>
-                  
+
                   <div className="text-sm text-muted-foreground">
-                    Step {step} of 4
+                    Step {step} of 5
                   </div>
-                  
-                  {step < 4 ? (
+
+                  {step < 5 ? (
                     <Button
-                      onClick={() => setStep(Math.min(4, step + 1))}
+                      onClick={() => setStep(Math.min(5, step + 1))}
                       disabled={step === 1 && !agentData.type}
                       className="gradient-accent hover:opacity-90"
                     >

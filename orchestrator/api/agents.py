@@ -1,15 +1,18 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, text
+from sqlalchemy.exc import SQLAlchemyError
 import time
 import logging
 
 from core.database.database import get_db
 from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
-# Import MCP tool models from database.models (SQLAlchemy models)
-from core.models import AgentToolAssignment, MCPTool
+# New cache tables (rewrite)
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+# Composio connection manager (used to restrict assignments to connected apps)
+from core.composio.entity_manager import EntityManager
 # Import Pydantic models from database.models (not models.py)
 from core.models import (
     AgentCreate, AgentUpdate, AgentResponse,
@@ -17,10 +20,90 @@ from core.models import (
     PatternCreate, PatternResponse,
     AgentStatus, AgentType
 )
+# Import hybrid auth (supports both Clerk JWT and API key)
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agents", tags=["agents"]) 
+
+
+def _stable_tool_id(name: str) -> int:
+    """Match frontend stableId() hash (negative int)."""
+    h = 0
+    for ch in (name or ""):
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        # convert to signed 32-bit
+        if h & 0x80000000:
+            h = -((~h + 1) & 0xFFFFFFFF)
+    if h == 0:
+        return -1
+    return -abs(int(h))
+
+
+def _assigned_by_user_id(ctx: RequestContext) -> Optional[int]:
+    """
+    `agent_app_assignments.assigned_by` is an INTEGER in Postgres.
+    Our RequestContext `user.id` is currently a Clerk user id string (e.g. "user_..."),
+    so we must never write it into this column.
+    """
+    try:
+        raw = getattr(getattr(ctx, "user", None), "id", None)
+        if raw is None:
+            return None
+        # Only accept numeric values
+        return int(raw)
+    except Exception:
+        return None
+
+
+def _resolve_tool_ids_to_app_names(db: Session, ctx: RequestContext, tool_ids: List[int]) -> List[str]:
+    """Resolve incoming tool IDs (ComposioAppCache.id or frontend stable hash) into app_name strings.
+
+    The Agent UI uses the *connected tools* list, so we only allow tools that are
+    connected for the current workspace.
+    """
+    if not tool_ids:
+        return []
+
+    # Connected apps for this workspace
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    connected_app_names: List[str] = []
+    if entity:
+        connected_app_names = [
+            (c.get("app_name") or "").upper()
+            for c in entity_manager.get_entity_connections(entity["id"])
+            if c.get("status") == "active"
+        ]
+
+    connected_set = {a for a in connected_app_names if a}
+    if not connected_set:
+        return []
+
+    id_to_app: Dict[int, str] = {}
+
+    # Map stable negative IDs for connected apps
+    for app_name in connected_set:
+        id_to_app[_stable_tool_id(app_name)] = app_name
+
+    # Map DB IDs for connected apps if cached
+    cached_apps = (
+        db.query(ComposioAppCache)
+        .filter(ComposioAppCache.app_name.in_(list(connected_set)))
+        .all()
+    )
+    for a in cached_apps:
+        id_to_app[int(a.id)] = a.app_name
+
+    resolved: List[str] = []
+    for tid in tool_ids:
+        app_name = id_to_app.get(int(tid))
+        if app_name and app_name not in resolved:
+            resolved.append(app_name)
+    return resolved
+
 
 def _normalize_tags(raw_tags) -> List[str]:
     """Normalize incoming tags into a list of unique, lower-trimmed strings."""
@@ -50,30 +133,44 @@ def _normalize_tags(raw_tags) -> List[str]:
     return normalized
 
 
-def _build_agent_response(agent: Agent) -> AgentResponse:
+def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build agent response with skills and tools"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
     logger.info(f"Agent {agent.id} model_config: {model_cfg}")
     
-    # Build tools list from tool_assignments relationship
-    tools = []
-    if hasattr(agent, 'tool_assignments') and agent.tool_assignments:
-        for assignment in agent.tool_assignments:
-            if assignment.enabled and hasattr(assignment, 'tool'):
-                tools.append({
-                    "id": assignment.tool.id,
-                    "name": assignment.tool.name,
-                    "description": assignment.tool.description,
-                    "provider": assignment.tool.provider,
-                    "category": assignment.tool.category,
-                    "icon": assignment.tool.icon,
-                    "permissions": assignment.permissions or {},
-                    "configuration": assignment.configuration or {},
-                    "assigned_at": assignment.assigned_at
-                })
+    # Build tools list from the NEW assignment table (agent_app_assignments).
+    tools: List[Dict[str, Any]] = []
+    assignments = (
+        db.query(AgentAppAssignment)
+        .filter(AgentAppAssignment.agent_id == agent.id, AgentAppAssignment.is_active == True)
+        .all()
+    )
+    if assignments:
+        app_names = [a.app_name.upper() for a in assignments if a.app_name]
+        cache = {
+            a.app_name: a
+            for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_(app_names)).all()
+        }
+        for assignment in assignments:
+            app_name = (assignment.app_name or "").upper()
+            cached = cache.get(app_name)
+            tools.append(
+                {
+                    "id": cached.id if cached else None,
+                    "assignment_id": assignment.id,
+                    "name": app_name,
+                    "description": (cached.description if cached else "") or "",
+                    "provider": "Composio" if cached else None,
+                    "category": ((cached.categories or [None])[0] if cached else None),
+                    "icon": cached.logo_url if cached else None,
+                    "permissions": {},
+                    "configuration": assignment.config or {},
+                    "assigned_at": assignment.assigned_at,
+                }
+            )
     
-    # Read-time adapter: Remove tags from configuration if present (legacy data cleanup)
+    # Read-time legacy cleanup: remove tags from configuration if present
     # agent.tags is the single source of truth, configuration should not contain tags
     configuration = agent.configuration.copy() if agent.configuration else {}
     if "tags" in configuration:
@@ -110,10 +207,8 @@ def _build_agent_response(agent: Agent) -> AgentResponse:
 )
 
 # SPECIFIC ROUTES FIRST (before {agent_id})
-# from main import require_api_key
-
-@router.get("/types", )
-async def get_agent_types():
+@router.get("/types")
+async def get_agent_types(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get available agent types"""
     return {
         "data": [
@@ -138,18 +233,19 @@ async def get_agent_types():
         }
     }
 
-@router.get("/stats", )
-async def get_agent_stats(db: Session = Depends(get_db)):
+@router.get("/stats")
+async def get_agent_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics"""
     try:
-        total_agents = db.query(func.count(Agent.id)).scalar() or 0
-        active_agents = db.query(func.count(Agent.id)).filter(Agent.status == "active").scalar() or 0
-        inactive_agents = db.query(func.count(Agent.id)).filter(Agent.status == "inactive").scalar() or 0
+        # Filter by workspace
+        total_agents = db.query(func.count(Agent.id)).filter(Agent.workspace_id == ctx.workspace_id).scalar() or 0
+        active_agents = db.query(func.count(Agent.id)).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == "active").scalar() or 0
+        inactive_agents = db.query(func.count(Agent.id)).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == "inactive").scalar() or 0
         
-        # Get agent counts by type
+        # Get agent counts by type (filtered by workspace)
         agent_types = {}
         for agent_type in AgentType:
-            count = db.query(func.count(Agent.id)).filter(Agent.agent_type == agent_type.value).scalar() or 0
+            count = db.query(func.count(Agent.id)).filter(Agent.workspace_id == ctx.workspace_id, Agent.agent_type == agent_type.value).scalar() or 0
             agent_types[agent_type.value] = count
         
         return {
@@ -167,29 +263,30 @@ async def get_agent_stats(db: Session = Depends(get_db)):
         logger.error(f"Error getting agent stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/bulk", response_model=List[AgentResponse], )
-async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(get_db)):
+@router.post("/bulk", response_model=List[AgentResponse])
+async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create multiple agents at once"""
     try:
         created_agents = []
         
         for agent_data in agents:
             tags = _normalize_tags(getattr(agent_data, 'tags', None))
-            # Check if agent with this name already exists
-            existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
+            # Check if agent with this name already exists in workspace
+            existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_data.name).first()
             if existing:
                 raise HTTPException(status_code=400, detail=f"Agent with name '{agent_data.name}' already exists")
             
-            # Create agent
+            # Create agent with workspace
             agent = Agent(
                 name=agent_data.name,
                 description=agent_data.description,
-                agent_type=agent_data.agent_type,  # Already a string, no .value needed
+                agent_type=agent_data.agent_type,
                 configuration=agent_data.configuration or {},
-                priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
+                priority_level=agent_data.priority_level if agent_data.priority_level else "medium",
                 max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
                 auto_start=agent_data.auto_start or False,
                 tags=tags,
+                workspace_id=ctx.workspace_id,
                 created_by="api"
             )
             
@@ -221,7 +318,7 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         for agent in created_agents:
             db.refresh(agent)
             agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
-            result.append(_build_agent_response(agent_with_skills))
+            result.append(_build_agent_response(agent_with_skills, db))
         
         return result
         
@@ -232,30 +329,31 @@ async def create_agents_bulk(agents: List[AgentCreate], db: Session = Depends(ge
         logger.error(f"Error creating bulk agents: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating bulk agents: {str(e)}")
 
-@router.post("/", response_model=AgentResponse, )
-async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
+@router.post("/", response_model=AgentResponse)
+async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create a new agent with enhanced fields"""
     print("🚀 API CALL: create_agent function called!")
     try:
-        logger.info(f"🔧 Creating agent: {agent_data.name}, tool_ids: {agent_data.tool_ids}")
+        logger.info(f"🔧 Creating agent: {agent_data.name} in workspace {ctx.workspace_id}, tool_ids: {agent_data.tool_ids}")
         
-        # Check if agent name already exists
-        existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
+        # Check if agent name already exists in workspace
+        existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_data.name).first()
         if existing:
             raise HTTPException(status_code=400, detail="Agent with this name already exists")
         
         tags = _normalize_tags(agent_data.tags if hasattr(agent_data, 'tags') else None)
         
-        # Create agent with new fields
+        # Create agent with workspace
         agent = Agent(
             name=agent_data.name,
             description=agent_data.description,
-            agent_type=agent_data.agent_type,  # Now accepts any string
+            agent_type=agent_data.agent_type,
             configuration=agent_data.configuration or {},
-            priority_level=agent_data.priority_level if agent_data.priority_level else "medium",  # Already a string
+            priority_level=agent_data.priority_level if agent_data.priority_level else "medium",
             max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
             auto_start=agent_data.auto_start or False,
             tags=tags,
+            workspace_id=ctx.workspace_id,
             created_by="api"
         )
         
@@ -278,46 +376,21 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         # Tags are NOT stored in agent.configuration to avoid duplicate state.
         # Legacy clients reading tags from configuration should migrate to use agent.tags.
         
-        # Add tools if provided (NEW FEATURE)
+        # Add tools (NEW: agent_app_assignments)
         if agent_data.tool_ids:
-            logger.info(f"🛠️ Processing tool_ids: {agent_data.tool_ids}")
-            # Enhanced validation: Check that all tool IDs exist and are active
-            tools = db.query(MCPTool).filter(
-                MCPTool.id.in_(agent_data.tool_ids),
-                MCPTool.status == "active"
-            ).all()
-            logger.info(f"🔍 Found {len(tools)} active tools out of {len(agent_data.tool_ids)} requested")
-            if len(tools) != len(agent_data.tool_ids):
-                found_ids = [tool.id for tool in tools]
-                missing_ids = [tid for tid in agent_data.tool_ids if tid not in found_ids]
-                # Check if missing tools exist but are inactive
-                inactive_tools = db.query(MCPTool).filter(
-                    MCPTool.id.in_(missing_ids),
-                    MCPTool.status != "active"
-                ).all()
-                if inactive_tools:
-                    inactive_names = [tool.name for tool in inactive_tools]
-                    raise HTTPException(
-                        status_code=400, 
-                        detail=f"Tools are inactive and cannot be assigned: {inactive_names}"
+            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_data.tool_ids)
+            for app_name in desired_apps:
+                db.add(
+                    AgentAppAssignment(
+                        agent_id=agent.id,
+                        app_name=app_name,
+                        app_type="EXTERNAL",
+                        assigned_by=_assigned_by_user_id(ctx),
+                        is_active=True,
+                        priority=0,
+                        config={},
                     )
-                else:
-                    raise HTTPException(status_code=404, detail=f"Tools not found: {missing_ids}")
-            
-            # Additional validation: Check for duplicate tool IDs
-            if len(set(agent_data.tool_ids)) != len(agent_data.tool_ids):
-                raise HTTPException(status_code=400, detail="Duplicate tool IDs are not allowed")
-            
-            # Create tool assignments
-            for tool in tools:
-                assignment = AgentToolAssignment(
-                    agent_id=agent.id,
-                    tool_id=tool.id,
-                    enabled=True,
-                    permissions={"read": True, "write": True, "execute": True},
-                    configuration={}
                 )
-                db.add(assignment)
         
         db.commit()
         db.refresh(agent)
@@ -325,10 +398,9 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         # Load skills and tools for response
         agent_with_skills_and_tools = db.query(Agent).options(
             joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
         ).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills_and_tools)
+        return _build_agent_response(agent_with_skills_and_tools, db)
         
     except HTTPException:
         raise
@@ -337,7 +409,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)):
         logger.error(f"Error creating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error creating agent: {str(e)}")
 
-@router.get("/", response_model=List[AgentResponse], )
+@router.get("/", response_model=List[AgentResponse])
 async def list_agents(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -345,14 +417,13 @@ async def list_agents(
     agent_type: Optional[AgentType] = None,
     priority_level: Optional[PriorityLevel] = None,
     search: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """List agents with enhanced filtering and pagination"""
     try:
-        query = db.query(Agent).options(
-            joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
-        )
+        # Filter by workspace
+        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills))
         
         # Apply filters
         if status:
@@ -373,17 +444,17 @@ async def list_agents(
         
         agents = query.offset(skip).limit(limit).all()
         
-        return [_build_agent_response(agent) for agent in agents]
+        return [_build_agent_response(agent, db) for agent in agents]
         
     except Exception as e:
         logger.error(f"Error listing agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/status", )
-async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
+@router.get("/{agent_id}/status")
+async def get_agent_status(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get current status of a specific agent"""
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
             
@@ -405,11 +476,11 @@ async def get_agent_status(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/execute", )
-async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = Depends(get_db)):
+@router.post("/{agent_id}/execute")
+async def execute_agent(agent_id: int, execution_data: dict = {}, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Execute an agent with given parameters"""
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
             
@@ -435,29 +506,31 @@ async def execute_agent(agent_id: int, execution_data: dict = {}, db: Session = 
         logger.error(f"Error executing agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}", response_model=AgentResponse, )
-async def get_agent(agent_id: int, db: Session = Depends(get_db)):
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get a specific agent by ID with skills and tools"""
     try:
-        agent = db.query(Agent).options(
-            joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments).joinedload(AgentToolAssignment.tool)
-        ).filter(Agent.id == agent_id).first()
+        agent = (
+            db.query(Agent)
+            .options(joinedload(Agent.skills))
+            .filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)
+            .first()
+        )
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        return _build_agent_response(agent)
+        return _build_agent_response(agent, db)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{agent_id}/skills", )
-async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
+@router.get("/{agent_id}/skills")
+async def get_agent_skills(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get skills for a specific agent"""
     try:
-        agent = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
@@ -479,11 +552,11 @@ async def get_agent_skills(agent_id: int, db: Session = Depends(get_db)):
         logger.error(f"Error getting agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{agent_id}/skills", )
-async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = Depends(get_db)):
+@router.post("/{agent_id}/skills")
+async def add_agent_skills(agent_id: int, skill_ids: List[int], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Add skills to an agent"""
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
@@ -504,18 +577,18 @@ async def add_agent_skills(agent_id: int, skill_ids: List[int], db: Session = De
         logger.error(f"Error adding agent skills: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{agent_id}", response_model=AgentResponse, )
-async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = Depends(get_db)):
+@router.put("/{agent_id}", response_model=AgentResponse)
+async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Update an existing agent"""
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         
         # Update fields if provided
         if agent_update.name is not None:
-            # Check for name conflicts
-            existing = db.query(Agent).filter(Agent.name == agent_update.name, Agent.id != agent_id).first()
+            # Check for name conflicts in workspace
+            existing = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.name == agent_update.name, Agent.id != agent_id).first()
             if existing:
                 raise HTTPException(status_code=400, detail="Agent with this name already exists")
             agent.name = agent_update.name
@@ -534,6 +607,40 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
                 config = agent.configuration.copy()
                 config.pop("tags", None)
                 agent.configuration = config
+
+        # Handle tool updates (NEW: agent_app_assignments)
+        if agent_update.tool_ids is not None:
+            desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_update.tool_ids)
+            desired_set = {a.upper() for a in desired_apps}
+
+            current = (
+                db.query(AgentAppAssignment)
+                .filter(AgentAppAssignment.agent_id == agent.id)
+                .all()
+            )
+            current_map = {c.app_name.upper(): c for c in current if c.app_name}
+
+            # Disable anything no longer selected
+            for app_name, row in current_map.items():
+                if app_name not in desired_set:
+                    row.is_active = False
+
+            # Add or re-enable selected apps
+            for app_name in desired_set:
+                if app_name in current_map:
+                    current_map[app_name].is_active = True
+                else:
+                    db.add(
+                        AgentAppAssignment(
+                            agent_id=agent.id,
+                            app_name=app_name,
+                            app_type="EXTERNAL",
+                            assigned_by=_assigned_by_user_id(ctx),
+                            is_active=True,
+                            priority=0,
+                            config={},
+                        )
+                    )
         
         db.commit()
         db.refresh(agent)
@@ -541,7 +648,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         # Load with skills for response
         agent_with_skills = db.query(Agent).options(joinedload(Agent.skills)).filter(Agent.id == agent.id).first()
         
-        return _build_agent_response(agent_with_skills)
+        return _build_agent_response(agent_with_skills, db)
         
     except HTTPException:
         raise
@@ -550,11 +657,11 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, db: Session = D
         logger.error(f"Error updating agent: {e}")
         raise HTTPException(status_code=500, detail=f"Error updating agent: {str(e)}")
 
-@router.delete("/{agent_id}", )
-async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
+@router.delete("/{agent_id}")
+async def delete_agent(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete an agent and all related records"""
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         

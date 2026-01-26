@@ -3,13 +3,13 @@
 
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  Search, 
-  Filter, 
-  MoreVertical, 
-  Play, 
-  Pause, 
-  Settings, 
+import {
+  Search,
+  Filter,
+  MoreVertical,
+  Play,
+  Pause,
+  Settings,
   Eye,
   CheckCircle,
   Clock,
@@ -20,16 +20,17 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { useAgents, useStartAgent, useStopAgent } from '@/hooks/use-agent-api'
 import { AgentConfigurationModal } from './agent-configuration-modal'
 import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
+import { ToolLogo } from '@/components/ui/tool-logo'
 
 // Agent type icons mapping
 const agentTypeIcons: Record<string, string> = {
@@ -60,9 +61,13 @@ interface AgentWithPerformance {
   lastActive?: string
   avatar?: string
   agent_model_config?: {
-    model_id?: string
     provider?: string
   }
+  tools?: Array<{
+    id: number
+    name: string // tool_id like 'slack'
+    icon?: string
+  }>
 }
 
 const statusStyles: Record<string, string> = {
@@ -80,7 +85,7 @@ const statusIcons: Record<string, any> = {
 // PRD-15: Model display helper
 const getModelDisplayName = (modelId?: string): string => {
   if (!modelId) return 'GPT-4'
-  
+
   const modelNames: Record<string, string> = {
     'gpt-4': 'GPT-4',
     'gpt-4-turbo': 'GPT-4 Turbo',
@@ -90,7 +95,7 @@ const getModelDisplayName = (modelId?: string): string => {
     'claude-3-sonnet-20240229': 'Claude 3 Sonnet',
     'claude-3-haiku-20240307': 'Claude 3 Haiku',
   }
-  
+
   return modelNames[modelId] || modelId.split('-')[0].toUpperCase()
 }
 
@@ -119,14 +124,14 @@ interface AgentRosterProps {
   setSearchTerm?: ((term: string) => void) | undefined
 }
 
-export function AgentRoster({ 
-  agents, 
-  loading, 
-  searchTerm, 
-  statusFilter, 
-  onAgentSelect, 
+export function AgentRoster({
+  agents,
+  loading,
+  searchTerm,
+  statusFilter,
+  onAgentSelect,
   onViewDetails,
-  selectedAgentId, 
+  selectedAgentId,
   onRefresh,
   setSearchTerm
 }: AgentRosterProps) {
@@ -135,7 +140,7 @@ export function AgentRoster({
   const [statusModalAgentId, setStatusModalAgentId] = useState<number | null>(null)
   const [currentAgentStatus, setCurrentAgentStatus] = useState<string>('')
   const [deleteModalAgentId, setDeleteModalAgentId] = useState<number | null>(null)
-  
+
   // Use real API hooks for agent actions
   const startAgentMutation = useStartAgent()
   const stopAgentMutation = useStopAgent()
@@ -153,11 +158,11 @@ export function AgentRoster({
     setStatusModalAgentId(Number(agentId))
     setCurrentAgentStatus(currentStatus)
   }
-  
+
   const handleDelete = (agentId: string) => {
     setDeleteModalAgentId(Number(agentId))
   }
-  
+
   const handleStatusChange = async (agentId: number, newStatus: string) => {
     try {
       if (newStatus === 'inactive') {
@@ -165,22 +170,22 @@ export function AgentRoster({
       } else if (newStatus === 'active') {
         await (startAgentMutation.mutateAsync as any)(agentId.toString())
       }
-      
+
       // Refresh the agents list
       onRefresh()
-      
+
     } catch (error) {
       console.error('Error updating agent status:', error)
     }
   }
-  
+
   const filteredAgents = agents.filter(agent => {
     const matchesSearch = (agent.name && agent.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (agent.agent_type && agent.agent_type.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (agent.skills && agent.skills.some((skill: any) => skill.name && skill.name.toLowerCase().includes(searchTerm.toLowerCase())))
-    
+
     const matchesStatus = statusFilter === 'all' || agent.status === statusFilter
-    
+
     return matchesSearch && matchesStatus
   })
 
@@ -219,7 +224,7 @@ export function AgentRoster({
         {filteredAgents.map((agent, index) => {
           const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
           const agentIcon = agentTypeIcons[agent.agent_type || 'custom'] || '🤖'
-          
+
           return (
             <motion.div
               key={agent.id}
@@ -239,7 +244,7 @@ export function AgentRoster({
                     <p className="text-xs text-muted-foreground">{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown Type'}</p>
                   </div>
                 </div>
-                
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -277,7 +282,7 @@ export function AgentRoster({
                         </>
                       )}
                     </DropdownMenuItem>
-                    <DropdownMenuItem 
+                    <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation(); // Prevent card click
                         handleDelete(agent.id);
@@ -293,7 +298,7 @@ export function AgentRoster({
 
               {/* Status & Model */}
               <div className="flex items-center justify-between mb-4">
-                <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
                   <Badge className={statusStyles[agent.status || 'active'] || statusStyles.active}>
                     <StatusIcon className="w-3 h-3 mr-1" />
                     {agent.status || 'active'}
@@ -304,12 +309,6 @@ export function AgentRoster({
                     {getModelDisplayName(agent.agent_model_config?.model_id)}
                   </Badge>
                 </div>
-                <span className="text-sm text-muted-foreground">
-                  {agent.performance_metrics?.success_rate != null ? 
-                    `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
-                    'N/A'
-                  }
-                </span>
               </div>
 
               {/* Performance Bar */}
@@ -317,18 +316,18 @@ export function AgentRoster({
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
                   <span>Success Rate</span>
                   <span>
-                    {agent.performance_metrics?.success_rate != null ? 
-                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` : 
+                    {agent.performance_metrics?.success_rate != null ?
+                      `${(agent.performance_metrics.success_rate * 100).toFixed(1)}%` :
                       'N/A'
                     }
                   </span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
-                  <div 
+                  <div
                     className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
-                    style={{ 
-                      width: `${agent.performance_metrics?.success_rate != null ? 
-                        agent.performance_metrics.success_rate * 100 : 0}%` 
+                    style={{
+                      width: `${agent.performance_metrics?.success_rate != null ?
+                        agent.performance_metrics.success_rate * 100 : 0}%`
                     }}
                   />
                 </div>
@@ -364,6 +363,30 @@ export function AgentRoster({
                   )}
                 </div>
               </div>
+
+              {/* Tools Preview */}
+              {agent.tools && agent.tools.length > 0 && (
+                <div className="mb-4 pt-3 border-t border-white/5">
+                  <div className="flex flex-wrap gap-2">
+                    {agent.tools.slice(0, 5).map((tool: any) => (
+                      <div key={tool.id} title={tool.name}>
+                        <ToolLogo
+                          name={tool.name}
+                          logo={tool.icon}
+                          size={24}
+                          showBackground={true}
+                          className="bg-secondary/30 border border-white/5"
+                        />
+                      </div>
+                    ))}
+                    {agent.tools.length > 5 && (
+                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-white/5 text-[10px] text-muted-foreground">
+                        +{agent.tools.length - 5}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Created Date */}
               <p className="text-xs text-muted-foreground">

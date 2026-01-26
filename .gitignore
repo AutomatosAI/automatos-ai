@@ -16,7 +16,10 @@ __pycache__/
 *.pyd
 .Python/
 venv/
+orchestrator/venv/
 env/
+ENV/
+.venv/
 pip-log.txt
 pip-delete-this-directory.txt
 .tox/
@@ -54,12 +57,19 @@ orchestrator/.env
 
 # Next.js build output
 frontend/.next/
+frontend/node_modules/
 frontend/out/
 frontend/.vercel
+.next/
+node_modules/
 
 # Memory backups
 orchestrator/memory_backups/
 *.faiss
+
+# Model cache (large ML model files)
+orchestrator/model_cache/
+**/model_cache/
 
 # Documentation files (auto-generated)
 *_ISSUES.md
@@ -81,9 +91,15 @@ __pycache__/
 
 # Logs
 *.log
+*.log.*
+logs/
+**/logs/
 /tmp/
 
 # Environment files with secrets
 .env
 .env.local
 .env.*.local
+**/.env
+orchestrator/.env
+frontend/.env.local

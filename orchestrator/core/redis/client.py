@@ -149,25 +149,50 @@ def init_redis_client(host: str = '127.0.0.1', port: int = 6379, password: Optio
 def get_redis_client() -> Optional[RedisClient]:
     """
     Get the global Redis client instance with lazy initialization.
-    Uses centralized config - password from config.REDIS_PASSWORD.
+    Uses centralized config - supports REDIS_URL (Railway, Heroku) or individual vars.
     Returns None if Redis is not configured (optional service).
     """
     global _redis_client
     if _redis_client is None:
         from config import config
+        from urllib.parse import urlparse
         
-        host = config.REDIS_HOST
-        port = config.REDIS_PORT
-        password = config.REDIS_PASSWORD
-        
-        if not host or not port:
-            logger.warning("Redis not configured (REDIS_HOST/REDIS_PORT missing). Redis features disabled.")
-            return None
-        
-        try:
-            init_redis_client(host=host, port=int(port), password=password)
-        except Exception as e:
-            logger.error(f"Failed to initialize Redis client: {e}")
-            return None
+        # Try REDIS_URL first (Railway, Heroku, etc.)
+        redis_url = config.REDIS_URL
+        if redis_url:
+            try:
+                parsed = urlparse(redis_url)
+                host = parsed.hostname
+                port = parsed.port or 6379
+                password = parsed.password
+                db = int(parsed.path.lstrip('/')) if parsed.path.lstrip('/') else 0
+                
+                if host and port:
+                    try:
+                        init_redis_client(host=host, port=port, password=password, db=db)
+                    except Exception as e:
+                        logger.error(f"Failed to initialize Redis client from URL: {e}")
+                        return None
+                else:
+                    logger.warning("Redis URL provided but could not parse host/port")
+                    return None
+            except Exception as e:
+                logger.error(f"Failed to parse REDIS_URL: {e}")
+                return None
+        else:
+            # Fallback to individual environment variables
+            host = config.REDIS_HOST
+            port = config.REDIS_PORT
+            password = config.REDIS_PASSWORD
+            
+            if not host or not port:
+                logger.warning("Redis not configured (REDIS_URL or REDIS_HOST/REDIS_PORT missing). Redis features disabled.")
+                return None
+            
+            try:
+                init_redis_client(host=host, port=int(port), password=password)
+            except Exception as e:
+                logger.error(f"Failed to initialize Redis client: {e}")
+                return None
     return _redis_client
 

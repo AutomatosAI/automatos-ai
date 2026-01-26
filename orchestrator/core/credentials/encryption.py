@@ -57,17 +57,21 @@ class EncryptionService:
         Raises:
             EncryptionKeyError: If key loading/generation fails
         """
-        # Try environment variable first
+        # Try environment variable first (priority for Railway/cloud deployments)
         key_str = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
         if key_str:
-            logger.info("Using encryption key from environment variable")
+            logger.info("🔐 Using encryption key from CREDENTIAL_ENCRYPTION_KEY environment variable")
             try:
+                # Clean the key (strip whitespace/newlines/quotes that might be in env var)
+                key_str = key_str.strip().strip('"').strip("'")
                 # Validate it's a valid Fernet key
                 key_bytes = key_str.encode() if isinstance(key_str, str) else key_str
                 Fernet(key_bytes)  # Test key validity
+                logger.info(f"✅ Encryption key from environment variable validated successfully (length: {len(key_str)})")
                 return key_bytes
             except Exception as e:
-                logger.error(f"Invalid encryption key in environment variable: {e}")
+                logger.error(f"❌ Invalid encryption key in CREDENTIAL_ENCRYPTION_KEY environment variable: {e}")
+                logger.error(f"   Key value (first 20 chars): {key_str[:20] if key_str else 'None'}...")
                 raise EncryptionKeyError("Invalid CREDENTIAL_ENCRYPTION_KEY in environment")
         
         # Try key file
@@ -83,8 +87,11 @@ class EncryptionService:
                 logger.error(f"Invalid encryption key in file {key_file}: {e}")
                 raise EncryptionKeyError(f"Invalid encryption key in {key_file}")
         
-        # Generate new key
-        logger.warning("No encryption key found - generating new key")
+        # Generate new key (only if neither env var nor file exists)
+        logger.warning(
+            "⚠️  No encryption key found in CREDENTIAL_ENCRYPTION_KEY environment variable or .credential_key file. "
+            "Generating new key. NOTE: This will NOT be able to decrypt existing credentials!"
+        )
         return self._generate_and_save_key(key_file)
     
     def _generate_and_save_key(self, key_file: Path) -> bytes:

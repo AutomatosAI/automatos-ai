@@ -9,6 +9,7 @@ Handles:
 - Identifying simple vs complex prompts
 """
 
+import json
 import logging
 import re
 from typing import List, Dict, Any, Optional
@@ -42,6 +43,12 @@ EXPLICIT_TOOL_PATTERNS = {
     'query_database': ['query database', 'from database', 'sql', 'how many']
 }
 
+# Explicit tool call syntax (e.g., "Use tool foo with params {...}")
+EXPLICIT_TOOL_CALL_RE = re.compile(
+    r"^\s*use\s+tool\s+([a-zA-Z0-9_\-\.]+)\s*(?:with\s+params|params|with\s+arguments|arguments)?\s*(\{.*\})\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 class PromptAnalyzer:
     """
@@ -56,8 +63,50 @@ class PromptAnalyzer:
     
     def is_simple_message(self, text: str) -> bool:
         """Check if message is a simple greeting/acknowledgment."""
-        text_lower = text.lower().strip()
-        return len(text_lower) < 50 and any(p in text_lower for p in self.simple_patterns)
+        text_lower = (text or "").lower().strip()
+        if len(text_lower) >= 50:
+            return False
+
+        # Normalize punctuation -> spaces so we can do safe token/phrase checks.
+        cleaned = re.sub(r"[^a-z0-9\\s]", " ", text_lower)
+        cleaned = re.sub(r"\\s+", " ", cleaned).strip()
+        if not cleaned:
+            return True
+
+        # IMPORTANT:
+        # - Single-word patterns must match as WHOLE WORDS (avoid "hi" matching "this")
+        # - Multi-word patterns can match as phrases
+        words = set(cleaned.split())
+        for p in self.simple_patterns:
+            p = (p or "").strip().lower()
+            if not p:
+                continue
+            if " " in p:
+                if p in cleaned:
+                    return True
+            else:
+                if p in words:
+                    return True
+
+        return False
+
+    def is_fresh_start_request(self, text: str) -> bool:
+        """Detect user requests to ignore prior chat context/memory."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        patterns = [
+            "clear memory",
+            "reset memory",
+            "start fresh",
+            "fresh run",
+            "new session",
+            "ignore previous",
+            "ignore earlier",
+            "forget previous",
+            "forget earlier"
+        ]
+        return any(p in text_lower for p in patterns)
     
     def detect_tool_intent(self, query: str) -> List[str]:
         """
@@ -156,11 +205,139 @@ class PromptAnalyzer:
         
         result = " ".join(expanded[:8])  # Limit to 8 terms
         return result if result.strip() else query[:50]
+
+    def parse_explicit_tool_call(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse explicit tool call syntax:
+        "Use tool <tool_name> with params {...}"
+        """
+        match = EXPLICIT_TOOL_CALL_RE.match(query or "")
+        if not match:
+            return None
+
+        tool_name = match.group(1)
+        args_str = match.group(2) or "{}"
+        try:
+            tool_args = json.loads(args_str)
+        except Exception as exc:
+            logger.warning(f"Failed to parse explicit tool params for {tool_name}: {exc}")
+            return {
+                "tool_name": tool_name,
+                "tool_args": {},
+                "parse_error": f"Invalid JSON params: {exc}"
+            }
+
+        return {
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+            "parse_error": None
+        }
+
+    def rank_tools_for_query(
+        self,
+        query: str,
+        available_tools: Optional[List[Dict[str, Any]]] = None,
+        max_tools: int = 12
+    ) -> List[Dict[str, Any]]:
+        """
+        Rank tools for a query using simple token overlap scoring.
+        Avoids hardcoded app mapping; uses tool name/description only.
+        """
+        if not query or not available_tools:
+            return []
+
+        # Stopwords to prevent accidental matches like "from" → delete_file, etc.
+        # NOTE: include generic words like "new" because they over-match file tools
+        # (e.g., "create a new repo" should not match "create_directory" by default).
+        stopwords = {
+            "the", "and", "for", "with", "from", "into", "onto", "over", "under",
+            "this", "that", "these", "those", "here", "there",
+            "today", "tomorrow", "yesterday", "now", "latest", "recent",
+            "please", "can", "could", "would", "should", "just",
+            "my", "your", "our", "their",
+            "new",
+        }
+
+        def tokenize(text: str) -> set[str]:
+            tokens = re.split(r"[^a-z0-9]+", (text or "").lower())
+            return {t for t in tokens if len(t) > 2 and t not in stopwords}
+
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return []
+
+        # Small synonym expansion to improve matching without hardcoding app/action maps.
+        # This helps common shorthand like "repo" match "repository" in tool descriptions.
+        expansions = {
+            "repo": {"repository"},
+            "repos": {"repository", "repositories"},
+            "repository": {"repo"},
+            "repositories": {"repo"},
+            "pr": {"pull", "pullrequest", "pull_request"},
+            "pullrequest": {"pr"},
+            # Improve routing for code queries (avoid narrowing to only multimodal)
+            "code": {"codebase", "source", "implementation", "snippet", "snippets"},
+            "example": {"examples", "snippet", "snippets"},
+            "examples": {"example", "snippet", "snippets"},
+        }
+        expanded_query_tokens = set(query_tokens)
+        for t in list(query_tokens):
+            expanded_query_tokens |= expansions.get(t, set())
+
+        # Heuristic guard: if the user talks about a *remote code repo* (GitHub/GitLab/repository)
+        # and does NOT mention local filesystem language, de-rank file tools that would otherwise
+        # match purely on verbs like "create".
+        repo_like = {"repo", "repos", "repository", "repositories", "github", "gitlab"}
+        filesystem_like = {"file", "files", "folder", "folders", "directory", "directories", "dir", "path", "local", "filesystem", "workspace"}
+        query_is_repo_intent = bool(expanded_query_tokens & repo_like) and not bool(expanded_query_tokens & filesystem_like)
+        file_tool_names = {"read_file", "write_file", "delete_file", "list_directory", "create_directory"}
+
+        scored = []
+        for tool in available_tools:
+            if not isinstance(tool, dict):
+                continue
+            fn = tool.get("function", {}) if isinstance(tool.get("function", {}), dict) else {}
+            name = fn.get("name") or ""
+            desc = fn.get("description") or ""
+            tool_text = f"{name} {desc}"
+            tool_tokens = tokenize(tool_text)
+            score = len(expanded_query_tokens & tool_tokens)
+
+            # Lightweight boost for direct name match
+            if name and name.lower() in (query or "").lower():
+                score += 3
+
+            # Safety bias: avoid suggesting destructive tools unless explicitly requested.
+            if name in {"delete_file", "execute_command"}:
+                destructive_tokens = {"delete", "remove", "destroy", "erase", "rm", "wipe", "exec", "run", "command"}
+                if not (expanded_query_tokens & destructive_tokens):
+                    score -= 2
+
+            # De-rank file ops for "repo/repository" intents unless the user explicitly
+            # references local filesystem concepts.
+            if query_is_repo_intent and name in file_tool_names:
+                score -= 2
+
+            if score > 0:
+                scored.append({
+                    "name": name,
+                    "description": desc,
+                    "score": score
+                })
+
+        scored.sort(key=lambda x: (-x["score"], x["name"]))
+        
+        # Debug logging for ranking
+        top_debug = [f"{t['name']} ({t['score']})" for t in scored[:10]]
+        logger.info(f"🔍 Query: '{query}' | Top ranked tools: {top_debug}")
+        
+        return scored[:max_tools]
     
     def convert_to_llm_messages(
         self,
         messages: List[Dict[str, Any]],
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        available_tools: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, str]]:
         """
         Convert chat messages to LLM format with system prompt.
@@ -231,6 +408,29 @@ When asked for a "report", "analysis", or "comprehensive overview":
 - Be specific and actionable, not generic
 
 You're part of the Automatos family. Be helpful, insightful, and data-driven."""
+
+        # If tool metadata is available, reinforce tool usage and list tool names
+        tool_names = []
+        if available_tools:
+            for tool in available_tools:
+                if not isinstance(tool, dict):
+                    continue
+                tool_name = tool.get("function", {}).get("name")
+                if tool_name:
+                    tool_names.append(tool_name)
+            tool_names = sorted(set(tool_names))
+
+        if tool_names:
+            max_list = 30
+            listed = ", ".join(tool_names[:max_list])
+            extra = "" if len(tool_names) <= max_list else f" (+{len(tool_names) - max_list} more)"
+            system_prompt += (
+                "\n\n## 🔧 TOOL USAGE POLICY\n"
+                "- You MUST use tools for external actions (email, Slack, GitHub, files, databases).\n"
+                "- Do NOT claim lack of capability if a relevant tool is available.\n"
+                "- If a needed tool is missing, reply: \"Tool not available/assigned for this request.\"\n"
+                f"- Available tool functions: {listed}{extra}\n"
+            )
         
         llm_messages.append({"role": "system", "content": system_prompt})
         

@@ -15,7 +15,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple, Union
-from uuid import uuid4
+from uuid import uuid4, UUID as PyUUID
 from enum import Enum
 
 import numpy as np
@@ -58,7 +58,8 @@ class MemoryItem(Base):
     __tablename__ = 'memory_items'
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    agent_id = Column(Integer, nullable=False)
+    agent_id = Column(Integer, nullable=True)  # Allow NULL for general conversations without specific agent
+    workspace_id = Column(UUID(as_uuid=True), nullable=False)
     content = Column(Text, nullable=False)
     memory_type = Column(String(50), nullable=False)
     memory_level = Column(String(50), nullable=False, default=MemoryLevel.SHORT_TERM)
@@ -216,8 +217,9 @@ class HierarchicalMemorySystem:
     
     async def store_experience(
         self,
-        agent_id: int,
-        experience: Dict[str, Any]
+        agent_id: Optional[int],
+        experience: Dict[str, Any],
+        workspace_id: Optional[Union[str, UUID]] = None
     ) -> str:
         """
         Store an experience in the hierarchical memory system.
@@ -269,9 +271,46 @@ class HierarchicalMemorySystem:
                     memory_level = MemoryLevel.WORKING
                 
                 async with self.async_session() as session:
+                    resolved_workspace_id = workspace_id
+                    if resolved_workspace_id is None and agent_id is not None:
+                        result = await session.execute(
+                            text("SELECT workspace_id FROM agents WHERE id = :agent_id LIMIT 1"),
+                            {"agent_id": agent_id}
+                        )
+                        resolved_workspace_id = result.scalar()
+
+                    if resolved_workspace_id is None:
+                        logger.error(
+                            "[Memory] ❌ Missing workspace_id for memory item "
+                            "(agent_id=%s, type=%s). Skipping persistence.",
+                            agent_id,
+                            experience.get("type")
+                        )
+                        return experience_id
+
+                    if isinstance(resolved_workspace_id, str):
+                        try:
+                            resolved_workspace_id = PyUUID(resolved_workspace_id)
+                        except ValueError:
+                            logger.error(
+                                "[Memory] ❌ Invalid workspace_id format: %s. Skipping persistence.",
+                                resolved_workspace_id
+                            )
+                            return experience_id
+                    elif not isinstance(resolved_workspace_id, PyUUID):
+                        try:
+                            resolved_workspace_id = PyUUID(str(resolved_workspace_id))
+                        except ValueError:
+                            logger.error(
+                                "[Memory] ❌ Invalid workspace_id type: %s. Skipping persistence.",
+                                type(resolved_workspace_id)
+                            )
+                            return experience_id
+
                     memory_item = MemoryItem(
                         id=experience_id,
                         agent_id=agent_id,
+                        workspace_id=resolved_workspace_id,
                         content=json.dumps(experience),
                         memory_type=MemoryType.EXPERIENCE,
                         memory_level=memory_level,
@@ -329,7 +368,9 @@ class HierarchicalMemorySystem:
         agent_id: int,
         context: str,
         memory_types: Optional[List[str]] = None,
-        top_k: int = 10
+        top_k: int = 10,
+        workspace_id: Optional[Union[str, UUID]] = None,
+        min_relevance: float = 0.6
     ) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to the given context using semantic similarity.
@@ -351,6 +392,28 @@ class HierarchicalMemorySystem:
             query = select(MemoryItem).filter(
                 MemoryItem.agent_id == agent_id
             )
+            
+            if workspace_id:
+                if isinstance(workspace_id, str):
+                    try:
+                        workspace_id = PyUUID(workspace_id)
+                    except ValueError:
+                        logger.warning(
+                            "[Memory] Invalid workspace_id format for retrieval: %s",
+                            workspace_id
+                        )
+                        workspace_id = None
+                elif not isinstance(workspace_id, PyUUID):
+                    try:
+                        workspace_id = PyUUID(str(workspace_id))
+                    except ValueError:
+                        logger.warning(
+                            "[Memory] Invalid workspace_id type for retrieval: %s",
+                            type(workspace_id)
+                        )
+                        workspace_id = None
+                if workspace_id:
+                    query = query.filter(MemoryItem.workspace_id == workspace_id)
             
             if memory_types:
                 query = query.filter(MemoryItem.memory_type.in_(memory_types))
@@ -386,6 +449,9 @@ class HierarchicalMemorySystem:
         
         # Step 3: Rank and filter memories
         memories = self._rank_memories(memories, context)
+        
+        # Filter by minimum relevance threshold
+        memories = [m for m in memories if m.get("final_score", 0) >= min_relevance]
         
         return memories[:top_k]
     
@@ -443,9 +509,9 @@ class HierarchicalMemorySystem:
         """Rank memories by combined relevance score"""
         for memory in memories:
             # Combine multiple factors for final ranking
-            recency_weight = 0.2
-            importance_weight = 0.3
-            relevance_weight = 0.5
+            recency_weight = 0.1
+            importance_weight = 0.2
+            relevance_weight = 0.7
             
             # Recency score (exponential decay)
             if "created_at" in memory:

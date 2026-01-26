@@ -52,13 +52,21 @@ CMD ["npm", "run", "dev"]
 # =============================================================================
 FROM base as builder
 
+# Accept build arguments for environment variables
+# NOTE: NEXT_PUBLIC_* variables are embedded in the client bundle and must NOT contain secrets
+# API keys should be handled server-side only (see frontend/app/api/chat/route.ts)
+ARG NEXT_PUBLIC_API_URL
+
+# Set as environment variables for Next.js build
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 # Install ALL dependencies (including devDependencies for build)
 RUN npm install --legacy-peer-deps
 
 # Copy source code (Dockerfile is in frontend/, so copy from current dir)
 COPY . .
 
-# Build application
+# Build application (NEXT_PUBLIC_* vars will be baked into the bundle)
 RUN npm run build
 
 # =============================================================================

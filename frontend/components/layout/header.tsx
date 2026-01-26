@@ -1,9 +1,10 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Menu, Bell, User } from 'lucide-react'
+import { Menu, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
+import { ProfileMenu } from '@/components/auth/profile-menu'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -57,13 +58,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           </Button>
 
           {/* User Menu */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full text-orange-400 hover:text-orange-300 hover:bg-orange-500/5"
-          >
-            <User className="w-5 h-5" />
-          </Button>
+          <ProfileMenu />
         </div>
       </div>
     </header>

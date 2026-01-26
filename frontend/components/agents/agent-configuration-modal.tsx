@@ -3,11 +3,11 @@
 import * as React from 'react'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Save, 
-  Settings, 
-  Bot, 
+import {
+  X,
+  Save,
+  Settings,
+  Bot,
   AlertTriangle,
   CheckCircle,
   Info,
@@ -16,7 +16,8 @@ import {
   Brain,
   Database,
   Network,
-  Clock
+  Clock,
+  Wrench
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,8 +28,9 @@ import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { ToolLogo } from '@/components/ui/tool-logo'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { 
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -40,6 +42,7 @@ import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddS
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
+import { useTools } from '@/hooks/use-tools-api'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -102,15 +105,15 @@ const environments = [
   { value: 'production', label: 'Production', color: 'text-green-400' }
 ]
 
-export function AgentConfigurationModal({ 
-  agentId, 
-  open, 
-  onClose, 
-  onSave 
+export function AgentConfigurationModal({
+  agentId,
+  open,
+  onClose,
+  onSave
 }: AgentConfigurationModalProps) {
   const [activeTab, setActiveTab] = useState('general')
   const [hasChanges, setHasChanges] = useState(false)
-  
+
   // Form state
   const [formData, setFormData] = useState<any>({})
 
@@ -122,12 +125,16 @@ export function AgentConfigurationModal({
   const [availableSkills, setAvailableSkills] = useState<any[]>([])
   const { data: agentSkills } = useAgentSkills(agentId?.toString() || '') // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
-  
+
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(agentId)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
   const addSkillMutation = useAddSkillToAgent()
   const removeSkillMutation = useRemoveSkillFromAgent()
+
+  // Tools API
+  const { data: toolsData } = useTools({ status: 'active', limit: 100 })
+  const availableTools = toolsData?.data || []
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
@@ -136,17 +143,17 @@ export function AgentConfigurationModal({
   useEffect(() => {
     if (!open) return
     let mounted = true
-    ;(async () => {
-      try {
-        const data = await listSkills({ limit: 200 })
-        const items = Array.isArray(data) ? data : (data?.items || data?.skills || [])
-        if (!mounted) return
-        setAvailableSkills(items)
-      } catch (_) {
-        if (!mounted) return
-        setAvailableSkills([])
-      }
-    })()
+      ; (async () => {
+        try {
+          const data = await listSkills({ limit: 200 })
+          const items = Array.isArray(data) ? data : (data?.items || data?.skills || [])
+          if (!mounted) return
+          setAvailableSkills(items)
+        } catch (_) {
+          if (!mounted) return
+          setAvailableSkills([])
+        }
+      })()
     return () => { mounted = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]) // Re-fetch when modal opens
@@ -164,7 +171,7 @@ export function AgentConfigurationModal({
         presence_penalty: 0.0,
         fallback_model_id: null
       }
-      
+
       // Initialize form data with real agent data
       setFormData({
         name: (agent as any).name || '',
@@ -184,7 +191,9 @@ export function AgentConfigurationModal({
         performance_monitoring: (agentConfig as any).performance_monitoring || true,
         assigned_skills: (agent as any).skills?.map((skill: any) => skill.id) || [],
         // PRD-15: Model configuration
-        model_config: modelConfig
+        model_config: modelConfig,
+        // Tools configuration
+        assigned_tools: (agent as any).tools?.map((tool: any) => tool.id) || []
       })
       setHasChanges(false)
     }
@@ -195,7 +204,7 @@ export function AgentConfigurationModal({
     setFormData((prev: any) => ({ ...prev, [key]: value }))
     setHasChanges(true)
   }
-  
+
   // PRD-15: Helper to update model config
   const updateModelConfig = (key: string, value: any) => {
     setFormData((prev: any) => ({
@@ -253,24 +262,34 @@ export function AgentConfigurationModal({
     }
   }
 
+  const toggleToolAssignment = (toolId: number) => {
+    const currentTools = formData.assigned_tools || []
+    const hasTool = currentTools.includes(toolId)
+    const newTools = hasTool
+      ? currentTools.filter((id: number) => id !== toolId)
+      : [...currentTools, toolId]
+
+    updateFormData('assigned_tools', newTools)
+  }
+
   const handleSave = async () => {
     if (!agentId) {
       console.error('No agent ID provided')
       return
     }
-    
+
     console.log('💾 Saving agent configuration...', {
       agentId,
       hasChanges,
       formData: formData
     })
-    
+
     try {
       const tags = (formData.tags || '')
         .split(',')
         .map((tag: string) => tag.trim())
         .filter((tag: string) => tag.length > 0)
-      
+
       const updatePayload = {
         name: formData.name,
         description: formData.description,
@@ -292,9 +311,10 @@ export function AgentConfigurationModal({
           performance_monitoring: formData.performance_monitoring,
           tags
         },
-        skill_assignments: formData.assigned_skills
+        skill_assignments: formData.assigned_skills,
+        tool_ids: formData.assigned_tools
       }
-      
+
       console.log('📝 Saving basic configuration...')
       // Save agent configuration
       await updateConfigMutation.mutateAsync({
@@ -302,7 +322,7 @@ export function AgentConfigurationModal({
         config: updatePayload
       })
       console.log('✅ Basic configuration saved')
-      
+
       // PRD-15: Save model configuration
       if (formData.model_config) {
         console.log('🤖 Saving model configuration...', formData.model_config)
@@ -312,15 +332,15 @@ export function AgentConfigurationModal({
         })
         console.log('✅ Model configuration saved')
       }
-      
+
       if (onSave) {
         onSave(agentId, updatePayload)
       }
-      
+
       setHasChanges(false)
       console.log('🎉 All changes saved successfully!')
       onClose()
-      
+
     } catch (err) {
       console.error('❌ Error saving agent configuration:', err)
       // Show the full error to help debug
@@ -332,17 +352,17 @@ export function AgentConfigurationModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={onClose}
       />
-      <motion.div 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4" 
-        initial={{ opacity: 0, scale: 0.95 }} 
-        animate={{ opacity: 1, scale: 1 }} 
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
       >
         <Card className="glass-card w-full max-w-5xl max-h-[90vh] overflow-hidden">
@@ -362,8 +382,8 @@ export function AgentConfigurationModal({
                   Unsaved Changes
                 </Badge>
               )}
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={handleSave}
                 disabled={saving || !hasChanges}
@@ -386,7 +406,7 @@ export function AgentConfigurationModal({
               </Button>
             </div>
           </CardHeader>
-          
+
           <CardContent className="overflow-y-auto p-6">
             {loading && (
               <div className="flex items-center justify-center py-12">
@@ -411,7 +431,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -432,6 +452,10 @@ export function AgentConfigurationModal({
                     <Bot className="w-4 h-4" />
                     <span>Model</span>
                   </TabsTrigger>
+                  <TabsTrigger value="tools" className="flex items-center space-x-2">
+                    <Wrench className="w-4 h-4" />
+                    <span>Tools</span>
+                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="general" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
@@ -449,7 +473,7 @@ export function AgentConfigurationModal({
                           placeholder="Enter agent name"
                         />
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="description">Description</Label>
                         <Textarea
@@ -473,11 +497,11 @@ export function AgentConfigurationModal({
                           Lightweight keywords that describe the agent&apos;s strengths.
                         </p>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label>Agent Type</Label>
-                        <Select 
-                          value={formData.agent_type || 'custom'} 
+                        <Select
+                          value={formData.agent_type || 'custom'}
                           onValueChange={(value) => updateFormData('agent_type', value)}
                         >
                           <SelectTrigger>
@@ -495,11 +519,11 @@ export function AgentConfigurationModal({
                           </SelectContent>
                         </Select>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label>Priority Level</Label>
-                        <Select 
-                          value={formData.priority_level || 'medium'} 
+                        <Select
+                          value={formData.priority_level || 'medium'}
                           onValueChange={(value) => updateFormData('priority_level', value)}
                         >
                           <SelectTrigger>
@@ -514,11 +538,11 @@ export function AgentConfigurationModal({
                           </SelectContent>
                         </Select>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label>Environment</Label>
-                        <Select 
-                          value={formData.environment || 'development'} 
+                        <Select
+                          value={formData.environment || 'development'}
                           onValueChange={(value) => updateFormData('environment', value)}
                         >
                           <SelectTrigger>
@@ -561,7 +585,7 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-3">
                         <Label>Timeout (seconds)</Label>
                         <div className="space-y-2">
@@ -580,7 +604,7 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-3">
                         <Label>Retry Attempts</Label>
                         <div className="space-y-2">
@@ -599,9 +623,9 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <Separator />
-                      
+
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
                           <div className="space-y-0.5">
@@ -615,7 +639,7 @@ export function AgentConfigurationModal({
                             onCheckedChange={(checked) => updateFormData('auto_start', checked)}
                           />
                         </div>
-                        
+
                         <div className="flex items-center justify-between">
                           <div className="space-y-0.5">
                             <Label>Performance Monitoring</Label>
@@ -660,7 +684,7 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-3">
                         <Label className="flex items-center space-x-2">
                           <Zap className="w-4 h-4" />
@@ -682,7 +706,7 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-3">
                         <Label className="flex items-center space-x-2">
                           <Network className="w-4 h-4" />
@@ -704,11 +728,11 @@ export function AgentConfigurationModal({
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label>Logging Level</Label>
-                        <Select 
-                          value={formData.logging_level || 'info'} 
+                        <Select
+                          value={formData.logging_level || 'info'}
                           onValueChange={(value) => updateFormData('logging_level', value)}
                         >
                           <SelectTrigger>
@@ -785,6 +809,69 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
+                <TabsContent value="tools" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Wrench className="h-5 w-5 text-blue-400" />
+                        Tool Assignment
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Select tools to grant this agent access to
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      {availableTools && availableTools.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {availableTools.map((tool: any) => (
+                            <div key={tool.id} className="flex items-start space-x-3 p-3 bg-background/50 rounded-lg border border-border/50">
+                              <Checkbox
+                                id={`tool-${tool.id}`}
+                                checked={formData.assigned_tools?.includes(tool.id) || false}
+                                onCheckedChange={() => toggleToolAssignment(tool.id)}
+                                className="mt-1"
+                              />
+                              <div className="flex-1">
+                                <Label htmlFor={`tool-${tool.id}`} className="cursor-pointer">
+                                  <div className="flex flex-col space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-medium flex items-center gap-2">
+                                        <div className="flex items-center justify-center">
+                                          <ToolLogo
+                                            name={tool.name}
+                                            logo={tool.icon}
+                                            size={20}
+                                            showBackground={false}
+                                          />
+                                        </div>
+                                        {tool.name}
+                                      </span>
+                                      <Badge variant="outline" className="text-xs scale-90">
+                                        {tool.provider}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground line-clamp-2">
+                                      {tool.description || 'No description available'}
+                                    </p>
+                                  </div>
+                                </Label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <Wrench className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Active Tools</h3>
+                          <p className="text-muted-foreground">
+                            No active tools available. Enable tools in Settings > Tools first.
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
                 {/* PRD-15: Model Configuration Tab */}
                 <TabsContent value="model" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
@@ -854,7 +941,7 @@ export function AgentConfigurationModal({
                       {/* Advanced Settings */}
                       <div className="space-y-4 pt-4 border-t border-border/50">
                         <h4 className="text-sm font-medium text-foreground">Advanced Settings</h4>
-                        
+
                         {/* Top P */}
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
@@ -916,7 +1003,7 @@ export function AgentConfigurationModal({
                       {/* Fallback Model */}
                       <div className="space-y-2">
                         <Label htmlFor="fallback-model">Fallback Model (Optional)</Label>
-                        <Select 
+                        <Select
                           value={formData.model_config?.fallback_model_id || 'none'}
                           onValueChange={(value) => updateModelConfig('fallback_model_id', value === 'none' ? null : value)}
                         >

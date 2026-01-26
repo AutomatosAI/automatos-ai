@@ -246,7 +246,6 @@ def seed_system_settings(db: Session):
             "description": "Public API URL for frontend",
             "is_required": True
         },
-        
         # ========================================
         # ORCHESTRATOR LLM SETTINGS
         # ========================================

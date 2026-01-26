@@ -156,7 +156,7 @@
           "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-4-skills--tools"
         },
         "tools": {
-          "text": "External integrations this agent can use (GitHub, Slack, databases, etc.). 400+ tools available via MCP protocol.",
+          "text": "External integrations this agent can use (GitHub, Slack, databases, etc.). Tools are provided by the integrations catalog.",
           "docLink": "/docs/user-guides/USER_GUIDE_AGENTS#step-4-skills--tools"
         }
       }
@@ -425,7 +425,7 @@
   "tools": {
     "page": {
       "title": "Tools Management",
-      "description": "Browse, configure, and assign MCP tools to agents"
+      "description": "Browse, configure, and assign integrations to agents"
     },
     "stats": {
       "available_tools": {

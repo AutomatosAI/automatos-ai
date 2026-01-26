@@ -8,7 +8,8 @@ Comprehensive data models for agents, skills, workflows, documents, and system c
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
-from sqlalchemy.orm import declarative_base
+# Base moved to core/database/base.py to avoid circular imports
+from core.database.base import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -16,14 +17,13 @@ from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
 from uuid import uuid4
+
 # Define PriorityLevel locally to avoid circular imports
 class PriorityLevel(str, Enum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
-
-Base = declarative_base()
 
 # Association tables for many-to-many relationships
 agent_skills = Table('agent_skills', Base.metadata,
@@ -96,6 +96,9 @@ class Agent(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
     
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+    
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
     emergence_score = Column(Float, nullable=True)  # Emergence metric
@@ -132,7 +135,7 @@ class Agent(Base):
     skills = relationship("Skill", secondary=agent_skills, back_populates="agents")
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
-    tool_assignments = relationship("AgentToolAssignment", foreign_keys="[AgentToolAssignment.agent_id]", cascade="all, delete-orphan")
+    # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
 
 class Skill(Base):
     __tablename__ = 'skills'
@@ -295,72 +298,6 @@ class Pattern(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
 
-# ===================================================================
-# MCP TOOLS MODELS (Phase 3: Skills & Tools Integration)
-# ===================================================================
-
-class MCPTool(Base):
-    """MCP Tool Model - represents external tools agents can use"""
-    __tablename__ = 'mcp_tools'
-    
-    id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text)
-    mcp_server_url = Column(String(500))
-    capabilities = Column(JSON, default={})
-    credentials_schema = Column(JSON, default={})
-    status = Column(String(50), default='active')
-    provider = Column(String(255))
-    version = Column(String(50))
-    icon = Column(String(100))
-    logo = Column(String(255))  # Logo file path, e.g. "/logos/Discord.png"
-    category = Column(String(100))
-    tags = Column(PG_ARRAY(String))
-    tool_metadata = Column('metadata', JSON, default={})  # Renamed from metadata (reserved in SQLAlchemy)
-    created_by = Column(String(255))
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool_assignments = relationship("AgentToolAssignment", back_populates="tool", cascade="all, delete-orphan")
-    usage_logs = relationship("ToolUsageLog", back_populates="tool", cascade="all, delete-orphan")
-
-class AgentToolAssignment(Base):
-    """Agent-Tool Assignment with permissions"""
-    __tablename__ = 'agent_tool_assignments'
-    
-    id = Column(Integer, primary_key=True)
-    agent_id = Column(Integer, ForeignKey('agents.id', ondelete='CASCADE'), nullable=False)
-    tool_id = Column(Integer, ForeignKey('mcp_tools.id', ondelete='CASCADE'), nullable=False)
-    enabled = Column(Boolean, default=True)
-    permissions = Column(JSON, default={})
-    configuration = Column(JSON, default={})
-    assigned_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    tool = relationship("MCPTool", back_populates="tool_assignments")
-
-class ToolUsageLog(Base):
-    """Tool Usage Tracking for MCP Tools"""
-    __tablename__ = 'tool_usage_logs'
-    __table_args__ = {'extend_existing': True}  # Allow extension by tools.py
-    
-    id = Column(Integer, primary_key=True)
-    execution_id = Column(Integer, ForeignKey('workflow_executions.id'))
-    agent_id = Column(Integer, ForeignKey('agents.id'), nullable=False)
-    tool_id = Column(Integer, ForeignKey('mcp_tools.id'), nullable=False)
-    method_called = Column(String(255))
-    input_data = Column(JSON)
-    output_data = Column(JSON)
-    success = Column(Boolean)
-    execution_time_ms = Column(Integer)
-    error_message = Column(Text)
-    created_at = Column(DateTime, default=func.now())
-    
-    # Relationships
-    tool = relationship("MCPTool", back_populates="usage_logs")
-
 class Workflow(Base):
     __tablename__ = 'workflows'
     
@@ -382,6 +319,9 @@ class Workflow(Base):
     expected_duration = Column(Integer, nullable=True)  # Expected duration in seconds (9-stage enhancement)
     complexity_score = Column(Float, nullable=True)  # Workflow complexity (9-stage enhancement)
     success_rate = Column(Float, nullable=True)  # Success rate (9-stage enhancement)
+    
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
     
     # Relationships
     agents = relationship("Agent", secondary=workflow_agents, back_populates="workflows")
@@ -429,6 +369,9 @@ class Document(Base):
     upload_date = Column(DateTime, default=func.now())
     processed_date = Column(DateTime)
     created_by = Column(String(255))
+    
+    # PRD-37: Workspace isolation
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
 class SystemConfiguration(Base):
     __tablename__ = 'system_configurations'
@@ -523,6 +466,7 @@ class AgentUpdate(BaseModel):
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
+    tool_ids: Optional[List[int]] = None  # NEW: Allow updating tool assignments
     tags: Optional[List[str]] = None
 
 class AgentResponse(BaseModel):
@@ -541,7 +485,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime
     created_by: Optional[str] = None
     skills: List[Dict[str, Any]] = []
-    tools: List[Dict[str, Any]] = []  # Phase 3: MCP Tools assigned to agent
+    tools: List[Dict[str, Any]] = []  # Assigned apps/integrations (Composio)
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):
@@ -570,84 +514,6 @@ class SkillResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by: Optional[str] = ""
-
-# ===================================================================
-# MCP TOOLS PYDANTIC MODELS (Phase 3: Skills & Tools Integration)
-# ===================================================================
-
-class MCPToolBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = {}
-    credentials_schema: Optional[Dict[str, Any]] = {}
-    status: Optional[str] = 'active'
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[List[str]] = []
-    tool_metadata: Optional[Dict[str, Any]] = Field(default={}, alias='metadata')  # Use alias for API compatibility
-
-class MCPToolCreate(MCPToolBase):
-    pass
-
-class MCPToolUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = None
-    credentials_schema: Optional[Dict[str, Any]] = None
-    status: Optional[str] = None
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    category: Optional[str] = None
-    tags: Optional[List[str]] = None  # Fixed: should be List[str] not str
-    tool_metadata: Optional[Dict[str, Any]] = Field(default=None, alias='metadata')
-
-class MCPToolResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    mcp_server_url: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = {}
-    credentials_schema: Optional[Dict[str, Any]] = {}
-    status: Optional[str] = 'active'
-    provider: Optional[str] = None
-    version: Optional[str] = None
-    icon: Optional[str] = None
-    logo: Optional[str] = None  # Logo file path
-    category: Optional[str] = None
-    tags: Optional[List[str]] = []
-    # Use Field with validation_alias to map from SQLAlchemy attribute
-    metadata: Optional[Dict[str, Any]] = Field(default={}, validation_alias='tool_metadata')
-    created_at: datetime
-    updated_at: datetime
-    created_by: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-        populate_by_name = True
-
-class AgentToolAssignmentCreate(BaseModel):
-    tool_id: int
-    enabled: bool = True
-    permissions: Optional[Dict[str, Any]] = {}
-    configuration: Optional[Dict[str, Any]] = {}
-
-class AgentToolAssignmentResponse(BaseModel):
-    id: int
-    agent_id: int
-    tool_id: int
-    enabled: bool
-    permissions: Dict[str, Any]
-    configuration: Dict[str, Any]
-    assigned_at: datetime
-    tool: MCPToolResponse
-    
-    class Config:
-        from_attributes = True
 
 class PatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -853,12 +719,20 @@ class Task(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 class User(Base):
-    """User model for task ownership"""
+    """User model with Clerk authentication (PRD-37: SaaS Foundation)"""
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=False)
+    
+    # PRD-37: Clerk authentication fields
+    clerk_user_id = Column(String(255), unique=True, nullable=True)
+    name = Column(String(255), nullable=True)
+    avatar_url = Column(String(500), nullable=True)
+    last_sign_in = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -1056,6 +930,7 @@ class Message(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     chat_id = Column(UUID(as_uuid=True), ForeignKey('chats.id', ondelete='CASCADE'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
     role = Column(String(20), nullable=False)
     parts = Column(JSONB, nullable=False, default=list, server_default='[]')
     attachments = Column(JSONB, default=list, server_default='[]')

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 import logging
 import uuid
 
@@ -36,6 +37,8 @@ from core.credentials.service import (
 )
 from core.credentials.encryption import EncryptionKeyError
 from core.utils.logging_adapter import set_request_id
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +152,10 @@ async def get_credential_type_by_name(
 # ============================================================================
 
 @router.post("/", response_model=CredentialResponse)
-async def create_credential(
+async def handle_request(
     credential: CredentialCreate,
     request: Request,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     user_id: Optional[str] = Query(None, description="User ID"),
     store: CredentialStore = Depends(get_credential_store),
     db: Session = Depends(get_db)
@@ -159,8 +163,6 @@ async def create_credential(
     """
     Create a new credential with encryption.
     Credential values are immediately encrypted and never stored in plaintext.
-    
-    PRD-20: Auto-activates matching MCP servers when credential is created!
     """
     set_request_id(str(uuid.uuid4()))
     
@@ -205,22 +207,6 @@ async def create_credential(
             field_names=field_names
         )
         
-        # PRD-20: AUTO-ACTIVATE matching MCP servers! 🚀
-        try:
-            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
-            
-            activation_service = MCPAutoActivationService(db)
-            activation_result = await activation_service.activate_mcp_servers_for_credential(
-                credential_id=created_cred.id,
-                credential_type_name=cred_type.name
-            )
-            
-            logger.info(f"🎉 Auto-activated {activation_result['activated_count']} MCP servers for credential '{created_cred.name}'")
-            
-        except Exception as e:
-            # Don't fail credential creation if auto-activation fails
-            logger.warning(f"⚠️  Auto-activation failed (credential still created): {e}")
-        
         return response
     
     except CredentialValidationError as e:
@@ -235,7 +221,8 @@ async def create_credential(
 
 
 @router.get("/")
-async def list_credentials(
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid), 
     credential_type_id: Optional[int] = Query(None, description="Filter by type"),
     environment: Optional[str] = Query(None, description="Filter by environment"),
     active_only: bool = Query(True, description="Only active credentials"),
@@ -256,7 +243,7 @@ async def list_credentials(
     
     try:
         # Build query
-        query = db.query(Credential)
+        query = db.query(Credential).filter(Credential.workspace_id == ctx.workspace_id)
         
         # Apply filters
         if credential_type_id:
@@ -455,29 +442,11 @@ async def delete_credential(
 ):
     """
     Securely delete a credential
-    
-    PRD-20: Auto-deactivates linked MCP servers when credential is deleted!
     """
     set_request_id(str(uuid.uuid4()))
     
     try:
         ip_address = get_client_ip(request)
-        
-        # PRD-20: DEACTIVATE linked MCP servers before deleting credential
-        try:
-            from modules.tools.services.mcp_auto_activation import MCPAutoActivationService
-            
-            activation_service = MCPAutoActivationService(db)
-            deactivation_result = await activation_service.deactivate_mcp_servers_for_credential(
-                credential_id=credential_id
-            )
-            
-            if deactivation_result['deactivated_count'] > 0:
-                logger.info(f"🔌 Auto-deactivated {deactivation_result['deactivated_count']} MCP servers")
-            
-        except Exception as e:
-            # Don't fail deletion if deactivation fails
-            logger.warning(f"⚠️  Auto-deactivation failed (continuing with deletion): {e}")
         
         # Delete the credential
         store.delete_credential(

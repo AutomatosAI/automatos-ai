@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 from core.database.database import get_db
 from modules.codegraph import CodeGraphService
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/code-graph", tags=["code-graph"])
@@ -109,6 +111,7 @@ def get_codegraph_service(db: Session = Depends(get_db)) -> CodeGraphService:
 @router.post("/index/github", response_model=IndexResponse)
 async def index_github_repository(
     request: IndexGitHubRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -137,7 +140,8 @@ async def index_github_repository(
             github_url=request.github_url,
             branch=request.branch,
             auth_token=request.auth_token,
-            exclude_patterns=request.exclude_patterns
+            exclude_patterns=request.exclude_patterns,
+            workspace_id=ctx.workspace_id
         )
         
         return IndexResponse(**result)
@@ -155,6 +159,7 @@ async def search_symbols(
     q: str = Query(..., description="Search query"),
     symbol_type: Optional[str] = Query(None, description="Filter by symbol type (function, class, etc.)"),
     limit: int = Query(10, ge=1, le=50, description="Maximum results"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -175,7 +180,8 @@ async def search_symbols(
             project_name=project,
             query=q,
             symbol_type=symbol_type,
-            limit=limit
+            limit=limit,
+            workspace_id=ctx.workspace_id
         )
         
         return SearchResponse(**results, prompt_block=None)
@@ -192,6 +198,7 @@ async def search_semantic(
     project: str = Query(..., description="Project name"),
     q: str = Query(..., description="Semantic search query"),
     limit: int = Query(10, ge=1, le=50, description="Maximum results"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -216,7 +223,8 @@ async def search_semantic(
         results = await service.semantic_search(
             project_name=project,
             query=q,
-            limit=limit
+            limit=limit,
+            workspace_id=ctx.workspace_id
         )
         
         return SearchResponse(**results)
@@ -229,7 +237,8 @@ async def search_semantic(
 
 
 @router.get("/projects", response_model=List[ProjectResponse])
-async def list_projects(
+async def get_item(
+    ctx: RequestContext = Depends(get_request_context_hybrid), 
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -242,7 +251,7 @@ async def list_projects(
     - Project status
     """
     try:
-        projects = service.list_projects()
+        projects = service.list_projects(workspace_id=ctx.workspace_id)
         return [ProjectResponse(**p) for p in projects]
         
     except Exception as e:
@@ -253,11 +262,12 @@ async def list_projects(
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """Get project details by ID"""
     try:
-        projects = service.list_projects()
+        projects = service.list_projects(workspace_id=ctx.workspace_id)
         project = next((p for p in projects if p["id"] == project_id), None)
         
         if not project:
@@ -275,6 +285,7 @@ async def get_project(
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -289,7 +300,7 @@ async def delete_project(
     This action cannot be undone.
     """
     try:
-        result = service.delete_project(project_id)
+        result = service.delete_project(project_id, workspace_id=ctx.workspace_id)
         return result
         
     except ValueError as e:
@@ -302,6 +313,7 @@ async def delete_project(
 @router.post("/projects/{project_id}/reindex")
 async def reindex_project(
     project_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     service: CodeGraphService = Depends(get_codegraph_service)
 ):
     """
@@ -316,7 +328,7 @@ async def reindex_project(
     """
     try:
         # Get project details
-        projects = service.list_projects()
+        projects = service.list_projects(workspace_id=ctx.workspace_id)
         project = next((p for p in projects if p["id"] == project_id), None)
         
         if not project:
@@ -353,7 +365,8 @@ async def reindex_project(
                 await bg_service.index_github_project(
                     project_name=project_name,
                     github_url=github_url,
-                    branch=branch
+                    branch=branch,
+                    workspace_id=ctx.workspace_id
                 )
             except Exception as e:
                 logger.exception(f"Background indexing failed for project {project_id}: {e}")
@@ -401,6 +414,7 @@ async def get_call_graph_api(
     symbol: str = Query(..., description="Qualified name of the root symbol"),
     depth: int = Query(1, ge=1, le=5, description="Depth of the call graph traversal"),
     direction: str = Query("outgoing", description="Traversal direction: 'outgoing', 'incoming', 'both'"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -411,7 +425,7 @@ async def get_call_graph_api(
     """
     try:
         codegraph_service = CodeGraphService(db)
-        call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction)
+        call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction, workspace_id=ctx.workspace_id)
         return call_graph
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

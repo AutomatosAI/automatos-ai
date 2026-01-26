@@ -24,11 +24,26 @@ import {
 
 interface DynamicCredentialFormProps {
   credentialId?: number  // If provided, edit mode
+  lockCredentialTypeId?: number
+  lockedCredentialType?: CredentialType
+  hideMetadataSection?: boolean
+  defaultName?: string
+  defaultEnvironment?: string
   onSuccess?: () => void
   onCancel?: () => void
 }
 
-export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: DynamicCredentialFormProps) {
+export function DynamicCredentialForm({
+  credentialId,
+  lockCredentialTypeId,
+  lockedCredentialType,
+  hideMetadataSection = false,
+  defaultName,
+  defaultEnvironment,
+  onSuccess,
+  onCancel
+}: DynamicCredentialFormProps) {
+  const metadataHidden = hideMetadataSection || !!lockCredentialTypeId
   const [credentialTypes, setCredentialTypes] = useState<CredentialType[]>([])
   const [selectedTypeId, setSelectedTypeId] = useState<number | null>(null)
   const [selectedType, setSelectedType] = useState<CredentialType | null>(null)
@@ -43,11 +58,19 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    loadCredentialTypes()
+    if (lockCredentialTypeId && lockedCredentialType) {
+      setCredentialTypes([lockedCredentialType])
+      setSelectedTypeId(lockedCredentialType.id)
+      setSelectedType(lockedCredentialType)
+    } else if (lockCredentialTypeId) {
+      loadLockedCredentialType(lockCredentialTypeId)
+    } else {
+      loadCredentialTypes()
+    }
     if (credentialId) {
       loadExistingCredential()
     }
-  }, [credentialId])
+  }, [credentialId, lockCredentialTypeId, lockedCredentialType])
 
   useEffect(() => {
     if (selectedTypeId) {
@@ -67,6 +90,21 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
     }
   }, [selectedTypeId, credentialTypes])
 
+  useEffect(() => {
+    if (metadataHidden && defaultName && !credentialMetadata.name) {
+      setCredentialMetadata(prev => ({ ...prev, name: defaultName }))
+    }
+    if (metadataHidden && defaultEnvironment && !credentialMetadata.environment) {
+      setCredentialMetadata(prev => ({ ...prev, environment: defaultEnvironment }))
+    }
+  }, [
+    metadataHidden,
+    defaultName,
+    defaultEnvironment,
+    credentialMetadata.name,
+    credentialMetadata.environment
+  ])
+
   const loadCredentialTypes = async () => {
     try {
       setLoading(true)
@@ -79,6 +117,20 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
     }
   }
 
+  const loadLockedCredentialType = async (typeId: number) => {
+    try {
+      setLoading(true)
+      const type = await getCredentialType(typeId)
+      setCredentialTypes([type])
+      setSelectedTypeId(typeId)
+      setSelectedType(type)
+    } catch (error) {
+      console.error('Failed to load credential type:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const loadExistingCredential = async () => {
     if (!credentialId) return
 
@@ -86,7 +138,7 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
       setLoading(true)
       const credential = await getCredential(credentialId)
       
-      setSelectedTypeId(credential.credential_type_id)
+      setSelectedTypeId(lockCredentialTypeId || credential.credential_type_id)
       setCredentialMetadata({
         name: credential.name,
         environment: credential.environment,
@@ -319,92 +371,96 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Credential Metadata */}
-      <div className="space-y-4 p-4 bg-secondary/20 rounded-lg">
-        <h3 className="font-semibold">Credential Info</h3>
-        
-        {!credentialId && (
+      {!metadataHidden && (
+        <div className="space-y-4 p-4 bg-secondary/20 rounded-lg">
+          <h3 className="font-semibold">Credential Info</h3>
+          
+          {!credentialId && !lockCredentialTypeId && (
+            <div className="space-y-2">
+              <Label htmlFor="credential_type">
+                Credential Type <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={selectedTypeId?.toString()}
+                onValueChange={(val) => setSelectedTypeId(parseInt(val))}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select credential type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {credentialTypes.map((type) => (
+                    <SelectItem key={type.id} value={type.id.toString()}>
+                      {type.display_name} ({type.category})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
-            <Label htmlFor="credential_type">
-              Credential Type <span className="text-red-500">*</span>
+            <Label htmlFor="name">
+              Name <span className="text-red-500">*</span>
             </Label>
-            <Select
-              value={selectedTypeId?.toString()}
-              onValueChange={(val) => setSelectedTypeId(parseInt(val))}
+            <Input
+              id="name"
+              value={credentialMetadata.name}
+              onChange={(e) => setCredentialMetadata({ ...credentialMetadata, name: e.target.value })}
+              placeholder="e.g., Production PostgreSQL"
               required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="environment">Environment</Label>
+            <Select
+              value={credentialMetadata.environment}
+              onValueChange={(val) => setCredentialMetadata({ ...credentialMetadata, environment: val })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select credential type" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {credentialTypes.map((type) => (
-                  <SelectItem key={type.id} value={type.id.toString()}>
-                    {type.display_name} ({type.category})
-                  </SelectItem>
-                ))}
+                <SelectItem value="development">Development</SelectItem>
+                <SelectItem value="staging">Staging</SelectItem>
+                <SelectItem value="production">Production</SelectItem>
               </SelectContent>
             </Select>
           </div>
-        )}
 
-        <div className="space-y-2">
-          <Label htmlFor="name">
-            Name <span className="text-red-500">*</span>
-          </Label>
-          <Input
-            id="name"
-            value={credentialMetadata.name}
-            onChange={(e) => setCredentialMetadata({ ...credentialMetadata, name: e.target.value })}
-            placeholder="e.g., Production PostgreSQL"
-            required
-          />
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="description">Description</Label>
+            <Input
+              id="description"
+              value={credentialMetadata.description}
+              onChange={(e) => setCredentialMetadata({ ...credentialMetadata, description: e.target.value })}
+              placeholder="Optional description"
+            />
+          </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="environment">Environment</Label>
-          <Select
-            value={credentialMetadata.environment}
-            onValueChange={(val) => setCredentialMetadata({ ...credentialMetadata, environment: val })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="development">Development</SelectItem>
-              <SelectItem value="staging">Staging</SelectItem>
-              <SelectItem value="production">Production</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="space-y-2">
+            <Label htmlFor="tags">Tags (comma-separated)</Label>
+            <Input
+              id="tags"
+              value={credentialMetadata.tags}
+              onChange={(e) => setCredentialMetadata({ ...credentialMetadata, tags: e.target.value })}
+              placeholder="e.g., production, critical, database"
+            />
+          </div>
         </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="description">Description</Label>
-          <Input
-            id="description"
-            value={credentialMetadata.description}
-            onChange={(e) => setCredentialMetadata({ ...credentialMetadata, description: e.target.value })}
-            placeholder="Optional description"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="tags">Tags (comma-separated)</Label>
-          <Input
-            id="tags"
-            value={credentialMetadata.tags}
-            onChange={(e) => setCredentialMetadata({ ...credentialMetadata, tags: e.target.value })}
-            placeholder="e.g., production, critical, database"
-          />
-        </div>
-      </div>
+      )}
 
       {/* Dynamic Fields Based on Credential Type */}
       {selectedType && (
         <div className="space-y-4 p-4 border border-border/30 rounded-lg">
-          <h3 className="font-semibold">
-            {selectedType.display_name} Configuration
-          </h3>
+          {!hideMetadataSection && (
+            <h3 className="font-semibold">
+              {selectedType.display_name} Configuration
+            </h3>
+          )}
           
-          {credentialId && (
+          {credentialId && !hideMetadataSection && (
             <div className="text-sm text-yellow-600 bg-yellow-500/10 p-3 rounded">
               ⚠️ For security reasons, existing values are not shown. Re-enter values to update.
             </div>
@@ -416,9 +472,11 @@ export function DynamicCredentialForm({ credentialId, onSuccess, onCancel }: Dyn
 
       {/* Actions */}
       <div className="flex gap-2 justify-end pt-4 border-t border-border/30">
-        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-          Cancel
-        </Button>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
+            Cancel
+          </Button>
+        )}
         <Button type="submit" disabled={saving || !selectedTypeId}>
           {saving ? 'Saving...' : credentialId ? 'Update Credential' : 'Create Credential'}
         </Button>
