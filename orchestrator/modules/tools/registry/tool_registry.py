@@ -210,7 +210,7 @@ class ToolRegistry:
         if tool.name not in self.categories[tool.category]:
             self.categories[tool.category].append(tool.name)
         
-        self.logger.info(f"Registered tool: {tool.name} (category: {tool.category.value}, security: {tool.security_level.value})")
+        self.logger.debug(f"Registered tool: {tool.name} (category: {tool.category.value}, security: {tool.security_level.value})")
     
     def get_tool(self, name: str) -> Optional[ToolSpec]:
         """Get a tool by name"""

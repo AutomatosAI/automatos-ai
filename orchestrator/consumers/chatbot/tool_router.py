@@ -42,49 +42,34 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# EXECUTOR CACHING - Prevent registry re-initialization on every tool call
+# EXECUTOR CACHING - Global singleton to avoid registry re-initialization
 # =============================================================================
 
-# Thread-local storage for executor caching per request
 import threading
-_executor_cache_lock = threading.Lock()
-_executor_cache: Dict[int, Tuple[Any, Any, float]] = {}  # session_id -> (executor, db_session, last_used_time)
-_EXECUTOR_CACHE_TTL = 300  # 5 minutes TTL
+_executor_lock = threading.Lock()
+_global_executor: Optional[UnifiedToolExecutor] = None
+_executor_init_logged = False
 
 
 def _get_cached_executor(db_session, force_new: bool = False):
     """
-    Get a cached UnifiedToolExecutor or create a new one.
-    Caches executors per database session to avoid re-initializing
-    the tool registry on every tool call.
+    Get a global UnifiedToolExecutor, updating its db_session.
+    Uses a singleton pattern to avoid re-initializing the tool registry.
+    The db_session is updated each call to ensure fresh transactions.
     """
-    import time
+    global _global_executor, _executor_init_logged
 
-    session_id = id(db_session)
-    current_time = time.time()
+    with _executor_lock:
+        if _global_executor is None or force_new:
+            _global_executor = UnifiedToolExecutor(db_session)
+            if not _executor_init_logged:
+                logger.info("Initialized global UnifiedToolExecutor (singleton)")
+                _executor_init_logged = True
+        else:
+            # Update db session for the existing executor
+            _global_executor.db = db_session
 
-    with _executor_cache_lock:
-        # Check if we have a cached executor for this session
-        if not force_new and session_id in _executor_cache:
-            executor, cached_session, last_used = _executor_cache[session_id]
-            # Validate the cached session is still the same object
-            if id(cached_session) == id(db_session) and (current_time - last_used) < _EXECUTOR_CACHE_TTL:
-                _executor_cache[session_id] = (executor, cached_session, current_time)
-                return executor
-
-        # Clean up old entries
-        stale_keys = [
-            k for k, (_, _, last_used) in _executor_cache.items()
-            if (current_time - last_used) > _EXECUTOR_CACHE_TTL
-        ]
-        for k in stale_keys:
-            del _executor_cache[k]
-
-        # Create new executor
-        executor = UnifiedToolExecutor(db_session)
-        _executor_cache[session_id] = (executor, db_session, current_time)
-        logger.info(f"Created new cached UnifiedToolExecutor (cache size: {len(_executor_cache)})")
-        return executor
+        return _global_executor
 
 def _new_trace_id() -> str:
     return uuid4().hex[:12]
@@ -753,9 +738,14 @@ def validate_action_for_intent(
         return eligible, reason
 
     except Exception as e:
-        logger.error(f"Action validation error: {e}")
+        # Log at debug level if it's a missing table error (expected during development)
+        error_str = str(e)
+        if "does not exist" in error_str or "UndefinedTable" in error_str:
+            logger.debug(f"Action validation skipped (table not created): {e}")
+        else:
+            logger.warning(f"Action validation error (fail open): {e}")
         # Fail open on errors to avoid blocking legitimate actions
-        return True, f"Validation error (fail open): {e}"
+        return True, "Validation skipped (fail open)"
     finally:
         if db_session is None:
             session_used.close()

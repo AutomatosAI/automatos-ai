@@ -138,7 +138,7 @@ class UnifiedToolExecutor:
     def composio_executor(self):
         """Lazy-load Composio executor (PRD-36) only when needed."""
         if self._composio_executor is None:
-            logger.info("  🔧 Initializing Composio executor (PRD-36)...")
+            logger.debug("  Initializing Composio executor...")
             self._composio_executor = _get_composio_executor(self.db)
         return self._composio_executor
 
@@ -211,16 +211,17 @@ class UnifiedToolExecutor:
     def action_executor(self):
         """Lazy-load action executor (file/shell ops) only when needed."""
         if self._action_executor is None:
-            logger.info("  🔧 Initializing file/shell executor...")
+            logger.debug("  Initializing file/shell executor...")
             self._action_executor = ActionExecutor(self.workspace_dir)
         return self._action_executor
     
     @property
     def tool_registry(self):
-        """Lazy-load tool registry only when needed."""
+        """Lazy-load tool registry using global singleton."""
         if self._tool_registry is None:
-            logger.info("  🔧 Initializing tool registry...")
-            self._tool_registry = ToolRegistry(self.db)
+            # Use global singleton to avoid re-registration on every executor
+            from modules.tools.registry import get_tool_registry
+            self._tool_registry = get_tool_registry(self.db)
         return self._tool_registry
     
     def _check_agent_permission(self, agent_id: int, tool_name: str) -> bool:
