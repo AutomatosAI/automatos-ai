@@ -189,7 +189,8 @@ class NewToolRegistry:
 
     def _get_entity_id(self, workspace_id):
         # Logic to fetch 'automatos_<workspace_id>' from the database
-        # ...
+        # Format: automatos_{workspace_id} for consistent entity identification
+        # Note: workspace_id should be from ctx.workspace_id in request context
         return f"automatos_{workspace_id}"
 
     def load_tools_for_llm(self):

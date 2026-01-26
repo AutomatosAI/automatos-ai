@@ -328,10 +328,12 @@ class ClerkAuth:
     def __init__(self):
         self.jwks_url = os.getenv("CLERK_JWKS_URL")
         # Extract issuer/audience from JWKS URL (e.g., https://app.clerk.accounts.dev)
-        # The audience is typically the issuer URL for Clerk tokens
+        # Note: Clerk session tokens do not include an "aud" claim by default.
+        # Only set audience if explicitly configured in Clerk or via CLERK_AUDIENCE env var.
         self.audience = os.getenv("CLERK_AUDIENCE")
         if not self.audience and self.jwks_url:
             # Derive from JWKS URL: https://app.clerk.accounts.dev/.well-known/jwks.json -> https://app.clerk.accounts.dev
+            # This is only used if Clerk tokens are configured with aud claim
             self.audience = self.jwks_url.replace("/.well-known/jwks.json", "")
         self._jwks_client = None
     
@@ -345,13 +347,28 @@ class ClerkAuth:
         """Verify Clerk JWT and return claims."""
         try:
             signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-            return jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=self.audience,
-                options={"verify_aud": True, "verify_exp": True}
-            )
+            # Clerk session tokens do not include "aud" claim by default.
+            # Only verify audience if explicitly configured (self.audience is set).
+            # If audience is not set, disable audience verification to avoid failures.
+            decode_options = {"verify_exp": True}
+            if self.audience:
+                decode_options["verify_aud"] = True
+                return jwt.decode(
+                    token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                    audience=self.audience,
+                    options=decode_options
+                )
+            else:
+                # No audience configured - skip audience verification
+                decode_options["verify_aud"] = False
+                return jwt.decode(
+                    token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                    options=decode_options
+                )
         except Exception:
             return None
 ```
@@ -706,7 +723,8 @@ After PRD-37, Composio can use:
 
 ```python
 # Composio entity ID from workspace
-entity_id = f"workspace_{ctx.workspace_id}"
+# Format: automatos_{workspace_id} for consistent entity identification
+entity_id = f"automatos_{ctx.workspace_id}"
 ```
 
 ---
