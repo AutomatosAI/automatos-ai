@@ -120,12 +120,24 @@ class OpenAIProvider(BaseLLMProvider):
                              formatted_tools.append(t)
                     
                     kwargs["tools"] = formatted_tools
-                    force_tool_choice = any(
-                        (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
-                        or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
-                        for m in (messages or [])
+
+                    # Check if tool results already exist in conversation
+                    # If so, switch to auto - the LLM has already acted on the request
+                    has_tool_results = any(
+                        m.get("role") == "tool" for m in (messages or [])
                     )
-                    kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+
+                    if has_tool_results:
+                        # Tool already executed - let LLM decide if more are needed
+                        kwargs["tool_choice"] = "auto"
+                    else:
+                        # First iteration - check if we should force tool use
+                        force_tool_choice = any(
+                            (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
+                            or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                            for m in (messages or [])
+                        )
+                        kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
                     import json
                     tools_json = json.dumps(formatted_tools, default=str)
                     tools_summary = f"{len(formatted_tools)} tools. Sample: {tools_json[:200]}..."
@@ -156,12 +168,19 @@ class OpenAIProvider(BaseLLMProvider):
                                 else:
                                     formatted_tools.append(t)
                             kwargs["tools"] = formatted_tools
-                            force_tool_choice = any(
-                                (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
-                                or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
-                                for m in (messages or [])
+                            # Check if tool results already exist
+                            has_tool_results = any(
+                                m.get("role") == "tool" for m in (messages or [])
                             )
-                            kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+                            if has_tool_results:
+                                kwargs["tool_choice"] = "auto"
+                            else:
+                                force_tool_choice = any(
+                                    (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
+                                    or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                                    for m in (messages or [])
+                                )
+                                kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
                         return self.client.chat.completions.create(**kwargs)
                     response = await loop.run_in_executor(None, _retry_call)
                 else:
