@@ -102,13 +102,13 @@ class ActionExecutor:
     def _validate_path(self, path: str) -> Path:
         """
         Validate and resolve a path within the workspace
-        
+
         Args:
             path: Path to validate
-            
+
         Returns:
             Resolved safe path
-            
+
         Raises:
             SecurityError: If path is outside workspace
         """
@@ -117,13 +117,21 @@ class ActionExecutor:
             resolved = Path(path).resolve()
         else:
             resolved = (self.workspace_root / path).resolve()
-        
+
         # Check if it's within workspace
         try:
             resolved.relative_to(self.workspace_root)
         except ValueError:
-            raise SecurityError(f"Path '{path}' is outside workspace boundary")
-        
+            # Provide a clear, actionable error message
+            raise SecurityError(
+                f"SECURITY: Cannot access '{path}' - path is outside the workspace boundary. "
+                f"The agent workspace is: {self.workspace_root}. "
+                f"To access files outside the workspace, either:\n"
+                f"  1. Use a relative path within the workspace, OR\n"
+                f"  2. Copy the file into the workspace first, OR\n"
+                f"  3. Configure AUTOMATOS_WORKSPACE environment variable to a different directory."
+            )
+
         return resolved
     
     def read_file(self, file_path: str, encoding: str = 'utf-8') -> Tuple[bool, str]:

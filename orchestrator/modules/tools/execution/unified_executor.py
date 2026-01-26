@@ -698,57 +698,95 @@ class UnifiedToolExecutor:
         agent_id: int
     ) -> Dict[str, Any]:
         """Execute file operations via AgentActionExecutor"""
+        requested_path = parameters.get('path', '') or parameters.get('file_path', '')
+
+        # Log the requested path vs workspace for debugging
+        logger.info(f"📁 File operation '{tool_name}' requested for path: {requested_path}")
+        logger.info(f"   Workspace root: {self.workspace_dir}")
+
         if tool_name == 'read_file':
-            success, content = self.action_executor.read_file(
-                parameters.get('path', '')
-            )
-            return {
+            success, content = self.action_executor.read_file(requested_path)
+            result = {
                 "success": success,
                 "action": "read_file",
                 "params": parameters,
-                "result": content
+                "requested_path": requested_path,
+                "workspace": str(self.workspace_dir),
             }
+            if success:
+                result["result"] = content
+            else:
+                result["error"] = content
+                logger.warning(f"❌ read_file failed: {content}")
+            return result
+
         elif tool_name == 'write_file':
-            success, result = self.action_executor.write_file(
-                parameters.get('path', ''),
+            success, msg = self.action_executor.write_file(
+                requested_path,
                 parameters.get('content', '')
             )
-            return {
+            result = {
                 "success": success,
                 "action": "write_file",
                 "params": parameters,
-                "result": result
+                "requested_path": requested_path,
+                "workspace": str(self.workspace_dir),
             }
+            if success:
+                result["result"] = msg
+            else:
+                result["error"] = msg
+                logger.warning(f"❌ write_file failed: {msg}")
+            return result
+
         elif tool_name == 'list_directory':
-            success, items = self.action_executor.list_directory(
-                parameters.get('path', '.')
-            )
-            return {
+            success, items = self.action_executor.list_directory(requested_path or '.')
+            result = {
                 "success": success,
                 "action": "list_directory",
                 "params": parameters,
-                "result": items
+                "requested_path": requested_path or '.',
+                "workspace": str(self.workspace_dir),
             }
+            if success:
+                result["result"] = items
+            else:
+                result["error"] = items
+                logger.warning(f"❌ list_directory failed: {items}")
+            return result
+
         elif tool_name == 'create_directory':
-            success, result = self.action_executor.create_directory(
-                parameters.get('path', '')
-            )
-            return {
+            success, msg = self.action_executor.create_directory(requested_path)
+            result = {
                 "success": success,
                 "action": "create_directory",
                 "params": parameters,
-                "result": result
+                "requested_path": requested_path,
+                "workspace": str(self.workspace_dir),
             }
+            if success:
+                result["result"] = msg
+            else:
+                result["error"] = msg
+                logger.warning(f"❌ create_directory failed: {msg}")
+            return result
+
         elif tool_name == 'delete_file':
-            success, result = self.action_executor.delete_file(
-                parameters.get('path', '')
-            )
-            return {
+            success, msg = self.action_executor.delete_file(requested_path)
+            result = {
                 "success": success,
                 "action": "delete_file",
                 "params": parameters,
-                "result": result
+                "requested_path": requested_path,
+                "workspace": str(self.workspace_dir),
             }
+            if success:
+                result["result"] = msg
+            else:
+                result["error"] = msg
+                logger.warning(f"❌ delete_file failed: {msg}")
+            return result
+
         else:
             return {
                 "success": False,
@@ -1060,7 +1098,7 @@ class UnifiedToolExecutor:
         if not isinstance(parameters, dict):
             return {"success": False, "error": "Invalid parameters (expected object)", "tool": tool_name}
 
-        action = parameters.get("action") or parameters.get("action_name")
+        raw_action = parameters.get("action") or parameters.get("action_name")
         # Accept both `params` (preferred) and `parameters` (some models emit this).
         params = None
         if isinstance(parameters.get("params"), dict):
@@ -1071,17 +1109,21 @@ class UnifiedToolExecutor:
             params = {}
         app_name = parameters.get("app_name") or parameters.get("app")
 
-        if not action:
+        if not raw_action:
             return {"success": False, "error": "Missing required field: action", "tool": tool_name}
+
+        # Normalize action name to uppercase (Composio actions are typically uppercase)
+        # This handles LLM inconsistency (e.g., "slack_send_message" vs "SLACK_SEND_MESSAGE")
+        action = str(raw_action).upper().strip()
 
         trace = trace_id or "no-trace"
         logger.info(
             f"[tool-trace {trace}] Composio execute app={app_name} action={action} "
-            f"agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
+            f"(raw: {raw_action}) agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
         )
 
         return await self.composio_executor.execute(
-            action=str(action),
+            action=action,
             params=params,
             agent_id=agent_id,
             workspace_id=workspace_id,

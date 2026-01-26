@@ -27,6 +27,7 @@ from .clarifier import QueryClarifier
 from .rephraser import QueryRephraser
 from .explainer import ResultExplainer
 from .visualizer import VisualizationSuggester, ChartType
+from ..query.validator import SQLValidator, SQLValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +208,33 @@ class SmartNL2SQLAgent:
                 schema_metadata=self.schema_metadata,
                 semantic_layer=self.semantic_layer,
             )
+
+            # Step 4.5: Validate SQL against schema before execution
+            # This prevents hallucinated columns/tables from causing execution errors
+            validator = SQLValidator(strict_column_validation=True)
+            try:
+                validated_sql, validation_warnings = validator.validate_and_rewrite(
+                    sql=sql,
+                    schema_metadata=self.schema_metadata
+                )
+                sql = validated_sql
+                if validation_warnings:
+                    logger.info(f"SQL validation warnings: {validation_warnings}")
+            except SQLValidationError as ve:
+                logger.error(f"SQL validation failed: {ve}")
+                turn.error = f"Generated SQL is invalid: {ve}"
+                turn.sql = sql  # Store original SQL for debugging
+                self.state.add_turn(turn)
+                return {
+                    "status": "error",
+                    "error": f"Generated SQL failed validation: {ve}",
+                    "original_sql": sql,
+                    "query": natural_language_query,
+                    "hint": "The AI generated a query referencing non-existent columns or tables. Please rephrase your question."
+                }
+
             turn.sql = sql
-            
+
             # Step 5: Execute SQL if requested
             data = []
             if execute_sql and db_executor:

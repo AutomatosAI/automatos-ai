@@ -41,6 +41,51 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# EXECUTOR CACHING - Prevent registry re-initialization on every tool call
+# =============================================================================
+
+# Thread-local storage for executor caching per request
+import threading
+_executor_cache_lock = threading.Lock()
+_executor_cache: Dict[int, Tuple[Any, Any, float]] = {}  # session_id -> (executor, db_session, last_used_time)
+_EXECUTOR_CACHE_TTL = 300  # 5 minutes TTL
+
+
+def _get_cached_executor(db_session, force_new: bool = False):
+    """
+    Get a cached UnifiedToolExecutor or create a new one.
+    Caches executors per database session to avoid re-initializing
+    the tool registry on every tool call.
+    """
+    import time
+
+    session_id = id(db_session)
+    current_time = time.time()
+
+    with _executor_cache_lock:
+        # Check if we have a cached executor for this session
+        if not force_new and session_id in _executor_cache:
+            executor, cached_session, last_used = _executor_cache[session_id]
+            # Validate the cached session is still the same object
+            if id(cached_session) == id(db_session) and (current_time - last_used) < _EXECUTOR_CACHE_TTL:
+                _executor_cache[session_id] = (executor, cached_session, current_time)
+                return executor
+
+        # Clean up old entries
+        stale_keys = [
+            k for k, (_, _, last_used) in _executor_cache.items()
+            if (current_time - last_used) > _EXECUTOR_CACHE_TTL
+        ]
+        for k in stale_keys:
+            del _executor_cache[k]
+
+        # Create new executor
+        executor = UnifiedToolExecutor(db_session)
+        _executor_cache[session_id] = (executor, db_session, current_time)
+        logger.info(f"Created new cached UnifiedToolExecutor (cache size: {len(_executor_cache)})")
+        return executor
+
 def _new_trace_id() -> str:
     return uuid4().hex[:12]
 
@@ -188,9 +233,11 @@ async def execute_tool(
     """
     Execute a tool via modules.tools.UnifiedToolExecutor.
     SINGLE ENTRY POINT for all tool execution in chat.
+
+    Uses cached executor to avoid re-initializing tool registry on every call.
     """
     from core.database.database import SessionLocal
-    
+
     trace = trace_id or _new_trace_id()
     # Use SessionLocal directly - simpler and works
     db_session = SessionLocal()
@@ -206,7 +253,10 @@ async def execute_tool(
                     logger.warning(f"[tool-trace {trace}] Agent workspace_id missing for agent={agent_id}")
             except Exception as exc:
                 logger.warning(f"[tool-trace {trace}] Failed to resolve workspace_id: {exc}")
-        executor = UnifiedToolExecutor(db_session)
+
+        # Use cached executor to avoid registry re-initialization overhead
+        executor = _get_cached_executor(db_session)
+
         logger.info(
             f"[tool-trace {trace}] execute_tool start tool={tool_name} "
             f"agent={agent_id} workspace={workspace_id} args={_summarize_args(tool_args)}"
