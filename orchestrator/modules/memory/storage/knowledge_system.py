@@ -141,7 +141,7 @@ class HierarchicalMemorySystem:
             raise ValueError("Redis client not initialized - check REDIS_HOST/REDIS_PORT in .env")
         
         self.redis_client = redis_from_central.get_redis()
-        logger.info("Using centralized Redis client")
+        logger.debug("Using centralized Redis client")
         
         # PostgreSQL with pgvector for persistent memory
         db_url = get_database_url()
@@ -151,24 +151,24 @@ class HierarchicalMemorySystem:
         self.async_session = sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
-        logger.info("Using centralized database connection")
+        logger.debug("Using centralized database connection")
         
         # Use centralized embedding manager (reads from General Settings)
         self.embedding_manager = create_embedding_manager()
         self.embedding_dim = self.embedding_manager.get_dimension()
         provider_info = self.embedding_manager.get_provider_info()
-        logger.info(
+        logger.debug(
             f"HierarchicalMemorySystem using {provider_info['provider']} embeddings "
             f"(model: {provider_info.get('model', 'N/A')}, dimension: {self.embedding_dim})"
         )
-        
+
         # Memory constraints based on cognitive science
         self.WORKING_MEMORY_CAPACITY = 7  # Miller's Law
         self.WORKING_MEMORY_TTL = 300  # 5 minutes in seconds
         self.SHORT_TERM_CAPACITY = 100
         self.SHORT_TERM_WINDOW = timedelta(hours=24)
-        
-        logger.info("HierarchicalMemorySystem initialized with real services")
+
+        logger.debug("HierarchicalMemorySystem initialized")
     
     async def initialize_database(self):
         """Create database tables if they don't exist"""
@@ -229,7 +229,7 @@ class HierarchicalMemorySystem:
         importance = self.calculate_importance(experience)
         is_conversation = experience.get("type") == "conversation"
         
-        logger.info(f"[Memory] store_experience called: type={experience.get('type')}, importance={importance:.2f}")
+        logger.debug(f"[Memory] store_experience called: type={experience.get('type')}, importance={importance:.2f}")
         
         # Step 1: Store in working memory (Redis with TTL)
         working_key = f"working:{agent_id}:{experience_id}"
@@ -327,7 +327,7 @@ class HierarchicalMemorySystem:
                     session.add(memory_item)
                     await session.commit()
                     
-                logger.info(f"[Memory] ✅ Stored {experience_id} (type={experience.get('type')}, level={memory_level.value}, importance={importance:.2f})")
+                logger.debug(f"[Memory] Stored {experience_id} (type={experience.get('type')}, level={memory_level.value})")
             except Exception as e:
                 logger.error(f"[Memory] ❌ PostgreSQL storage failed: {e}")
                 import traceback
