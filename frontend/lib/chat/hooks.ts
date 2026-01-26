@@ -78,10 +78,11 @@ export function useChat({
         abortControllerRef.current = new AbortController()
         const token = isLoaded ? await getToken() : null
         
-        // Get API key from env or localStorage (from settings)
+        // API key is handled server-side in /api/chat route to avoid exposing secrets in client bundle
+        // Only use localStorage API key if explicitly set by user (non-sensitive identifier)
         const apiKey = typeof window !== 'undefined' 
-          ? (process.env.NEXT_PUBLIC_API_KEY || localStorage.getItem('api_key'))
-          : process.env.NEXT_PUBLIC_API_KEY
+          ? localStorage.getItem('api_key')
+          : null
         
         const outgoingParts =
           Array.isArray(messageObj.parts) && messageObj.parts.length > 0

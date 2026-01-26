@@ -327,6 +327,12 @@ class ClerkAuth:
     
     def __init__(self):
         self.jwks_url = os.getenv("CLERK_JWKS_URL")
+        # Extract issuer/audience from JWKS URL (e.g., https://app.clerk.accounts.dev)
+        # The audience is typically the issuer URL for Clerk tokens
+        self.audience = os.getenv("CLERK_AUDIENCE")
+        if not self.audience and self.jwks_url:
+            # Derive from JWKS URL: https://app.clerk.accounts.dev/.well-known/jwks.json -> https://app.clerk.accounts.dev
+            self.audience = self.jwks_url.replace("/.well-known/jwks.json", "")
         self._jwks_client = None
     
     @property
@@ -343,7 +349,8 @@ class ClerkAuth:
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
-                options={"verify_aud": False, "verify_exp": True}
+                audience=self.audience,
+                options={"verify_aud": True, "verify_exp": True}
             )
         except Exception:
             return None

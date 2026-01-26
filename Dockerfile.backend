@@ -48,7 +48,7 @@ FROM base as development
 
 # Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
 # For docker-compose, the full entrypoint.sh will be mounted/overridden
-RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
+RUN printf '#!/bin/bash\nset -e\nexec "$@"\n' > /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Copy application code (Dockerfile is in orchestrator/, so copy from current dir)
@@ -81,7 +81,7 @@ COPY . .
 
 # Create minimal entrypoint script (Railway doesn't need full entrypoint - database is ready)
 # For docker-compose, the full entrypoint.sh will be mounted/overridden
-RUN echo '#!/bin/bash\nset -e\nexec "$@"' > /usr/local/bin/docker-entrypoint.sh && \
+RUN printf '#!/bin/bash\nset -e\nexec "$@"\n' > /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create necessary directories
