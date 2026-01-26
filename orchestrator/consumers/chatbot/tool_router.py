@@ -333,13 +333,25 @@ class ToolRouter:
                 except Exception as exc:
                     logger.debug(f"[tool-trace {trace_id}] Relative date rewrite skipped: {exc}")
 
-            result = await execute_tool(
-                tool_name,
-                tool_args if isinstance(tool_args, dict) else {},
-                agent_id,
-                workspace_id=workspace_id,
-                trace_id=trace_id,
-            )
+            # Use validation wrapper for Composio tools to prevent calling unassigned actions
+            is_composio = tool_name.startswith("composio_") or tool_name == "composio_execute"
+            if is_composio and original_intent:
+                result = await execute_tool_with_validation(
+                    tool_name=tool_name,
+                    tool_args=tool_args if isinstance(tool_args, dict) else {},
+                    original_intent=original_intent,
+                    agent_id=agent_id,
+                    workspace_id=workspace_id,
+                    allow_destructive=False,
+                )
+            else:
+                result = await execute_tool(
+                    tool_name,
+                    tool_args if isinstance(tool_args, dict) else {},
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace_id,
+                )
 
             # Check success (support multiple executor result shapes)
             success = (

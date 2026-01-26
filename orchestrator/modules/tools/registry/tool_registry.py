@@ -402,7 +402,11 @@ class ToolRegistry:
         self.register_tool(ToolSpec(
             name="search_knowledge",
             category=ToolCategory.RESEARCH,
-            description="Search the Automatos knowledge base for documentation, guides, and information about the platform",
+            description=(
+                "Search the Automatos knowledge base for documentation, guides, and information about the platform. "
+                "NOTE: This tool has a 2-attempt limit. If results are insufficient, try a different search query "
+                "rather than repeating the same query. Do NOT call multiple times with similar queries."
+            ),
             executor_class="AgentPlatformTools",
             executor_method="execute_tool",
             parameters=[
@@ -668,7 +672,8 @@ class ToolRegistry:
 - Visualization Suggestions: Recommends chart types based on data
 - Multi-turn Support: Maintains conversation context
 
-Use this for complex queries or when you want AI-powered assistance.""",
+Use this for complex queries or when you want AI-powered assistance.
+IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT retry with the same query.""",
             executor_class="UnifiedToolExecutor",
             executor_method="_execute_smart_database_tool",
             parameters=[
@@ -901,7 +906,10 @@ Use this for complex queries or when you want AI-powered assistance.""",
                 description=(
                     "Execute an external app action via Composio (connected third-party apps). "
                     "Use this for actions in email/messaging and developer tools—e.g., "
-                    "read/send emails, post messages, create/manage repositories, issues, and pull requests."
+                    "read/send emails, post messages, create/manage repositories, issues, and pull requests. "
+                    "IMPORTANT: This tool has a 2-attempt limit per conversation turn. If the first attempt "
+                    "fails, check the error message carefully before retrying. Do NOT retry with the same "
+                    "parameters if validation failed or action was not found."
                 ),
                 executor_class="ComposioToolExecutor",
                 executor_method="execute",
