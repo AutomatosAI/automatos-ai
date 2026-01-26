@@ -17,11 +17,12 @@ import logging
 import uuid
 import re
 from typing import List, Optional, Dict, Any, AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
 
-from core.models import Chat, Message, Vote
+from core.models import Chat, Message, Vote, Workspace
 from config import config
 
 # Import from consumer's own modules
@@ -33,7 +34,6 @@ from consumers.chatbot.tool_router import get_tool_router, get_chat_tools
 from modules.memory.operations import get_memory_injector
 
 logger = logging.getLogger(__name__)
-
 
 # =============================================================================
 # CHAT SERVICE - DATABASE OPERATIONS
@@ -170,6 +170,29 @@ class ChatService:
                 workspace_id = uuid.UUID(workspace_id)
             except ValueError:
                 raise ValueError("Invalid workspace_id format")
+
+        # Safety net: ensure the referenced workspace exists.
+        # This prevents FK crashes when the request falls back to the dev workspace UUID.
+        dev_fallback = UUID("00000000-0000-0000-0000-000000000001")
+        existing_ws = self.db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if not existing_ws:
+            if workspace_id == dev_fallback:
+                ws = Workspace(
+                    id=workspace_id,
+                    name="Dev Workspace",
+                    slug="dev",
+                    plan="starter",
+                    plan_limits={},
+                    settings={},
+                    is_personal=True,
+                    is_active=True,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                )
+                self.db.add(ws)
+                self.db.commit()
+            else:
+                raise ValueError(f"workspace_id does not exist: {workspace_id}")
         
         message = Message(
             id=uuid.uuid4(),
@@ -394,7 +417,10 @@ class StreamingChatService:
             
             # Inject memory context via modules.memory
             memory_context = None
-            if not fresh_start:
+            # Optimized: Check if we should even try to retrieve memories (save tokens/time)
+            should_retrieve = self.memory_injector.should_retrieve_memories(latest_text, chat_id)
+            
+            if not fresh_start and should_retrieve:
                 memory_context = await self.memory_injector.retrieve_relevant_memories(
                     chat_id,
                     latest_text,
@@ -556,7 +582,8 @@ class StreamingChatService:
                             tool_name,
                             tool_args,
                             agent_id=agent_id,
-                            workspace_id=self.workspace_id
+                            workspace_id=self.workspace_id,
+                            original_intent=latest_text,
                         )
 
                         yield self.streaming_handler.format_aisdk_tool_end(
@@ -730,7 +757,8 @@ class StreamingChatService:
                             tool_name,
                             tool_args,
                             agent_id=agent_id,
-                            workspace_id=self.workspace_id
+                            workspace_id=self.workspace_id,
+                            original_intent=latest_text,
                         )
                         return {
                             "tool_call_id": tool_id,
@@ -1136,6 +1164,38 @@ class StreamingChatService:
                 llm_messages[0]['content'] = system_prompt
             else:
                 llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
+
+            # Always give the model the current date/time to prevent "2023" hallucinations
+            # in queries like "this week", "last month", etc.
+            now_utc = datetime.utcnow().strftime("%Y-%m-%d")
+            llm_messages.insert(
+                1,
+                {
+                    "role": "system",
+                    "content": (
+                        f"Current date (UTC): {now_utc}. "
+                        "When interpreting relative date ranges (e.g., 'this week'), base them on this date."
+                    ),
+                },
+            )
+
+            # Multi-step execution policy:
+            # - Users often ask for multiple tasks in one message (e.g., "summarize emails AND post to Slack").
+            # - The model is allowed to call tools multiple times in sequence.
+            # - Prefer read-only/data gathering actions first, then any write/post side-effects after
+            #   the content is ready (prevents "post before summarizing" failures).
+            llm_messages.insert(
+                2,
+                {
+                    "role": "system",
+                    "content": (
+                        "Execution policy: If the user requests multiple distinct tasks, you may call tools "
+                        "multiple times to complete ALL tasks before producing your final answer. "
+                        "Prefer data-gathering (read/list/fetch) steps before side-effect (send/post/create/update) steps. "
+                        "Only send/post after you have the final content to send."
+                    ),
+                },
+            )
             
             # Await memory result
             memory_context = None
@@ -1143,7 +1203,8 @@ class StreamingChatService:
                 memory_context = await memory_task
                 if memory_context:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
-                    llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
+                    # Keep "Current date (UTC)" at index 1 (highest-priority system context)
+                    llm_messages.insert(3, self.memory_injector.build_memory_injection_message(memory_context))
 
             # Add dynamic tool candidates (no hardcoded app mapping)
             if use_tools and latest_text:
@@ -1164,7 +1225,8 @@ class StreamingChatService:
                             )
                             use_tools = filtered_tools
 
-                        insert_at = 2 if memory_context else 1
+                        # Insert after: system prompt (0) + current date (1) + optional memory (2)
+                        insert_at = 4 if memory_context else 3
                         llm_messages.insert(
                             insert_at,
                             {
@@ -1334,7 +1396,13 @@ class StreamingChatService:
                         tool_args = json.loads(tool_call.get('function', {}).get('arguments', '{}'))
                         tool_id = tool_call.get('id')
                         
-                        result = await self.tool_router.execute_and_format(tool_name, tool_args)
+                        result = await self.tool_router.execute_and_format(
+                            tool_name,
+                            tool_args,
+                            agent_id=1,
+                            workspace_id=self.workspace_id,
+                            original_intent=latest_text,
+                        )
                         if result['success']:
                             tool_data.update(result['frontend_data'])
                         
@@ -1431,16 +1499,16 @@ CRITICAL INSTRUCTIONS:
 - DO NOT explain how to do something - ACTUALLY DO IT using function calls
 - If you have a write_file or create_document tool, USE IT to create files
 - If you have database query tools, USE THEM to get real data
-- If you need external apps (Gmail/Slack/etc.), use `composio_execute` with a mapped action name (e.g., SLACK_POST_MESSAGE, GMAIL_FETCH_EMAILS)
+- If you need external apps (Gmail/Slack/etc.), use `composio_execute` with an exact mapped action name from `composio_actions_cache`
 - EXECUTE first, explain later (if needed)
 
 Examples:
 - "Create a report" → Call write_file tool with the report content
 - "Query the database" → Call smart_query_database tool
 - "Search for code" → Call search_codebase tool
-- "Post a message to Slack" → Call composio_execute with action="SLACK_POST_MESSAGE" and params {channel, text}
-- "Summarize my emails" → Call composio_execute with action="GMAIL_FETCH_EMAILS" and params (query/date filters), then summarize
-- "Create a GitHub issue" → Call composio_execute with a mapped GitHub action (from the cache)
+- "Post a message to Slack" → Call composio_execute with a mapped Slack send-message action from the cache and params {channel, text}
+- "Summarize my emails" → Call composio_execute with a mapped Gmail fetch/list action from the cache and params (query/date filters), then summarize
+- If an action is not mapped, retry using one of the suggested safe mapped actions returned by the tool
 
 COMMUNICATION TOOLS:
 - composio_execute: Use this to call external app actions (Gmail, Slack, GitHub, etc.)
@@ -1528,6 +1596,13 @@ YOUR SPECIALIZED SKILLS:
         invalid_parameters_retry_budget = 1
         # Detect repeated tool calls (prevents infinite loops / API spam).
         seen_call_keys: set[str] = set()
+        # Stop "search tool spirals": if the model keeps calling the same search tool
+        # with different queries but keeps getting 0 results, force a final answer.
+        last_tool_name: Optional[str] = None
+        empty_same_tool_streak = 0
+        # Stop "rephrase and retry" loops: for most internal tools, we only allow one attempt
+        # per user request (multi-step exceptions: composio_execute and file tools).
+        tool_attempts: dict[str, int] = {}
         
         while current_response.tool_calls and iteration < max_iterations:
             iteration += 1
@@ -1572,15 +1647,77 @@ YOUR SPECIALIZED SKILLS:
                     call_key = f"{tool_name}:{args_key}"
                     if call_key in seen_call_keys:
                         executed_call_key_repeat = True
+                        # IMPORTANT: skip executing duplicates to prevent repeated side-effects
+                        # (e.g., posting the same Slack message twice).
+                        llm_context = (
+                            "Skipped duplicate tool call (same tool + same arguments were already executed in this request)."
+                        )
+                        tool_results.append(
+                            {
+                                "tool_call_id": tool_id,
+                                "role": "tool",
+                                "name": tool_name,
+                                "content": llm_context,
+                            }
+                        )
+                        yield self.streaming_handler.format_aisdk_data(
+                            "tool-result",
+                            {
+                                "toolCallId": tool_id,
+                                "toolName": tool_name,
+                                "result": llm_context,
+                            },
+                        )
+                        await asyncio.sleep(0)
+                        continue
                     else:
                         seen_call_keys.add(call_key)
                     
                     # Execute tool via tool router
+                    # (pass original user intent for deterministic guards like relative-date rewriting)
+                    user_text = ""
+                    for m in reversed(llm_messages):
+                        if m.get("role") == "user":
+                            user_text = m.get("content") or ""
+                            break
+
                     result = await self.tool_router.execute_and_format(
                         tool_name=tool_name,
                         tool_args=tool_args,
-                        agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1
+                        agent_id=agent_runtime.agent_id if hasattr(agent_runtime, 'agent_id') else 1,
+                        workspace_id=self.workspace_id,
+                        original_intent=user_text,
                     )
+
+                    # Detect repeated empty search attempts (prevents "try again" loops)
+                    try:
+                        raw = result.get("raw_result") or {}
+                        count = raw.get("count")
+                        if count is None:
+                            rr = raw.get("results")
+                            if isinstance(rr, list):
+                                count = len(rr)
+                        is_search_tool = tool_name.startswith("search_") or tool_name in {
+                            "semantic_search",
+                        }
+                        is_empty = (isinstance(count, int) and count == 0)
+                        if is_search_tool and is_empty:
+                            if last_tool_name == tool_name:
+                                empty_same_tool_streak += 1
+                            else:
+                                empty_same_tool_streak = 1
+                            last_tool_name = tool_name
+                        else:
+                            last_tool_name = tool_name
+                            empty_same_tool_streak = 0
+                    except Exception:
+                        pass
+
+                    # Track attempts per tool name (used to stop wasteful re-tries).
+                    try:
+                        tool_attempts[tool_name] = int(tool_attempts.get(tool_name, 0)) + 1
+                    except Exception:
+                        pass
 
                     # Extract LLM context from result and truncate to prevent context overflow
                     llm_context = result.get('llm_context', str(result.get('raw_result', '')))
@@ -1792,6 +1929,51 @@ YOUR SPECIALIZED SKILLS:
                         'result': llm_context[:500]  # Truncate for streaming
                     })
                     await asyncio.sleep(0)
+
+                    # --- Hard stop conditions to prevent looping for single requests ---
+                    #
+                    # 1) Search tools: stop after FIRST empty result.
+                    if empty_same_tool_streak >= 1 and (
+                        tool_name.startswith("search_") or tool_name in {"semantic_search"}
+                    ):
+                        from types import SimpleNamespace
+                        message = (
+                            "I couldn't find any matching results and will stop retrying to avoid looping. "
+                            "If you expected results, it likely means the underlying knowledge/code index isn't ingested "
+                            "or the query is targeting the wrong index/type."
+                        )
+                        yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                        return
+
+                    # 2) Database tools: stop after FIRST successful result (avoid paraphrase loops).
+                    if tool_name in {"query_database", "smart_query_database"} and result.get("success"):
+                        from types import SimpleNamespace
+                        llm_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You now have the database result. Do NOT call the database tool again. "
+                                    "Write the final answer using the tool output above."
+                                ),
+                            }
+                        )
+                        final_response = await agent_runtime.llm_manager.generate_response(messages=llm_messages, tools=None)
+                        yield {"_final_response": SimpleNamespace(content=final_response.content or "", tool_calls=None, usage=getattr(final_response, "usage", None))}
+                        return
+
+                    # 3) Generic: for most non-Composio tools, don't allow multiple attempts in one request.
+                    # This prevents the model from re-issuing the same tool with slightly different phrasing.
+                    if tool_name not in {"composio_execute"} and not tool_name.startswith("composio_"):
+                        # Allow file operations to be multi-step for report saving.
+                        if tool_name not in {"read_file", "write_file", "list_directory", "create_directory", "delete_file"}:
+                            if tool_attempts.get(tool_name, 0) >= 2:
+                                from types import SimpleNamespace
+                                message = (
+                                    f"I already tried `{tool_name}` and won’t retry again in the same request "
+                                    "to avoid looping. If you want me to try a different approach, tell me what to change."
+                                )
+                                yield {"_final_response": SimpleNamespace(content=message, tool_calls=None, usage=None)}
+                                return
                     
                 except Exception as e:
                     logger.error(f"Tool {tool_name} failed: {e}")
@@ -1835,10 +2017,14 @@ YOUR SPECIALIZED SKILLS:
             if followup_system_messages:
                 llm_messages.extend(followup_system_messages)
 
-            # If the model is repeating the same tool call, or we have a successful "read" result,
-            # force synthesis WITHOUT tools to prevent repeated external API calls.
-            # (This avoids the observed loop where the model keeps calling `composio_execute`.)
-            if executed_call_key_repeat or (executed_any_success and not followup_system_messages):
+            # If the model is repeating the same tool call, force synthesis WITHOUT tools
+            # to prevent repeated external API calls.
+            #
+            # IMPORTANT:
+            # Do NOT stop tool use merely because one tool call succeeded: many user requests are
+            # multi-step (e.g., "fetch emails THEN post summary to Slack"). Stopping after the first
+            # success prevents completion of later side-effects.
+            if executed_call_key_repeat:
                 from types import SimpleNamespace
                 llm_messages.append(
                     {
@@ -1914,7 +2100,9 @@ YOUR SPECIALIZED SKILLS:
             result = await self.tool_router.execute_and_format(
                 tool_name,
                 {"query": query},
-                agent_id=agent_id
+                agent_id=agent_id,
+                workspace_id=self.workspace_id,
+                original_intent=query,
             )
             
             if result['success']:
@@ -1979,7 +2167,18 @@ YOUR SPECIALIZED SKILLS:
                 tool_id = tool_call.get('id')
                 
                 logger.info(f"Executing tool: {tool_name}")
-                result = await self.tool_router.execute_and_format(tool_name, tool_args)
+                user_text = ""
+                for m in reversed(llm_messages):
+                    if m.get("role") == "user":
+                        user_text = m.get("content") or ""
+                        break
+                result = await self.tool_router.execute_and_format(
+                    tool_name,
+                    tool_args,
+                    agent_id=1,
+                    workspace_id=self.workspace_id,
+                    original_intent=user_text,
+                )
                 
                 return {
                     "tool_call_id": tool_id,

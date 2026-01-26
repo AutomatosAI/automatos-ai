@@ -10,6 +10,7 @@ psycopg2-binary==2.9.9
 asyncpg==0.29.0
 pgvector==0.2.4
 sqlparse==0.5.0
+greenlet>=3.0.0
 
 # Data validation
 pydantic>=2.7.4,<3.0.0
@@ -76,6 +77,10 @@ langchain-text-splitters==1.0.0
 langchain-community==0.4.1
 langchain-openai==1.0.1
 langchain-core==1.0.2
+
+# PandasAI (optional): charts + NL analysis for database results
+pandasai
+pandasai-litellm
 
 # CodeGraph dependencies (PRD-11)
 tree-sitter>=0.20.4

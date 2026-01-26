@@ -55,7 +55,11 @@ from api.context import router as context_router
 from api.credentials import router as credentials_router  # PRD-18: Enhanced credentials
 from api.system_settings import router as system_settings_router  # System Settings Management
 from api.tools import router as tools_router
-from api.composio import router as composio_router  # PRD-36: Composio Integration
+# PRD-36: Composio Integration (optional module)
+try:
+    from api.composio import router as composio_router
+except ImportError:
+    composio_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -81,7 +85,11 @@ from api.chatbot_llm import router as chatbot_router
 from api.chat import router as chat_router  # PRD-27: New streaming chat with history
 # document_processing removed - use api/documents.py instead
 from api.agent_endpoints import router as agent_endpoints_router
-from api.workspaces import router as workspaces_router  # PRD-37: Workspace context
+# PRD-37: Workspace context (optional module - may not exist in all branches)
+try:
+    from api.workspaces import router as workspaces_router
+except ImportError:
+    workspaces_router = None
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.execution_history import router as execution_history_router  # Enhanced execution history
@@ -403,7 +411,8 @@ app.include_router(context_router)
 app.include_router(credentials_router)  # PRD-18: Enhanced credentials with management
 app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
-app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
+if composio_router is not None:
+    app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
@@ -429,7 +438,8 @@ app.include_router(chatbot_router)  # Legacy chatbot endpoint (kept for backward
 app.include_router(chat_router)  # PRD-27: New streaming chat with SSE, history, and artifacts
 # document_processing_router removed - api/documents.py handles all document processing
 app.include_router(agent_endpoints_router)
-app.include_router(workspaces_router)  # PRD-37: Workspace context
+if workspaces_router is not None:
+    app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 

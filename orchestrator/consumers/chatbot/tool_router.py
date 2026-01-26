@@ -20,6 +20,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from uuid import UUID, uuid4
 from contextlib import contextmanager
 import re
+from datetime import datetime, timedelta, timezone
 
 # Use modules.tools directly - NO duplicate tool definitions
 from modules.tools import ToolCategory, UnifiedToolExecutor
@@ -56,6 +57,50 @@ def _is_fatal_dependency_error(error: Optional[str]) -> bool:
         return False
     lowered = error.lower()
     return "composio openai sdk not available" in lowered or "composio-openai" in lowered
+
+
+def _resolve_relative_date_window_utc(intent: str) -> Optional[tuple[datetime.date, datetime.date]]:
+    """
+    Resolve common relative date phrases to an (after_date, before_date) window in UTC.
+
+    NOTE: before_date is exclusive (like Gmail's `before:`).
+    """
+    t = (intent or "").lower()
+    if not t:
+        return None
+
+    today = datetime.now(timezone.utc).date()
+    start_of_week = today - timedelta(days=today.weekday())  # Monday start (UTC)
+    tomorrow = today + timedelta(days=1)
+
+    # Order matters: match more specific phrases first.
+    if "this week" in t:
+        return (start_of_week, tomorrow)
+    if "last week" in t or "previous week" in t:
+        return (start_of_week - timedelta(days=7), start_of_week)
+    if "yesterday" in t:
+        return (today - timedelta(days=1), today)
+    if "today" in t:
+        return (today, tomorrow)
+    if "past 7 days" in t or "last 7 days" in t:
+        return (today - timedelta(days=7), tomorrow)
+
+    return None
+
+
+_AFTER_BEFORE_DATE_RE = re.compile(r"\b(after|before):\d{4}[/-]\d{1,2}[/-]\d{1,2}\b", re.IGNORECASE)
+
+
+def _rewrite_query_after_before(query: str, after_date: datetime.date, before_date: datetime.date) -> str:
+    """
+    Replace any existing after:/before: date filters in a query string and append the resolved window.
+    Preserves other query terms.
+    """
+    q = (query or "").strip()
+    q = _AFTER_BEFORE_DATE_RE.sub("", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    window = f"after:{after_date:%Y/%m/%d} before:{before_date:%Y/%m/%d}"
+    return f"{q} {window}".strip() if q else window
 
 @contextmanager
 def _session_scope():
@@ -201,7 +246,8 @@ class ToolRouter:
         tool_name: str,
         tool_args: Dict[str, Any],
         agent_id: int = 1,
-        workspace_id: Optional[UUID] = None
+        workspace_id: Optional[UUID] = None,
+        original_intent: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a tool and return formatted results.
@@ -214,138 +260,92 @@ class ToolRouter:
                 'raw_result': dict      # Original result
             }
         """
-        # ------------------------------------------------------------------
-        # Compatibility aliases (LLM sometimes emits "helper" tool names).
-        # We do NOT register these as real tools; we transparently route them
-        # to the correct ToolRegistry tool to avoid "Unknown tool" loops.
-        #
-        # IMPORTANT: This must stay generic for 800+ apps. We map patterns like:
-        # - send_slack_message
-        # - send_<app>_message
-        # to composio_execute with a mapped action from composio_actions_cache.
-        # ------------------------------------------------------------------
-        normalized_name = (tool_name or "").strip()
-        alias_app: Optional[str] = None
-
-        if normalized_name in {"send_slack_message", "slack_send_message"}:
-            alias_app = "SLACK"
-        else:
-            m = re.match(r"^send_(?P<app>[a-z0-9]+)_message$", normalized_name, flags=re.I)
-            if m:
-                alias_app = str(m.group("app") or "").upper().strip()
-
-        if alias_app:
-            channel = None
-            text = None
-            if isinstance(tool_args, dict):
-                channel = tool_args.get("channel") or tool_args.get("channel_id") or tool_args.get("conversation")
-                text = tool_args.get("message") or tool_args.get("text") or tool_args.get("content")
-
-            # Pick a safe mapped action for this app that looks like "send message".
-            # If not found, still route to composio_execute and let the executor return a mapped-action error.
-            action_name: Optional[str] = None
-            try:
-                from core.models.composio_cache import ComposioActionCache
-
-                with _session_scope() as s:
-                    rows = (
-                        s.query(ComposioActionCache.action_name)
-                        .filter(ComposioActionCache.app_name == alias_app)
-                        .filter(
-                            (ComposioActionCache.action_name.ilike("%send%"))
-                            | (ComposioActionCache.action_name.ilike("%message%"))
-                            | (ComposioActionCache.description.ilike("%send%"))
-                            | (ComposioActionCache.description.ilike("%message%"))
-                        )
-                        .limit(20)
-                        .all()
-                    )
-                candidates = [str(r[0]) for r in rows if r and r[0]]
-                dangerous = ("archive", "delete", "remove", "revoke", "clear", "close", "disable", "ban", "kick")
-                for c in candidates:
-                    cl = c.lower()
-                    if any(tok in cl for tok in dangerous):
-                        continue
-                    action_name = c
-                    break
-            except Exception:
-                action_name = None
-
-            mapped_args: Dict[str, Any] = {
-                "app_name": alias_app,
-                "action": action_name or "",
-                "params": {"channel": channel, "text": text},
-            }
-            mapped_args["params"] = {k: v for k, v in mapped_args["params"].items() if v is not None}
-            tool_name = "composio_execute"
-            tool_args = mapped_args
-
         trace_id = _new_trace_id()
         logger.info(
             f"[tool-trace {trace_id}] ToolRouter execute_and_format "
             f"tool={tool_name} agent={agent_id} workspace={workspace_id} args={_summarize_args(tool_args)}"
         )
-        
+
         try:
+            # Deterministic guard: if the user asked for a relative date range,
+            # and the tool call includes after:/before: date filters, rewrite them
+            # based on current UTC dates to prevent stale/hallucinated years.
+            if original_intent and tool_name == "composio_execute" and isinstance(tool_args, dict):
+                try:
+                    window = _resolve_relative_date_window_utc(original_intent)
+                    if window:
+                        after_d, before_d = window
+                        params = tool_args.get("params") or tool_args.get("parameters")
+                        if isinstance(params, dict):
+                            q = params.get("query")
+                            if isinstance(q, str):
+                                params["query"] = _rewrite_query_after_before(q, after_d, before_d)
+                except Exception as exc:
+                    logger.debug(f"[tool-trace {trace_id}] Relative date rewrite skipped: {exc}")
+
             result = await execute_tool(
                 tool_name,
-                tool_args,
+                tool_args if isinstance(tool_args, dict) else {},
                 agent_id,
                 workspace_id=workspace_id,
-                trace_id=trace_id
+                trace_id=trace_id,
             )
-            
-            # Check success
+
+            # Check success (support multiple executor result shapes)
             success = (
-                result.get('success') or
-                result.get('status') == 'success' or
-                bool(result.get('results'))
+                bool(result.get("success"))
+                or result.get("status") == "success"
+                or bool(result.get("results"))
             )
-            
+
             if success:
                 frontend_data = self.formatter.format_for_frontend(result, tool_name)
                 llm_context = self.formatter.format_for_llm(result, tool_name)
-                
+
                 logger.info(f"[tool-trace {trace_id}] {tool_name} succeeded")
                 return {
-                    'success': True,
-                    'frontend_data': frontend_data,
-                    'llm_context': llm_context,
-                    'raw_result': result,
-                    'fatal_error': False,
-                    'error_type': None
+                    "success": True,
+                    "frontend_data": frontend_data,
+                    "llm_context": llm_context,
+                    "raw_result": result,
+                    "fatal_error": False,
+                    "error_type": None,
                 }
-            else:
-                error = result.get('error', 'Unknown error')
-                error_type = result.get('error_type')
-                fatal_error = bool(result.get('fatal')) or _is_fatal_dependency_error(error)
-                llm_error = error
-                if fatal_error:
-                    llm_error = "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
-                logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
-                return {
-                    'success': False,
-                    'frontend_data': {},
-                    'llm_context': f"Tool {tool_name} failed: {llm_error}",
-                    'raw_result': result,
-                    'fatal_error': fatal_error,
-                    'error_type': error_type
-                }
-                
+
+            error = result.get("error", "Unknown error")
+            error_type = result.get("error_type")
+            fatal_error = bool(result.get("fatal")) or _is_fatal_dependency_error(error)
+            llm_error = (
+                "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
+                if fatal_error
+                else error
+            )
+            logger.warning(f"[tool-trace {trace_id}] {tool_name} failed: {error}")
+            return {
+                "success": False,
+                "frontend_data": {},
+                "llm_context": f"Tool {tool_name} failed: {llm_error}",
+                "raw_result": result,
+                "fatal_error": fatal_error,
+                "error_type": error_type,
+            }
+
         except Exception as e:
             error_msg = str(e)
             fatal_error = _is_fatal_dependency_error(error_msg)
+            llm_error = (
+                "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
+                if fatal_error
+                else error_msg
+            )
             logger.error(f"[tool-trace {trace_id}] {tool_name} exception: {error_msg}")
-            llm_error = error_msg
-            if fatal_error:
-                llm_error = "Tool execution failed due to a server configuration issue. Please restart the backend and try again."
             return {
-                'success': False,
-                'frontend_data': {},
-                'llm_context': f"Tool {tool_name} error: {llm_error}",
-                'raw_result': {'success': False, 'error': error_msg},
-                'fatal_error': fatal_error,
-                'error_type': 'dependency_missing' if fatal_error else None
+                "success": False,
+                "frontend_data": {},
+                "llm_context": f"Tool {tool_name} error: {llm_error}",
+                "raw_result": {"success": False, "error": error_msg},
+                "fatal_error": fatal_error,
+                "error_type": "dependency_missing" if fatal_error else None,
             }
     
     def build_tool_context_message(

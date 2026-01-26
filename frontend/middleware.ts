@@ -1,17 +1,12 @@
-/**
- * Next.js Middleware 
- * Currently no auth middleware - public access to all routes
- */
+import { authMiddleware } from "@clerk/nextjs";
 
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
-
-export function middleware(request: NextRequest) {
-    return NextResponse.next()
-}
+// This example protects all routes including api/trpc routes
+// Please edit this to allow other routes to be public as needed.
+// See https://clerk.com/docs/references/nextjs/auth-middleware for more information about configuring your Middleware
+export default authMiddleware({
+    publicRoutes: ["/sign-in(.*)", "/sign-up(.*)", "/api/webhooks(.*)"]
+});
 
 export const config = {
-    matcher: [
-        '/((?!_next/static|_next/image|favicon.ico).*)',
-    ],
-}
+    matcher: ["/((?!.+\\.[\\w]+$|_next).*)", "/", "/(api|trpc)(.*)"],
+};

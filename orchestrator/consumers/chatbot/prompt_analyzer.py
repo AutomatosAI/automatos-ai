@@ -63,8 +63,32 @@ class PromptAnalyzer:
     
     def is_simple_message(self, text: str) -> bool:
         """Check if message is a simple greeting/acknowledgment."""
-        text_lower = text.lower().strip()
-        return len(text_lower) < 50 and any(p in text_lower for p in self.simple_patterns)
+        text_lower = (text or "").lower().strip()
+        if len(text_lower) >= 50:
+            return False
+
+        # Normalize punctuation -> spaces so we can do safe token/phrase checks.
+        cleaned = re.sub(r"[^a-z0-9\\s]", " ", text_lower)
+        cleaned = re.sub(r"\\s+", " ", cleaned).strip()
+        if not cleaned:
+            return True
+
+        # IMPORTANT:
+        # - Single-word patterns must match as WHOLE WORDS (avoid "hi" matching "this")
+        # - Multi-word patterns can match as phrases
+        words = set(cleaned.split())
+        for p in self.simple_patterns:
+            p = (p or "").strip().lower()
+            if not p:
+                continue
+            if " " in p:
+                if p in cleaned:
+                    return True
+            else:
+                if p in words:
+                    return True
+
+        return False
 
     def is_fresh_start_request(self, text: str) -> bool:
         """Detect user requests to ignore prior chat context/memory."""
@@ -223,12 +247,15 @@ class PromptAnalyzer:
             return []
 
         # Stopwords to prevent accidental matches like "from" → delete_file, etc.
+        # NOTE: include generic words like "new" because they over-match file tools
+        # (e.g., "create a new repo" should not match "create_directory" by default).
         stopwords = {
             "the", "and", "for", "with", "from", "into", "onto", "over", "under",
             "this", "that", "these", "those", "here", "there",
             "today", "tomorrow", "yesterday", "now", "latest", "recent",
             "please", "can", "could", "would", "should", "just",
             "my", "your", "our", "their",
+            "new",
         }
 
         def tokenize(text: str) -> set[str]:
@@ -239,6 +266,32 @@ class PromptAnalyzer:
         if not query_tokens:
             return []
 
+        # Small synonym expansion to improve matching without hardcoding app/action maps.
+        # This helps common shorthand like "repo" match "repository" in tool descriptions.
+        expansions = {
+            "repo": {"repository"},
+            "repos": {"repository", "repositories"},
+            "repository": {"repo"},
+            "repositories": {"repo"},
+            "pr": {"pull", "pullrequest", "pull_request"},
+            "pullrequest": {"pr"},
+            # Improve routing for code queries (avoid narrowing to only multimodal)
+            "code": {"codebase", "source", "implementation", "snippet", "snippets"},
+            "example": {"examples", "snippet", "snippets"},
+            "examples": {"example", "snippet", "snippets"},
+        }
+        expanded_query_tokens = set(query_tokens)
+        for t in list(query_tokens):
+            expanded_query_tokens |= expansions.get(t, set())
+
+        # Heuristic guard: if the user talks about a *remote code repo* (GitHub/GitLab/repository)
+        # and does NOT mention local filesystem language, de-rank file tools that would otherwise
+        # match purely on verbs like "create".
+        repo_like = {"repo", "repos", "repository", "repositories", "github", "gitlab"}
+        filesystem_like = {"file", "files", "folder", "folders", "directory", "directories", "dir", "path", "local", "filesystem", "workspace"}
+        query_is_repo_intent = bool(expanded_query_tokens & repo_like) and not bool(expanded_query_tokens & filesystem_like)
+        file_tool_names = {"read_file", "write_file", "delete_file", "list_directory", "create_directory"}
+
         scored = []
         for tool in available_tools:
             if not isinstance(tool, dict):
@@ -248,7 +301,7 @@ class PromptAnalyzer:
             desc = fn.get("description") or ""
             tool_text = f"{name} {desc}"
             tool_tokens = tokenize(tool_text)
-            score = len(query_tokens & tool_tokens)
+            score = len(expanded_query_tokens & tool_tokens)
 
             # Lightweight boost for direct name match
             if name and name.lower() in (query or "").lower():
@@ -257,8 +310,13 @@ class PromptAnalyzer:
             # Safety bias: avoid suggesting destructive tools unless explicitly requested.
             if name in {"delete_file", "execute_command"}:
                 destructive_tokens = {"delete", "remove", "destroy", "erase", "rm", "wipe", "exec", "run", "command"}
-                if not (query_tokens & destructive_tokens):
+                if not (expanded_query_tokens & destructive_tokens):
                     score -= 2
+
+            # De-rank file ops for "repo/repository" intents unless the user explicitly
+            # references local filesystem concepts.
+            if query_is_repo_intent and name in file_tool_names:
+                score -= 2
 
             if score > 0:
                 scored.append({

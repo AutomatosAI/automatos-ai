@@ -1085,6 +1085,7 @@ class UnifiedToolExecutor:
             params=params,
             agent_id=agent_id,
             workspace_id=workspace_id,
+            app_name=str(app_name).upper().strip() if app_name else None,
         )
     
     def get_available_tools(self, categories: Optional[list] = None) -> list:

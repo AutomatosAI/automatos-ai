@@ -369,7 +369,8 @@ class HierarchicalMemorySystem:
         context: str,
         memory_types: Optional[List[str]] = None,
         top_k: int = 10,
-        workspace_id: Optional[Union[str, UUID]] = None
+        workspace_id: Optional[Union[str, UUID]] = None,
+        min_relevance: float = 0.6
     ) -> List[Dict[str, Any]]:
         """
         Retrieve memories relevant to the given context using semantic similarity.
@@ -449,6 +450,9 @@ class HierarchicalMemorySystem:
         # Step 3: Rank and filter memories
         memories = self._rank_memories(memories, context)
         
+        # Filter by minimum relevance threshold
+        memories = [m for m in memories if m.get("final_score", 0) >= min_relevance]
+        
         return memories[:top_k]
     
     async def _get_working_memories(self, agent_id: int) -> List[Dict[str, Any]]:
@@ -505,9 +509,9 @@ class HierarchicalMemorySystem:
         """Rank memories by combined relevance score"""
         for memory in memories:
             # Combine multiple factors for final ranking
-            recency_weight = 0.2
-            importance_weight = 0.3
-            relevance_weight = 0.5
+            recency_weight = 0.1
+            importance_weight = 0.2
+            relevance_weight = 0.7
             
             # Recency score (exponential decay)
             if "created_at" in memory:

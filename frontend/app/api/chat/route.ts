@@ -16,6 +16,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const apiKey = getApiKey(request)
     const authHeader = request.headers.get('authorization')
+    const workspaceId =
+      request.headers.get('x-workspace-id') ||
+      request.headers.get('x-workspace') ||
+      request.headers.get('X-Workspace-ID') ||
+      request.headers.get('X-Workspace')
     
     // Log for debugging (remove in production)
     if (!process.env.NEXT_PUBLIC_API_KEY) {
@@ -30,6 +35,7 @@ export async function POST(request: NextRequest) {
         'Accept': 'text/plain',
         'x-api-key': apiKey, // Always send API key
         ...(authHeader ? { 'Authorization': authHeader } : {}),
+        ...(workspaceId ? { 'X-Workspace-ID': workspaceId } : {}),
       },
       body: JSON.stringify(body),
     })
@@ -69,6 +75,11 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json()
     const apiKey = getApiKey(request)
     const authHeader = request.headers.get('authorization')
+    const workspaceId =
+      request.headers.get('x-workspace-id') ||
+      request.headers.get('x-workspace') ||
+      request.headers.get('X-Workspace-ID') ||
+      request.headers.get('X-Workspace')
     
     // Get the path from the request URL to forward to correct backend endpoint
     const url = new URL(request.url)
@@ -81,6 +92,7 @@ export async function PATCH(request: NextRequest) {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         ...(authHeader ? { 'Authorization': authHeader } : {}),
+        ...(workspaceId ? { 'X-Workspace-ID': workspaceId } : {}),
       },
       body: JSON.stringify(body),
     })

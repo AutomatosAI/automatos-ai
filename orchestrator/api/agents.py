@@ -42,6 +42,22 @@ def _stable_tool_id(name: str) -> int:
     return -abs(int(h))
 
 
+def _assigned_by_user_id(ctx: RequestContext) -> Optional[int]:
+    """
+    `agent_app_assignments.assigned_by` is an INTEGER in Postgres.
+    Our RequestContext `user.id` is currently a Clerk user id string (e.g. "user_..."),
+    so we must never write it into this column.
+    """
+    try:
+        raw = getattr(getattr(ctx, "user", None), "id", None)
+        if raw is None:
+            return None
+        # Only accept numeric values
+        return int(raw)
+    except Exception:
+        return None
+
+
 def _resolve_tool_ids_to_app_names(db: Session, ctx: RequestContext, tool_ids: List[int]) -> List[str]:
     """Resolve incoming tool IDs (ComposioAppCache.id or frontend stable hash) into app_name strings.
 
@@ -369,7 +385,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
                         agent_id=agent.id,
                         app_name=app_name,
                         app_type="EXTERNAL",
-                        assigned_by=getattr(ctx.user, "id", None),
+                        assigned_by=_assigned_by_user_id(ctx),
                         is_active=True,
                         priority=0,
                         config={},
@@ -619,7 +635,7 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
                             agent_id=agent.id,
                             app_name=app_name,
                             app_type="EXTERNAL",
-                            assigned_by=getattr(ctx.user, "id", None),
+                            assigned_by=_assigned_by_user_id(ctx),
                             is_active=True,
                             priority=0,
                             config={},

@@ -899,8 +899,9 @@ Use this for complex queries or when you want AI-powered assistance.""",
                 name="composio_execute",
                 category=ToolCategory.API_TOOLS,
                 description=(
-                    "Execute an external app action via Composio (e.g., Gmail, Slack). "
-                    "Use this when the user asks to read/send emails, post messages, etc."
+                    "Execute an external app action via Composio (connected third-party apps). "
+                    "Use this for actions in email/messaging and developer tools—e.g., "
+                    "read/send emails, post messages, create/manage repositories, issues, and pull requests."
                 ),
                 executor_class="ComposioToolExecutor",
                 executor_method="execute",
@@ -908,7 +909,7 @@ Use this for complex queries or when you want AI-powered assistance.""",
                     ToolParameter(
                         name="app_name",
                         type="string",
-                        description="App name (e.g., 'GMAIL', 'SLACK')",
+                        description="App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')",
                         required=False,
                     ),
                     ToolParameter(

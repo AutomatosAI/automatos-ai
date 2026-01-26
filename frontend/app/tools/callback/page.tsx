@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
+import { apiClient } from '@/lib/api-client'
 
 export default function ComposioCallbackPage() {
     const searchParams = useSearchParams()
@@ -11,9 +12,21 @@ export default function ComposioCallbackPage() {
     useEffect(() => {
         const status = searchParams?.get('status')
         const connectionId = searchParams?.get('connection_id')
-        const connected = searchParams?.get('connected') // Fallback param
+        const connected = searchParams?.get('connected') // App name (e.g. GMAIL)
 
         console.log('🔗 OAuth Callback:', { status, connectionId, connected })
+
+        // If we have enough info, notify the backend so it can mark the app as ACTIVE
+        // and the Tools UI can show it under "Connected tools".
+        if (connected && connectionId) {
+            const appName = connected.toUpperCase()
+            const normalizedStatus = (status || 'active').toLowerCase()
+            apiClient
+                .post(`/api/composio/connect/${encodeURIComponent(appName)}/callback?connection_id=${encodeURIComponent(connectionId)}&status=${encodeURIComponent(normalizedStatus)}`)
+                .catch((err) => {
+                    console.warn('Failed to sync Composio connection to backend:', err)
+                })
+        }
 
         // If successful, close the popup
         if (status === 'success' || status === 'active' || connected) {

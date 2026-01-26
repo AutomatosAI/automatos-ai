@@ -219,7 +219,40 @@ class AgentPlatformTools:
             elif tool_name == "search_codebase":
                 query = parameters.get("query", "")
                 file_type = parameters.get("file_type")
-                project_name = parameters.get("project_name", "Automatos-ai")  # Default project (case-sensitive!)
+                project_name = parameters.get("project_name")
+
+                # Resolve workspace_id from agent (CodeGraph projects are workspace-scoped)
+                workspace_id = None
+                try:
+                    from core.models import Agent as AgentModel
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and getattr(agent_row, "workspace_id", None):
+                        workspace_id = str(agent_row.workspace_id)
+                except Exception:
+                    workspace_id = None
+
+                # If project_name not provided, pick the most recently indexed active project
+                if not project_name and workspace_id:
+                    try:
+                        row = self.db.execute(
+                            text(
+                                """
+                                SELECT name
+                                FROM codegraph_projects
+                                WHERE workspace_id = :workspace_id AND status = 'active'
+                                ORDER BY last_indexed DESC NULLS LAST, updated_at DESC NULLS LAST
+                                LIMIT 1
+                                """
+                            ),
+                            {"workspace_id": workspace_id},
+                        ).fetchone()
+                        if row and row[0]:
+                            project_name = row[0]
+                    except Exception:
+                        project_name = None
+
+                # Backward-compatible default (only if nothing else is available)
+                project_name = project_name or "Automatos-ai"
                 
                 if not self.code_graph:
                     self.logger.warning(f"  ⚠️ CodeGraphService not available (missing API key)")
@@ -233,7 +266,8 @@ class AgentPlatformTools:
                     result_dict = await self.code_graph.search_symbols(
                         project_name=project_name,
                         query=query,
-                        limit=5
+                        limit=5,
+                        workspace_id=workspace_id,
                     )
                     # search_symbols returns a dict with 'results' key
                     results = result_dict.get("results", []) if isinstance(result_dict, dict) else []
@@ -242,7 +276,13 @@ class AgentPlatformTools:
                     # Project might not exist or name mismatch - return helpful message
                     self.logger.warning(f"  ⚠️ CodeGraph search failed: {str(e)}")
                     return ToolResultFormatter.standardize_result(
-                        {"success": False, "error": f"Codebase search unavailable - project '{project_name}' not found. Please index the codebase first."},
+                        {
+                            "success": False,
+                            "error": (
+                                f"Codebase search unavailable - no indexed CodeGraph project found for this workspace "
+                                f"(requested '{project_name}'). Please index the codebase first."
+                            ),
+                        },
                         tool_name
                     )
                 

@@ -79,24 +79,18 @@ class ToolResultFormatter:
             Full document content or empty string if error
         """
         try:
-            # Security: Validate path is within allowed directory
-            allowed_base = Path("/var/automatos/documents").resolve()
-            requested_path = Path(file_path).resolve()
-            
-            try:
-                requested_path.relative_to(allowed_base)
-            except ValueError:
-                logger.warning(f"Access denied: {file_path} not in allowed directory")
+            requested_path = ToolResultFormatter._resolve_document_path(file_path)
+            if not requested_path:
                 return ""
             
             # Check file exists and size
             if not os.path.exists(requested_path):
-                logger.warning(f"Document not found: {file_path}")
+                logger.warning(f"Document not found: {requested_path}")
                 return ""
             
             file_size_kb = os.path.getsize(requested_path) / 1024
             if file_size_kb > max_size_kb:
-                logger.warning(f"Document too large ({file_size_kb:.1f}KB): {file_path}")
+                logger.warning(f"Document too large ({file_size_kb:.1f}KB): {requested_path}")
                 return f"[Document too large to display: {file_size_kb:.1f}KB. Use download link instead.]"
             
             # Read file content
@@ -106,6 +100,111 @@ class ToolResultFormatter:
         except Exception as e:
             logger.error(f"Error reading document {file_path}: {e}")
             return ""
+
+    @staticmethod
+    def _document_roots() -> List[Path]:
+        """
+        Allowed document roots for artifact rendering.
+
+        We keep the original `/var/automatos/documents` default, but also support
+        local-repo docs for dev (e.g. `automatos-ai/docs/**`) without hardcoding an
+        absolute machine-specific path.
+        """
+        roots: List[Path] = []
+
+        env_roots = (
+            os.getenv("AUTOMATOS_DOCUMENTS_DIRS")
+            or os.getenv("AUTOMATOS_DOCUMENTS_DIR")
+            or os.getenv("DOCUMENTS_DIR")
+        )
+        if env_roots:
+            for raw in env_roots.split(","):
+                p = raw.strip()
+                if not p:
+                    continue
+                try:
+                    roots.append(Path(p).expanduser().resolve())
+                except Exception:
+                    continue
+
+        # Default prod path
+        try:
+            roots.append(Path("/var/automatos/documents").resolve())
+        except Exception:
+            pass
+
+        # Dev-friendly repo-relative fallbacks
+        # result_formatter.py -> formatting -> tools -> modules -> orchestrator -> automatos-ai
+        try:
+            automatos_ai_root = Path(__file__).resolve().parents[4]
+            docs_root = (automatos_ai_root / "docs").resolve()
+            roots.append(docs_root)
+            roots.append((docs_root / "PRDS").resolve())
+        except Exception:
+            pass
+
+        # De-dupe while preserving order
+        seen = set()
+        out: List[Path] = []
+        for r in roots:
+            if str(r) in seen:
+                continue
+            seen.add(str(r))
+            out.append(r)
+        return out
+
+    @staticmethod
+    def _is_under_allowed_root(path: Path) -> bool:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            return False
+        for root in ToolResultFormatter._document_roots():
+            try:
+                resolved.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
+
+    @staticmethod
+    def _resolve_document_path(file_path_or_name: str) -> Optional[Path]:
+        """
+        Resolve a document path safely.
+
+        Accepts:
+        - absolute paths (must be under allowed roots)
+        - bare filenames (resolved under allowed roots)
+        """
+        if not file_path_or_name:
+            return None
+
+        raw = str(file_path_or_name).strip()
+        if not raw:
+            return None
+
+        candidate = Path(raw).expanduser()
+        if candidate.is_absolute():
+            if ToolResultFormatter._is_under_allowed_root(candidate):
+                return candidate.resolve()
+            logger.warning(f"Access denied: {raw} not under allowed document roots")
+            return None
+
+        # Treat as filename under allowed roots
+        filename = candidate.name
+        for root in ToolResultFormatter._document_roots():
+            p = (root / filename)
+            if p.exists() and p.is_file():
+                return p.resolve()
+
+        # Also allow one-level relative paths under docs roots (e.g. PRDS/foo.md)
+        for root in ToolResultFormatter._document_roots():
+            p = (root / candidate)
+            if p.exists() and p.is_file():
+                return p.resolve()
+
+        # Not found
+        return None
     
     @staticmethod
     def _detect_content_type(filename: str) -> str:
@@ -271,6 +370,26 @@ class ToolResultFormatter:
         
         # Extract results (handle both singular and plural)
         raw_results = raw_result.get('results') or raw_result.get('result') or []
+
+        # Composio returns payload under `data` (not `results`). If we don't normalize this,
+        # the LLM sees "0 items" and assumes nothing happened.
+        if (not raw_results) and (tool_name == "composio_execute" or tool_name.startswith("composio_")):
+            data = raw_result.get("data")
+            if isinstance(data, list):
+                raw_results = data
+            elif isinstance(data, dict):
+                # Common API shapes: {"items":[...]}, {"messages":[...]}, {"threads":[...]} etc.
+                for k in ("results", "items", "messages", "emails", "threads", "data"):
+                    v = data.get(k)
+                    if isinstance(v, list):
+                        raw_results = v
+                        break
+                if not raw_results:
+                    # Preserve structured payload as a single result item
+                    raw_results = [data]
+            elif data is not None:
+                raw_results = [data]
+
         if not isinstance(raw_results, list):
             raw_results = [raw_results] if raw_results else []
         
@@ -320,8 +439,8 @@ class ToolResultFormatter:
                 similarity = doc.get('similarity', 0.0)
                 
                 # Use the source (filename) directly - this is the actual file on disk
-                # Build correct path
-                file_path = f"/var/automatos/documents/{source}"
+                resolved = ToolResultFormatter._resolve_document_path(source)
+                file_path = str(resolved) if resolved else f"/var/automatos/documents/{source}"
                 
                 if source not in docs_by_source:
                     docs_by_source[source] = {
@@ -401,6 +520,12 @@ class ToolResultFormatter:
             
             # Frontend expects an array of results
             frontend_data['database_results'] = [db_result]
+
+        elif tool_name == "composio_execute" or tool_name.startswith("composio_"):
+            # Generic external-api artifact payload. Even if the UI doesn't have a dedicated
+            # renderer, this makes the result available in `tool_data` for inspection.
+            frontend_data["api_results"] = standardized["results"]
+            frontend_data["api_metadata"] = standardized.get("metadata", {})
         
         return frontend_data
     
@@ -457,6 +582,20 @@ class ToolResultFormatter:
                 summary_parts.append(f"\n📊 AI Analysis: {pandas_insight.get('summary', '')}")
                 if pandas_insight.get('charts'):
                     summary_parts.append("(Chart generated - see visualization)")
+
+        elif tool_name == "composio_execute" or tool_name.startswith("composio_"):
+            # Provide a compact, structured preview of external API results
+            # so the LLM can actually answer using the returned data.
+            preview = standardized["results"][:3]
+            if preview:
+                try:
+                    preview_json = json.dumps(preview, default=str, indent=2)[:1800]
+                except Exception:
+                    preview_json = str(preview)[:1800]
+                summary_parts.append("\nAPI result preview (use this to answer):")
+                summary_parts.append(preview_json)
+            else:
+                summary_parts.append("\nAPI returned 0 items for this query.")
         
         full_summary = "\n".join(summary_parts)
         

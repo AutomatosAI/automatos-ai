@@ -985,7 +985,8 @@ class CodeGraphService:
         project_name: str,
         query: str,
         symbol_type: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Search for code symbols by name (fuzzy matching)
@@ -1093,7 +1094,8 @@ class CodeGraphService:
         self,
         project_name: str,
         query: str,
-        limit: int = 10
+        limit: int = 10,
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Semantic search using centralized EnhancedVectorStore.

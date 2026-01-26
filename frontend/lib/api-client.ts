@@ -1570,6 +1570,7 @@ class ApiClient {
         action_count: a.action_count || 0,
         trigger_count: a.trigger_count || 0,
         auth_schemes: a.auth_schemes || [],
+        triggers: a.triggers || [],  // Include triggers array from API
       },
       updated_at: marketplace?.last_synced || null,
     }))
@@ -1592,7 +1593,14 @@ class ApiClient {
   async getToolCategories() {
     const stats = (await this.request('/api/tools/stats')) as any
     const categories = stats?.categories || {}
-    return Object.entries(categories).map(([name, count]) => ({ id: name, name, count }))
+    // Return top 15 categories by app count (sorted descending)
+    // This keeps the category filter dropdown manageable (734 categories is unusable)
+    // Note: All apps remain fully searchable - this only limits the category filter options
+    const allCategories = Object.entries(categories)
+      .map(([name, count]) => ({ id: name, name, count: count as number }))
+      .sort((a, b) => b.count - a.count) // Sort by count descending (most popular first)
+      .slice(0, 15) // Take top 15 most popular categories
+    return allCategories
   }
 
   async getToolsStats() {

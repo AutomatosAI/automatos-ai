@@ -1,0 +1,631 @@
+"""
+Composio API Endpoints (PRD-36)
+==============================
+
+API routes for Composio integration:
+- App discovery and listing
+- OAuth connection management
+- Action listing
+- Webhook handling for triggers
+"""
+
+import os
+import hmac
+import hashlib
+import logging
+from typing import Optional, List, Dict, Any
+from uuid import UUID
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+
+from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
+from core.composio.client import get_composio_client, ComposioClient
+from core.composio.entity_manager import EntityManager
+from core.composio.tool_executor import ComposioToolExecutor
+from core.models.composio import AgentAppFeature, TriggerSubscription
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/composio", tags=["Composio"])
+
+
+# =============================================================================
+# Request/Response Models
+# =============================================================================
+
+class AppResponse(BaseModel):
+    """Composio app information."""
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
+    categories: List[str] = []
+    is_connected: bool = False
+    action_count: int = 0
+    auth_schemes: List[str] = []
+    triggers: List[Dict[str, Any]] = []
+    trigger_count: int = 0
+
+
+class ActionResponse(BaseModel):
+    """Composio action information."""
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    app_name: str
+    parameters: dict = {}
+    enabled: bool = True
+
+
+class ConnectionResponse(BaseModel):
+    """App connection status."""
+    app_name: str
+    status: str
+    connected_at: Optional[datetime] = None
+    connection_id: Optional[str] = None
+
+
+class InitiateConnectionRequest(BaseModel):
+    """Request to initiate OAuth."""
+    callback_url: Optional[str] = None
+
+
+class InitiateConnectionResponse(BaseModel):
+    """OAuth redirect URL."""
+    redirect_url: str
+    app_name: str
+
+
+class FeatureToggleRequest(BaseModel):
+    """Toggle action enabled state."""
+    action_name: str
+    enabled: bool
+
+
+class BatchFeatureToggleRequest(BaseModel):
+    """Batch toggle actions."""
+    features: List[FeatureToggleRequest]
+
+
+class TriggerSubscriptionRequest(BaseModel):
+    """Subscribe to a trigger."""
+    trigger_name: str
+    agent_id: Optional[int] = None
+    workflow_id: Optional[int] = None
+
+
+class WebhookPayload(BaseModel):
+    """Incoming webhook data."""
+    trigger_name: str
+    entity_id: str
+    app_name: str
+    event_data: dict = {}
+
+
+# =============================================================================
+# App Discovery Endpoints
+# =============================================================================
+
+@router.get("/apps", response_model=List[AppResponse])
+async def list_available_apps(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    List all available Composio apps.
+    
+    Returns apps with connection status for the current workspace.
+    """
+    client = get_composio_client()
+    
+    try:
+        apps = client.get_available_apps()
+    except Exception as e:
+        logger.error(f"Failed to fetch Composio apps: {e}")
+        raise HTTPException(status_code=503, detail="Composio service unavailable")
+    
+    # Get connected apps for this workspace
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    connected_apps = set()
+    
+    if entity:
+        connections = entity_manager.get_entity_connections(entity["id"])
+        connected_apps = {
+            c["app_name"] for c in connections 
+            if c["status"] == "active"
+        }
+    
+    # Filter by category if provided
+    if category:
+        apps = [a for a in apps if category.lower() in [c.lower() for c in a.get("categories", [])]]
+    
+    return [
+        AppResponse(
+            name=app["name"],
+            display_name=app.get("display_name", app["name"]),
+            description=app.get("description"),
+            logo_url=app.get("logo_url"),
+            categories=app.get("categories", []),
+            is_connected=app["name"].upper() in {a.upper() for a in connected_apps},
+            # Never fetch actions per-app in list endpoint (expensive).
+            action_count=app.get("action_count", 0),
+            auth_schemes=app.get("auth_schemes", []),
+            triggers=app.get("triggers", []),
+            trigger_count=app.get("trigger_count", 0)
+        )
+        for app in apps
+    ]
+
+
+@router.get("/apps/{app_name}/actions", response_model=List[ActionResponse])
+async def list_app_actions(
+    app_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    List all actions available for an app.
+    
+    Includes enabled status for each action based on agent configuration.
+    """
+    client = get_composio_client()
+    
+    try:
+        actions = client.get_app_actions(app_name.upper())
+    except Exception as e:
+        logger.error(f"Failed to fetch actions for {app_name}: {e}")
+        raise HTTPException(status_code=503, detail="Composio service unavailable")
+    
+    return [
+        ActionResponse(
+            name=action["name"],
+            display_name=action.get("display_name", action["name"]),
+            description=action.get("description"),
+            app_name=app_name.upper(),
+            parameters=action.get("parameters", {})
+        )
+        for action in actions
+    ]
+
+
+# =============================================================================
+# Connection Management Endpoints
+# =============================================================================
+
+@router.get("/connections", response_model=List[ConnectionResponse])
+async def list_connections(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    List all app connections for the current workspace.
+    Syncs status with Composio API for pending connections.
+    """
+    client = get_composio_client()
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    
+    if not entity:
+        return []
+    
+    connections = entity_manager.get_entity_connections(entity["id"])
+    result = []
+    
+    for conn in connections:
+        status = conn["status"]
+        
+        # For pending connections, check Composio API for actual status
+        if status == "pending":
+            composio_status = client.get_connection_status(
+                entity_id=entity["composio_entity_id"],
+                app=conn["app_name"]
+            )
+            if composio_status and composio_status.get("status") == "ACTIVE":
+                # Connection is now active on Composio - update local DB
+                entity_manager.update_connection_status(
+                    entity_id=entity["id"],
+                    app_name=conn["app_name"],
+                    status="active",
+                    connection_id=composio_status.get("id")
+                )
+                status = "active"
+                logger.info(f"Connection {conn['app_name']} synced to ACTIVE status")
+        
+        result.append(ConnectionResponse(
+            app_name=conn["app_name"],
+            status=status,
+            connected_at=conn.get("connected_at"),
+            connection_id=conn.get("connection_id")
+        ))
+    
+    return result
+
+
+@router.post("/connect/{app_name}", response_model=InitiateConnectionResponse)
+async def initiate_connection(
+    app_name: str,
+    request: InitiateConnectionRequest = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Initiate OAuth connection for an app.
+    
+    Returns a redirect URL for the Composio hosted OAuth flow.
+    """
+    client = get_composio_client()
+    entity_manager = EntityManager(db)
+    
+    # Get or create entity for workspace
+    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+    composio_entity_id = entity["composio_entity_id"]
+    
+    # Default callback URL
+    callback_url = request.callback_url if request else None
+    if not callback_url:
+        # Use frontend callback URL (popup callback page)
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        callback_url = f"{frontend_url}/tools/callback?connected={app_name.upper()}"
+    
+    try:
+        redirect_url = client.initiate_connection(
+            entity_id=composio_entity_id,
+            app=app_name.upper(),
+            callback_url=callback_url
+        )
+    except Exception as e:
+        logger.error(f"Failed to initiate connection for {app_name}: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to initiate OAuth: {str(e)}")
+    
+    # Store pending connection
+    entity_manager.add_connection(
+        entity_id=entity["id"],
+        app_name=app_name.upper(),
+        status="pending"
+    )
+    
+    return InitiateConnectionResponse(
+        redirect_url=redirect_url,
+        app_name=app_name.upper()
+    )
+
+
+@router.post("/connect/{app_name}/callback")
+async def connection_callback(
+    app_name: str,
+    connection_id: str = Query(..., description="Composio connection ID"),
+    status: str = Query("active", description="Connection status"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    OAuth callback handler.
+    
+    Called after user completes OAuth flow to update connection status.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    
+    if not entity:
+        raise HTTPException(status_code=404, detail="Entity not found")
+    
+    success = entity_manager.update_connection_status(
+        entity_id=entity["id"],
+        app_name=app_name.upper(),
+        status=status,
+        connection_id=connection_id
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    return {"status": "success", "app_name": app_name.upper(), "connected": status == "active"}
+
+
+@router.delete("/connections/{app_name}")
+async def disconnect_app(
+    app_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Disconnect an app from the workspace.
+    """
+    client = get_composio_client()
+    entity_manager = EntityManager(db)
+    
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="No connections found")
+    
+    # Remove from Composio
+    try:
+        client.disconnect_app(entity["composio_entity_id"], app_name.upper())
+    except Exception as e:
+        logger.warning(f"Failed to disconnect from Composio (may already be disconnected): {e}")
+    
+    # Remove from database
+    entity_manager.remove_connection(entity["id"], app_name.upper())
+    
+    return {"status": "disconnected", "app_name": app_name.upper()}
+
+
+# =============================================================================
+# Agent Feature Management
+# =============================================================================
+
+@router.get("/agents/{agent_id}/apps/{app_name}/features", response_model=List[ActionResponse])
+async def get_agent_app_features(
+    agent_id: int,
+    app_name: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get enabled features for an agent-app combination.
+    """
+    client = get_composio_client()
+    executor = ComposioToolExecutor(db)
+    
+    # Get all actions for the app
+    actions = client.get_app_actions(app_name.upper())
+    
+    # Get enabled actions for this agent
+    enabled_actions = set(executor.get_agent_enabled_actions(agent_id, app_name.upper()))
+    
+    # If no features configured yet, all are enabled by default
+    has_config = db.query(AgentAppFeature).filter(
+        AgentAppFeature.agent_id == agent_id,
+        AgentAppFeature.app_name == app_name.upper()
+    ).count() > 0
+    
+    return [
+        ActionResponse(
+            name=action["name"],
+            display_name=action.get("display_name", action["name"]),
+            description=action.get("description"),
+            app_name=app_name.upper(),
+            parameters=action.get("parameters", {}),
+            enabled=action["name"] in enabled_actions if has_config else True
+        )
+        for action in actions
+    ]
+
+
+@router.put("/agents/{agent_id}/apps/{app_name}/features")
+async def update_agent_app_features(
+    agent_id: int,
+    app_name: str,
+    request: BatchFeatureToggleRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Update enabled features for an agent-app combination.
+    """
+    executor = ComposioToolExecutor(db)
+    
+    updates = [
+        {"action_name": f.action_name, "enabled": f.enabled}
+        for f in request.features
+    ]
+    
+    count = executor.batch_set_agent_actions(agent_id, app_name.upper(), updates)
+    
+    return {"updated": count, "app_name": app_name.upper()}
+
+
+@router.post("/agents/{agent_id}/apps/{app_name}/enable-all")
+async def enable_all_features(
+    agent_id: int,
+    app_name: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Enable all features for an agent-app combination.
+    """
+    client = get_composio_client()
+    executor = ComposioToolExecutor(db)
+    
+    actions = client.get_app_actions(app_name.upper())
+    updates = [{"action_name": a["name"], "enabled": True} for a in actions]
+    
+    count = executor.batch_set_agent_actions(agent_id, app_name.upper(), updates)
+    
+    return {"enabled": count, "app_name": app_name.upper()}
+
+
+@router.post("/agents/{agent_id}/apps/{app_name}/disable-all")
+async def disable_all_features(
+    agent_id: int,
+    app_name: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Disable all features for an agent-app combination.
+    """
+    client = get_composio_client()
+    executor = ComposioToolExecutor(db)
+    
+    actions = client.get_app_actions(app_name.upper())
+    updates = [{"action_name": a["name"], "enabled": False} for a in actions]
+    
+    count = executor.batch_set_agent_actions(agent_id, app_name.upper(), updates)
+    
+    return {"disabled": count, "app_name": app_name.upper()}
+
+
+# =============================================================================
+# Webhook Handler
+# =============================================================================
+
+@router.post("/webhook")
+async def handle_webhook(
+    request: Request,
+    x_composio_signature: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Handle incoming Composio webhook events.
+    
+    Validates signature and routes to appropriate agent/workflow.
+    """
+    # Get raw body for signature verification
+    body = await request.body()
+    
+    # Verify signature if secret is configured
+    webhook_secret = os.getenv("COMPOSIO_WEBHOOK_SECRET")
+    if webhook_secret and x_composio_signature:
+        expected_sig = hmac.new(
+            webhook_secret.encode(),
+            body,
+            hashlib.sha256
+        ).hexdigest()
+        
+        if not hmac.compare_digest(x_composio_signature, expected_sig):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    
+    # Parse payload
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    
+    trigger_name = payload.get("trigger_name")
+    entity_id = payload.get("entity_id")
+    event_data = payload.get("event_data", {})
+    
+    if not trigger_name or not entity_id:
+        raise HTTPException(status_code=400, detail="Missing trigger_name or entity_id")
+    
+    logger.info(f"Received webhook: {trigger_name} for entity {entity_id}")
+    
+    # Find matching subscription
+    # TODO: Route to appropriate agent/workflow
+    # This will be expanded in the execution layer integration
+    
+    return {
+        "status": "received",
+        "trigger_name": trigger_name,
+        "entity_id": entity_id
+    }
+
+
+# =============================================================================
+# Trigger Subscription Endpoints
+# =============================================================================
+
+@router.post("/triggers/subscribe")
+async def subscribe_to_trigger(
+    request: TriggerSubscriptionRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Subscribe to a Composio trigger.
+    """
+    client = get_composio_client()
+    entity_manager = EntityManager(db)
+    
+    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+    
+    # Build callback URL
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    callback_url = f"{backend_url}/api/composio/webhook"
+    
+    try:
+        result = client.subscribe_to_trigger(
+            entity_id=entity["composio_entity_id"],
+            trigger_name=request.trigger_name,
+            callback_url=callback_url
+        )
+    except Exception as e:
+        logger.error(f"Failed to subscribe to trigger: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to subscribe: {str(e)}")
+    
+    # Store subscription
+    subscription = TriggerSubscription(
+        entity_id=entity["id"],
+        trigger_name=request.trigger_name,
+        callback_url=callback_url,
+        agent_id=request.agent_id,
+        workflow_id=request.workflow_id,
+        composio_subscription_id=result.get("id"),
+        is_active=True
+    )
+    db.add(subscription)
+    db.commit()
+    
+    return {
+        "status": "subscribed",
+        "trigger_name": request.trigger_name,
+        "subscription_id": subscription.id
+    }
+
+
+@router.get("/triggers")
+async def list_trigger_subscriptions(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    List all trigger subscriptions for the workspace.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    
+    if not entity:
+        return []
+    
+    subscriptions = db.query(TriggerSubscription).filter(
+        TriggerSubscription.entity_id == entity["id"],
+        TriggerSubscription.is_active == True
+    ).all()
+    
+    return [
+        {
+            "id": s.id,
+            "trigger_name": s.trigger_name,
+            "agent_id": s.agent_id,
+            "workflow_id": s.workflow_id,
+            "created_at": s.created_at
+        }
+        for s in subscriptions
+    ]
+
+
+@router.delete("/triggers/{subscription_id}")
+async def unsubscribe_trigger(
+    subscription_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Unsubscribe from a trigger.
+    """
+    client = get_composio_client()
+    
+    subscription = db.query(TriggerSubscription).filter(
+        TriggerSubscription.id == subscription_id
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    
+    # Unsubscribe from Composio
+    if subscription.composio_subscription_id:
+        try:
+            client.unsubscribe_trigger(subscription.composio_subscription_id)
+        except Exception as e:
+            logger.warning(f"Failed to unsubscribe from Composio: {e}")
+    
+    # Mark as inactive
+    subscription.is_active = False
+    db.commit()
+    
+    return {"status": "unsubscribed", "subscription_id": subscription_id}

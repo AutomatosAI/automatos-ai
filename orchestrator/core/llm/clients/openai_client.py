@@ -18,6 +18,43 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+def _get_model_context_limit(model: str) -> int:
+    """
+    Best-effort context window sizes for common OpenAI models used in this repo.
+    If unknown, default conservatively to 8192 (avoids 400s).
+    """
+    m = (model or "").lower()
+    # GPT-4 Turbo preview is 128k
+    if "gpt-4-turbo" in m or "gpt-4.1" in m:
+        return 128000
+    # Legacy GPT-4 is typically 8k (unless explicitly 32k)
+    if "gpt-4-32k" in m:
+        return 32768
+    if m.startswith("gpt-4"):
+        return 8192
+    # GPT-3.5 Turbo often 16k, but keep conservative unless explicitly 16k
+    if "gpt-3.5-turbo-16k" in m:
+        return 16384
+    if "gpt-3.5" in m:
+        return 8192
+    return 8192
+
+
+def _safe_max_tokens(model: str, requested_max_tokens: int, prompt_tokens: Optional[int]) -> int:
+    """
+    Compute a safe max_tokens given an estimated/known prompt token count.
+    Leaves a small safety margin to avoid context_length_exceeded.
+    """
+    limit = _get_model_context_limit(model)
+    safety = 256
+    if not prompt_tokens:
+        # No estimate: cap aggressively for 8k-class models.
+        return min(int(requested_max_tokens or 0), 1500) if limit <= 8192 else int(requested_max_tokens or 0)
+    available = max(0, limit - int(prompt_tokens) - safety)
+    if available <= 0:
+        return 256
+    return min(int(requested_max_tokens or 0), available)
+
 
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI GPT provider implementation"""
@@ -60,11 +97,13 @@ class OpenAIProvider(BaseLLMProvider):
         loop = asyncio.get_running_loop()
         try:
             def _call():
+                # NOTE: We don't have a tokenizer here, so we do a conservative cap.
+                # Also: if OpenAI returns a context_length_exceeded error, we retry once below.
                 kwargs = {
                     "model": self.config.model,
                     "messages": messages,
                     "temperature": self.config.temperature,
-                    "max_tokens": self.config.max_tokens
+                    "max_tokens": _safe_max_tokens(self.config.model, self.config.max_tokens, prompt_tokens=None),
                 }
                 # PRD-17: Add tools if provided
                 if tools:
@@ -95,7 +134,38 @@ class OpenAIProvider(BaseLLMProvider):
                     )
                 return self.client.chat.completions.create(**kwargs)
             
-            response = await loop.run_in_executor(None, _call)
+            try:
+                response = await loop.run_in_executor(None, _call)
+            except Exception as e:
+                # Retry once on context-length errors by lowering max_tokens.
+                msg = str(e)
+                if "context_length_exceeded" in msg or "maximum context length" in msg:
+                    logger.warning(f"OpenAI context length exceeded; retrying with lower max_tokens. Error: {e}")
+                    def _retry_call():
+                        kwargs = {
+                            "model": self.config.model,
+                            "messages": messages,
+                            "temperature": self.config.temperature,
+                            "max_tokens": 512,
+                        }
+                        if tools:
+                            formatted_tools = []
+                            for t in tools:
+                                if "type" not in t:
+                                    formatted_tools.append({"type": "function", "function": t})
+                                else:
+                                    formatted_tools.append(t)
+                            kwargs["tools"] = formatted_tools
+                            force_tool_choice = any(
+                                (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
+                                or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                                for m in (messages or [])
+                            )
+                            kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
+                        return self.client.chat.completions.create(**kwargs)
+                    response = await loop.run_in_executor(None, _retry_call)
+                else:
+                    raise
             
             # PRD-17: Extract tool calls if present
             tool_calls = None

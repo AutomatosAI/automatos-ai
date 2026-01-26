@@ -80,6 +80,33 @@ class MemoryInjector:
         self._recent_cache = {"time": 0, "data": []}
         self._cache_ttl = 60  # Cache recent memories for 60 seconds
     
+    def should_retrieve_memories(self, query: str, chat_id: str) -> bool:
+        """
+        Intelligent decision on whether to retrieve memories for a given query.
+        Skips retrieval for short greetings, thanks, or irrelevant inputs to save tokens.
+        """
+        if not query:
+            return False
+            
+        # Skip for very short queries
+        if len(query) < 10:
+            return False
+        
+        query_lower = query.lower().strip()
+        
+        # Skip for common greetings and short acknowledgments
+        greetings = {"hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye", "cool", "ok", "okay"}
+        if query_lower in greetings:
+            logger.info("[Memory] Skipping retrieval for greeting/short msg")
+            return False
+        
+        # Check if query references past context - stronger signal to retrieve
+        past_indicators = {"before", "earlier", "remember", "you said", "we discussed", "last time", "previously"}
+        if any(ind in query_lower for ind in past_indicators):
+            return True
+        
+        return True
+
     async def retrieve_relevant_memories(
         self,
         chat_id: str,
@@ -101,6 +128,12 @@ class MemoryInjector:
         Returns:
             Formatted memory context string, or None
         """
+        """
+        Retrieves relevant memories if the query is significant enough.
+        """
+        if not self.should_retrieve_memories(query, chat_id):
+           return None
+           
         if not query or len(query) < 5:
             return None
         
@@ -143,7 +176,7 @@ class MemoryInjector:
                 text=query,
                 context_types=[ContextType.HISTORICAL],
                 max_results=10,
-                min_relevance=0.3,
+                min_relevance=0.6,
                 include_metadata=True
             )
             

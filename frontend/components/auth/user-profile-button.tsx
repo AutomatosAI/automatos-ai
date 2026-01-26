@@ -1,6 +1,7 @@
 'use client'
 
-import { UserButton, SignInButton, useUser } from '@clerk/nextjs'
+import Link from 'next/link'
+import { UserButton, useUser } from '@clerk/nextjs'
 
 /**
  * PRD-37: User Profile Button Component
@@ -29,11 +30,12 @@ export function UserProfileButton({
 
     if (!isSignedIn) {
         return (
-            <SignInButton mode="modal">
-                <button className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-500 transition-colors">
-                    Sign In
-                </button>
-            </SignInButton>
+            <Link
+                href="/sign-in"
+                className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-500 transition-colors"
+            >
+                Sign In
+            </Link>
         )
     }
 
