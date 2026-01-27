@@ -62,27 +62,30 @@ def require_permission(permission: str):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # Try to get request context from kwargs or args
+            from core.auth.dependencies import RequestContext
+
             ctx = kwargs.get("ctx")
             if not ctx:
-                # Search in args
-                from core.auth.dependencies import RequestContext
                 for arg in args:
                     if isinstance(arg, RequestContext):
                         ctx = arg
                         break
-            
-            if not ctx:
-                 # Fallback: maybe it's in a dependency that hasn't been resolved yet? 
-                 # In FastAPI, dependencies are resolved before the function is called.
-                 # If ctx is missing, we can't check permissions.
-                 # However, usually ctx is passed as "ctx" argument.
-                 pass
 
-            if ctx and hasattr(ctx, 'role'):
-                if not has_permission(ctx.role, permission):
-                    raise HTTPException(status_code=403, detail=f"Permission denied: {permission}")
-            
+            if not ctx:
+                raise HTTPException(status_code=403, detail="Permission denied: missing context")
+
+            role = None
+            if getattr(ctx, "user", None) is not None:
+                role = getattr(ctx.user, "role", None)
+            if role is None and hasattr(ctx, "role"):
+                role = ctx.role
+
+            if not role:
+                raise HTTPException(status_code=403, detail="Permission denied: missing role")
+
+            if not has_permission(role, permission):
+                raise HTTPException(status_code=403, detail=f"Permission denied: {permission}")
+
             return await func(*args, **kwargs)
         return wrapper
     return decorator

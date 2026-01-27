@@ -30,11 +30,11 @@ class AuditLog(Base):
 
 class AuditService:
     """Service for creating audit log entries."""
-    
+
     def __init__(self, db):
         self.db = db
-    
-    async def log(
+
+    def log(
         self,
         workspace_id: str,
         user_id: int,
@@ -44,9 +44,9 @@ class AuditService:
         resource_name: Optional[str] = None,
         details: Optional[dict] = None,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
     ):
-        """Create an audit log entry."""
+        """Create an audit log entry (sync)."""
         try:
             entry = AuditLog(
                 workspace_id=workspace_id,
@@ -57,14 +57,13 @@ class AuditService:
                 resource_name=resource_name,
                 details=details or {},
                 ip_address=ip_address,
-                user_agent=user_agent
+                user_agent=user_agent,
             )
             self.db.add(entry)
             self.db.commit()
-            
-            logger.info(f"Audit: {action} by user {user_id} in workspace {workspace_id}")
+            logger.info("Audit: %s by user %s in workspace %s", action, user_id, workspace_id)
             return entry
-        except Exception as e:
-            logger.error(f"Failed to create audit log: {e}")
-            # Don't fail the request if audit logging fails
+        except Exception:
+            self.db.rollback()
+            logger.exception("Failed to create audit log")
             return None
