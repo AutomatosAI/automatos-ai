@@ -31,8 +31,9 @@ export default function ComposioCallbackPage() {
         // If successful, close the popup
         if (status === 'success' || status === 'active' || connected) {
             if (window.opener) {
-                // Notify parent window
-                window.opener.postMessage({ type: 'COMPOSIO_CONNECTED', status, connectionId }, '*')
+                // Notify parent window with trusted origin
+                const trustedOrigin = window.location.origin
+                window.opener.postMessage({ type: 'COMPOSIO_CONNECTED', status, connectionId }, trustedOrigin)
                 window.close()
             } else {
                 // If not a popup, redirect to tools page
