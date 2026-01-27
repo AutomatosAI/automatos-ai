@@ -5,7 +5,8 @@ import { Send, StopCircle, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from './model-selector'
-import { AgentSelector } from './agent-selector'
+import { AgentSelector, type Agent } from './agent-selector'
+import { ToolLogo } from '@/components/ui/tool-logo'
 import type { VisibilityType, AppUsage } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
@@ -40,6 +41,7 @@ export function MultimodalInput({
   const [uploadQueue, setUploadQueue] = useState<string[]>([])
   const [uploadedDocs, setUploadedDocs] = useState<Array<{ document_id: string; filename: string; status: string }>>([])
   const [input, setInput] = useState('')
+  const [activeAgent, setActiveAgent] = useState<Agent | null>(null)
 
   // Safe input with default
   const safeInput = input || ''
@@ -206,6 +208,7 @@ export function MultimodalInput({
               <AgentSelector
                 selectedAgentId={selectedAgentId}
                 onAgentChange={onAgentChange}
+                onAgentData={setActiveAgent}
               />
             ) : (
               <ModelSelector
@@ -215,26 +218,50 @@ export function MultimodalInput({
             )}
           </div>
 
-          {/* Right side: Send/Stop Button */}
-          {isStreaming ? (
-            <Button
-              type="button"
-              onClick={stop}
-              size="icon"
-              className="bg-red-600 hover:bg-red-700 h-9 w-9 rounded-xl shadow-sm"
-            >
-              <StopCircle className="w-4 h-4" />
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              disabled={!safeInput.trim()}
-              size="icon"
-              className="h-10 w-10 rounded-2xl disabled:opacity-50 bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-[0_0_20px_rgba(249,115,22,0.25)] hover:shadow-[0_0_28px_rgba(249,115,22,0.35)] transition-shadow"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
-          )}
+          {/* Active Agent Tools - Next to Send Button */}
+          <div className="flex items-center gap-3 ml-auto mr-2 mt-1">
+            {activeAgent?.tools && activeAgent.tools.length > 0 && (
+              <div className="flex gap-2 items-center animate-in fade-in zoom-in-50 duration-300">
+                {activeAgent.tools.slice(0, 4).map((tool) => (
+                  <div key={tool.id} className="relative hover:scale-110 transition-all duration-200">
+                    <ToolLogo
+                      name={tool.name}
+                      logo={tool.icon}
+                      size={28}
+                      showBackground={true}
+                      className="bg-background/80 ring-1 ring-orange-500/30 border border-orange-500/20 shadow-[0_0_10px_rgba(249,115,22,0.1)] rounded-lg"
+                    />
+                  </div>
+                ))}
+                {activeAgent.tools.length > 4 && (
+                  <div className="w-7 h-7 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">
+                    +{activeAgent.tools.length - 4}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Send/Stop Button */}
+            {isStreaming ? (
+              <Button
+                type="button"
+                onClick={stop}
+                size="icon"
+                className="bg-red-600 hover:bg-red-700 h-9 w-9 rounded-xl shadow-sm"
+              >
+                <StopCircle className="w-4 h-4" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                disabled={!safeInput.trim()}
+                size="icon"
+                className="h-10 w-10 rounded-2xl disabled:opacity-50 bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-[0_0_20px_rgba(249,115,22,0.25)] hover:shadow-[0_0_28px_rgba(249,115,22,0.35)] transition-shadow"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

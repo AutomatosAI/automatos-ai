@@ -89,6 +89,13 @@ class MetadataSyncService:
             logger.info("Step 3/4: Upserting apps into cache...")
             for idx, (app_name, app) in enumerate(apps_by_name.items(), 1):
                 try:
+                    # Log trigger info for debugging
+                    trigger_count = app.get("trigger_count", 0)
+                    triggers = app.get("triggers", [])
+                    if trigger_count > 0 or len(triggers) > 0:
+                        logger.debug(f"App {app_name}: {trigger_count} triggers, {len(triggers)} in array")
+                    elif app_name in ["SLACK", "GMAIL", "GITHUB"]:
+                        logger.warning(f"⚠️  App {app_name} has 0 triggers - check if Composio API returned triggers")
                     self._upsert_app_only(app_name, app)
                     apps_synced += 1
                     if idx % 50 == 0 or idx == len(apps_by_name):

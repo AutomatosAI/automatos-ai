@@ -294,6 +294,8 @@ async def connected(
     for c in active:
         app_name = (c.get("app_name") or "").upper()
         cached = cache.get(app_name)
+        meta = (cached.app_metadata or {}) if cached else {}
+        triggers = meta.get("triggers") or []
         out.append(
             {
                 "id": cached.id if cached else None,
@@ -302,9 +304,12 @@ async def connected(
                 "connected_at": c.get("connected_at"),
                 "connection_id": c.get("connection_id"),
                 "display_name": cached.display_name if cached else app_name,
+                "description": cached.description if cached else None,
                 "logo_url": cached.logo_url if cached else None,
                 "categories": cached.categories if cached else [],
                 "action_count": cached.action_count if cached else 0,
+                "trigger_count": cached.trigger_count if cached else 0,
+                "triggers": triggers if isinstance(triggers, list) else [],
             }
         )
     return {"apps": out, "total": len(out)}

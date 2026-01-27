@@ -1522,6 +1522,7 @@ class ApiClient {
           action_count: a.action_count || 0,
           trigger_count: a.trigger_count || 0,
           auth_schemes: a.auth_schemes || [],
+          triggers: a.triggers || [],
         },
         updated_at: null,
       }))

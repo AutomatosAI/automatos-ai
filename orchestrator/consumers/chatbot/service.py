@@ -845,25 +845,36 @@ class StreamingChatService:
 
                         # Enhanced deduplication check with semantic similarity
                         should_skip, skip_reason = tool_tracker.should_skip_execution(tool_name, tool_args)
-                        if should_skip:
+                        
+                        # Determine if this skip should be silent (hidden from UI)
+                        # We silently hide "identical parameters" duplicates to prevent "printing twice"
+                        silent_suppression = False
+                        if should_skip and "identical parameters" in skip_reason:
+                            silent_suppression = True
+                            logger.info(f"🚫 Silently suppressing duplicate tool: {tool_name}")
+                        elif should_skip:
                             logger.warning(f"⚠️ Tool loop prevention: {skip_reason}")
                         else:
                             # Record the execution before it happens
                             tool_tracker.record_execution(tool_name, tool_args)
 
-                        tool_calls_prepared.append((tool_id, tool_name, tool_args, should_skip, skip_reason))
+                        tool_calls_prepared.append((tool_id, tool_name, tool_args, should_skip, skip_reason, silent_suppression))
 
-                        yield self.streaming_handler.format_aisdk_tool_start(
-                            tool_call_id=tool_id,
-                            tool_name=tool_name,
-                            tool_input=tool_args,
-                        )
+                        # Only emit start event if NOT silently suppressed
+                        if not silent_suppression:
+                            yield self.streaming_handler.format_aisdk_tool_start(
+                                tool_call_id=tool_id,
+                                tool_name=tool_name,
+                                tool_input=tool_args,
+                            )
                         await asyncio.sleep(0)
 
                     # Execute all tools in parallel
-                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], should_skip: bool, skip_reason: str = ""):
+                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], should_skip: bool, skip_reason: str, silent: bool):
                         if should_skip:
-                            logger.warning(f"⚠️ Skipping tool execution: {tool_name} - {skip_reason}")
+                            if not silent:
+                                logger.warning(f"⚠️ Skipping tool execution: {tool_name} - {skip_reason}")
+                            
                             return {
                                 "tool_call_id": tool_id,
                                 "tool_name": tool_name,
@@ -873,6 +884,7 @@ class StreamingChatService:
                                 "frontend_data": {},
                                 "success": False,
                                 "error": skip_reason,
+                                "silent": silent
                             }
 
                         # ------------------------------------------------------------------
@@ -901,6 +913,7 @@ class StreamingChatService:
                                         "frontend_data": {},
                                         "success": False,
                                         "error": "Refused destructive action for messaging intent",
+                                        "silent": False
                                     }
 
                         logger.info(f"Executing tool: {tool_name}")
@@ -920,11 +933,12 @@ class StreamingChatService:
                             "frontend_data": result.get("frontend_data", {}),
                             "success": bool(result.get("success")),
                             "error": (result.get("raw_result", {}) or {}).get("error"),
+                            "silent": False
                         }
 
                     results = await asyncio.gather(*[
-                        execute_single_tool(tool_id, tool_name, tool_args, should_skip, skip_reason)
-                        for (tool_id, tool_name, tool_args, should_skip, skip_reason) in tool_calls_prepared
+                        execute_single_tool(tool_id, tool_name, tool_args, should_skip, skip_reason, silent)
+                        for (tool_id, tool_name, tool_args, should_skip, skip_reason, silent) in tool_calls_prepared
                     ])
 
                     tool_results = []
@@ -932,29 +946,35 @@ class StreamingChatService:
 
                     # Emit tool-end + stream tool-data for each tool
                     for r in results:
-                        tool_id = r["tool_call_id"]
-                        tool_name = r["tool_name"]
-                        duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
+                        # Skip UI events for silently suppressed duplicates
+                        if r.get("silent"):
+                            # We still append to tool_results below so the LLM knows what happened
+                            # (or thinks it errored, so it stops trying), but frontend sees nothing.
+                            pass
+                        else:
+                            tool_id = r["tool_call_id"]
+                            tool_name = r["tool_name"]
+                            duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
 
-                        yield self.streaming_handler.format_aisdk_tool_end(
-                            tool_call_id=tool_id,
-                            tool_name=tool_name,
-                            success=r["success"],
-                            error=r.get("error"),
-                            duration_ms=duration_ms,
-                        )
-                        await asyncio.sleep(0)
-
-                        if r["success"] and r.get("frontend_data"):
-                            tool_data.update(r["frontend_data"])
-                            if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
-                                documents_tool_used = True
-                            yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
-                            sent_tool_data = True
+                            yield self.streaming_handler.format_aisdk_tool_end(
+                                tool_call_id=tool_id,
+                                tool_name=tool_name,
+                                success=r["success"],
+                                error=r.get("error"),
+                                duration_ms=duration_ms,
+                            )
                             await asyncio.sleep(0)
 
+                            if r["success"] and r.get("frontend_data"):
+                                tool_data.update(r["frontend_data"])
+                                if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
+                                    documents_tool_used = True
+                                yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
+                                sent_tool_data = True
+                                await asyncio.sleep(0)
+
                         tool_results.append({
-                            "tool_call_id": tool_id,
+                            "tool_call_id": r["tool_call_id"],
                             "role": "tool",
                             "content": r.get("content", ""),
                         })

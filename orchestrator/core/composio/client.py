@@ -375,12 +375,24 @@ class ComposioClient:
             trigger_map = self._build_trigger_map()
             results = []
             for app in apps:
-                raw_triggers = (
-                    getattr(app.meta, "triggers", None)
-                    or getattr(app, "triggers", None)
-                    or trigger_map.get(app.slug.lower(), [])
-                )
+                # Try multiple sources for triggers
+                raw_triggers = None
+                source = "none"
+                if hasattr(app, "meta") and hasattr(app.meta, "triggers"):
+                    raw_triggers = getattr(app.meta, "triggers", None)
+                    source = "app.meta.triggers"
+                if not raw_triggers and hasattr(app, "triggers"):
+                    raw_triggers = getattr(app, "triggers", None)
+                    source = "app.triggers"
+                if not raw_triggers:
+                    raw_triggers = trigger_map.get(app.slug.lower(), [])
+                    source = f"trigger_map[{app.slug.lower()}]"
+                
                 normalized_triggers = self._normalize_triggers(raw_triggers)
+                
+                # Log if we found triggers (for debugging)
+                if normalized_triggers and app.slug.lower() in ["slack", "gmail", "github"]:
+                    logger.debug(f"Found {len(normalized_triggers)} triggers for {app.slug} (source: {source})")
                 # Extract description from multiple possible sources
                 description = ""
                 if hasattr(app, "meta"):
@@ -415,16 +427,22 @@ class ComposioClient:
         """Build a map of toolkit slug -> triggers."""
         trigger_map: Dict[str, List[Dict[str, Any]]] = {}
         triggers = self.get_trigger_types()
+        logger.info(f"Fetched {len(triggers)} trigger types from Composio API")
+        if not triggers:
+            logger.warning("⚠️  No triggers fetched from Composio API - trigger_map will be empty")
         for trigger in triggers:
             toolkit = trigger.get("toolkit") or {}
             slug = (toolkit.get("slug") or "").lower()
             if not slug:
+                # Log if we're skipping triggers due to missing toolkit slug
+                logger.debug(f"Skipping trigger {trigger.get('name')} - no toolkit slug")
                 continue
             trigger_map.setdefault(slug, []).append({
                 "name": trigger.get("slug") or trigger.get("name"),
                 "display_name": trigger.get("name"),
                 "description": trigger.get("description"),
             })
+        logger.info(f"Built trigger map with {len(trigger_map)} toolkits")
         return trigger_map
 
     def _normalize_triggers(self, triggers: Any) -> List[Dict[str, Any]]:
@@ -475,11 +493,20 @@ class ComposioClient:
                 params["cursor"] = cursor
             resp = requests.get(url, headers=headers, params=params, timeout=15)
             if resp.status_code != 200:
-                logger.warning(f"Failed to fetch trigger types: {resp.status_code} {resp.text}")
+                logger.error(
+                    f"❌ Failed to fetch trigger types from Composio API: "
+                    f"status={resp.status_code}, response={resp.text[:200]}"
+                )
+                # Don't break on first error - might be pagination issue
+                # But log it clearly
+                if resp.status_code == 401:
+                    logger.error("⚠️  Authentication failed - check COMPOSIO_API_KEY")
+                elif resp.status_code == 403:
+                    logger.error("⚠️  API key doesn't have permission to fetch triggers")
                 break
             data = resp.json() or {}
             items.extend(data.get("items", []) or [])
-            cursor = data.get("next_cursor")
+            cursor = data.get("next_cursor") or data.get("nextCursor")
             if not cursor:
                 break
 
