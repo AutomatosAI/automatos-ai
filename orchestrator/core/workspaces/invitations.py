@@ -122,3 +122,10 @@ class InvitationService:
         invitation.accepted_at = datetime.utcnow()
         invitation.accepted_by_user_id = user_id
         self.db.commit()
+
+    def revoke_invitation(self, invitation: "WorkspaceInvitation") -> None:
+        """Delete a local invitation (e.g. after Clerk invite fails to avoid orphans)."""
+        if invitation is None:
+            return
+        self.db.query(WorkspaceInvitation).filter(WorkspaceInvitation.id == invitation.id).delete()
+        self.db.commit()

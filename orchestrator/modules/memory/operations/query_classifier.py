@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Optional, Dict, Any, List
 import logging
 import json
+import re
 from pydantic import BaseModel, Field
 
 # Try to import LLMManager, handle potential circular imports or location changes
@@ -81,32 +82,48 @@ class QueryClassifier:
         Classify this query."""
         
         try:
-            # This assumes llm_manager has a method to get a JSON response or struct response
-            # Adjust based on actual LLMManager capability. Making assumption it supports unified interface.
-            response = await self.llm_manager.generate_response(
-                prompt=prompt,
-                system_instruction=system_prompt,
-                response_format="json_object", # Hypothetical parameter
-                temperature=0.0
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            response = await self.llm_manager.generate_response(messages=messages, tools=[])
+
+            content = response.content if hasattr(response, "content") else (
+                str(response) if response is not None else ""
             )
-            
-            # Parse response
-            # Depending on LLMManager implementation, response might be a string or object.
-            content = response
-            if hasattr(response, 'content'):
-                content = response.content
-            
-            data = json.loads(content)
-            
-            # Additional heuristic: If directly asking "what is..." regarding a project entity, force memory
-            if "what is" in query.lower() or "who is" in query.lower():
-                # Heuristic override if confidence is low?
-                pass
-                
+            data = None
+            try:
+                data = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", content)
+                if match:
+                    try:
+                        data = json.loads(match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+                if not data:
+                    start = content.find("{")
+                    if start != -1:
+                        depth, end = 0, start
+                        for i, c in enumerate(content[start:], start):
+                            if c == "{":
+                                depth += 1
+                            elif c == "}":
+                                depth -= 1
+                                if depth == 0:
+                                    end = i
+                                    break
+                        try:
+                            data = json.loads(content[start : end + 1])
+                        except json.JSONDecodeError:
+                            pass
+            if not isinstance(data, dict):
+                raise ValueError("Could not parse JSON from classifier response")
+
             return ClassificationResult(**data)
-            
+
         except Exception as e:
-            logger.error(f"Query classification failed: {e}")
+            logger.error("Query classification failed: %s", e)
             # Fallback: Assume memory is needed if it's not a short greeting
             requires_memory = len(query) > 10
             return ClassificationResult(

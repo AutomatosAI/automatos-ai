@@ -1,9 +1,11 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from core.auth.hybrid import get_request_context_hybrid as get_request_context
 from core.auth.dependencies import RequestContext
-from core.auth.clerk import get_clerk_auth # Added import
+from core.auth.clerk import get_clerk_auth
 from core.database.database import get_db
 from core.workspaces.permissions import require_permission, WorkspaceRole
 from core.workspaces.invitations import InvitationService
@@ -12,6 +14,8 @@ from core.workspaces.models import WorkspaceMember
 from core.models.workspaces import Workspace
 from core.models.core import User
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/team", tags=["team"])
 
@@ -115,43 +119,44 @@ async def invite_member(
     valid_roles = [r.value for r in WorkspaceRole]
     if request.role not in valid_roles:
         raise HTTPException(400, f"Invalid role: {request.role}. Must be one of {valid_roles}")
-    
-    # Create Clerk Invitation if Org ID exists
-    clerk_invite_data = {}
-    if ctx.user.org_id:
-        clerk = get_clerk_auth()
-        try:
-             # This sends the email via Clerk
-            clerk_invite_data = await clerk.invite_to_org(
-                org_id=ctx.user.org_id,
-                email=request.email,
-                role=request.role,
-                inviter_user_id=ctx.user.clerk_user_id or str(ctx.user_id)
-            )
-        except ValueError as e:
-            raise HTTPException(400, str(e))
-    
-    # Also Create local invitation for record keeping
+
     invitation_service = InvitationService(db)
+    invitation = None
+    clerk_invite_data = {}
+
+    # Create local invitation first; then Clerk. If Clerk fails, revoke local invite.
     try:
         invitation = await invitation_service.create_invitation(
             workspace_id=workspace_id,
             email=request.email,
             role=request.role,
-            invited_by=ctx.user_id 
+            invited_by=ctx.user_id,
         )
     except ValueError as e:
-        # If local creation fails but Clerk succeeded, we're in a weird state.
-        # But usually local validation runs first.
         raise HTTPException(400, str(e))
-    
-    # Audit log
+
+    if ctx.user.org_id:
+        try:
+            clerk = get_clerk_auth()
+            clerk_invite_data = await clerk.invite_to_org(
+                org_id=ctx.user.org_id,
+                email=request.email,
+                role=request.role,
+                inviter_user_id=ctx.user.clerk_user_id or str(ctx.user_id),
+            )
+        except Exception as e:
+            try:
+                invitation_service.revoke_invitation(invitation)
+            except Exception as revoke_err:
+                logger.error("Failed to revoke invitation after Clerk error: %s", revoke_err)
+            raise HTTPException(status_code=502, detail=f"Clerk invite failed: {e}") from e
+
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         workspace_id=workspace_id,
         user_id=ctx.user_id,
         action="member:invited",
-        details={"email": request.email, "role": request.role, "clerk_id": clerk_invite_data.get("id")}
+        details={"email": request.email, "role": request.role, "clerk_id": clerk_invite_data.get("id")},
     )
     
     return InvitationResponse(
@@ -197,15 +202,14 @@ async def update_member_role(
     
     # TODO: Update role in Clerk metadata via API if needed
     
-    # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         workspace_id=workspace_id,
         user_id=ctx.user_id,
         action="member:role_changed",
         resource_type="member",
-        resource_id=member_id,
-        details={"old_role": old_role, "new_role": request.role}
+        resource_id=str(member_id),
+        details={"old_role": old_role, "new_role": request.role},
     )
     
     return {"status": "success", "new_role": request.role}
@@ -245,15 +249,14 @@ async def remove_member(
     member.is_active = False
     db.commit()
     
-    # Audit log
     audit = AuditService(db)
-    await audit.log(
+    audit.log(
         workspace_id=workspace_id,
         user_id=ctx.user_id,
         action="member:removed",
         resource_type="member",
-        resource_id=member_id,
-        details={"removed_user_id": member.user_id}
+        resource_id=str(member_id),
+        details={"removed_user_id": member.user_id},
     )
     
     return {"status": "success"}
