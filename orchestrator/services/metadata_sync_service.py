@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -89,13 +89,13 @@ class MetadataSyncService:
             logger.info("Step 3/4: Upserting apps into cache...")
             for idx, (app_name, app) in enumerate(apps_by_name.items(), 1):
                 try:
-                    # Log trigger info for debugging
                     trigger_count = app.get("trigger_count", 0)
                     triggers = app.get("triggers", [])
                     if trigger_count > 0 or len(triggers) > 0:
-                        logger.debug(f"App {app_name}: {trigger_count} triggers, {len(triggers)} in array")
-                    elif app_name in ["SLACK", "GMAIL", "GITHUB"]:
-                        logger.warning(f"⚠️  App {app_name} has 0 triggers - check if Composio API returned triggers")
+                        if app_name in ("SLACK", "GMAIL", "GITHUB"):
+                            logger.info(f"  Storing {trigger_count} triggers for {app_name}")
+                    elif app_name in ("SLACK", "GMAIL", "GITHUB"):
+                        logger.warning(f"⚠️  App {app_name} has 0 triggers - check Composio API / trigger_map")
                     self._upsert_app_only(app_name, app)
                     apps_synced += 1
                     if idx % 50 == 0 or idx == len(apps_by_name):
@@ -104,20 +104,30 @@ class MetadataSyncService:
                     logger.error(f"Failed to upsert app {app_name}: {e}")
                     errors.append(f"{app_name}: {e}")
 
-            # Upsert actions
-            logger.info("Step 4/4: Upserting actions into cache...")
+            # Upsert actions (and remove orphans so DB matches Composio bulk exactly)
+            logger.info("Step 4/4: Upserting actions into cache (removing orphans)...")
             total_actions = sum(len(actions) for actions in actions_by_app.values())
             action_idx = 0
             batch_size = 100  # Commit in batches to avoid huge transactions
+            seen: Set[Tuple[str, str]] = set()  # (app_name, action_name) to avoid bulk duplicates
             for app_name, actions in actions_by_app.items():
                 # Only store actions for known apps (avoid stray/unmapped toolkits)
                 if app_name not in apps_by_name:
                     continue
+                keep_names = {(a.get("name") or "").strip() for a in actions if (a.get("name") or "").strip()}
+                if keep_names:
+                    deleted = self._delete_orphaned_actions(app_name, keep_names)
+                    if deleted and app_name in ("GITHUB", "SLACK", "GMAIL"):
+                        logger.info(f"  Removed {deleted} orphaned actions for {app_name}")
                 for action in actions:
                     try:
                         name = (action.get("name") or "").strip()
                         if not name:
                             continue
+                        key = (app_name, name)
+                        if key in seen:
+                            continue
+                        seen.add(key)
                         self._upsert_action(app_name, name, action)
                         actions_synced += 1
                         action_idx += 1
@@ -137,7 +147,7 @@ class MetadataSyncService:
                         except Exception:
                             pass
 
-            # Update action_count per app from grouped actions (override toolkit meta if needed)
+            # Update action_count per app from actual DB count (matches bulk after orphan cleanup)
             for app_name, app in apps_by_name.items():
                 try:
                     cached = (
@@ -147,7 +157,13 @@ class MetadataSyncService:
                     )
                     if not cached:
                         continue
-                    cached.action_count = len(actions_by_app.get(app_name, []))
+                    actual = (
+                        self.db.query(func.count(ComposioActionCache.id))
+                        .filter(ComposioActionCache.app_name == app_name)
+                        .scalar()
+                        or 0
+                    )
+                    cached.action_count = int(actual)
                     cached.last_synced_at = datetime.utcnow()
                 except Exception as e:
                     errors.append(f"{app_name}: failed to update counts: {e}")
@@ -297,6 +313,20 @@ class MetadataSyncService:
             )
             self.db.add(cached)
             self.db.flush()
+
+    def _delete_orphaned_actions(self, app_name: str, keep_action_names: set) -> int:
+        """Delete actions for this app that are not in keep_action_names. Returns count deleted."""
+        if not keep_action_names:
+            return 0
+        to_delete = (
+            self.db.query(ComposioActionCache)
+            .filter(
+                ComposioActionCache.app_name == app_name,
+                ~ComposioActionCache.action_name.in_(list(keep_action_names)),
+            )
+        )
+        n = to_delete.delete(synchronize_session=False)
+        return int(n) if isinstance(n, int) else 0
 
     def _upsert_action(self, app_name: str, action_name: str, action: Dict[str, Any]) -> None:
         cached = (

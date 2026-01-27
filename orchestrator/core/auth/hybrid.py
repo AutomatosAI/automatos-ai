@@ -188,18 +188,22 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         clerk = get_clerk_auth()
         claims = clerk.verify_token(bearer)
         if claims:
+            # ... (successful resolution logic)
             info = clerk.extract_user_info(claims)
             resolved = workspace_id or _resolve_workspace_for_clerk_user(
                 clerk_user_id=info.get("clerk_user_id"),
                 org_id=info.get("org_id"),
             )
             if not resolved:
-                raise HTTPException(
+                 logger.warning(f"Auth failed: Workspace not resolved for user {info.get('email')}")
+                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
                 )
             if not _workspace_exists(resolved):
+                logger.warning(f"Auth failed: Workspace {resolved} does not exist")
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+            
             user = UserContext(
                 id=info.get("clerk_user_id") or info.get("email"),
                 email=info.get("email"),
@@ -212,6 +216,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
 
         # If a bearer token is present but invalid, treat as unauthorized.
+        logger.warning("Auth failed: Invalid or expired Clerk token")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
     # 2) API key
@@ -223,6 +228,7 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             or os.getenv("API_KEY")
         )
         if expected and provided_key == expected:
+            # ... (success logic)
             user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
             resolved = workspace_id
             if not resolved:
@@ -237,21 +243,22 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             return RequestContext(
                 workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
             )
-
+        
+        logger.warning("Auth failed: Invalid API key provided")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     # 3) Dev fallback
     if require_auth:
+        logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     # Keep noisy warnings down unless explicitly enabled
     if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.warning(
-            "Auth not configured (no Bearer token / API key). Using anonymous context. "
-            "Set REQUIRE_AUTH=true to enforce."
+        logger.info(
+            "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
         )
 
-    # Anonymous requests: still prefer a real workspace if unambiguous.
+    # Anonymous requests
     resolved = workspace_id or _resolve_workspace_for_clerk_user(clerk_user_id=None, org_id=None)
     if not resolved:
         resolved = UUID("00000000-0000-0000-0000-000000000001")

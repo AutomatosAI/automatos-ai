@@ -60,21 +60,27 @@ class UnifiedToolExecutor:
     and making it easier to add new tools.
     """
     
-    def __init__(self, db_session: Session, workspace_dir: str = "/tmp/automatos_workspace"):
+    def __init__(
+        self,
+        db_session: Session,
+        workspace_dir: str = "/tmp/automatos_workspace",
+        registry: Optional[ToolRegistry] = None,
+    ):
         """
         Initialize unified tool executor.
         
         Args:
-            db_session: Database session
+            db_session: Database session for this request
             workspace_dir: Directory for file operations
+            registry: Optional shared ToolRegistry. If provided, used instead of lazy-loading.
         """
         self.db = db_session
         self.workspace_dir = workspace_dir
+        self._tool_registry = registry  # Shared registry when provided; else lazy-load
         
         # Lazy-loaded executors (only initialize when needed)
         self._platform_tools = None  # For research tools (RAG, CodeGraph)
         self._action_executor = None  # For file/shell operations
-        self._tool_registry = None  # For tool metadata
         self._composio_executor = None  # PRD-36: Composio tools
         
         # Tool routing map
@@ -132,7 +138,7 @@ class UnifiedToolExecutor:
             # PRD-36: Composio tools routed dynamically by prefix
         }
         
-        logger.info("🔧 UnifiedToolExecutor initialized (lazy-loading enabled)")
+        logger.debug("UnifiedToolExecutor initialized (registry=%s)", "injected" if registry is not None else "lazy")
     
     @property
     def composio_executor(self):
@@ -216,10 +222,9 @@ class UnifiedToolExecutor:
         return self._action_executor
     
     @property
-    def tool_registry(self):
-        """Lazy-load tool registry using global singleton."""
+    def tool_registry(self) -> ToolRegistry:
+        """Use injected registry or lazy-load global singleton."""
         if self._tool_registry is None:
-            # Use global singleton to avoid re-registration on every executor
             from modules.tools.registry import get_tool_registry
             self._tool_registry = get_tool_registry(self.db)
         return self._tool_registry

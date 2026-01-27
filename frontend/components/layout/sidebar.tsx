@@ -65,6 +65,14 @@ const navigationItems = [
     description: 'Documents, databases & code-graph'
   },
   {
+    name: 'Team Management',
+    href: '/team',
+    icon: Users,
+    iconColor: 'text-blue-400',
+    description: 'Manage workspace members',
+    requiredRole: 'admin' as const, // Admin only
+  },
+  {
     name: 'Context Engineering',
     href: '/context',
     icon: Brain,

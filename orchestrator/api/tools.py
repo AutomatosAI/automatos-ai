@@ -286,9 +286,13 @@ async def connected(
     active = [c for c in connections if (c.get("status") or "").lower() == "active"]
 
     # Enrich with cached metadata if present
+    conn_app_names = [c.get("app_name") for c in active if c.get("app_name")]
+    app_names_upper = [(a or "").upper() for a in conn_app_names]
     cache = {
         a.app_name: a
-        for a in db.query(ComposioAppCache).filter(ComposioAppCache.app_name.in_([c["app_name"] for c in active])).all()
+        for a in db.query(ComposioAppCache).filter(
+            ComposioAppCache.app_name.in_(list(set(app_names_upper)))
+        ).all()
     }
     out = []
     for c in active:
@@ -296,6 +300,14 @@ async def connected(
         cached = cache.get(app_name)
         meta = (cached.app_metadata or {}) if cached else {}
         triggers = meta.get("triggers") or []
+        action_count = cached.action_count if cached else 0
+        if action_count == 0:
+            n = (
+                db.query(ComposioActionCache)
+                .filter(ComposioActionCache.app_name == app_name)
+                .count()
+            )
+            action_count = n
         out.append(
             {
                 "id": cached.id if cached else None,
@@ -307,7 +319,7 @@ async def connected(
                 "description": cached.description if cached else None,
                 "logo_url": cached.logo_url if cached else None,
                 "categories": cached.categories if cached else [],
-                "action_count": cached.action_count if cached else 0,
+                "action_count": action_count,
                 "trigger_count": cached.trigger_count if cached else 0,
                 "triggers": triggers if isinstance(triggers, list) else [],
             }

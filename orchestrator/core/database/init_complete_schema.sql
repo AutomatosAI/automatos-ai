@@ -523,7 +523,8 @@ CREATE TABLE IF NOT EXISTS kb_tables (
     has_totals BOOLEAN DEFAULT false,
     caption TEXT,
     footnotes TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    workspace_id UUID REFERENCES workspaces(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_kb_tables_knowledge_item ON kb_tables(knowledge_item_id);
@@ -546,7 +547,8 @@ CREATE TABLE IF NOT EXISTS kb_images (
     thumbnail_data BYTEA,
     storage_path VARCHAR(500),
     visual_embedding vector(512),
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    workspace_id UUID REFERENCES workspaces(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_kb_images_knowledge_item ON kb_images(knowledge_item_id);
@@ -566,7 +568,8 @@ CREATE TABLE IF NOT EXISTS kb_formulas (
     formula_type VARCHAR(100),
     domain VARCHAR(100),
     rendered_svg TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    workspace_id UUID REFERENCES workspaces(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_kb_formulas_knowledge_item ON kb_formulas(knowledge_item_id);

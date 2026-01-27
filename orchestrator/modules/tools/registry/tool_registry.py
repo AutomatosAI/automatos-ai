@@ -1086,6 +1086,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
 
 # Global registry instance
 _tool_registry: Optional[ToolRegistry] = None
+_registry_init_logged: bool = False
 
 
 def get_tool_registry(db_session: Optional[Session] = None) -> ToolRegistry:
@@ -1098,16 +1099,20 @@ def get_tool_registry(db_session: Optional[Session] = None) -> ToolRegistry:
     Returns:
         ToolRegistry instance
     """
-    global _tool_registry
+    global _tool_registry, _registry_init_logged
     
     if _tool_registry is None:
         _tool_registry = ToolRegistry(db_session=db_session)
+        if not _registry_init_logged:
+            logger.info("Tool registry initialized (singleton)")
+            _registry_init_logged = True
     
     return _tool_registry
 
 
 def reset_tool_registry():
-    """Reset the global registry (for testing)"""
-    global _tool_registry
+    """Reset the global registry (for testing)."""
+    global _tool_registry, _registry_init_logged
     _tool_registry = None
+    _registry_init_logged = False
 
