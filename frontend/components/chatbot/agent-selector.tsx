@@ -15,24 +15,54 @@ import { apiClient } from '@/lib/api-client'
 
 import { useWorkspace } from '@/components/workspace-provider'
 
+import { ToolLogo } from '@/components/ui/tool-logo'
+import { Badge } from '@/components/ui/badge'
+
 export interface Agent {
   id: number
   name: string
   agent_type: string
   description: string
   status: string
-  skills: string[]
-  model_config: any
+  skills?: Array<{ id: string; name: string }>
+  agent_model_config?: {
+    model_id?: string
+    provider?: string
+  }
+  model_config?: any // Legacy fallback
   is_default: boolean
   tags: string[]
+  tools?: Array<{
+    id: number
+    name: string
+    icon?: string
+  }>
 }
 
 export interface AgentSelectorProps {
   selectedAgentId?: number | null
   onAgentChange: (agentId: number | null) => void
+  onAgentData?: (agent: Agent | null) => void
 }
 
-export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorProps) {
+// Helper for model display name
+const getModelDisplayName = (modelId?: string): string => {
+  if (!modelId) return 'GPT-4'
+
+  const modelNames: Record<string, string> = {
+    'gpt-4': 'GPT-4',
+    'gpt-4-turbo': 'GPT-4 Turbo',
+    'gpt-4-turbo-preview': 'GPT-4 Turbo',
+    'gpt-3.5-turbo': 'GPT-3.5',
+    'claude-3-opus-20240229': 'Claude 3 Opus',
+    'claude-3-sonnet-20240229': 'Claude 3 Sonnet',
+    'claude-3-haiku-20240307': 'Claude 3 Haiku',
+  }
+
+  return modelNames[modelId] || modelId.split('-')[0].toUpperCase()
+}
+
+export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: AgentSelectorProps) {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { workspace, isLoading: isWorkspaceLoading } = useWorkspace()
@@ -57,24 +87,16 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId)
 
-  const agentsByType = agents.reduce((acc: Record<string, Agent[]>, agent) => {
-    const type = agent.agent_type || 'custom'
-    if (!acc[type]) acc[type] = []
-    acc[type].push(agent)
-    return acc
-  }, {})
+  // Bubble up selected agent data
+  useEffect(() => {
+    if (onAgentData) {
+      onAgentData(selectedAgent || null)
+    }
+  }, [selectedAgent, onAgentData])
 
-  const typeLabels: Record<string, string> = {
-    system: '⚙️ System',
-    code_architect: '💻 Code Experts',
-    security_expert: '🔒 Security',
-    technical_writer: '📝 Writers',
-    data_analyst: '📊 Data',
-    operations: '🚀 DevOps',
-    custom: '🤖 Custom',
-    analysis: '🔍 Analysis',
-    specialized: '⭐ Specialized',
-  }
+
+
+
 
   return (
     <DropdownMenu>
@@ -82,19 +104,30 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
+          className="h-9 px-3 rounded-full border-2 border-orange-500/20 bg-black/20 hover:bg-orange-500/5 hover:border-orange-500/40 text-foreground/90 text-xs gap-2 shadow-[0_0_18px_rgba(249,115,22,0.10)]"
         >
           {isLoading ? (
             <Loader2 className="w-3 h-3 animate-spin" />
           ) : (
             <>
-              <Bot className="w-3 h-3 text-orange-400" />
-              <span className="truncate max-w-[160px]">
-                {selectedAgent?.name || 'Auto (Model)'}
-              </span>
+              {selectedAgent ? (
+                <>
+                  <Bot className="w-3 h-3 text-orange-400" />
+                  <span className="truncate max-w-[120px] font-medium">
+                    {selectedAgent.name}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Bot className="w-3 h-3 text-orange-400" />
+                  <span className="truncate max-w-[160px]">
+                    Auto (Model)
+                  </span>
+                </>
+              )}
             </>
           )}
-          <ChevronDown className="w-3 h-3 text-orange-400" />
+          <ChevronDown className="w-3 h-3 text-orange-400 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -120,48 +153,70 @@ export function AgentSelector({ selectedAgentId, onAgentChange }: AgentSelectorP
         </DropdownMenuItem>
         <DropdownMenuSeparator />
 
-        {Object.entries(agentsByType).map(([type, typeAgents]) => (
-          <div key={type}>
-            <DropdownMenuLabel className="text-xs text-muted-foreground sticky top-0 bg-background z-10">
-              {typeLabels[type] || type}
-            </DropdownMenuLabel>
-            {typeAgents.map((agent) => {
-              const isSelected = selectedAgentId === agent.id
-              const modelName = agent.model_config?.model_id || 'Unknown'
+        {agents.map((agent) => {
+          const isSelected = selectedAgentId === agent.id
 
-              return (
-                <DropdownMenuItem
-                  key={agent.id}
-                  onClick={() => onAgentChange(agent.id)}
-                  className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
-                >
-                  <div className="flex items-start justify-between w-full">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm">{agent.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {agent.description}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs text-muted-foreground/70">
-                          {modelName}
-                        </span>
-                        {agent.skills.length > 0 && (
-                          <span className="text-xs text-orange-400/70">
-                            • {agent.skills.length} skill{agent.skills.length !== 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {isSelected && (
-                      <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
-                    )}
+          return (
+            <DropdownMenuItem
+              key={agent.id}
+              onClick={() => onAgentChange(agent.id)}
+              className="text-foreground hover:bg-orange-500/10 cursor-pointer rounded-lg py-2"
+            >
+              <div className="flex items-start justify-between w-full">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium text-sm">{agent.name}</div>
+                    <span className="text-[10px] text-muted-foreground/70 bg-secondary/30 px-1.5 py-0.5 rounded border border-white/5">
+                      {getModelDisplayName(agent.agent_model_config?.model_id || agent.model_config?.model_id)}
+                    </span>
                   </div>
-                </DropdownMenuItem>
-              )
-            })}
-            <DropdownMenuSeparator />
-          </div>
-        ))}
+                  <div className="text-xs text-muted-foreground truncate">
+                    {agent.description}
+                  </div>
+
+                  {agent.skills && agent.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {agent.skills.slice(0, 3).map((skill: any) => (
+                        <Badge key={skill.id} variant="secondary" className="text-[10px] px-1 h-5 font-normal bg-orange-500/5 text-orange-300 border-orange-500/10">
+                          {skill.name ? skill.name.replace('_', ' ') : 'Unknown'}
+                        </Badge>
+                      ))}
+                      {agent.skills.length > 3 && (
+                        <Badge variant="secondary" className="text-[10px] px-1 h-5 font-normal bg-secondary/30 text-muted-foreground">
+                          +{agent.skills.length - 3}
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tools Preview */}
+                  {agent.tools && agent.tools.length > 0 && (
+                    <div className="flex items-center gap-1 mt-2 pt-2 border-t border-white/5">
+                      {agent.tools.slice(0, 5).map((tool) => (
+                        <ToolLogo
+                          key={tool.id}
+                          name={tool.name}
+                          logo={tool.icon}
+                          size={14}
+                          showBackground={true}
+                          className="bg-secondary/30 border border-white/5 opacity-70 hover:opacity-100 transition-opacity"
+                        />
+                      ))}
+                      {agent.tools.length > 5 && (
+                        <span className="text-[10px] text-muted-foreground ml-1">
+                          +{agent.tools.length - 5}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {isSelected && (
+                  <Check className="w-4 h-4 text-orange-400 ml-2 flex-shrink-0" />
+                )}
+              </div>
+            </DropdownMenuItem>
+          )
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   )

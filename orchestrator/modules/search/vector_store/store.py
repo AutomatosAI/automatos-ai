@@ -164,7 +164,7 @@ class EnhancedVectorStore:
             # Create additional tables for advanced features
             await self._create_auxiliary_tables(conn)
         
-        logger.info(f"Enhanced vector store initialized with dimension {self.embedding_dimension}")
+        logger.debug(f"Enhanced vector store initialized with dimension {self.embedding_dimension}")
     
     async def _create_indexes(self, conn: asyncpg.Connection) -> None:
         """Create optimized indexes for vector operations"""

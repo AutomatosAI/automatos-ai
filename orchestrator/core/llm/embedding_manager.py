@@ -7,11 +7,12 @@ Reads configuration from General Settings and provides unified interface.
 """
 
 import logging
+import threading
 from typing import Optional, List
 
 from .clients.base import (
-    BaseEmbeddingProvider, 
-    EmbeddingConfig, 
+    BaseEmbeddingProvider,
+    EmbeddingConfig,
     EmbeddingProvider,
     DeterministicEmbeddingProvider
 )
@@ -19,6 +20,11 @@ from .clients.openai_embedding import OpenAIEmbeddingProvider
 from .clients.huggingface_embedding import HuggingFaceLocalEmbeddingProvider
 
 logger = logging.getLogger(__name__)
+
+# Thread-safe singleton lock
+_embedding_lock = threading.Lock()
+_embedding_manager: Optional["EmbeddingManager"] = None
+_init_logged = False
 
 
 def get_system_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
@@ -96,7 +102,7 @@ class EmbeddingManager:
             cache_dir = get_system_setting("embedding_cache_dir") or "./model_cache"
             dimension_str = get_system_setting("vector_store_dimensions") or "1024"
             
-            logger.info(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
+            logger.debug(f"Loaded embedding settings: provider={provider_type}, model={model}, dim={dimension_str}")
             
             # Fallback to environment variables if DB settings failed
             import os
@@ -112,7 +118,7 @@ class EmbeddingManager:
             dimension = int(dimension_str)
             
             if not provider_type or provider_type == "disabled":
-                logger.info("Embedding provider disabled - using deterministic fallback")
+                logger.debug("Embedding provider disabled - using deterministic fallback")
                 self.provider = DeterministicEmbeddingProvider(dimension=dimension)
                 return
             
@@ -153,7 +159,7 @@ class EmbeddingManager:
             
             # Create provider
             self.provider = self._create_provider(config)
-            logger.info(
+            logger.debug(
                 f"Initialized {provider_type} embedding provider "
                 f"(model: {model}, dimension: {dimension})"
             )
@@ -238,20 +244,28 @@ class EmbeddingManager:
         }
 
 
-# Singleton instance
-_embedding_manager: Optional[EmbeddingManager] = None
-
-
 def create_embedding_manager() -> EmbeddingManager:
     """
-    Create or get singleton embedding manager.
-    
+    Create or get singleton embedding manager (thread-safe).
+
     Returns:
         EmbeddingManager instance
     """
-    global _embedding_manager
-    if _embedding_manager is None:
-        _embedding_manager = EmbeddingManager()
+    global _embedding_manager, _init_logged
+
+    # Fast path - already initialized
+    if _embedding_manager is not None:
+        return _embedding_manager
+
+    # Thread-safe initialization
+    with _embedding_lock:
+        # Double-check after acquiring lock
+        if _embedding_manager is None:
+            _embedding_manager = EmbeddingManager()
+            if not _init_logged:
+                logger.info("EmbeddingManager singleton initialized")
+                _init_logged = True
+
     return _embedding_manager
 
 

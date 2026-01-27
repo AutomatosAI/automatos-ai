@@ -137,7 +137,7 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
     """Build agent response with skills and tools"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
-    logger.info(f"Agent {agent.id} model_config: {model_cfg}")
+    logger.debug(f"Agent {agent.id} model_config: {model_cfg}")
     
     # Build tools list from the NEW assignment table (agent_app_assignments).
     tools: List[Dict[str, Any]] = []

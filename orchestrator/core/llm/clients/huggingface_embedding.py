@@ -29,7 +29,7 @@ class HuggingFaceLocalEmbeddingProvider(BaseEmbeddingProvider):
             )
         
         try:
-            logger.info(
+            logger.debug(
                 f"Loading HuggingFace model: {self.config.model} "
                 f"(cache: {self.config.cache_dir})"
             )
@@ -37,7 +37,7 @@ class HuggingFaceLocalEmbeddingProvider(BaseEmbeddingProvider):
                 self.config.model,
                 cache_folder=self.config.cache_dir
             )
-            logger.info(
+            logger.debug(
                 f"Initialized HuggingFace embedding model: {self.config.model} "
                 f"({self.get_dimension()}d)"
             )

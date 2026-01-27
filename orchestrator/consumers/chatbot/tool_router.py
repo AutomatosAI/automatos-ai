@@ -41,6 +41,36 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# EXECUTOR CACHING - Global singleton to avoid registry re-initialization
+# =============================================================================
+
+import threading
+_executor_lock = threading.Lock()
+_global_executor: Optional[UnifiedToolExecutor] = None
+_executor_init_logged = False
+
+
+def _get_cached_executor(db_session, force_new: bool = False):
+    """
+    Get a global UnifiedToolExecutor, updating its db_session.
+    Uses a singleton pattern to avoid re-initializing the tool registry.
+    The db_session is updated each call to ensure fresh transactions.
+    """
+    global _global_executor, _executor_init_logged
+
+    with _executor_lock:
+        if _global_executor is None or force_new:
+            _global_executor = UnifiedToolExecutor(db_session)
+            if not _executor_init_logged:
+                logger.info("Initialized global UnifiedToolExecutor (singleton)")
+                _executor_init_logged = True
+        else:
+            # Update db session for the existing executor
+            _global_executor.db = db_session
+
+        return _global_executor
+
 def _new_trace_id() -> str:
     return uuid4().hex[:12]
 
@@ -188,9 +218,11 @@ async def execute_tool(
     """
     Execute a tool via modules.tools.UnifiedToolExecutor.
     SINGLE ENTRY POINT for all tool execution in chat.
+
+    Uses cached executor to avoid re-initializing tool registry on every call.
     """
     from core.database.database import SessionLocal
-    
+
     trace = trace_id or _new_trace_id()
     # Use SessionLocal directly - simpler and works
     db_session = SessionLocal()
@@ -206,7 +238,10 @@ async def execute_tool(
                     logger.warning(f"[tool-trace {trace}] Agent workspace_id missing for agent={agent_id}")
             except Exception as exc:
                 logger.warning(f"[tool-trace {trace}] Failed to resolve workspace_id: {exc}")
-        executor = UnifiedToolExecutor(db_session)
+
+        # Use cached executor to avoid registry re-initialization overhead
+        executor = _get_cached_executor(db_session)
+
         logger.info(
             f"[tool-trace {trace}] execute_tool start tool={tool_name} "
             f"agent={agent_id} workspace={workspace_id} args={_summarize_args(tool_args)}"
@@ -283,13 +318,25 @@ class ToolRouter:
                 except Exception as exc:
                     logger.debug(f"[tool-trace {trace_id}] Relative date rewrite skipped: {exc}")
 
-            result = await execute_tool(
-                tool_name,
-                tool_args if isinstance(tool_args, dict) else {},
-                agent_id,
-                workspace_id=workspace_id,
-                trace_id=trace_id,
-            )
+            # Use validation wrapper for Composio tools to prevent calling unassigned actions
+            is_composio = tool_name.startswith("composio_") or tool_name == "composio_execute"
+            if is_composio and original_intent:
+                result = await execute_tool_with_validation(
+                    tool_name=tool_name,
+                    tool_args=tool_args if isinstance(tool_args, dict) else {},
+                    original_intent=original_intent,
+                    agent_id=agent_id,
+                    workspace_id=workspace_id,
+                    allow_destructive=False,
+                )
+            else:
+                result = await execute_tool(
+                    tool_name,
+                    tool_args if isinstance(tool_args, dict) else {},
+                    agent_id,
+                    workspace_id=workspace_id,
+                    trace_id=trace_id,
+                )
 
             # Check success (support multiple executor result shapes)
             success = (
@@ -691,9 +738,14 @@ def validate_action_for_intent(
         return eligible, reason
 
     except Exception as e:
-        logger.error(f"Action validation error: {e}")
+        # Log at debug level if it's a missing table error (expected during development)
+        error_str = str(e)
+        if "does not exist" in error_str or "UndefinedTable" in error_str:
+            logger.debug(f"Action validation skipped (table not created): {e}")
+        else:
+            logger.warning(f"Action validation error (fail open): {e}")
         # Fail open on errors to avoid blocking legitimate actions
-        return True, f"Validation error (fail open): {e}"
+        return True, "Validation skipped (fail open)"
     finally:
         if db_session is None:
             session_used.close()

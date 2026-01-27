@@ -16,11 +16,13 @@ import json
 import logging
 import uuid
 import re
-from typing import List, Optional, Dict, Any, AsyncGenerator
+import hashlib
+from typing import List, Optional, Dict, Any, AsyncGenerator, Set, Tuple
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
+from difflib import SequenceMatcher
 
 from core.models import Chat, Message, Vote, Workspace
 from config import config
@@ -34,6 +36,152 @@ from consumers.chatbot.tool_router import get_tool_router, get_chat_tools
 from modules.memory.operations import get_memory_injector
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# TOOL LOOP PREVENTION UTILITIES
+# =============================================================================
+
+def _normalize_query(query: str) -> str:
+    """Normalize a search query for deduplication comparison."""
+    if not query:
+        return ""
+    # Lowercase, remove extra whitespace, strip punctuation
+    normalized = re.sub(r'[^\w\s]', '', query.lower())
+    normalized = ' '.join(normalized.split())
+    return normalized
+
+
+def _queries_are_similar(query1: str, query2: str, threshold: float = 0.75) -> bool:
+    """
+    Check if two queries are semantically similar using string similarity.
+    Returns True if similarity ratio >= threshold.
+    """
+    norm1 = _normalize_query(query1)
+    norm2 = _normalize_query(query2)
+
+    if not norm1 or not norm2:
+        return False
+
+    # Exact match after normalization
+    if norm1 == norm2:
+        return True
+
+    # Use SequenceMatcher for fuzzy matching
+    ratio = SequenceMatcher(None, norm1, norm2).ratio()
+    return ratio >= threshold
+
+
+def _extract_query_from_args(tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
+    """Extract the search/query parameter from tool arguments."""
+    # Common query parameter names
+    query_keys = ['query', 'search_query', 'q', 'text', 'question', 'prompt']
+
+    for key in query_keys:
+        if key in tool_args and isinstance(tool_args[key], str):
+            return tool_args[key]
+
+    return None
+
+
+class ToolExecutionTracker:
+    """
+    Tracks tool executions within a conversation turn to prevent looping.
+    Implements:
+    - Exact deduplication (same tool + same args)
+    - Semantic deduplication for search tools (similar queries)
+    - Per-tool retry limits
+    """
+
+    # Tools that use search queries and should have semantic deduplication
+    SEARCH_TOOLS = {
+        'search_knowledge', 'semantic_search', 'search_codebase',
+        'search_tables', 'search_images', 'search_formulas',
+        'search_multimodal', 'smart_query_database', 'query_database'
+    }
+
+    # Max retries per tool type
+    TOOL_RETRY_LIMITS = {
+        'composio_execute': 2,      # Composio gets 2 total attempts
+        'search_knowledge': 2,
+        'semantic_search': 2,
+        'search_codebase': 2,
+        'smart_query_database': 2,
+        'query_database': 2,
+        'list_directory': 2,
+        'read_file': 3,
+        'write_file': 2,
+        'default': 3                # Default limit for unlisted tools
+    }
+
+    def __init__(self):
+        # Track exact executions: set of (tool_name, args_hash)
+        self.exact_executions: Set[Tuple[str, str]] = set()
+        # Track queries per search tool for semantic dedup: {tool_name: [queries]}
+        self.search_queries: Dict[str, List[str]] = {}
+        # Track execution counts per tool: {tool_name: count}
+        self.tool_counts: Dict[str, int] = {}
+
+    def _hash_args(self, tool_args: Dict[str, Any]) -> str:
+        """Create a hash of tool arguments for exact matching."""
+        return hashlib.md5(json.dumps(tool_args, sort_keys=True).encode()).hexdigest()
+
+    def should_skip_execution(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any]
+    ) -> Tuple[bool, str]:
+        """
+        Check if a tool execution should be skipped.
+
+        Returns:
+            (should_skip, reason) - True if should skip, with explanation
+        """
+        # Check retry limit
+        current_count = self.tool_counts.get(tool_name, 0)
+        limit = self.TOOL_RETRY_LIMITS.get(tool_name, self.TOOL_RETRY_LIMITS['default'])
+
+        if current_count >= limit:
+            return True, f"Tool '{tool_name}' has reached its execution limit ({limit}) for this turn"
+
+        # Check exact duplicate
+        args_hash = self._hash_args(tool_args)
+        exec_key = (tool_name, args_hash)
+
+        if exec_key in self.exact_executions:
+            return True, f"Tool '{tool_name}' was already executed with identical parameters"
+
+        # Check semantic similarity for search tools
+        if tool_name in self.SEARCH_TOOLS:
+            query = _extract_query_from_args(tool_name, tool_args)
+            if query:
+                previous_queries = self.search_queries.get(tool_name, [])
+                for prev_query in previous_queries:
+                    if _queries_are_similar(query, prev_query):
+                        return True, f"Tool '{tool_name}' was already executed with a similar query"
+
+        return False, ""
+
+    def record_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> None:
+        """Record that a tool was executed."""
+        # Record exact execution
+        args_hash = self._hash_args(tool_args)
+        self.exact_executions.add((tool_name, args_hash))
+
+        # Increment count
+        self.tool_counts[tool_name] = self.tool_counts.get(tool_name, 0) + 1
+
+        # Record query for search tools
+        if tool_name in self.SEARCH_TOOLS:
+            query = _extract_query_from_args(tool_name, tool_args)
+            if query:
+                if tool_name not in self.search_queries:
+                    self.search_queries[tool_name] = []
+                self.search_queries[tool_name].append(query)
+
+    def get_execution_count(self, tool_name: str) -> int:
+        """Get the number of times a tool has been executed."""
+        return self.tool_counts.get(tool_name, 0)
 
 # =============================================================================
 # CHAT SERVICE - DATABASE OPERATIONS
@@ -670,7 +818,8 @@ class StreamingChatService:
                 # Allow one recovery if the model calls composio_execute with missing args.
                 composio_invalid_parameters_retry_budget = 1
 
-                executed_tool_signatures = set()
+                # Use enhanced tool execution tracker for loop prevention
+                tool_tracker = ToolExecutionTracker()
 
                 while current_response.tool_calls and iteration < max_iterations:
                     iteration += 1
@@ -693,35 +842,49 @@ class StreamingChatService:
                             tool_args = {"raw": tool_args_raw}
                         
                         start_times[tool_id] = time.time()
-                        
-                        # Deduplication check
-                        tool_sig = (tool_name, json.dumps(tool_args, sort_keys=True))
-                        is_duplicate = tool_sig in executed_tool_signatures
-                        if not is_duplicate:
-                            executed_tool_signatures.add(tool_sig)
-                        
-                        tool_calls_prepared.append((tool_id, tool_name, tool_args, is_duplicate))
 
-                        yield self.streaming_handler.format_aisdk_tool_start(
-                            tool_call_id=tool_id,
-                            tool_name=tool_name,
-                            tool_input=tool_args,
-                        )
+                        # Enhanced deduplication check with semantic similarity
+                        should_skip, skip_reason = tool_tracker.should_skip_execution(tool_name, tool_args)
+                        
+                        # Determine if this skip should be silent (hidden from UI)
+                        # We silently hide "identical parameters" duplicates to prevent "printing twice"
+                        silent_suppression = False
+                        if should_skip and "identical parameters" in skip_reason:
+                            silent_suppression = True
+                            logger.info(f"🚫 Silently suppressing duplicate tool: {tool_name}")
+                        elif should_skip:
+                            logger.warning(f"⚠️ Tool loop prevention: {skip_reason}")
+                        else:
+                            # Record the execution before it happens
+                            tool_tracker.record_execution(tool_name, tool_args)
+
+                        tool_calls_prepared.append((tool_id, tool_name, tool_args, should_skip, skip_reason, silent_suppression))
+
+                        # Only emit start event if NOT silently suppressed
+                        if not silent_suppression:
+                            yield self.streaming_handler.format_aisdk_tool_start(
+                                tool_call_id=tool_id,
+                                tool_name=tool_name,
+                                tool_input=tool_args,
+                            )
                         await asyncio.sleep(0)
 
                     # Execute all tools in parallel
-                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], is_duplicate: bool):
-                        if is_duplicate:
-                            logger.warning(f"⚠️ Skipping duplicate tool execution: {tool_name}")
+                    async def execute_single_tool(tool_id: str, tool_name: str, tool_args: Dict[str, Any], should_skip: bool, skip_reason: str, silent: bool):
+                        if should_skip:
+                            if not silent:
+                                logger.warning(f"⚠️ Skipping tool execution: {tool_name} - {skip_reason}")
+                            
                             return {
                                 "tool_call_id": tool_id,
                                 "tool_name": tool_name,
                                 "tool_args": tool_args,
                                 "role": "tool",
-                                "content": f"Error: Tool '{tool_name}' was already executed with these parameters in this turn. Do not call it again.",
+                                "content": f"Error: {skip_reason}. Do not call this tool again with similar parameters.",
                                 "frontend_data": {},
                                 "success": False,
-                                "error": "Duplicate execution skipped",
+                                "error": skip_reason,
+                                "silent": silent
                             }
 
                         # ------------------------------------------------------------------
@@ -750,6 +913,7 @@ class StreamingChatService:
                                         "frontend_data": {},
                                         "success": False,
                                         "error": "Refused destructive action for messaging intent",
+                                        "silent": False
                                     }
 
                         logger.info(f"Executing tool: {tool_name}")
@@ -769,11 +933,12 @@ class StreamingChatService:
                             "frontend_data": result.get("frontend_data", {}),
                             "success": bool(result.get("success")),
                             "error": (result.get("raw_result", {}) or {}).get("error"),
+                            "silent": False
                         }
 
                     results = await asyncio.gather(*[
-                        execute_single_tool(tool_id, tool_name, tool_args, is_dup)
-                        for (tool_id, tool_name, tool_args, is_dup) in tool_calls_prepared
+                        execute_single_tool(tool_id, tool_name, tool_args, should_skip, skip_reason, silent)
+                        for (tool_id, tool_name, tool_args, should_skip, skip_reason, silent) in tool_calls_prepared
                     ])
 
                     tool_results = []
@@ -781,29 +946,35 @@ class StreamingChatService:
 
                     # Emit tool-end + stream tool-data for each tool
                     for r in results:
-                        tool_id = r["tool_call_id"]
-                        tool_name = r["tool_name"]
-                        duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
+                        # Skip UI events for silently suppressed duplicates
+                        if r.get("silent"):
+                            # We still append to tool_results below so the LLM knows what happened
+                            # (or thinks it errored, so it stops trying), but frontend sees nothing.
+                            pass
+                        else:
+                            tool_id = r["tool_call_id"]
+                            tool_name = r["tool_name"]
+                            duration_ms = int((time.time() - start_times.get(tool_id, time.time())) * 1000)
 
-                        yield self.streaming_handler.format_aisdk_tool_end(
-                            tool_call_id=tool_id,
-                            tool_name=tool_name,
-                            success=r["success"],
-                            error=r.get("error"),
-                            duration_ms=duration_ms,
-                        )
-                        await asyncio.sleep(0)
-
-                        if r["success"] and r.get("frontend_data"):
-                            tool_data.update(r["frontend_data"])
-                            if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
-                                documents_tool_used = True
-                            yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
-                            sent_tool_data = True
+                            yield self.streaming_handler.format_aisdk_tool_end(
+                                tool_call_id=tool_id,
+                                tool_name=tool_name,
+                                success=r["success"],
+                                error=r.get("error"),
+                                duration_ms=duration_ms,
+                            )
                             await asyncio.sleep(0)
 
+                            if r["success"] and r.get("frontend_data"):
+                                tool_data.update(r["frontend_data"])
+                                if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
+                                    documents_tool_used = True
+                                yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
+                                sent_tool_data = True
+                                await asyncio.sleep(0)
+
                         tool_results.append({
-                            "tool_call_id": tool_id,
+                            "tool_call_id": r["tool_call_id"],
                             "role": "tool",
                             "content": r.get("content", ""),
                         })
@@ -918,8 +1089,12 @@ class StreamingChatService:
                     )
 
                     logger.info(
-                        f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}"
+                        f"Iteration {iteration} complete. More tool calls: {bool(current_response.tool_calls)}, "
+                        f"Has content: {bool(current_response.content)}"
                     )
+                    # Log tool execution summary for debugging
+                    if tool_tracker.tool_counts:
+                        logger.info(f"📊 Tool execution counts this turn: {dict(tool_tracker.tool_counts)}")
 
                 if iteration >= max_iterations and current_response.tool_calls:
                     logger.warning(f"Hit max tool iterations ({max_iterations}). Forcing final response.")

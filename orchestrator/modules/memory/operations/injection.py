@@ -33,7 +33,7 @@ def get_memory_system():
             # Import from new module location
             from modules.memory.storage.knowledge_system import HierarchicalMemorySystem
             _memory_system = HierarchicalMemorySystem()
-            logger.info("✅ MemoryInjector connected to HierarchicalMemorySystem")
+            logger.debug("MemoryInjector connected to HierarchicalMemorySystem")
         except Exception as e:
             logger.warning(f"Could not initialize memory system: {e}")
     return _memory_system
@@ -64,7 +64,7 @@ async def get_context_retrieval_engine():
                 chunker=chunker,
                 default_strategy=RetrievalStrategy.ADAPTIVE
             )
-            logger.info("✅ MemoryInjector connected to ContextRetrievalEngine")
+            logger.debug("MemoryInjector connected to ContextRetrievalEngine")
         except Exception as e:
             logger.warning(f"ContextRetrievalEngine not available: {e}")
     return _context_retrieval_engine
@@ -97,7 +97,7 @@ class MemoryInjector:
         # Skip for common greetings and short acknowledgments
         greetings = {"hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye", "cool", "ok", "okay"}
         if query_lower in greetings:
-            logger.info("[Memory] Skipping retrieval for greeting/short msg")
+            logger.debug("[Memory] Skipping retrieval for greeting/short msg")
             return False
         
         # Check if query references past context - stronger signal to retrieve
@@ -141,14 +141,14 @@ class MemoryInjector:
             # Try advanced retrieval engine first
             engine = await get_context_retrieval_engine()
             if engine:
-                logger.info("[Memory] Trying ContextRetrievalEngine...")
+                logger.debug("[Memory] Trying ContextRetrievalEngine...")
                 result = await self._retrieve_with_context_engine(engine, chat_id, query)
                 if result:
                     return result
-                logger.info("[Memory] ContextRetrievalEngine returned empty, trying basic memory...")
-            
+                logger.debug("[Memory] ContextRetrievalEngine returned empty, trying basic memory...")
+
             # Fallback to basic memory system
-            logger.info("[Memory] Using HierarchicalMemorySystem...")
+            logger.debug("[Memory] Using HierarchicalMemorySystem...")
             return await self._retrieve_with_basic_memory(
                 chat_id,
                 query,
@@ -243,14 +243,14 @@ class MemoryInjector:
         )
         recent_task = self._get_recent_memories(limit=10, workspace_id=workspace_id)
         
-        logger.info(f"[Memory] Starting parallel retrieval: Semantic + Recent")
+        logger.debug("[Memory] Starting parallel retrieval: Semantic + Recent")
         results = await asyncio.gather(semantic_task, recent_task, return_exceptions=True)
-        
+
         # Process Semantic Results
         semantic_memories = []
         if isinstance(results[0], list):
             semantic_memories = results[0]
-            logger.info(f"[Memory] Semantic search found {len(semantic_memories)} memories")
+            logger.debug(f"[Memory] Semantic search found {len(semantic_memories)} memories")
         else:
             logger.error(f"[Memory] Semantic search failed: {results[0]}")
 
@@ -258,7 +258,7 @@ class MemoryInjector:
         recent_memories = []
         if isinstance(results[1], list):
             recent_memories = results[1]
-            logger.info(f"[Memory] Recent memories: {len(recent_memories)}")
+            logger.debug(f"[Memory] Recent memories: {len(recent_memories)}")
         else:
             logger.error(f"[Memory] Recent memory fetch failed: {results[1]}")
             
@@ -276,10 +276,10 @@ class MemoryInjector:
                 all_memories.append(('recent', mem))
         
         if not all_memories:
-            logger.info("[Memory] No memories found")
+            logger.debug("[Memory] No memories found")
             return None
-        
-        logger.info(f"[Memory] Total unique memories: {len(all_memories)}")
+
+        logger.debug(f"[Memory] Total unique memories: {len(all_memories)}")
         
         # Format memories for LLM
         memory_lines = []
@@ -308,7 +308,7 @@ class MemoryInjector:
         # Check cache
         now = time.time()
         if self._recent_cache["data"] and (now - self._recent_cache["time"] < self._cache_ttl):
-            logger.info("[Memory] Using cached recent memories")
+            logger.debug("[Memory] Using cached recent memories")
             return self._recent_cache["data"][:limit]
 
         try:
@@ -371,7 +371,7 @@ class MemoryInjector:
             assistant_response: The assistant's response
         """
         try:
-            logger.info(f"[Memory] Storing: {user_message[:50]}...")
+            logger.debug(f"[Memory] Storing: {user_message[:50]}...")
             memory_system = get_memory_system()
             if not memory_system:
                 logger.warning("[Memory] No memory system available!")
@@ -396,7 +396,7 @@ class MemoryInjector:
                 experience=experience,
                 workspace_id=workspace_id
             )
-            logger.info(f"[Memory] ✅ Stored (id={result}): {user_message[:50]}...")
+            logger.debug(f"[Memory] Stored (id={result})")
             
         except Exception as e:
             logger.error(f"[Memory] ❌ Storage FAILED: {e}")
