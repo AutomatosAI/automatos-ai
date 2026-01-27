@@ -96,6 +96,10 @@ class Agent(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
     
+    # Ownership & Visibility (New)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_shared = Column(Boolean, default=True)  # True = visible to workspace, False = private to creator
+
     # PRD-37: Workspace isolation
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
     
@@ -315,6 +319,11 @@ class Workflow(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
+    
+    # Ownership & Visibility (New)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_shared = Column(Boolean, default=True)
+
     priority = Column(String(50), nullable=True)  # Workflow priority (9-stage enhancement)
     expected_duration = Column(Integer, nullable=True)  # Expected duration in seconds (9-stage enhancement)
     complexity_score = Column(Float, nullable=True)  # Workflow complexity (9-stage enhancement)
@@ -369,6 +378,10 @@ class Document(Base):
     upload_date = Column(DateTime, default=func.now())
     processed_date = Column(DateTime)
     created_by = Column(String(255))
+    
+    # Ownership & Visibility (New)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_shared = Column(Boolean, default=True)
     
     # PRD-37: Workspace isolation
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
@@ -769,6 +782,10 @@ class ExternalKnowledge(Base):
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Ownership & Visibility (New)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_shared = Column(Boolean, default=True)
 
 # Enhanced Pydantic Models for new functionality
 

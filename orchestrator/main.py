@@ -64,7 +64,9 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
+from api.team import router as team_router  # PRD-37: Team Management
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -441,7 +443,9 @@ app.include_router(agent_endpoints_router)
 if workspaces_router is not None:
     app.include_router(workspaces_router)  # PRD-37: Workspace context
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
+app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
+app.include_router(team_router)  # PRD-37: Team Management
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

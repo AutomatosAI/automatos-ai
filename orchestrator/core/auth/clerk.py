@@ -266,6 +266,72 @@ class ClerkAuth:
         """Check if Clerk auth is properly configured."""
         return bool(self.jwks_url and self.clerk_secret_key)
 
+    async def get_org_members(self, org_id: str) -> list[dict]:
+        """Fetch members of a Clerk organization."""
+        if not self.clerk_secret_key:
+            return []
+        
+        api_url = f"{self.clerk_api_base}/v1/organizations/{org_id}/memberships"
+        headers = {
+            "Authorization": f"Bearer {self.clerk_secret_key}",
+            "Content-Type": "application/json",
+        }
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(api_url, headers=headers)
+            if response.status_code == 200:
+                return response.json().get("data", [])
+            logger.error(f"Failed to fetch Clerk org members: {response.text}")
+            return []
+
+    async def invite_to_org(self, org_id: str, email: str, role: str, inviter_user_id: str) -> dict:
+        """Invite a user to a Clerk organization."""
+        if not self.clerk_secret_key:
+            raise ValueError("Clerk secret key not configured")
+
+        api_url = f"{self.clerk_api_base}/v1/organizations/{org_id}/invitations"
+        headers = {
+            "Authorization": f"Bearer {self.clerk_secret_key}",
+            "Content-Type": "application/json",
+        }
+        
+        # Clerk roles are org:admin, org:member usually. Map internal roles.
+        clerk_role = "org:admin" if role in ["owner", "admin"] else "org:member"
+        
+        payload = {
+            "email_address": email,
+            "role": clerk_role,
+            "inviter_user_id": inviter_user_id,
+            "public_metadata": {"internal_role": role} # Store specific role in metadata
+        }
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(api_url, headers=headers, json=payload)
+            if response.status_code == 200:
+                return response.json()
+            
+            error_msg = response.json().get("errors", [{}])[0].get("message", "Unknown error")
+            raise ValueError(f"Clerk Invitation Failed: {error_msg}")
+
+    async def remove_from_org(self, org_id: str, user_id: str) -> None:
+        """Remove a user from a Clerk organization."""
+        if not self.clerk_secret_key:
+            raise ValueError("Clerk secret key not configured")
+
+        api_url = f"{self.clerk_api_base}/v1/organizations/{org_id}/memberships/{user_id}"
+        headers = {
+            "Authorization": f"Bearer {self.clerk_secret_key}",
+            "Content-Type": "application/json",
+        }
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.delete(api_url, headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Failed to remove user from Clerk org: {response.text}")
+                # Don't raise error if they are arguably already gone, 
+                # but good to log.
+
+
 
 # Global instance for dependency injection
 _clerk_auth: Optional[ClerkAuth] = None

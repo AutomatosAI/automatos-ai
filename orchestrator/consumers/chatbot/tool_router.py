@@ -42,34 +42,19 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# EXECUTOR CACHING - Global singleton to avoid registry re-initialization
+# EXECUTOR FACTORY - Per-request executor, shared registry (no db mutation)
 # =============================================================================
 
-import threading
-_executor_lock = threading.Lock()
-_global_executor: Optional[UnifiedToolExecutor] = None
-_executor_init_logged = False
 
-
-def _get_cached_executor(db_session, force_new: bool = False):
+def _get_executor_for_request(db_session):
     """
-    Get a global UnifiedToolExecutor, updating its db_session.
-    Uses a singleton pattern to avoid re-initializing the tool registry.
-    The db_session is updated each call to ensure fresh transactions.
+    Create a new UnifiedToolExecutor per request using the shared registry.
+    Avoids mutating a global executor's db_session (race conditions).
+    Registry remains singleton; executors are per-request.
     """
-    global _global_executor, _executor_init_logged
+    registry = registry_get_tool_registry()
+    return UnifiedToolExecutor(db_session, registry=registry)
 
-    with _executor_lock:
-        if _global_executor is None or force_new:
-            _global_executor = UnifiedToolExecutor(db_session)
-            if not _executor_init_logged:
-                logger.info("Initialized global UnifiedToolExecutor (singleton)")
-                _executor_init_logged = True
-        else:
-            # Update db session for the existing executor
-            _global_executor.db = db_session
-
-        return _global_executor
 
 def _new_trace_id() -> str:
     return uuid4().hex[:12]
@@ -239,8 +224,7 @@ async def execute_tool(
             except Exception as exc:
                 logger.warning(f"[tool-trace {trace}] Failed to resolve workspace_id: {exc}")
 
-        # Use cached executor to avoid registry re-initialization overhead
-        executor = _get_cached_executor(db_session)
+        executor = _get_executor_for_request(db_session)
 
         logger.info(
             f"[tool-trace {trace}] execute_tool start tool={tool_name} "

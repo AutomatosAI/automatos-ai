@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Global instances
 _memory_system = None
 _context_retrieval_engine = None
+_query_classifier = None
 
 
 def get_memory_system():
@@ -79,19 +80,74 @@ class MemoryInjector:
     def __init__(self):
         self._recent_cache = {"time": 0, "data": []}
         self._cache_ttl = 60  # Cache recent memories for 60 seconds
-    
-    def should_retrieve_memories(self, query: str, chat_id: str) -> bool:
+        self.classifier = None
+
+    async def _get_llm_manager(self, agent_id: Optional[int] = None):
+        """Helper to get an LLM manager for classification."""
+        try:
+            # Lazy import to avoid circular dependencies
+            from modules.agents.factory import AgentFactory
+            from core.database.database import get_db_session
+            from core.models.core import Agent
+            
+            with get_db_session() as db:
+                factory = AgentFactory(db)
+                if agent_id:
+                    agent = db.query(Agent).get(agent_id)
+                    if agent:
+                        # Use agent's config
+                        return await factory._create_llm_manager(agent.model_config, agent.name)
+                
+                # Fallback to system default if no agent or generic
+                # Creating a temporary manager with default config
+                from core.models.core import ModelConfiguration
+                default_config = ModelConfiguration(provider="openai", model_id="gpt-3.5-turbo")
+                return await factory._create_llm_manager(default_config, "System")
+        except Exception as e:
+            logger.warning(f"Failed to get LLM manager: {e}")
+            return None
+
+    async def should_retrieve_memories(self, query: str, chat_id: str, agent_id: Optional[int] = None) -> bool:
         """
         Intelligent decision on whether to retrieve memories for a given query.
-        Skips retrieval for short greetings, thanks, or irrelevant inputs to save tokens.
+        Uses QueryClassifier if available, otherwise falls back to heuristics.
         """
         if not query:
             return False
             
         # Skip for very short queries
-        if len(query) < 10:
+        if len(query) < 5:
             return False
-        
+            
+        # 1. New Intelligent Classification
+        try:
+            from modules.memory.operations.query_classifier import QueryClassifier, QueryIntent
+            
+            llm_manager = await self._get_llm_manager(agent_id)
+            if llm_manager:
+                if not self.classifier:
+                    self.classifier = QueryClassifier(llm_manager)
+                else:
+                    self.classifier.llm_manager = llm_manager
+                
+                # Get classification
+                result = await self.classifier.classify(query)
+                logger.debug(f"[Memory] Query Intent: {result.intent} (Confidence: {result.confidence})")
+                
+                # If explicitly requires memory, return True
+                if result.requires_memory:
+                    return True
+                    
+                # If explicitly factual or greeting, return False (unless confidence low)
+                if result.intent in [QueryIntent.GREETING, QueryIntent.FACTUAL_QUERY] and result.confidence > 0.8:
+                    return False
+                    
+        except ImportError:
+            pass # Classifier not found
+        except Exception as e:
+            logger.warning(f"[Memory] Classification failed, falling back to heuristics: {e}")
+
+        # 2. Fallback Heuristics
         query_lower = query.lower().strip()
         
         # Skip for common greetings and short acknowledgments
@@ -128,14 +184,14 @@ class MemoryInjector:
         Returns:
             Formatted memory context string, or None
         """
-        """
-        Retrieves relevant memories if the query is significant enough.
-        """
-        if not self.should_retrieve_memories(query, chat_id):
-           return None
-           
-        if not query or len(query) < 5:
+        if not query or len(query) < 3:
             return None
+
+        # Check if we should retrieve
+        should_retrieve = await self.should_retrieve_memories(query, chat_id, agent_id)
+        if not should_retrieve:
+           logger.debug(f"[Memory] Skipping retrieval for query: '{query[:50]}...'")
+           return None
         
         try:
             # Try advanced retrieval engine first

@@ -25,5 +25,6 @@ except ImportError:
 
 try:
     from core.workspaces.models import *  # PRD-37: Workspaces
+    from core.workspaces import *  # Import all workspace module components
 except ImportError:
     pass

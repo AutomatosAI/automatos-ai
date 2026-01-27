@@ -3,6 +3,8 @@
 ## Problem
 All apps showing `trigger_count: 0` and empty `triggers: []` arrays in the database, even though Composio apps should have triggers (e.g., Slack shows "9 Triggers" in marketplace but details show "0 Triggers").
 
+**Status:** Addressed. Connected endpoint and frontend now return/pass triggers; sync stores them. Re-sync + hard-refresh UI if still seeing 0.
+
 ## Root Cause Analysis
 
 ### Code Flow
@@ -50,15 +52,25 @@ All apps showing `trigger_count: 0` and empty `triggers: []` arrays in the datab
 
 ## Changes Made
 
-### 1. Enhanced Logging (client.py)
-- Added logging to `_build_trigger_map()` to show how many triggers were fetched
-- Added warning if trigger_map is empty
-- Enhanced error logging in `get_trigger_types()` with specific error codes
-- Added debug logging for trigger source (app.meta vs trigger_map)
+### 1. **Connected endpoint returns triggers** (`api/tools.py`)
+- `GET /api/tools/connected` now includes `trigger_count`, `triggers`, and `description` from `ComposioAppCache` for each app. Previously these were omitted, so the Enabled tab and app details showed "0 Triggers" for connected apps.
 
-### 2. Enhanced Sync Logging (metadata_sync_service.py)
-- Added debug logging when apps have triggers
-- Added warning for popular apps (SLACK, GMAIL, GITHUB) if they have 0 triggers
+### 2. **Frontend passes triggers for connected apps** (`frontend/lib/api-client.ts`)
+- `getTools({ status: 'active' })` normalization now sets `metadata.triggers = a.triggers || []`. The details modal reads `tool.metadata.triggers`; without this, connected-app details showed no triggers.
+
+### 3. **Composio client** (`core/composio/client.py`)
+- Pagination: `get_trigger_types()` now uses `data.get("next_cursor") or data.get("nextCursor")` when advancing pages.
+- Existing logging in `_build_trigger_map()` and `get_trigger_types()` (trigger counts, errors) retained.
+
+### 4. **Sync service** (`services/metadata_sync_service.py`)
+- **Orphan cleanup:** before upserting actions per app, deletes actions not in the current Composio bulk response so DB matches Composio and counts don’t accumulate.
+- **Deduplication:** dedupes bulk actions by `(app_name, action_name)` before upsert to avoid `UniqueViolation` from duplicate bulk entries.
+- **`action_count`:** set from actual DB count per app after sync, not from bulk length.
+- Logs when storing triggers for SLACK, GMAIL, GITHUB; warns if those apps have 0 triggers.
+
+### 5. **Scripts**
+- **`scripts/db_composio_diagnostic.py`** – DB diagnostic for cache totals, GITHUB, triggers, duplicates; prints **HOW TO FIX**.
+- **`scripts/run_tools_sync.py`** – runs the same full sync as `POST /api/tools/sync` (uses `.env`).
 
 ## Diagnostic Steps
 
@@ -173,18 +185,16 @@ After fixes, verify:
 
 ## Files Modified
 
-1. `automatos-ai/orchestrator/core/composio/client.py`
-   - Enhanced logging in `_build_trigger_map()`
-   - Enhanced error handling in `get_trigger_types()`
-   - Added debug logging for trigger sources
-
-2. `automatos-ai/orchestrator/services/metadata_sync_service.py`
-   - Added debug logging for trigger counts during sync
+1. **`automatos-ai/orchestrator/api/tools.py`** – Connected endpoint returns `trigger_count`, `triggers`, `description`.
+2. **`automatos-ai/frontend/lib/api-client.ts`** – Connected tools include `metadata.triggers`.
+3. **`automatos-ai/orchestrator/core/composio/client.py`** – `nextCursor` pagination fallback; existing trigger logging kept.
+4. **`automatos-ai/orchestrator/services/metadata_sync_service.py`** – Orphan cleanup, dedup, `action_count` from DB, trigger logging.
+5. **`automatos-ai/orchestrator/scripts/db_composio_diagnostic.py`** – New diagnostic script.
+6. **`automatos-ai/orchestrator/scripts/run_tools_sync.py`** – New script to run full sync.
 
 ## Next Steps
 
-1. **Run sync** and check logs for trigger-related messages
-2. **Check database** to see if triggers are being stored
-3. **Test API endpoint** directly to verify it works
-4. **Fix any API/auth issues** if found
-5. **Re-run sync** after fixes
+1. **Re-run sync** (`python scripts/run_tools_sync.py` or `POST /api/tools/sync`) to refresh apps, triggers, actions, and clean orphans.
+2. **Run diagnostic** (`python scripts/db_composio_diagnostic.py`) to confirm DB state.
+3. **Hard-refresh Tools UI** (Cmd+Shift+R) if triggers still show 0; use Marketplace or Enabled (not a cached session).
+4. If triggers remain missing, **check logs** for `get_trigger_types()` errors and **verify** `COMPOSIO_API_KEY`.
