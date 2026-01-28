@@ -209,8 +209,10 @@ class MemoryInjector:
         }
 
 
-# Module-level instance
+# Module-level instances
 _memory_injector = None
+_memory_system = None
+
 
 def get_memory_injector() -> MemoryInjector:
     """Get or create the global MemoryInjector instance."""
@@ -218,3 +220,22 @@ def get_memory_injector() -> MemoryInjector:
     if _memory_injector is None:
         _memory_injector = MemoryInjector()
     return _memory_injector
+
+
+def get_memory_system():
+    """
+    Get the memory system instance (Mem0 only).
+
+    This function exists for backward compatibility.
+    Returns Mem0MemorySystem - no fallbacks.
+    """
+    global _memory_system
+    if _memory_system is None:
+        try:
+            from modules.memory.storage.mem0_system import Mem0MemorySystem
+            _memory_system = Mem0MemorySystem()
+            logger.info("[Memory] Using Mem0MemorySystem (pure Mem0)")
+        except Exception as e:
+            logger.error(f"[Memory] Failed to initialize Mem0: {e}")
+            return None
+    return _memory_system
