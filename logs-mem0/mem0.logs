@@ -1,0 +1,1001 @@
+2026-01-27T22:09:32.565481902Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:09:32.565488875Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:09:34.211072737Z [err]  [01/27/26 22:09:34] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:09:34.211082080Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:09:34.211088300Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:09:34.214031376Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:09:34.214037927Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:09:34.217991577Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:09:34.217999887Z [err]                               openmemory                                         
+2026-01-27T22:09:34.233629422Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:09:34.233635487Z [err]                               Automatos AI', 'event': 'ADD'}                     
+2026-01-27T22:09:34.233640693Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:09:34.233645995Z [err]                               openmemory                                         
+2026-01-27T22:09:34.257398130Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-27T22:09:34.257403955Z [err]                               [{'id':                                            
+2026-01-27T22:09:34.257407776Z [err]                               '378a6a7c-ac50-4fdc-b1f4-0317b716f2                
+2026-01-27T22:09:34.257411583Z [err]                               e3', 'memory': 'Name is Gerard',                   
+2026-01-27T22:09:34.257415764Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:09:34.257419578Z [err]                               'cc075d15-09be-4390-921b-71adf36fe4                
+2026-01-27T22:09:34.257423251Z [err]                               9a', 'memory': 'Is the founder of                  
+2026-01-27T22:09:34.257426976Z [err]                               Automatos AI', 'event': 'ADD'}]}                   
+2026-01-27T22:09:36.216340432Z [err]  [01/27/26 22:09:35] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:09:36.216351633Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:09:36.216358608Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:09:36.349458559Z [err]  [01/27/26 22:09:36] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:09:36.349469450Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:09:36.349476640Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:09:36.379862537Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:09:36.379878029Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:09:36.379886105Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:09:36.379893242Z [inf]  INFO:     100.64.0.5:54588 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:09:36.379925853Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:11:46.654292208Z [inf]  INFO:     100.64.0.2:58454 - "GET /api/v1/memories/?search_query=I+am+just+testing+our+new+memory+module%2C+so+telling+you+facts+about+me+to+see+if+you+can+save+them.+I+live+in+Cascais%2C+I+am+from+Ireland%2C+and+I+work+in+IT+banking.&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:12:06.745762745Z [err]  [01/27/26 22:12:00] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:12:06.745767934Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:12:06.745772418Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:12:06.745778201Z [err]                               openmemory                                         
+2026-01-27T22:12:06.745787381Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:12:06.745787522Z [err]  [01/27/26 22:12:01] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.745792810Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:12:06.745798713Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:12:06.745801311Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:12:06.745804477Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.745809846Z [err]                               openmemory                                         
+2026-01-27T22:12:06.745814358Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:12:06.745817779Z [err]                      INFO     {'id': '3', 'text': 'Is from Ireland',  main.py:526
+2026-01-27T22:12:06.745822469Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:12:06.745825837Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:12:06.745830482Z [err]  [01/27/26 22:12:02] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.745834658Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:12:06.745838610Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:12:06.745845143Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:12:06.745848161Z [err]                               openmemory                                         
+2026-01-27T22:12:06.745852508Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.745859049Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:12:06.745865425Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:12:06.745871885Z [err]                      INFO     Total existing memories: 2              main.py:488
+2026-01-27T22:12:06.746280100Z [err]  [01/27/26 22:12:05] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.746285769Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:12:06.746291309Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:12:06.746297007Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:12:06.746302598Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:12:06.746308653Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:12:06.746314432Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:12:06.746320850Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-27T22:12:06.746326833Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:12:06.746332881Z [err]                      INFO     {'id': '2', 'text': 'Lives in Cascais', main.py:526
+2026-01-27T22:12:06.749898990Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:12:06.749910320Z [err]                               '13e3748b-526e-4240-b181-e5638060f0                
+2026-01-27T22:12:06.749919237Z [err]                               02', 'memory': 'Works in IT                        
+2026-01-27T22:12:06.749926076Z [err]                               banking', 'event': 'ADD'}]}                        
+2026-01-27T22:12:06.749932809Z [err]  [01/27/26 22:12:06] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:06.749938987Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:12:06.749973432Z [err]                      INFO     {'id': '4', 'text': 'Works in IT        main.py:526
+2026-01-27T22:12:06.749979013Z [err]                               banking', 'event': 'ADD'}                          
+2026-01-27T22:12:06.749984261Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:12:06.749989939Z [err]                               openmemory                                         
+2026-01-27T22:12:06.749995333Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-27T22:12:06.750001742Z [err]                               [{'id':                                            
+2026-01-27T22:12:06.750006732Z [err]                               'd0a344c8-1f1b-46e5-be3a-49064c7a9a                
+2026-01-27T22:12:06.750012762Z [err]                               cf', 'memory': 'Lives in Cascais',                 
+2026-01-27T22:12:06.750018120Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:12:06.750023408Z [err]                               '853c6bf0-07f9-4bee-8455-8d804c3bf2                
+2026-01-27T22:12:06.750030370Z [err]                               9b', 'memory': 'Is from Ireland',                  
+2026-01-27T22:12:06.756654802Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:12:07.080943431Z [err]  [01/27/26 22:12:07] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:07.080952249Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:12:07.080962217Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:12:08.690987937Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:12:08.690997433Z [inf]  INFO:     100.64.0.3:13400 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:12:08.691151878Z [err]  [01/27/26 22:12:08] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:12:08.691172640Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:12:08.691178275Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:12:08.691183344Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:12:08.691193157Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:12:08.691200504Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:20:39.518838873Z [inf]  INFO:     100.64.0.4:61214 - "GET /api/v1/memories/?search_query=Hi+you+remember+me+%3F&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:20:39.518844544Z [err]  [01/27/26 22:20:39] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:20:39.518850176Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:20:39.518855330Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:20:39.518861538Z [err]                               openmemory                                         
+2026-01-27T22:20:40.410087593Z [err]  [01/27/26 22:20:40] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:20:40.410093743Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:20:40.410099438Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:20:40.410105005Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:20:40.410111108Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:20:40.410117072Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:20:40.410122688Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:20:40.410128138Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:20:40.410134597Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:20:40.410142755Z [inf]  INFO:     100.64.0.2:32902 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:21:09.895793883Z [inf]  INFO:     100.64.0.3:17680 - "GET /api/v1/memories/?search_query=WHat+did+we+speak+about+%3F&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:21:59.921420663Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:21:59.921432927Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:21:59.921441920Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:21:59.921448231Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:21:59.921453801Z [inf]  INFO:     100.64.0.3:18526 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:21:59.921495941Z [err]  [01/27/26 22:21:55] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:21:59.921502814Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:21:59.921509230Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:21:59.921518184Z [err]                               openmemory                                         
+2026-01-27T22:21:59.921524965Z [err]  [01/27/26 22:21:56] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:21:59.921531630Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:21:59.921538038Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:21:59.921544677Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:21:59.921551612Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:25:00.477035591Z [inf]  INFO:     100.64.0.6:43898 - "GET /api/v1/memories/?search_query=My+Name+is+Gerard+and+I+am+the+founder+of+Automatos+AI.%0A%0AI+am+just+testing+our+new+memory+module%2C+so+telling+you+facts+about+me+to+see+if+you+can+save+them.+I+live+in+Cascais%2C+I+am+from+Ireland%2C+and+I+work+in+IT+banking.&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:26:11.127321310Z [err]  [01/27/26 22:26:06] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:26:11.127331940Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:26:11.127338107Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:26:11.127344805Z [err]                               openmemory                                         
+2026-01-27T22:26:11.127356889Z [err]  [01/27/26 22:26:08] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.127368370Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:26:11.127374179Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:26:11.127379882Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.127388541Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:26:11.127394541Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:26:11.127399825Z [err]  [01/27/26 22:26:09] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.127408871Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:26:11.127417868Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:26:11.127424177Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.127429489Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:26:11.127435068Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:26:11.127444616Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.130154990Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:26:11.130162062Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:26:11.130167610Z [err]  [01/27/26 22:26:10] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:11.130172443Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:26:11.130177562Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:26:11.130182796Z [err]                      INFO     Total existing memories: 5              main.py:488
+2026-01-27T22:26:14.792567464Z [err]  [01/27/26 22:26:14] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:26:14.792573181Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:26:14.792578649Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:26:14.792584013Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:26:14.792588881Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:26:14.792597043Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:26:14.792603492Z [err]                      INFO     {'id': '1', 'text': 'Is from Ireland',  main.py:526
+2026-01-27T22:26:14.792609265Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:26:14.792616002Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:26:14.792621850Z [err]                      INFO     {'id': '2', 'text': 'Lives in Cascais', main.py:526
+2026-01-27T22:26:14.792631318Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:26:14.792638489Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:26:14.792644178Z [err]                      INFO     {'id': '3', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:26:14.792651137Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-27T22:26:14.792658422Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:26:14.792664128Z [err]                      INFO     {'id': '4', 'text': 'Works in IT        main.py:526
+2026-01-27T22:26:14.792670665Z [err]                               banking', 'event': 'NONE'}                         
+2026-01-27T22:26:14.795077310Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:26:14.795081296Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:26:14.795087173Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:26:14.795092229Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:26:14.795097351Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:26:14.795102545Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:26:14.795107927Z [inf]  INFO:     100.64.0.5:54844 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:27:15.093372397Z [inf]  INFO:     100.64.0.5:30744 - "GET /api/v1/memories/?search_query=Calm+you+are+not+meant+to+manually+write+stuff+in+the+db+ha...++so+dont+stress.&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:27:23.273084001Z [err]  [01/27/26 22:27:22] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:27:23.273089753Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:27:23.273095578Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:27:23.273101935Z [err]                               openmemory                                         
+2026-01-27T22:27:24.244877882Z [err]  [01/27/26 22:27:23] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:27:24.244882383Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:27:24.244886949Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:27:24.244892326Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:27:24.244896235Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:27:24.244900718Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:27:24.244905936Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:27:24.244912093Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:27:24.244917513Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:27:24.244923594Z [inf]  INFO:     100.64.0.4:23868 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:28:14.271232755Z [inf]  INFO:     100.64.0.7:20260 - "GET /api/v1/memories/?search_query=Why+would+you+do+that%3F+Please+don%27t+call+tools+randomly%3F&user_id=ws_default_agent_1&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:28:16.324021345Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:28:16.324035148Z [err]                               cbf8_agent_global with app:                        
+2026-01-27T22:28:16.324042684Z [err]                               openmemory                                         
+2026-01-27T22:28:16.324074378Z [err]  [01/27/26 22:28:15] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:28:17.235452431Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:28:17.235459875Z [inf]  INFO:     100.64.0.6:10212 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_global HTTP/1.1" 200 OK
+2026-01-27T22:28:17.235847006Z [err]  [01/27/26 22:28:16] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:28:17.235864281Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:28:17.235872005Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:28:17.235877977Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:28:17.235883634Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:28:17.235889837Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:28:17.235895903Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:28:17.235901680Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:34:39.382630073Z [inf]  INFO:     100.64.0.8:21178 - "GET /api/v1/memories/?search_query=My+Name+is+Gerard+and+I+am+the+founder+of+Automatos+AI.%0A%0AI+am+just+testing+our+new+memory+module%2C+so+telling+you+facts+about+me+to+see+if+you+can+save+them.+I+live+in+Cascais%2C+I+am+from+Ireland%2C+and+I+work+in+IT+banking.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 404 Not Found
+2026-01-27T22:35:39.639623728Z [err]  [01/27/26 22:35:29] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:35:39.639629862Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.639630728Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:35:39.639638257Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:35:39.639642522Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:35:39.639645829Z [err]  [01/27/26 22:35:31] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.639649743Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:35:39.639654307Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.639659089Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.639661294Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.639672409Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:35:39.639680238Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:35:39.639686296Z [err]  [01/27/26 22:35:32] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.639695363Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:35:39.639700586Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:35:39.639720194Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.639725798Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:35:39.642578925Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:35:39.642590635Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.642598087Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:35:39.642604689Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:35:39.642611306Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:35:39.642618262Z [err]  [01/27/26 22:35:36] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.642624638Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.642630482Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.642636626Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:35:39.642643751Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:35:39.642652747Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:35:39.642660091Z [err]                               openmemory                                         
+2026-01-27T22:35:39.642667235Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:35:39.642673593Z [err]                               Automatos AI', 'event': 'ADD'}                     
+2026-01-27T22:35:39.642680100Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:35:39.642686394Z [err]                               openmemory                                         
+2026-01-27T22:35:39.642692140Z [err]                      INFO     {'id': '2', 'text': 'Lives in Cascais', main.py:526
+2026-01-27T22:35:39.646011659Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:35:39.646020344Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:35:39.646026480Z [err]                               openmemory                                         
+2026-01-27T22:35:39.646180008Z [err]                      INFO     {'id': '3', 'text': 'Is from Ireland',  main.py:526
+2026-01-27T22:35:39.646184906Z [err]                               'event': 'ADD'}                                    
+2026-01-27T22:35:39.646189174Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:35:39.646193123Z [err]                               openmemory                                         
+2026-01-27T22:35:39.646197365Z [err]                      INFO     {'id': '4', 'text': 'Works in IT        main.py:526
+2026-01-27T22:35:39.646201232Z [err]                               banking', 'event': 'ADD'}                          
+2026-01-27T22:35:39.646204861Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:35:39.646208761Z [err]                               openmemory                                         
+2026-01-27T22:35:39.646212674Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-27T22:35:39.646216373Z [err]                               [{'id':                                            
+2026-01-27T22:35:39.646222160Z [err]                               'e85069ea-c3a2-441f-83d9-76e290d86c                
+2026-01-27T22:35:39.646226125Z [err]                               13', 'memory': 'Name is Gerard',                   
+2026-01-27T22:35:39.646230085Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:35:39.646233864Z [err]                               '21367411-3470-4f24-8412-682f0281ce                
+2026-01-27T22:35:39.650513620Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.650524216Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.650530745Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.650603568Z [err]                               99', 'memory': 'Is the founder of                  
+2026-01-27T22:35:39.650610766Z [err]                               Automatos AI', 'event': 'ADD'},                    
+2026-01-27T22:35:39.650616485Z [err]                               {'id':                                             
+2026-01-27T22:35:39.650621585Z [err]                               '3f49c036-1214-4cb5-bd2c-4f42fc19bd                
+2026-01-27T22:35:39.650626004Z [err]                               83', 'memory': 'Lives in Cascais',                 
+2026-01-27T22:35:39.650631643Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:35:39.650636646Z [err]                               'b6c32ddb-3252-40d1-a4e6-74de23f50f                
+2026-01-27T22:35:39.650641708Z [err]                               6e', 'memory': 'Is from Ireland',                  
+2026-01-27T22:35:39.650648181Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-27T22:35:39.650654930Z [err]                               '7ec04eb9-75af-4437-88a4-25a24596a0                
+2026-01-27T22:35:39.650660610Z [err]                               b2', 'memory': 'Works in IT                        
+2026-01-27T22:35:39.650667421Z [err]                               banking', 'event': 'ADD'}]}                        
+2026-01-27T22:35:39.650676365Z [err]  [01/27/26 22:35:37] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.650682448Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.657773270Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.657780176Z [err]  [01/27/26 22:35:38] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.657786075Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.657792234Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.657798004Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.657802578Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.657806857Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.701635156Z [err]  [01/27/26 22:35:39] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:35:39.701643635Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:35:39.701649112Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:35:39.725257628Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:35:39.725265530Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:35:39.725270666Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:35:39.725274904Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:35:39.725279277Z [inf]  INFO:     100.64.0.4:36250 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:35:59.725665419Z [inf]  INFO:     100.64.0.5:45292 - "GET /api/v1/memories/?search_query=How+are+yout+today&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:36:09.718647170Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:36:09.718655169Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:36:09.718663120Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:36:09.718669843Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:36:09.718670707Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:36:09.718679089Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:36:09.718685580Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:36:09.718697044Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:36:09.718704047Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:36:09.718712477Z [err]  [01/27/26 22:36:09] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:36:09.718712934Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:36:09.718720004Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:36:09.721789721Z [inf]  INFO:     100.64.0.2:20560 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:36:39.066699321Z [inf]  INFO:     100.64.0.5:36978 - "GET /api/v1/memories/?search_query=Can+you+tell+me+you+capibilities+%3F&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:36:39.066711462Z [err]  [01/27/26 22:36:36] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:36:39.066719002Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:36:39.066725651Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:36:39.066731716Z [err]  [01/27/26 22:36:37] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:36:39.066738099Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:36:39.066743620Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:36:39.066749469Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:36:39.066755429Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:36:39.066761953Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:36:39.066767753Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:36:39.066780757Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:36:39.066786006Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:36:39.066791450Z [inf]  INFO:     100.64.0.6:24602 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:36:45.749878641Z [inf]  INFO:     100.64.0.9:41102 - "GET /api/v1/memories/?search_query=Please+stop+always+calling+tools&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:37:05.189574112Z [err]  [01/27/26 22:36:56] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:37:05.189580218Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:37:05.189586406Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:37:05.189592212Z [err]  [01/27/26 22:36:57] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:37:05.189599845Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:37:05.189605991Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:37:05.189611731Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:37:05.189617070Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:37:05.189622811Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:37:05.189628965Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:37:05.189634854Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:37:05.189640873Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:37:05.189646004Z [inf]  INFO:     100.64.0.2:27848 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:46:47.688313030Z [inf]  INFO:     100.64.0.3:33988 - "GET /api/v1/memories/?search_query=Hey+there&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:46:47.688320112Z [err]  [01/27/26 22:46:43] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:46:47.688326591Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:46:47.688333562Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:46:47.688340590Z [err]  [01/27/26 22:46:44] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:46:47.688346879Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:46:47.688352737Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:46:47.688359134Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-27T22:46:47.688365642Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:46:47.688374248Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:46:47.688381268Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:46:47.688388133Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:46:47.688394888Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:46:47.688401385Z [inf]  INFO:     100.64.0.4:27610 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:47:27.782287221Z [inf]  INFO:     100.64.0.5:59586 - "GET /api/v1/memories/?search_query=Just+saying+hello%2C+my+name+is+Gerard+the+founder+of+Automatos+AI&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:48:48.155462018Z [err]  [01/27/26 22:48:44] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:48:48.155467845Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:48:48.155472049Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:48:48.155478829Z [err]  [01/27/26 22:48:45] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:48:48.155484804Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:48:48.155490686Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:48:48.155495532Z [err]  [01/27/26 22:48:46] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:48:48.155500749Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:48:48.155507215Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:48:48.155513084Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:48:48.155520274Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:48:48.155525324Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:48:48.155531637Z [err]                      INFO     Total existing memories: 5              main.py:488
+2026-01-27T22:48:50.205012876Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-27T22:48:50.205019757Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:48:50.205150528Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:48:50.205192671Z [err]  [01/27/26 22:48:50] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:48:50.205199055Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:48:50.205236037Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:48:50.205243233Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:48:50.205248642Z [inf]  INFO:     100.64.0.10:41634 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T22:48:50.205388948Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:48:50.205396700Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:48:50.205402632Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:48:50.205407863Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:48:50.205414239Z [err]                      INFO     {'id': '1', 'text': 'Is from Ireland',  main.py:526
+2026-01-27T22:48:50.205419543Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:48:50.205424496Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:48:50.205429633Z [err]                      INFO     {'id': '2', 'text': 'Lives in Cascais', main.py:526
+2026-01-27T22:48:50.205435395Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:48:50.205440900Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:48:50.205446325Z [err]                      INFO     {'id': '3', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:48:50.205455920Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-27T22:48:50.205461447Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:48:50.205466459Z [err]                      INFO     {'id': '4', 'text': 'Works in IT        main.py:526
+2026-01-27T22:48:50.205472317Z [err]                               banking', 'event': 'NONE'}                         
+2026-01-27T22:48:50.205764971Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:49:30.299799447Z [inf]  INFO:     100.64.0.4:20030 - "GET /api/v1/memories/?search_query=I+live+in+Cascais+and+the+weather+is+bad+today%2C+thought+Id+just+check+up+on+you+and+see+how+you+were+doing.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-27T22:49:33.543998093Z [err]  [01/27/26 22:49:33] INFO     Creating memory for user_id:        memories.py:242
+2026-01-27T22:49:33.544004833Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-27T22:49:33.544013296Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-27T22:49:34.444312837Z [err]  [01/27/26 22:49:34] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:34.444320054Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:49:34.444324568Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:49:36.265169346Z [err]  [01/27/26 22:49:35] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:36.265173297Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:49:36.265177882Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:49:36.416763701Z [err]  [01/27/26 22:49:36] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:36.416773835Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:49:36.416780617Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:49:36.416786803Z [err]                      INFO     Total existing memories: 5              main.py:488
+2026-01-27T22:49:40.416931023Z [err]                      INFO     {'id': '1', 'text': 'Is from Ireland',  main.py:526
+2026-01-27T22:49:40.416939949Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:49:40.416945703Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:49:40.416950732Z [err]                      INFO     {'id': '2', 'text': 'Name is Gerard',   main.py:526
+2026-01-27T22:49:40.416955936Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:49:40.416960557Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:49:40.416965411Z [err]                      INFO     {'id': '3', 'text': 'Is the founder of  main.py:526
+2026-01-27T22:49:40.416974015Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-27T22:49:40.416979802Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:49:40.416986618Z [err]                      INFO     {'id': '4', 'text': 'Works in IT        main.py:526
+2026-01-27T22:49:40.416991685Z [err]                               banking', 'event': 'ADD'}                          
+2026-01-27T22:49:40.417060385Z [err]  [01/27/26 22:49:40] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:40.417066928Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:49:40.417072692Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:49:40.417078590Z [err]                      INFO     {'id': '0', 'text': 'Lives in Cascais', main.py:526
+2026-01-27T22:49:40.417085062Z [err]                               'event': 'NONE'}                                   
+2026-01-27T22:49:40.417091358Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-27T22:49:40.581741728Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:40.581749429Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-27T22:49:40.581754222Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-27T22:49:40.586113136Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-27T22:49:40.586119083Z [err]                               openmemory                                         
+2026-01-27T22:49:40.601936595Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-27T22:49:40.601948311Z [err]                               [{'id':                                            
+2026-01-27T22:49:40.601955284Z [err]                               'f84de819-111f-4c23-8cad-3f3ec069c7                
+2026-01-27T22:49:40.601961787Z [err]                               58', 'memory': 'Works in IT                        
+2026-01-27T22:49:40.601967370Z [err]                               banking', 'event': 'ADD'}]}                        
+2026-01-27T22:49:42.318459203Z [err]  [01/27/26 22:49:41] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-27T22:49:42.318467821Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-27T22:49:42.318474271Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-27T22:49:42.318481700Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-27T22:49:42.318488127Z [inf]  Parsing environment variables in final config...
+2026-01-27T22:49:42.318494632Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:49:42.318500416Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-27T22:49:42.318508208Z [inf]  INFO:     100.64.0.4:53924 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-27T23:03:56.650947458Z [err]  INFO:     Shutting down
+2026-01-27T23:03:56.650953540Z [err]  INFO:     Waiting for application shutdown.
+2026-01-27T23:03:56.650959776Z [err]  INFO:     Application shutdown complete.
+2026-01-27T23:03:56.650965568Z [err]  INFO:     Finished server process [1]
+2026-01-27T23:03:58.000000000Z [inf]  Stopping Container
+2026-01-28T07:44:59.000000000Z [inf]  Starting Container
+2026-01-28T07:45:10.440799993Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T07:45:10.440805821Z [err]    @validator('created_at', pre=True)
+2026-01-28T07:45:10.440811761Z [err]  INFO:     Started server process [1]
+2026-01-28T07:45:10.440817829Z [err]  INFO:     Waiting for application startup.
+2026-01-28T07:45:10.440822619Z [err]  INFO:     Application startup complete.
+2026-01-28T07:45:10.440828135Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T07:45:10.441295826Z [err]  [01/28/26 07:45:07] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T07:45:10.441301966Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T07:45:10.441307574Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T07:45:10.441314162Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T07:45:10.441319579Z [err]                               mem0migrations                                     
+2026-01-28T07:45:10.441324844Z [err]  [01/28/26 07:45:09] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:45:10.441330075Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:45:10.441335293Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:45:10.441340542Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T07:45:10.441345949Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-28T07:45:10.444094252Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T07:45:10.444099869Z [inf]  Parsing environment variables in final config...
+2026-01-28T07:45:10.444105421Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:45:10.444111803Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:45:10.444117470Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T07:45:10.444124263Z [inf]  Memory client initialized successfully
+2026-01-28T07:45:10.444129998Z [inf]  INFO:     100.64.0.3:58806 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T07:45:50.043893927Z [inf]  INFO:     100.64.0.4:28332 - "GET /api/v1/memories/?search_query=You+know+my+name+%3F&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T07:45:57.878474049Z [err]  [01/28/26 07:45:57] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T07:45:57.878484159Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T07:45:57.878490777Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T07:45:58.974067852Z [err]  [01/28/26 07:45:58] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:45:58.974070890Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:45:58.974076540Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:45:58.974078123Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:45:58.974080387Z [inf]  INFO:     100.64.0.5:57358 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T07:45:58.974087092Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T07:45:58.974093703Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-28T07:45:58.974099640Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T07:45:58.974105342Z [inf]  Parsing environment variables in final config...
+2026-01-28T07:45:58.974111736Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:46:49.151028519Z [inf]  INFO:     100.64.0.5:25084 - "GET /api/v1/memories/?search_query=Its+ok%2C+I+am+Gerard%2C+the+Founder+of+Autmatos+AI++that+you+run+on+%3A%29&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T07:46:58.559582096Z [err]  [01/28/26 07:46:58] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T07:46:58.559587861Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T07:46:58.559595022Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T07:47:00.368417526Z [err]  [01/28/26 07:47:00] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:00.368422391Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:47:00.368430552Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:47:01.687323016Z [err]  [01/28/26 07:47:01] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:01.687329544Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T07:47:01.687336504Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T07:47:02.815418137Z [err]  [01/28/26 07:47:02] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:02.815451012Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T07:47:02.815458493Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T07:47:02.815464841Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T07:47:05.387330920Z [err]  [01/28/26 07:47:04] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:05.387336655Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:47:05.387343040Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:47:05.387349135Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T07:47:05.387355840Z [err]                               'event': 'ADD'}                                    
+2026-01-28T07:47:05.387362194Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T07:47:05.387369040Z [err]                               openmemory                                         
+2026-01-28T07:47:05.387375376Z [err]                      INFO     {'id': '1', 'text': 'Is the Founder of  main.py:526
+2026-01-28T07:47:05.387380749Z [err]                               Automatos AI', 'event': 'ADD'}                     
+2026-01-28T07:47:05.387386247Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T07:47:05.387391928Z [err]                               openmemory                                         
+2026-01-28T07:47:05.387397601Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T07:47:05.387403659Z [err]                               [{'id':                                            
+2026-01-28T07:47:05.387409044Z [err]                               '98dcabea-9b28-4b0b-ae3f-87da6e5632                
+2026-01-28T07:47:05.387414871Z [err]                               39', 'memory': 'Name is Gerard',                   
+2026-01-28T07:47:05.387420652Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-28T07:47:05.387426183Z [err]                               'f3284ed1-e270-42ed-b8f5-c85786471a                
+2026-01-28T07:47:05.387864427Z [err]                               05', 'memory': 'Is the Founder of                  
+2026-01-28T07:47:05.387870302Z [err]                               Automatos AI', 'event': 'ADD'}]}                   
+2026-01-28T07:47:05.557062533Z [err]  [01/28/26 07:47:05] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:05.557073698Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:47:05.557080585Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:47:06.582707023Z [err]  [01/28/26 07:47:06] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:47:06.582715075Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:47:06.582721802Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:47:06.582729762Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T07:47:06.582737883Z [inf]  Parsing environment variables in final config...
+2026-01-28T07:47:06.582749243Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:47:06.582760711Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:47:06.582768461Z [inf]  INFO:     100.64.0.3:61806 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T07:49:27.817075724Z [inf]  INFO:     100.64.0.6:56318 - "GET /api/v1/memories/?search_query=So+what+will+we+do+to+day%2C+I+am+staying+in+because+bad+storms+inportugal+where+I+live&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T07:51:28.257986791Z [err]                      INFO     Total existing memories: 2              main.py:488
+2026-01-28T07:51:28.257987571Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:51:28.257999330Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T07:51:28.258006603Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T07:51:28.258037261Z [err]  [01/28/26 07:51:24] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T07:51:28.258046307Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T07:51:28.258052492Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T07:51:28.258064916Z [err]  [01/28/26 07:51:25] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:51:28.258072621Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:51:28.258079727Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:51:28.258085874Z [err]  [01/28/26 07:51:26] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:51:28.258095116Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T07:51:28.258102197Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T07:51:29.564921288Z [err]  [01/28/26 07:51:29] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T07:51:29.564929901Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:51:29.564935876Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:51:29.568578444Z [err]                      INFO     {'id': '0', 'text': "User's name is     main.py:526
+2026-01-28T07:51:29.568584446Z [err]                               Gerard", 'event': 'UPDATE',                        
+2026-01-28T07:51:29.568588902Z [err]                               'old_memory': 'Name is Gerard'}                    
+2026-01-28T07:51:29.568593471Z [err]                      INFO     Updating memory with data="User's name main.py:1143
+2026-01-28T07:51:29.568597758Z [err]                               is Gerard"                                         
+2026-01-28T07:51:29.578888848Z [err]                      INFO     Updating memory with ID                main.py:1182
+2026-01-28T07:51:29.578895842Z [err]                               memory_id='98dcabea-9b28-4b0b-ae3f-87d             
+2026-01-28T07:51:29.578902151Z [err]                               a6e563239' with data="User's name is               
+2026-01-28T07:51:29.578908821Z [err]                               Gerard"                                            
+2026-01-28T07:51:29.582906964Z [err]                      INFO     {'id': '1', 'text': 'Is the Founder of  main.py:526
+2026-01-28T07:51:29.582913819Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-28T07:51:29.586458960Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-28T07:51:29.586466243Z [err]                      INFO     {'id': '2', 'text': 'User is staying in main.py:526
+2026-01-28T07:51:29.586470619Z [err]                               due to bad storms in Portugal',                    
+2026-01-28T07:51:29.586475318Z [err]                               'event': 'ADD'}                                    
+2026-01-28T07:51:29.586479724Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T07:51:29.586484737Z [err]                               openmemory                                         
+2026-01-28T07:51:29.605058069Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T07:51:29.605073157Z [err]                               [{'id':                                            
+2026-01-28T07:51:29.605080351Z [err]                               '98dcabea-9b28-4b0b-ae3f-87da6e5632                
+2026-01-28T07:51:29.605085641Z [err]                               39', 'memory': "User's name is                     
+2026-01-28T07:51:29.605090911Z [err]                               Gerard", 'event': 'UPDATE',                        
+2026-01-28T07:51:29.605096814Z [err]                               'previous_memory': 'Name is                        
+2026-01-28T07:51:29.605102518Z [err]                               Gerard'}, {'id':                                   
+2026-01-28T07:51:29.605108436Z [err]                               'fb273910-f1d7-4e34-8312-d03c1c4bf4                
+2026-01-28T07:51:29.605114076Z [err]                               6b', 'memory': 'User is staying in                 
+2026-01-28T07:51:29.605119696Z [err]                               due to bad storms in Portugal',                    
+2026-01-28T07:51:29.605125236Z [err]                               'event': 'ADD'}]}                                  
+2026-01-28T07:51:30.266243282Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T07:51:30.266269486Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T07:51:30.266287126Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T07:51:30.266313600Z [inf]  Parsing environment variables in final config...
+2026-01-28T07:51:30.266347702Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:51:30.266355612Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T07:51:30.266362472Z [inf]  INFO:     100.64.0.2:30336 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T07:51:30.266369873Z [err]  [01/28/26 07:51:30] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:08:22.000000000Z [inf]  Stopping Container
+2026-01-28T08:08:22.548670101Z [err]  INFO:     Application shutdown complete.
+2026-01-28T08:08:22.548676361Z [err]  INFO:     Finished server process [1]
+2026-01-28T08:08:22.548682520Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f44bd3c2480>
+2026-01-28T08:08:22.548689770Z [err]  Traceback (most recent call last):
+2026-01-28T08:08:22.548696312Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T08:08:22.548707954Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T08:08:22.548716887Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T08:08:22.548732325Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T08:08:22.548738401Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f44bd3c2480>
+2026-01-28T08:08:22.548744036Z [err]  Traceback (most recent call last):
+2026-01-28T08:08:22.548751126Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T08:08:22.548760643Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T08:08:22.548767687Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T08:08:22.548774242Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T08:08:22.548779715Z [err]  INFO:     Shutting down
+2026-01-28T08:08:22.548786075Z [err]  INFO:     Waiting for application shutdown.
+2026-01-28T08:18:57.000000000Z [inf]  Starting Container
+2026-01-28T08:19:05.451076754Z [err]  INFO:     Waiting for application startup.
+2026-01-28T08:19:05.451080220Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T08:19:05.451086255Z [err]  INFO:     Application startup complete.
+2026-01-28T08:19:05.451089277Z [err]    @validator('created_at', pre=True)
+2026-01-28T08:19:05.451095412Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T08:19:05.451097559Z [err]  INFO:     Started server process [1]
+2026-01-28T08:24:16.316625835Z [inf]  INFO:     100.64.0.3:10220 - "GET /api/v1/memories/?search_query=I+am+Gerard+the+founder+of+Automatos+and+just+checking+in&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T08:24:45.729397684Z [err]  [01/28/26 08:24:39] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T08:24:45.729408569Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T08:24:45.729415110Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T08:24:45.729420771Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T08:24:45.729426757Z [err]                               mem0migrations                                     
+2026-01-28T08:24:45.729433437Z [err]  [01/28/26 08:24:41] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:45.729438897Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:24:45.729446397Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:24:45.729452284Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:45.729458445Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T08:24:45.729469784Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T08:24:45.729480328Z [err]  [01/28/26 08:24:42] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:45.729487495Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T08:24:45.729493103Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T08:24:45.729499057Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T08:24:45.729505313Z [err]  [01/28/26 08:24:44] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:45.729511120Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:24:45.735600965Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:24:45.735612652Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T08:24:45.735618693Z [err]                               'event': 'ADD'}                                    
+2026-01-28T08:24:45.735623936Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T08:24:45.735628578Z [err]                               openmemory                                         
+2026-01-28T08:24:45.735633902Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-28T08:24:45.735638452Z [err]                               Automatos', 'event': 'ADD'}                        
+2026-01-28T08:24:45.735643473Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T08:24:45.735649342Z [err]                               openmemory                                         
+2026-01-28T08:24:45.735656847Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T08:24:45.735661580Z [err]                               [{'id':                                            
+2026-01-28T08:24:45.735666446Z [err]                               '1833d286-9c05-439f-9da9-03885639ad                
+2026-01-28T08:24:45.735671196Z [err]                               4f', 'memory': 'Name is Gerard',                   
+2026-01-28T08:24:45.735676129Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-28T08:24:45.735680764Z [err]                               'f904471d-18e5-4635-956f-5e5a7401fb                
+2026-01-28T08:24:45.735685739Z [err]                               55', 'memory': 'Is the founder of                  
+2026-01-28T08:24:45.735690037Z [err]                               Automatos', 'event': 'ADD'}]}                      
+2026-01-28T08:24:45.740873296Z [err]  [01/28/26 08:24:45] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:45.740882658Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:24:45.740890267Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:24:46.529970243Z [err]  [01/28/26 08:24:46] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:24:46.529974927Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:24:46.529980016Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:24:46.529985534Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T08:24:46.529991173Z [inf]  Parsing environment variables in final config...
+2026-01-28T08:24:46.529996719Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T08:24:46.530001974Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T08:24:46.530009318Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T08:24:46.530014731Z [inf]  Memory client initialized successfully
+2026-01-28T08:24:46.530020046Z [inf]  INFO:     100.64.0.4:14580 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T08:26:07.596663076Z [inf]  INFO:     100.64.0.5:11606 - "GET /api/v1/memories/?search_query=I+am+just+testing+your+memory+and+ability+to+save+data+like+where+I+am+from+which+is+Ireland+and+I+am+currently+living+in+Portugal.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T08:26:07.596670686Z [err]  [01/28/26 08:26:05] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T08:26:07.601440160Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T08:26:07.601454537Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T08:26:07.601463917Z [err]  [01/28/26 08:26:06] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:07.601473354Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:26:07.601480633Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:26:07.601492830Z [err]  [01/28/26 08:26:07] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:07.601503133Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T08:26:07.601510320Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T08:26:07.601518331Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:07.601525806Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T08:26:07.601533384Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T08:26:07.601540965Z [err]                      INFO     Total existing memories: 2              main.py:488
+2026-01-28T08:26:09.912596578Z [err]  [01/28/26 08:26:09] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:09.912603964Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:26:09.912610625Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:26:09.912616806Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T08:26:09.912623493Z [err]                               'event': 'NONE'}                                   
+2026-01-28T08:26:09.912630569Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-28T08:26:09.912638519Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-28T08:26:09.912645512Z [err]                               Automatos', 'event': 'NONE'}                       
+2026-01-28T08:26:09.912652427Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-28T08:26:09.912659718Z [err]                      INFO     {'id': '2', 'text': 'Originally from    main.py:526
+2026-01-28T08:26:09.912666082Z [err]                               Ireland', 'event': 'ADD'}                          
+2026-01-28T08:26:09.912672389Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T08:26:09.912680911Z [err]                               openmemory                                         
+2026-01-28T08:26:09.912688078Z [err]                      INFO     {'id': '3', 'text': 'Currently living   main.py:526
+2026-01-28T08:26:09.912694138Z [err]                               in Portugal', 'event': 'ADD'}                      
+2026-01-28T08:26:09.912703068Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T08:26:09.912712178Z [err]                               openmemory                                         
+2026-01-28T08:26:10.703822900Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T08:26:10.703828398Z [err]                               [{'id':                                            
+2026-01-28T08:26:10.703833674Z [err]                               'fc86f5b3-1345-4809-897f-84411b17d4                
+2026-01-28T08:26:10.703838418Z [err]                               27', 'memory': 'Originally from                    
+2026-01-28T08:26:10.703842744Z [err]                               Ireland', 'event': 'ADD'}, {'id':                  
+2026-01-28T08:26:10.703846953Z [err]                               '9eb327ff-8b63-436a-a4d7-f13a5a5588                
+2026-01-28T08:26:10.703851428Z [err]                               f1', 'memory': 'Currently living in                
+2026-01-28T08:26:10.703855861Z [err]                               Portugal', 'event': 'ADD'}]}                       
+2026-01-28T08:26:10.703860431Z [err]  [01/28/26 08:26:10] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:10.703865808Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:26:10.703870884Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:26:11.764386366Z [err]  [01/28/26 08:26:11] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T08:26:11.764396761Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T08:26:11.764401866Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T08:26:11.787484379Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T08:26:11.787498303Z [inf]  Parsing environment variables in final config...
+2026-01-28T08:26:11.787505957Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T08:26:11.787515771Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T08:26:11.787522303Z [inf]  INFO:     100.64.0.5:34588 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T08:38:55.123853858Z [err]  INFO:     Shutting down
+2026-01-28T08:38:55.123865516Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T08:38:55.123871827Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T08:38:55.123877316Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T08:38:55.123894075Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T08:38:55.123900479Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T08:38:55.123907236Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f022ecc2480>
+2026-01-28T08:38:55.123913762Z [err]  Traceback (most recent call last):
+2026-01-28T08:38:55.123923949Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T08:38:55.123925359Z [err]  INFO:     Waiting for application shutdown.
+2026-01-28T08:38:55.123941831Z [err]  INFO:     Application shutdown complete.
+2026-01-28T08:38:55.123952116Z [err]  INFO:     Finished server process [1]
+2026-01-28T08:38:55.123960904Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f022ecc2480>
+2026-01-28T08:38:55.123968299Z [err]  Traceback (most recent call last):
+2026-01-28T08:38:55.123977967Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T08:38:55.123985434Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T08:38:56.000000000Z [inf]  Stopping Container
+2026-01-28T09:04:19.000000000Z [inf]  Starting Container
+2026-01-28T09:04:26.064855670Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T09:04:26.064861012Z [err]    @validator('created_at', pre=True)
+2026-01-28T09:04:26.064866406Z [err]  INFO:     Started server process [1]
+2026-01-28T09:04:26.064872851Z [err]  INFO:     Waiting for application startup.
+2026-01-28T09:04:26.064922730Z [err]  INFO:     Application startup complete.
+2026-01-28T09:04:26.064995778Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T09:05:17.754772703Z [inf]  INFO:     100.64.0.3:56528 - "GET /api/v1/memories/?search_query=I+am+Gerard+the+founder+of+Automatos+AI+and+just+testing+your+memory+system.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T09:05:37.646330455Z [err]                               [{'id':                                            
+2026-01-28T09:05:37.646338205Z [err]                               '9cd7b6e6-6148-4378-9ea7-817cc023da                
+2026-01-28T09:05:37.646345819Z [err]                               0b', 'memory': 'Name is Gerard',                   
+2026-01-28T09:05:37.646353121Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-28T09:05:37.646359721Z [err]                               '8e7c3fa3-24d7-4973-9f02-83620cf385                
+2026-01-28T09:05:37.646366723Z [err]                               da', 'memory': 'Is the founder of                  
+2026-01-28T09:05:37.646373047Z [err]                               Automatos AI', 'event': 'ADD'}]}                   
+2026-01-28T09:05:37.646393216Z [err]  [01/28/26 09:05:30] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T09:05:37.646400723Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T09:05:37.646406752Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T09:05:37.646412791Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T09:05:37.646419927Z [err]                               mem0migrations                                     
+2026-01-28T09:05:37.646426463Z [err]  [01/28/26 09:05:32] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.646454488Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:05:37.646461204Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:05:37.646467297Z [err]  [01/28/26 09:05:33] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.646473288Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T09:05:37.646479371Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T09:05:37.646486427Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.646492761Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T09:05:37.646498154Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T09:05:37.646504026Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T09:05:37.646509918Z [err]  [01/28/26 09:05:35] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.646515657Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:05:37.646561152Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:05:37.646570754Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T09:05:37.646579467Z [err]                               'event': 'ADD'}                                    
+2026-01-28T09:05:37.646585741Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T09:05:37.646591584Z [err]                               openmemory                                         
+2026-01-28T09:05:37.646596949Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-28T09:05:37.646602670Z [err]                               Automatos AI', 'event': 'ADD'}                     
+2026-01-28T09:05:37.646609247Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T09:05:37.646653546Z [err]                               openmemory                                         
+2026-01-28T09:05:37.646666117Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T09:05:37.649911470Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.649929246Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:05:37.649934098Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:05:37.649952320Z [err]  [01/28/26 09:05:36] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:05:37.649956901Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:05:37.649961126Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:05:37.649964963Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T09:05:37.649968907Z [inf]  Parsing environment variables in final config...
+2026-01-28T09:05:37.649976080Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T09:05:37.649979919Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T09:05:37.649983588Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T09:05:37.649989414Z [inf]  Memory client initialized successfully
+2026-01-28T09:05:37.649993774Z [inf]  INFO:     100.64.0.4:50188 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T09:14:41.410179536Z [inf]  INFO:     100.64.0.5:30822 - "GET /api/v1/memories/?search_query=Very+bad+weather+here+in+Portugal+where+I+am+living%2C+so+lets+get+some+good+work+done+today.+I+plan+to+build+you+a+new+workspace+canvas+and+make+your+memory+better.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T09:14:44.130466359Z [err]  [01/28/26 09:14:43] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T09:14:44.130472754Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T09:14:44.130480630Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T09:14:45.168110310Z [err]  [01/28/26 09:14:44] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:45.168120699Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:14:45.168130404Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:14:45.168138088Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:45.168145421Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T09:14:45.168154261Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T09:14:45.168162011Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:45.168169106Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T09:14:45.168176956Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T09:14:45.168185203Z [err]                      INFO     Total existing memories: 2              main.py:488
+2026-01-28T09:14:49.528583510Z [err]  [01/28/26 09:14:48] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:49.528589825Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:14:49.528595160Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:14:49.529221373Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T09:14:49.529228825Z [err]                               'event': 'NONE'}                                   
+2026-01-28T09:14:49.529234957Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-28T09:14:49.529241227Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-28T09:14:49.529246636Z [err]                               Automatos AI', 'event': 'NONE'}                    
+2026-01-28T09:14:49.529253585Z [err]                      INFO     NOOP for Memory.                        main.py:585
+2026-01-28T09:14:49.529259103Z [err]                      INFO     {'id': '2', 'text': 'User is living in  main.py:526
+2026-01-28T09:14:49.529265585Z [err]                               Portugal', 'event': 'ADD'}                         
+2026-01-28T09:14:49.529272380Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T09:14:49.529278339Z [err]                               openmemory                                         
+2026-01-28T09:14:49.529283803Z [err]                      INFO     {'id': '3', 'text': 'Plans to build a   main.py:526
+2026-01-28T09:14:49.529289010Z [err]                               new workspace canvas', 'event': 'ADD'}             
+2026-01-28T09:14:49.529296702Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T09:14:49.529302553Z [err]                               openmemory                                         
+2026-01-28T09:14:50.680976134Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T09:14:50.680983021Z [err]                               [{'id':                                            
+2026-01-28T09:14:50.680989805Z [err]                               'e9baf796-b7c4-42d2-a339-da701f510c                
+2026-01-28T09:14:50.680995932Z [err]                               ad', 'memory': 'User is living in                  
+2026-01-28T09:14:50.681004805Z [err]                               Portugal', 'event': 'ADD'}, {'id':                 
+2026-01-28T09:14:50.681012167Z [err]                               '4210e9c4-1862-45ba-8361-3754edfe87                
+2026-01-28T09:14:50.681018972Z [err]                               ce', 'memory': 'Plans to build a                   
+2026-01-28T09:14:50.681025506Z [err]                               new workspace canvas', 'event':                    
+2026-01-28T09:14:50.681033355Z [err]                               'ADD'}]}                                           
+2026-01-28T09:14:50.681040204Z [err]  [01/28/26 09:14:49] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:50.681049427Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:14:50.681056501Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:14:50.681066866Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T09:14:50.681103250Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T09:14:50.681109926Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T09:14:50.681119911Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T09:14:51.717173293Z [inf]  Parsing environment variables in final config...
+2026-01-28T09:14:51.717179924Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T09:14:51.717189095Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T09:14:51.717195390Z [inf]  INFO:     100.64.0.6:47392 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T09:29:48.000000000Z [inf]  Stopping Container
+2026-01-28T09:29:51.326911655Z [err]  INFO:     Shutting down
+2026-01-28T09:29:51.326917012Z [err]  INFO:     Waiting for application shutdown.
+2026-01-28T09:29:51.326930796Z [err]  INFO:     Application shutdown complete.
+2026-01-28T09:29:51.326938189Z [err]  INFO:     Finished server process [1]
+2026-01-28T09:29:51.326944717Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7fd8188c6480>
+2026-01-28T09:29:51.326949259Z [err]  Traceback (most recent call last):
+2026-01-28T09:29:51.326955049Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T09:29:51.326960593Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T09:29:51.326966266Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T09:29:51.326971311Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T09:29:51.326975655Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7fd8188c6480>
+2026-01-28T09:29:51.326979969Z [err]  Traceback (most recent call last):
+2026-01-28T09:29:51.326984385Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T09:29:51.326989540Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T09:29:51.326993751Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T09:29:51.326997928Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T10:08:17.000000000Z [inf]  Starting Container
+2026-01-28T10:08:23.059009255Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T10:08:23.059017543Z [err]    @validator('created_at', pre=True)
+2026-01-28T10:08:23.059024973Z [err]  INFO:     Started server process [1]
+2026-01-28T10:08:23.059031841Z [err]  INFO:     Waiting for application startup.
+2026-01-28T10:08:23.059072713Z [err]  INFO:     Application startup complete.
+2026-01-28T10:08:23.059080328Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T10:08:25.159689556Z [err]  [01/28/26 10:08:25] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T10:08:25.159696998Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T10:08:25.159704719Z [err]                               cbf8_agent_96 with app: openmemory                 
+2026-01-28T10:08:26.070044668Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T10:08:26.070051196Z [err]                               mem0migrations                                     
+2026-01-28T10:08:27.104919929Z [err]  [01/28/26 10:08:27] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:08:27.104924562Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:08:27.104931373Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:08:27.120809163Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T10:08:27.128011669Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-28T10:08:27.136142394Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T10:08:27.136149131Z [inf]  Parsing environment variables in final config...
+2026-01-28T10:08:27.136153837Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:08:27.136158673Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:08:27.136163288Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T10:08:27.136168866Z [inf]  Memory client initialized successfully
+2026-01-28T10:08:27.136176496Z [inf]  INFO:     100.64.0.3:44922 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_96 HTTP/1.1" 200 OK
+2026-01-28T10:20:38.000000000Z [inf]  Stopping Container
+2026-01-28T10:20:40.117149765Z [err]  INFO:     Shutting down
+2026-01-28T10:20:40.117156185Z [err]  INFO:     Waiting for application shutdown.
+2026-01-28T10:20:40.117162313Z [err]  INFO:     Application shutdown complete.
+2026-01-28T10:20:40.117168210Z [err]  INFO:     Finished server process [1]
+2026-01-28T10:20:40.117174448Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f69eabbe480>
+2026-01-28T10:20:40.117180160Z [err]  Traceback (most recent call last):
+2026-01-28T10:20:40.117185968Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T10:20:40.117191747Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T10:20:40.117198901Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T10:20:40.117204386Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T10:20:40.117209427Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f69eabbe480>
+2026-01-28T10:20:40.117214819Z [err]  Traceback (most recent call last):
+2026-01-28T10:20:40.117220248Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T10:20:40.117226882Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T10:20:40.117232358Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T10:20:40.117238257Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T10:28:19.000000000Z [inf]  Starting Container
+2026-01-28T10:28:27.871828919Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T10:28:27.871833645Z [err]    @validator('created_at', pre=True)
+2026-01-28T10:28:27.871841585Z [err]  INFO:     Started server process [1]
+2026-01-28T10:28:27.871898060Z [err]  INFO:     Waiting for application startup.
+2026-01-28T10:28:27.871905609Z [err]  INFO:     Application startup complete.
+2026-01-28T10:28:27.871958845Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T10:28:27.871965581Z [inf]  INFO:     100.64.0.2:11030 - "GET /api/v1/memories/?search_query=Hi+do+you+remember+me+%3F&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T10:28:27.871972578Z [err]  [01/28/26 10:28:27] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T10:28:27.871979019Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T10:28:27.871988327Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T10:28:27.871994334Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T10:28:27.872000038Z [err]                               mem0migrations                                     
+2026-01-28T10:28:28.942765633Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T10:28:28.942778535Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T10:28:28.942784287Z [inf]  Parsing environment variables in final config...
+2026-01-28T10:28:28.942789663Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:28:28.942794538Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:28:28.942800739Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T10:28:28.942815681Z [inf]  Memory client initialized successfully
+2026-01-28T10:28:28.942822401Z [inf]  INFO:     100.64.0.2:11030 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T10:28:28.942831390Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-28T10:28:28.942834834Z [err]  [01/28/26 10:28:28] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:28:28.942840696Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:28:28.942846096Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:29:39.229030989Z [inf]  INFO:     100.64.0.3:13814 - "GET /api/v1/memories/?search_query=I+am+Gerard+the+founder+of+Automatos+and+testing+a+new+memory+module+you+should+have+so+you+should+remember+me.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T10:30:39.889356889Z [inf]  INFO:     100.64.0.2:41562 - "GET /api/v1/memories/?search_query=I+am+Gerard+the+founder+of+Automatos+and+testing+a+new+memory+module+you+should+have+so+you+should+remember+me.&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T10:30:44.515777034Z [err]  [01/28/26 10:30:44] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T10:30:44.515787977Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T10:30:44.515794386Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T10:30:45.757509304Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:30:45.757532823Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:30:45.757623937Z [err]  [01/28/26 10:30:45] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:46.829418288Z [err]  [01/28/26 10:30:46] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:46.829428924Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T10:30:46.829618825Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T10:30:47.855483872Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:47.855490911Z [err]                               https://api.openai.com/v1/embedding                
+2026-01-28T10:30:47.855497050Z [err]                               s "HTTP/1.1 200 OK"                                
+2026-01-28T10:30:47.855502597Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T10:30:49.779905474Z [err]                      INFO     {'id': '0', 'text': 'Name is Gerard',   main.py:526
+2026-01-28T10:30:49.779919014Z [err]                               'event': 'ADD'}                                    
+2026-01-28T10:30:49.779926223Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T10:30:49.779969073Z [err]                               openmemory                                         
+2026-01-28T10:30:49.779977178Z [err]                      INFO     {'id': '1', 'text': 'Is the founder of  main.py:526
+2026-01-28T10:30:49.779984404Z [err]  [01/28/26 10:30:49] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:49.779987699Z [err]                               Automatos', 'event': 'ADD'}                        
+2026-01-28T10:30:49.779991590Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:30:49.779997831Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T10:30:49.779999290Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:30:49.780006177Z [err]                               openmemory                                         
+2026-01-28T10:30:49.780012869Z [err]                      INFO     Qdrant response: {'results':        memories.py:269
+2026-01-28T10:30:49.780020574Z [err]                               [{'id':                                            
+2026-01-28T10:30:49.780027072Z [err]                               'c88db7fd-4ea7-4583-9c90-e8b382f791                
+2026-01-28T10:30:49.780033978Z [err]                               45', 'memory': 'Name is Gerard',                   
+2026-01-28T10:30:49.780041664Z [err]                               'event': 'ADD'}, {'id':                            
+2026-01-28T10:30:49.780048381Z [err]                               'c485b056-8b63-4b40-a09e-34458a442e                
+2026-01-28T10:30:49.788489954Z [err]                               d8', 'memory': 'Is the founder of                  
+2026-01-28T10:30:49.788505160Z [err]                               Automatos', 'event': 'ADD'}]}                      
+2026-01-28T10:30:50.681892725Z [err]                      INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:50.682175504Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:30:50.682186837Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:30:50.682193426Z [err]  [01/28/26 10:30:50] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T10:30:50.682202892Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T10:30:50.682209267Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T10:30:50.682227653Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T10:30:50.682234991Z [inf]  Parsing environment variables in final config...
+2026-01-28T10:30:50.682242556Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:30:50.682249163Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T10:30:50.682255370Z [inf]  INFO:     100.64.0.2:59586 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T10:44:54.038007715Z [inf]  INFO:     100.64.0.4:39070 - "GET /api/v1/memories/?search_query=Gerard&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=10&page=1 HTTP/1.1" 200 OK
+2026-01-28T10:51:02.613062807Z [err]  INFO:     Shutting down
+2026-01-28T10:51:02.613068187Z [err]  INFO:     Waiting for application shutdown.
+2026-01-28T10:51:02.613075411Z [err]  INFO:     Application shutdown complete.
+2026-01-28T10:51:02.613081681Z [err]  INFO:     Finished server process [1]
+2026-01-28T10:51:03.588616546Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f312a1c2480>
+2026-01-28T10:51:03.588623941Z [err]  Traceback (most recent call last):
+2026-01-28T10:51:03.588628922Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T10:51:03.588634488Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T10:51:03.589317719Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T10:51:03.589326661Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T10:51:03.589332291Z [err]  Exception ignored in: <function QdrantClient.__del__ at 0x7f312a1c2480>
+2026-01-28T10:51:03.589338023Z [err]  Traceback (most recent call last):
+2026-01-28T10:51:03.589343541Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 169, in __del__
+2026-01-28T10:51:03.589349686Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/qdrant_client.py", line 178, in close
+2026-01-28T10:51:03.589356720Z [err]    File "/usr/local/lib/python3.12/site-packages/qdrant_client/local/qdrant_local.py", line 85, in close
+2026-01-28T10:51:03.589361944Z [err]  ImportError: sys.meta_path is None, Python is likely shutting down
+2026-01-28T10:51:04.000000000Z [inf]  Stopping Container
+2026-01-28T11:04:26.000000000Z [inf]  Starting Container
+2026-01-28T11:04:31.478954375Z [err]  /usr/src/openmemory/app/schemas.py:54: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+2026-01-28T11:04:31.478962589Z [err]    @validator('created_at', pre=True)
+2026-01-28T11:04:33.040435841Z [err]  INFO:     Started server process [1]
+2026-01-28T11:04:33.040442224Z [err]  INFO:     Waiting for application startup.
+2026-01-28T11:04:33.040449568Z [err]  INFO:     Application startup complete.
+2026-01-28T11:04:33.040456908Z [err]  INFO:     Uvicorn running on http://0.0.0.0:8765 (Press CTRL+C to quit)
+2026-01-28T11:04:52.493611391Z [inf]  INFO:     100.64.0.3:57888 - "GET /api/v1/memories/?search_query=Tell+me+my+name%3F&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T11:04:52.493619650Z [err]  [01/28/26 11:04:49] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T11:04:52.493627187Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T11:04:52.493634797Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T11:04:52.493643086Z [err]                      INFO     Inserting 1 vectors into collection   qdrant.py:130
+2026-01-28T11:04:52.493650229Z [err]                               mem0migrations                                     
+2026-01-28T11:04:52.493657284Z [err]  [01/28/26 11:04:51] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T11:04:52.493664306Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T11:04:52.493671785Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T11:04:52.493678318Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T11:04:52.493684882Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269
+2026-01-28T11:04:52.493692107Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T11:04:52.493698763Z [inf]  Parsing environment variables in final config...
+2026-01-28T11:04:52.493705091Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T11:04:52.493750039Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T11:04:52.493758458Z [inf]  Initializing memory client with config hash: e6ff287bb3c0754f24fda8f12de569a5
+2026-01-28T11:04:53.754035893Z [inf]  Memory client initialized successfully
+2026-01-28T11:04:53.754041350Z [inf]  INFO:     100.64.0.4:17032 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T11:05:13.840986646Z [inf]  INFO:     100.64.0.5:40808 - "GET /api/v1/memories/?search_query=So+you+remember+nothing+from+out+earlier+chats%3F&user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19&size=8&page=1 HTTP/1.1" 200 OK
+2026-01-28T11:06:17.361801322Z [inf]  Auto-detected vector store: redis with config: {'collection_name': 'openmemory', 'redis_url': 'redis://default:tCehIXGkeSvRMIyqFwLOHpMOFaSGybLB@redis.railway.internal:6379'}
+2026-01-28T11:06:17.361813988Z [inf]  Parsing environment variables in final config...
+2026-01-28T11:06:17.361821573Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T11:06:17.361829213Z [inf]  Loaded OPENAI_API_KEY from environment for api_key
+2026-01-28T11:06:17.361849014Z [err]  [01/28/26 11:06:12] INFO     Creating memory for user_id:        memories.py:242
+2026-01-28T11:06:17.361855754Z [err]                               ws_ae8320bc-95e1-4de1-bbe9-396bef19                
+2026-01-28T11:06:17.361861783Z [err]                               cbf8_agent_19 with app: openmemory                 
+2026-01-28T11:06:17.361867855Z [err]  [01/28/26 11:06:13] INFO     HTTP Request: POST                  _client.py:1025
+2026-01-28T11:06:17.361873949Z [err]                               https://api.openai.com/v1/chat/comp                
+2026-01-28T11:06:17.361881919Z [err]                               letions "HTTP/1.1 200 OK"                          
+2026-01-28T11:06:17.361883462Z [inf]  INFO:     100.64.0.6:53292 - "POST /api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19 HTTP/1.1" 200 OK
+2026-01-28T11:06:17.361888827Z [err]                      INFO     Total existing memories: 0              main.py:488
+2026-01-28T11:06:17.361895122Z [err]                      INFO     Qdrant response: {'results': []}    memories.py:269

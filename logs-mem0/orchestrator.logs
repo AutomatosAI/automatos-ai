@@ -1,0 +1,276 @@
+2026-01-28 10:45:43,939 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Starting Automotas AI API Server...
+2026-01-28 10:45:43,939 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Database ready (tables already exist from docker-compose init)
+2026-01-28 10:45:43,939 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis client will lazy-initialize on first use
+2026-01-28 10:45:43,940 - core.services.analytics_engine - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis connection established successfully
+2026-01-28 10:45:43,940 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis connection established for real-time updates
+2026-01-28 10:45:43,940 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services initialized successfully
+2026-01-28 10:45:43,940 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services initialized successfully
+INFO:     Application startup complete.
+^CINFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-01-28 11:03:35,509 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Shutting down Automotas AI API Server...
+2026-01-28 11:03:35,509 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services shutdown complete
+2026-01-28 11:03:35,509 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services shutdown complete
+INFO:     Application shutdown complete.
+INFO:     Finished server process [18439]
+2026-01-28 11:03:36,009 - modules.agents.execution.execution_manager - WARNING - [req=- run=- agent=- wf=- tenant=-] - ⚠️  Skipping cleanup of non-temp directory: /private/var/folders/4x/_4lf58tn5675y6qpdkc0cjbc0000gn/T/automatos_workspace_3lugc8kt
+clINFO:     Stopping reloader process [16089]
+(venv) gkavanagh@Mac orchestrator % clear
+(venv) gkavanagh@Mac orchestrator % python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload  
+INFO:     Will watch for changes in these directories: ['/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [38907] using WatchFiles
+/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:383: UserWarning: Valid config keys have changed in V2:
+* 'schema_extra' has been renamed to 'json_schema_extra'
+  warnings.warn(message, UserWarning)
+Using environment variables for database (credential system not available): 'user'
+INFO:core.llm.function_registry:FunctionRegistry initialized
+INFO:core.llm.embedding_manager:EmbeddingManager singleton initialized
+INFO:modules.rag.ingestion.manager:DocumentManager using none embeddings
+INFO:faiss.loader:Loading faiss.
+INFO:faiss.loader:Successfully loaded faiss.
+INFO:modules.orchestrator.tracker:OrchestrationTracker initialized
+/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/pydantic/_internal/_config.py:383: UserWarning: Valid config keys have changed in V2:
+* 'schema_extra' has been renamed to 'json_schema_extra'
+  warnings.warn(message, UserWarning)
+INFO:core.llm.manager:Found credential 'development_openai' (type: openai_api) for provider 'openai'
+WARNING:core.llm.manager:Could not find credential for provider 'openai' using any variation. Tried: ['development_openai_api', 'development_openai', 'openai_api', 'openai', 'openai', 'Openai', 'Openai']
+INFO:modules.rag.service:RAGConfig loaded: max_tokens=4500, diversity=0.3, min_similarity=0.5
+INFO:modules.orchestrator.stages.task_decomposer:RealTaskDecomposer initialized with provided LLM manager
+INFO:modules.orchestrator.stages.quality_assessor:OutputQualityAssessor initialized (LLM: True)
+INFO:core.llm.semantic_skill_matcher:SemanticSkillMatcher: Using none embeddings (model: N/A, dimension: N/A)
+INFO:modules.search.optimization.context_optimizer:Context Optimizer using none embeddings (model: N/A, dimension: 1024)
+INFO:modules.orchestrator.stages.context_engineering:🌐 ContextEngineeringIntegrator initialized with api_base_url: http://localhost:8000
+INFO:modules.search.optimization.context_optimizer:Context Optimizer using none embeddings (model: N/A, dimension: 1024)
+INFO:modules.orchestrator.stages.context_engineering:✅ Context Optimizer initialized
+INFO:modules.orchestrator.stages.context_engineering:✅ Vector Store integration ready (will initialize on first use)
+INFO:modules.orchestrator.stages.context_engineering:ℹ️ Mathematical optimization DISABLED - using basic RAG only
+INFO:modules.agents.execution.execution_manager:📁 Agent execution workspace: /private/var/folders/4x/_4lf58tn5675y6qpdkc0cjbc0000gn/T/automatos_workspace_4vq1ffep
+INFO:modules.agents.execution.execution_manager:✅ Inter-agent communication ENABLED
+INFO:core.redis.client:Redis connection pool created for shinkansen.proxy.rlwy.net:56395
+INFO:core.redis.client:✅ Redis connection test successful
+INFO:core.redis.client:Redis client initialized
+WARNING:core.credentials.resolver:Could not load credential 'development_db' from database: Failed to decrypt credential: Could not decrypt credential. The encryption key may have changed or data is corrupted.
+WARNING:core.database.database:Using environment variables for database (credential system not available): 'user'
+INFO:modules.search.services.context_level_decision:✅ Context Level Decision Engine initialized
+INFO:modules.orchestrator.service:✅ Enhanced Orchestrator Service initialized with 9-stage pipeline
+INFO:modules.tools.registry.tool_registry:ToolRegistry initialized with 16 tools
+INFO:modules.tools.registry.tool_registry:Tool registry initialized (singleton)
+INFO:consumers.chatbot.tool_router:[tool-trace ccdde32102e5] Loaded 16 tools (agent_id=None, denied=0, candidates=16, 0ms)
+INFO:main:🌐 CORS configured with allowed origins: ['https://ui.automatos.app', 'http://localhost:3000']
+2026-01-28 11:03:54,747 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard API routes registered
+2026-01-28 11:03:54,747 - main - WARNING - [req=- run=- agent=- wf=- tenant=-] - Could not mount legacy routes: No module named 'api_routes'
+INFO:     Started server process [38921]
+INFO:     Waiting for application startup.
+2026-01-28 11:03:54,747 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Starting Automotas AI API Server...
+2026-01-28 11:03:54,747 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Database ready (tables already exist from docker-compose init)
+2026-01-28 11:03:54,747 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis client will lazy-initialize on first use
+2026-01-28 11:03:54,747 - core.services.analytics_engine - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis connection established successfully
+2026-01-28 11:03:54,747 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Redis connection established for real-time updates
+2026-01-28 11:03:54,747 - api.dashboard_integration - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services initialized successfully
+2026-01-28 11:03:54,747 - main - INFO - [req=- run=- agent=- wf=- tenant=-] - Dashboard services initialized successfully
+INFO:     Application startup complete.
+
+
+
+
+
+
+INFO:     127.0.0.1:52954 - "OPTIONS /api/agents/?status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52955 - "OPTIONS /api/workspaces/current HTTP/1.1" 200 OK
+2026-01-28 11:04:04,955 - httpx - INFO - [req=42930501628d run=- agent=- wf=- tenant=-] - HTTP Request: GET https://api.clerk.com/v1/users/user_38Z4SP1ttmy9Sk3wf79XgQLS8H1 "HTTP/1.1 200 OK"
+2026-01-28 11:04:04,956 - core.auth.clerk - INFO - [req=42930501628d run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+2026-01-28 11:04:05,278 - core.auth.clerk - INFO - [req=b2d0b7617b2c run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+INFO:     127.0.0.1:52955 - "GET /api/agents/?status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52954 - "GET /api/workspaces/current HTTP/1.1" 200 OK
+2026-01-28 11:04:07,453 - core.auth.clerk - INFO - [req=f0ded62e1bc2 run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+INFO:     127.0.0.1:52954 - "GET /api/agents/?status=active HTTP/1.1" 200 OK
+2026-01-28 11:04:10,450 - core.auth.clerk - INFO - [req=bba7e12f973f run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+INFO:     127.0.0.1:52954 - "GET /api/agents/?status=active HTTP/1.1" 200 OK
+2026-01-28 11:04:11,566 - core.auth.clerk - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+2026-01-28 11:04:11,767 - core.auth.clerk - INFO - [req=41aa115e67ba run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+2026-01-28 11:04:11,970 - api.chat - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [chat] RequestContext workspace_id=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:04:11,971 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - StreamingChatService initialized with AgentFactory integration
+2026-01-28 11:04:12,421 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Created chat 2620e32d-86fd-482f-954b-3001443a954b for user 1: Hi there
+2026-01-28 11:04:13,089 - api.chat - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Chat request - agentId: None, model: gpt-4
+2026-01-28 11:04:13,311 - api.chat - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [chat] agentId not provided; using default agent_id=19 for workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:04:14,387 - consumers.chatbot.tool_router - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [tool-trace 25b6997ce6b5] Loaded 16 tools (agent_id=19, denied=0, candidates=16, 1075ms)
+INFO:     127.0.0.1:52969 - "POST /api/chat HTTP/1.1" 200 OK
+2026-01-28 11:04:15,385 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+2026-01-28 11:04:15,385 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Using user-selected model: openai/gpt-4
+2026-01-28 11:04:17,757 - core.llm.manager - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Found credential 'development_openai' (type: openai_api) for provider 'openai'
+2026-01-28 11:04:17,895 - core.llm.manager - WARNING - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Could not find credential for provider 'openai' using any variation. Tried: ['development_openai_api', 'development_openai', 'openai_api', 'openai', 'openai', 'Openai', 'Openai']
+2026-01-28 11:04:17,895 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/modules/memory/operations/query_classifier.py:47: UserWarning: `normalize_intent` overrides an existing Pydantic `@field_validator` decorator
+  def normalize_intent(cls, v):
+2026-01-28 11:04:18,542 - core.credentials.resolver - WARNING - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Could not load credential 'development_openai' from database: Failed to decrypt credential: Could not decrypt credential. The encryption key may have changed or data is corrupted.
+2026-01-28 11:04:18,542 - modules.agents.factory.agent_factory - WARNING - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Failed to retrieve/decrypt 'development_openai' credential: Credential 'development_openai' not found - check logs for database error
+2026-01-28 11:04:18,542 - modules.agents.factory.agent_factory - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Using OPENAI_API_KEY from environment variable for Communication (fallback)
+2026-01-28 11:04:18,542 - modules.agents.factory.agent_factory - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Creating LLM manager for Communication: provider=openai, model=gpt-4
+2026-01-28 11:04:18,617 - core.llm.clients.openai_client - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+INFO:     127.0.0.1:52955 - "GET /api/agents/?status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52955 - "OPTIONS /api/chat/2620e32d-86fd-482f-954b-3001443a954b HTTP/1.1" 200 OK
+2026-01-28 11:04:19,413 - consumers.chatbot.service - INFO - [req=d6b5258edeae run=- agent=- wf=- tenant=-] - Updated chat 2620e32d-86fd-482f-954b-3001443a954b title to unique: Hi... (3)
+INFO:     127.0.0.1:52955 - "PATCH /api/chat/2620e32d-86fd-482f-954b-3001443a954b HTTP/1.1" 200 OK
+2026-01-28 11:04:21,363 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:04:21,554 - core.llm.clients.openai_client - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+2026-01-28 11:04:22,861 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:04:22,863 - consumers.chatbot.service - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - 🔍 LLM Response - has_tool_calls: False, content_length: 34, finish_reason: stop
+2026-01-28 11:04:23,572 - modules.memory.integrations.mem0_client - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Initialized Mem0Client with URL: https://automatos-mem0-server-production.up.railway.app
+2026-01-28 11:04:23,572 - modules.memory.storage.mem0_system - INFO - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - Mem0MemorySystem initialized
+2026-01-28 11:04:32,538 - modules.memory.integrations.mem0_client - ERROR - [req=0fe2759ce9a3 run=- agent=- wf=- tenant=-] - [Mem0] Failed to add memory: 502 Server Error: Bad Gateway for url: https://automatos-mem0-server-production.up.railway.app/api/v1/memories/?user_id=ws_ae8320bc-95e1-4de1-bbe9-396bef19cbf8_agent_19
+/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/starlette/responses.py:262: RuntimeWarning: coroutine 'MemoryInjector.should_retrieve_memories' was never awaited
+  async for chunk in self.body_iterator:
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+2026-01-28 11:04:38,365 - core.auth.clerk - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+2026-01-28 11:04:38,552 - api.chat - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [chat] RequestContext workspace_id=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:04:38,553 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - StreamingChatService initialized with AgentFactory integration
+2026-01-28 11:04:39,421 - api.chat - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Chat request - agentId: None, model: gpt-4
+2026-01-28 11:04:39,609 - api.chat - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [chat] agentId not provided; using default agent_id=19 for workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:04:40,668 - consumers.chatbot.tool_router - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [tool-trace 574880b9f1fb] Loaded 16 tools (agent_id=19, denied=0, candidates=16, 1058ms)
+INFO:     127.0.0.1:53005 - "POST /api/chat HTTP/1.1" 200 OK
+2026-01-28 11:04:40,716 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+2026-01-28 11:04:40,717 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Using user-selected model: openai/gpt-4
+2026-01-28 11:04:41,112 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+2026-01-28 11:04:41,113 - consumers.chatbot.prompt_analyzer - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - 🔍 Query: 'Tell me my name?' | Top ranked tools: []
+2026-01-28 11:04:41,114 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Filtering tools: 16 -> 11 relevant tools
+2026-01-28 11:04:41,559 - core.credentials.resolver - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Could not load credential 'development_openai' from database: Failed to decrypt credential: Could not decrypt credential. The encryption key may have changed or data is corrupted.
+2026-01-28 11:04:41,560 - modules.agents.factory.agent_factory - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Failed to retrieve/decrypt 'development_openai' credential: Credential 'development_openai' not found - check logs for database error
+2026-01-28 11:04:41,560 - modules.agents.factory.agent_factory - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Using OPENAI_API_KEY from environment variable for Communication (fallback)
+2026-01-28 11:04:41,560 - modules.agents.factory.agent_factory - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Creating LLM manager for Communication: provider=openai, model=gpt-4
+2026-01-28 11:04:41,617 - core.llm.clients.openai_client - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+2026-01-28 11:04:44,920 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:04:45,208 - core.credentials.resolver - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Could not load credential 'development_db' from database: Failed to decrypt credential: Could not decrypt credential. The encryption key may have changed or data is corrupted.
+2026-01-28 11:04:45,209 - core.database.database - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Using environment variables for database (credential system not available): 'user'
+2026-01-28 11:04:46,130 - modules.search.retrieval.context_retrieval_engine - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - No embedding provided for similarity-based retrieval
+2026-01-28 11:04:46,131 - modules.search.retrieval.context_retrieval_engine - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Retrieved 0 contexts in 0.6ms
+2026-01-28 11:04:46,483 - modules.memory.operations.injection - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [Memory] Legacy recent memories DISABLED via code (testing mode).
+2026-01-28 11:04:46,484 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - [Memory] Injecting 40 chars
+2026-01-28 11:04:46,484 - consumers.chatbot.prompt_analyzer - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - 🔍 Query: 'Tell me my name?' | Top ranked tools: []
+2026-01-28 11:04:46,639 - core.llm.clients.openai_client - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+2026-01-28 11:04:46,639 - core.llm.clients.openai_client - INFO - [req=- run=- agent=- wf=- tenant=-] - Sending tools to OpenAI (tool_choice=auto): 11 tools. Sample: [{"type": "function", "function": {"name": "search_knowledge", "description": "Search the Automatos knowledge base for documentation, guides, and information about the platform. NOTE: This tool has a ...
+2026-01-28 11:04:48,299 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:04:48,304 - consumers.chatbot.service - INFO - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - 🔍 LLM Response - has_tool_calls: False, content_length: 125, finish_reason: stop
+2026-01-28 11:04:48,304 - consumers.chatbot.service - WARNING - [req=18d7ffbb9a82 run=- agent=- wf=- tenant=-] - ⚠️ LLM did NOT call tools despite 11 tools being available. Response: I'm sorry, but I don't have any previous record of your name in our conversation history. Could you please tell me your name?
+2026-01-28 11:05:04,790 - core.auth.clerk - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Auto-assigned admin role to gerard@automatos.app based on domain
+2026-01-28 11:05:04,996 - api.chat - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [chat] RequestContext workspace_id=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:05:04,997 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - StreamingChatService initialized with AgentFactory integration
+2026-01-28 11:05:05,842 - api.chat - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Chat request - agentId: None, model: gpt-4
+2026-01-28 11:05:06,045 - api.chat - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [chat] agentId not provided; using default agent_id=19 for workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:05:07,031 - consumers.chatbot.tool_router - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace 5b489142f6bd] Loaded 16 tools (agent_id=19, denied=0, candidates=16, 984ms)
+INFO:     127.0.0.1:53016 - "POST /api/chat HTTP/1.1" 200 OK
+2026-01-28 11:05:07,080 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+2026-01-28 11:05:07,080 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Using user-selected model: openai/gpt-4
+2026-01-28 11:05:07,462 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [chat] resolve_workspace_id current=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 agent=19
+2026-01-28 11:05:07,463 - consumers.chatbot.prompt_analyzer - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - 🔍 Query: 'So you remember nothing from out earlier chats?' | Top ranked tools: ['search_multimodal (1)', 'smart_query_database (1)']
+2026-01-28 11:05:07,463 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Filtering tools: 16 -> 11 relevant tools
+2026-01-28 11:05:07,923 - core.credentials.resolver - WARNING - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Could not load credential 'development_openai' from database: Failed to decrypt credential: Could not decrypt credential. The encryption key may have changed or data is corrupted.
+2026-01-28 11:05:07,924 - modules.agents.factory.agent_factory - WARNING - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Failed to retrieve/decrypt 'development_openai' credential: Credential 'development_openai' not found - check logs for database error
+2026-01-28 11:05:07,924 - modules.agents.factory.agent_factory - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Using OPENAI_API_KEY from environment variable for Communication (fallback)
+2026-01-28 11:05:07,924 - modules.agents.factory.agent_factory - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Creating LLM manager for Communication: provider=openai, model=gpt-4
+2026-01-28 11:05:07,980 - core.llm.clients.openai_client - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+2026-01-28 11:05:09,938 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:05:09,948 - modules.search.retrieval.context_retrieval_engine - WARNING - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - No embedding provided for similarity-based retrieval
+2026-01-28 11:05:09,948 - modules.search.retrieval.context_retrieval_engine - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Retrieved 0 contexts in 0.3ms
+2026-01-28 11:05:10,163 - modules.memory.operations.injection - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [Memory] Legacy recent memories DISABLED via code (testing mode).
+2026-01-28 11:05:10,163 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [Memory] Injecting 40 chars
+2026-01-28 11:05:10,163 - consumers.chatbot.prompt_analyzer - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - 🔍 Query: 'So you remember nothing from out earlier chats?' | Top ranked tools: ['search_multimodal (1)', 'smart_query_database (1)']
+2026-01-28 11:05:10,339 - core.llm.clients.openai_client - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4
+2026-01-28 11:05:10,341 - core.llm.clients.openai_client - INFO - [req=- run=- agent=- wf=- tenant=-] - Sending tools to OpenAI (tool_choice=required): 11 tools. Sample: [{"type": "function", "function": {"name": "search_knowledge", "description": "Search the Automatos knowledge base for documentation, guides, and information about the platform. NOTE: This tool has a ...
+2026-01-28 11:05:11,996 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:05:12,002 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - 🔍 LLM Response - has_tool_calls: True, content_length: 0, finish_reason: stop
+2026-01-28 11:05:12,002 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - ✅ LLM requested 1 tool calls
+2026-01-28 11:05:12,002 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Tool iteration 1: LLM requested 1 tool calls
+2026-01-28 11:05:12,003 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Executing tool: query_database
+2026-01-28 11:05:12,003 - consumers.chatbot.tool_router - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] ToolRouter execute_and_format tool=query_database agent=19 workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 args=dict keys=['query']
+2026-01-28 11:05:12,005 - consumers.chatbot.tool_router - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] execute_tool start tool=query_database agent=19 workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8 args=dict keys=['query']
+2026-01-28 11:05:12,005 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] Executing tool 'query_database' for agent=19 workspace=ae8320bc-95e1-4de1-bbe9-396bef19cbf8
+2026-01-28 11:05:12,005 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] Parameters keys=['query']
+2026-01-28 11:05:12,006 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - 🔧 Agent 19 querying database: SELECT username FROM conversation_history WHERE us...
+INFO:     127.0.0.1:53021 - "GET /api/knowledge/sources/database/?active_only=true HTTP/1.1" 200 OK
+2026-01-28 11:05:12,380 - httpx - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - HTTP Request: GET http://127.0.0.1:8000/api/knowledge/sources/database/?active_only=true "HTTP/1.1 200 OK"
+2026-01-28 11:05:12,381 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - No knowledge sources - using direct DB fallback
+2026-01-28 11:05:12,381 - modules.nl2sql.schema.provider - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - ✅ Schema Provider initialized
+2026-01-28 11:06:05,830 - core.llm.clients.openai_client - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Initialized OpenAI client with model: gpt-4-turbo-preview
+2026-01-28 11:06:09,053 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:06:09,058 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [Database Tool] Generated SQL: SELECT username FROM conversation_history WHERE user_id = current_user_id ORDER BY timestamp DESC LIMIT 1;...
+2026-01-28 11:06:09,261 - core.database.database - ERROR - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Database session error: (psycopg2.errors.UndefinedTable) relation "conversation_history" does not exist
+LINE 1: SELECT username FROM conversation_history WHERE user_id = cu...
+                             ^
+
+[SQL: SELECT username FROM conversation_history WHERE user_id = current_user_id ORDER BY timestamp DESC LIMIT 1;]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-01-28 11:06:09,262 - modules.tools.execution.unified_executor - ERROR - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Direct DB query error: (psycopg2.errors.UndefinedTable) relation "conversation_history" does not exist
+LINE 1: SELECT username FROM conversation_history WHERE user_id = cu...
+                             ^
+
+[SQL: SELECT username FROM conversation_history WHERE user_id = current_user_id ORDER BY timestamp DESC LIMIT 1;]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/modules/tools/execution/unified_executor.py", line 338, in execute_tool
+    result = await executor_func(
+                   ^^^^^^^^^^^^^^
+TypeError: UnifiedToolExecutor._execute_database_tool() got an unexpected keyword argument 'workspace_id'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1969, in _exec_single_context
+    self.dialect.do_execute(
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/default.py", line 922, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.UndefinedTable: relation "conversation_history" does not exist
+LINE 1: SELECT username FROM conversation_history WHERE user_id = cu...
+                             ^
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/modules/tools/execution/unified_executor.py", line 506, in _query_main_database
+    result = session.execute(text(sql))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/orm/session.py", line 2308, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/orm/session.py", line 2199, in _execute_internal
+    result = conn.execute(
+             ^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1416, in execute
+    return meth(
+           ^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/sql/elements.py", line 516, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1639, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1848, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1988, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 2343, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/base.py", line 1969, in _exec_single_context
+    self.dialect.do_execute(
+  File "/Users/gkavanagh/Development/Automatos-AI-Platform/automatos-ai/orchestrator/venv/lib/python3.11/site-packages/sqlalchemy/engine/default.py", line 922, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedTable) relation "conversation_history" does not exist
+LINE 1: SELECT username FROM conversation_history WHERE user_id = cu...
+                             ^
+
+[SQL: SELECT username FROM conversation_history WHERE user_id = current_user_id ORDER BY timestamp DESC LIMIT 1;]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-01-28 11:06:09,279 - modules.tools.execution.unified_executor - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] -   ✅ Tool 'query_database' executed successfully
+2026-01-28 11:06:09,279 - consumers.chatbot.tool_router - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] execute_tool done tool=query_database success=False
+2026-01-28 11:06:09,279 - consumers.chatbot.tool_router - WARNING - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - [tool-trace cdec03d9c797] query_database failed: (psycopg2.errors.UndefinedTable) relation "conversation_history" does not exist
+LINE 1: SELECT username FROM conversation_history WHERE user_id = cu...
+                             ^
+
+[SQL: SELECT username FROM conversation_history WHERE user_id = current_user_id ORDER BY timestamp DESC LIMIT 1;]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-01-28 11:06:09,280 - core.llm.clients.openai_client - INFO - [req=- run=- agent=- wf=- tenant=-] - Sending tools to OpenAI (tool_choice=auto): 11 tools. Sample: [{"type": "function", "function": {"name": "search_knowledge", "description": "Search the Automatos knowledge base for documentation, guides, and information about the platform. NOTE: This tool has a ...
+2026-01-28 11:06:11,603 - httpx - INFO - [req=- run=- agent=- wf=- tenant=-] - HTTP Request: POST https://api.openai.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-01-28 11:06:11,619 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - Iteration 1 complete. More tool calls: False, Has content: True
+2026-01-28 11:06:11,620 - consumers.chatbot.service - INFO - [req=af87eacfd50d run=- agent=- wf=- tenant=-] - 📊 Tool execution counts this turn: {'query_database': 1}
