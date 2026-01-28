@@ -1,0 +1,98 @@
+'use client'
+
+/**
+ * TerminalHeader Component for PRD-38.2 Extended Widgets
+ *
+ * Displays command info, exit code, and execution time
+ */
+
+import { Terminal, FolderOpen, Clock, CheckCircle2, XCircle } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+interface TerminalHeaderProps {
+  command: string
+  workingDirectory?: string
+  exitCode?: number
+  executionTime?: number
+  isStreaming?: boolean
+}
+
+export function TerminalHeader({
+  command,
+  workingDirectory,
+  exitCode,
+  executionTime,
+  isStreaming,
+}: TerminalHeaderProps) {
+  // Determine success/error state
+  const isSuccess = exitCode === 0
+  const isError = exitCode !== undefined && exitCode !== 0
+
+  // Format execution time
+  const formatTime = (ms: number): string => {
+    if (ms < 1000) return `${ms}ms`
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+    const mins = Math.floor(ms / 60000)
+    const secs = ((ms % 60000) / 1000).toFixed(1)
+    return `${mins}m ${secs}s`
+  }
+
+  return (
+    <div className="flex flex-col gap-1 px-3 py-2 bg-[#1a1a1a] border-b border-[#333] text-sm">
+      {/* Command line */}
+      <div className="flex items-center gap-2">
+        <span className="text-green-400 font-mono">$</span>
+        <code className="text-gray-200 font-mono flex-1 truncate">
+          {command}
+        </code>
+      </div>
+
+      {/* Info row */}
+      <div className="flex items-center gap-4 text-xs text-gray-400">
+        {/* Working directory */}
+        {workingDirectory && (
+          <div className="flex items-center gap-1">
+            <FolderOpen className="h-3 w-3" />
+            <span className="font-mono truncate max-w-[200px]">
+              {workingDirectory}
+            </span>
+          </div>
+        )}
+
+        {/* Exit code */}
+        {exitCode !== undefined && (
+          <div
+            className={cn(
+              'flex items-center gap-1',
+              isSuccess && 'text-green-400',
+              isError && 'text-red-400'
+            )}
+          >
+            {isSuccess ? (
+              <CheckCircle2 className="h-3 w-3" />
+            ) : (
+              <XCircle className="h-3 w-3" />
+            )}
+            <span>Exit: {exitCode}</span>
+          </div>
+        )}
+
+        {/* Streaming indicator */}
+        {isStreaming && (
+          <div className="flex items-center gap-1 text-yellow-400">
+            <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+            <span>Running...</span>
+          </div>
+        )}
+
+        {/* Execution time */}
+        {executionTime !== undefined && !isStreaming && (
+          <div className="flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            <span>{formatTime(executionTime)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -262,6 +262,206 @@ export interface ImageWidgetData {
 }
 
 // ============================================
+// Phase 2 Widget Data Types
+// ============================================
+
+/**
+ * Email address structure
+ */
+export interface EmailAddress {
+  email: string
+  name?: string
+}
+
+/**
+ * Email attachment structure
+ */
+export interface EmailAttachment {
+  id: string
+  filename: string
+  mimeType: string
+  size: number
+  downloadUrl?: string
+}
+
+/**
+ * Email summary (for list view)
+ */
+export interface EmailSummary {
+  id: string
+  from: EmailAddress
+  to: EmailAddress[]
+  subject: string
+  snippet: string
+  date: string
+  isRead: boolean
+  hasAttachments: boolean
+  labels?: string[]
+}
+
+/**
+ * Full email data (extends summary)
+ */
+export interface EmailFull extends EmailSummary {
+  body: string
+  bodyHtml?: string  // ⚠️ SECURITY: Must be sanitized before rendering
+  cc?: EmailAddress[]
+  bcc?: EmailAddress[]
+  attachments?: EmailAttachment[]
+  threadId?: string
+}
+
+/**
+ * Email draft for compose mode
+ */
+export interface EmailDraft {
+  to: string[]
+  cc?: string[]
+  bcc?: string[]
+  subject: string
+  body: string
+  attachments?: File[]
+}
+
+/**
+ * Email widget data (from Composio Gmail/Outlook)
+ */
+export interface EmailWidgetData {
+  mode: 'list' | 'view' | 'compose'
+  // For list mode
+  emails?: EmailSummary[]
+  totalCount?: number
+  unreadCount?: number
+  // For view mode
+  email?: EmailFull
+  // For compose mode
+  draft?: EmailDraft
+  replyTo?: EmailFull
+}
+
+/**
+ * Terminal widget data (from execute_command, run_script)
+ */
+export interface TerminalWidgetData {
+  command: string
+  output: string
+  exitCode?: number
+  executionTime?: number
+  workingDirectory?: string
+  environment?: Record<string, string>
+  isStreaming?: boolean
+}
+
+/**
+ * Workflow status type
+ */
+export type WorkflowStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+/**
+ * Workflow step structure
+ */
+export interface WorkflowStep {
+  id: string
+  name: string
+  type: 'action' | 'condition' | 'loop' | 'parallel'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+  startedAt?: string
+  completedAt?: string
+  duration?: number
+  result?: unknown
+  error?: string
+  children?: WorkflowStep[]  // For nested/parallel steps
+}
+
+/**
+ * Workflow widget data (from workflow orchestrator)
+ */
+export interface WorkflowWidgetData {
+  workflowId: string
+  workflowName: string
+  status: WorkflowStatus
+  steps: WorkflowStep[]
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  result?: unknown
+  variables?: Record<string, unknown>
+}
+
+/**
+ * Memory type categories
+ */
+export type MemoryType = 'fact' | 'preference' | 'context' | 'instruction'
+
+/**
+ * Memory item structure
+ */
+export interface Memory {
+  id: string
+  type: MemoryType
+  content: string
+  source: {
+    conversationId?: string
+    timestamp: string
+    trigger?: string
+  }
+  relevance?: number  // For injected memories
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Memory widget data (from memory system)
+ */
+export interface MemoryWidgetData {
+  mode: 'injected' | 'stored' | 'all'
+  // Memories injected into this conversation
+  injectedMemories?: Memory[]
+  // Memories stored from this conversation
+  storedMemories?: Memory[]
+  // Search results
+  searchResults?: Memory[]
+  searchQuery?: string
+  // Stats
+  totalMemories?: number
+  conversationMemories?: number
+}
+
+/**
+ * File info structure
+ */
+export interface FileInfo {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size: number
+  mimeType?: string
+  createdAt?: string
+  modifiedAt?: string
+  permissions?: string
+}
+
+/**
+ * File widget data (from file operations)
+ */
+export interface FileWidgetData {
+  mode: 'single' | 'list' | 'preview'
+  // Single file
+  file?: FileInfo
+  // File list
+  files?: FileInfo[]
+  currentPath?: string
+  // Preview content
+  previewContent?: string
+  previewType?: 'text' | 'image' | 'pdf' | 'code' | 'binary'
+}
+
+// ============================================
 // Grid Layout Types
 // ============================================
 

@@ -13,8 +13,18 @@ import type {
   DataWidgetData,
   DocumentWidgetData,
   ImageWidgetData,
+  EmailWidgetData,
+  TerminalWidgetData,
+  WorkflowWidgetData,
+  MemoryWidgetData,
+  FileWidgetData,
   ChartData,
   DocumentChunk,
+  EmailSummary,
+  WorkflowStep,
+  Memory,
+  FileInfo,
+  WorkflowStatus,
 } from './types'
 
 /**
@@ -49,17 +59,49 @@ const TOOL_WIDGET_MAP: Record<string, WidgetType> = {
   analyze_image: 'image',
   search_images: 'image',
 
-  // Phase 2+ tools (placeholders)
+  // Phase 2: Email Tools → Email Widget
   GMAIL_SEND_EMAIL: 'email',
   GMAIL_LIST_EMAILS: 'email',
+  GMAIL_GET_EMAIL: 'email',
+  GMAIL_REPLY_EMAIL: 'email',
   OUTLOOK_SEND_EMAIL: 'email',
+  OUTLOOK_LIST_EMAILS: 'email',
+  OUTLOOK_GET_EMAIL: 'email',
+  send_email: 'email',
+  list_emails: 'email',
+  get_email: 'email',
+
+  // Phase 2: Terminal Tools → Terminal Widget
   execute_command: 'terminal',
   run_script: 'terminal',
+  shell_execute: 'terminal',
+  run_bash: 'terminal',
+  exec: 'terminal',
+
+  // Phase 2: Workflow Tools → Workflow Widget
   run_workflow: 'workflow',
   get_workflow_status: 'workflow',
+  pause_workflow: 'workflow',
+  resume_workflow: 'workflow',
+  cancel_workflow: 'workflow',
+  start_workflow: 'workflow',
+
+  // Phase 2: Memory Tools → Memory Widget
+  store_memory: 'memory',
+  recall_memory: 'memory',
+  search_memory: 'memory',
+  delete_memory: 'memory',
+  list_memories: 'memory',
+  get_memory: 'memory',
+
+  // Phase 2: File Tools → File Widget
   read_file: 'file',
   write_file: 'file',
   list_files: 'file',
+  delete_file: 'file',
+  move_file: 'file',
+  copy_file: 'file',
+  get_file_info: 'file',
 }
 
 /**
@@ -323,6 +365,314 @@ function transformToImageWidget(
 }
 
 /**
+ * Transform tool result to Email widget data
+ */
+function transformToEmailWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<EmailWidgetData>, 'id'> {
+  // Determine mode based on result structure
+  let mode: 'list' | 'view' | 'compose' = 'list'
+  if (result.email || result.message) {
+    mode = 'view'
+  } else if (result.draft) {
+    mode = 'compose'
+  }
+
+  // Parse emails for list mode
+  const emails: EmailSummary[] = []
+  if (Array.isArray(result.emails) || Array.isArray(result.messages)) {
+    const emailList = (result.emails || result.messages) as Record<string, unknown>[]
+    emailList.forEach((email) => {
+      emails.push({
+        id: (email.id as string) || '',
+        from: {
+          email: (email.from_email as string) || (email.from as string) || '',
+          name: email.from_name as string | undefined,
+        },
+        to: Array.isArray(email.to)
+          ? email.to.map((t: unknown) => ({
+              email: typeof t === 'string' ? t : (t as Record<string, unknown>).email as string,
+              name: typeof t === 'object' ? (t as Record<string, unknown>).name as string : undefined,
+            }))
+          : [{ email: (email.to as string) || '' }],
+        subject: (email.subject as string) || '(No subject)',
+        snippet: (email.snippet as string) || (email.preview as string) || '',
+        date: (email.date as string) || (email.received_at as string) || new Date().toISOString(),
+        isRead: (email.is_read as boolean) ?? true,
+        hasAttachments: (email.has_attachments as boolean) ?? false,
+        labels: email.labels as string[] | undefined,
+      })
+    })
+  }
+
+  const data: EmailWidgetData = {
+    mode,
+    emails: emails.length > 0 ? emails : undefined,
+    totalCount: (result.total_count as number) || emails.length,
+    unreadCount: result.unread_count as number | undefined,
+  }
+
+  return {
+    type: 'email',
+    title: mode === 'list' ? 'Inbox' : (result.subject as string) || 'Email',
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: toolName.includes('GMAIL') ? 'gmail' : 'email',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Transform tool result to Terminal widget data
+ */
+function transformToTerminalWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<TerminalWidgetData>, 'id'> {
+  const data: TerminalWidgetData = {
+    command: (result.command as string) || (result.cmd as string) || '',
+    output: (result.output as string) || (result.stdout as string) || '',
+    exitCode: (result.exit_code as number) ?? (result.exitCode as number) ?? (result.return_code as number),
+    executionTime: (result.execution_time as number) || (result.duration_ms as number),
+    workingDirectory: (result.working_directory as string) || (result.cwd as string),
+    isStreaming: (result.is_streaming as boolean) ?? false,
+  }
+
+  // Combine stdout and stderr if both present
+  if (result.stderr && typeof result.stderr === 'string') {
+    data.output = data.output + (data.output ? '\n' : '') + result.stderr
+  }
+
+  return {
+    type: 'terminal',
+    title: `$ ${data.command.split(' ')[0]}`,
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: 'terminal',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Transform tool result to Workflow widget data
+ */
+function transformToWorkflowWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<WorkflowWidgetData>, 'id'> {
+  // Parse workflow steps
+  const steps: WorkflowStep[] = []
+  if (Array.isArray(result.steps)) {
+    result.steps.forEach((step: Record<string, unknown>) => {
+      steps.push({
+        id: (step.id as string) || `step-${steps.length}`,
+        name: (step.name as string) || 'Step',
+        type: (step.type as WorkflowStep['type']) || 'action',
+        status: (step.status as WorkflowStep['status']) || 'pending',
+        startedAt: step.started_at as string | undefined,
+        completedAt: step.completed_at as string | undefined,
+        duration: step.duration as number | undefined,
+        result: step.result,
+        error: step.error as string | undefined,
+      })
+    })
+  }
+
+  const data: WorkflowWidgetData = {
+    workflowId: (result.workflow_id as string) || (result.id as string) || '',
+    workflowName: (result.workflow_name as string) || (result.name as string) || 'Workflow',
+    status: (result.status as WorkflowStatus) || 'pending',
+    steps,
+    startedAt: result.started_at as string | undefined,
+    completedAt: result.completed_at as string | undefined,
+    error: result.error as string | undefined,
+    result: result.result,
+    variables: result.variables as Record<string, unknown> | undefined,
+  }
+
+  return {
+    type: 'workflow',
+    title: data.workflowName,
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: 'workflow',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Transform tool result to Memory widget data
+ */
+function transformToMemoryWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<MemoryWidgetData>, 'id'> {
+  // Parse memories
+  const parseMemory = (m: Record<string, unknown>): Memory => ({
+    id: (m.id as string) || `mem-${Date.now()}`,
+    type: (m.type as Memory['type']) || 'fact',
+    content: (m.content as string) || '',
+    source: {
+      conversationId: m.conversation_id as string | undefined,
+      timestamp: (m.timestamp as string) || new Date().toISOString(),
+      trigger: m.trigger as string | undefined,
+    },
+    relevance: m.relevance as number | undefined,
+    metadata: m.metadata as Record<string, unknown> | undefined,
+  })
+
+  const injectedMemories: Memory[] = []
+  const storedMemories: Memory[] = []
+
+  if (Array.isArray(result.injected_memories)) {
+    result.injected_memories.forEach((m: Record<string, unknown>) => {
+      injectedMemories.push(parseMemory(m))
+    })
+  }
+  if (Array.isArray(result.stored_memories)) {
+    result.stored_memories.forEach((m: Record<string, unknown>) => {
+      storedMemories.push(parseMemory(m))
+    })
+  }
+  if (Array.isArray(result.memories)) {
+    result.memories.forEach((m: Record<string, unknown>) => {
+      if (m.relevance !== undefined) {
+        injectedMemories.push(parseMemory(m))
+      } else {
+        storedMemories.push(parseMemory(m))
+      }
+    })
+  }
+
+  const data: MemoryWidgetData = {
+    mode: 'all',
+    injectedMemories: injectedMemories.length > 0 ? injectedMemories : undefined,
+    storedMemories: storedMemories.length > 0 ? storedMemories : undefined,
+    totalMemories: (result.total_count as number) || injectedMemories.length + storedMemories.length,
+  }
+
+  return {
+    type: 'memory',
+    title: 'Memory',
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: 'memory',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Transform tool result to File widget data
+ */
+function transformToFileWidget(
+  toolName: string,
+  result: Record<string, unknown>,
+  metadata: WidgetMetadata
+): Omit<Widget<FileWidgetData>, 'id'> {
+  // Parse file info
+  const parseFileInfo = (f: Record<string, unknown>): FileInfo => ({
+    name: (f.name as string) || (f.filename as string) || 'Unknown',
+    path: (f.path as string) || (f.file_path as string) || '',
+    type: (f.is_directory as boolean) || (f.type as string) === 'directory' ? 'directory' : 'file',
+    size: (f.size as number) || 0,
+    mimeType: f.mime_type as string | undefined,
+    createdAt: f.created_at as string | undefined,
+    modifiedAt: f.modified_at as string | undefined,
+    permissions: f.permissions as string | undefined,
+  })
+
+  // Determine mode
+  let mode: 'single' | 'list' | 'preview' = 'single'
+  if (Array.isArray(result.files) || Array.isArray(result.entries)) {
+    mode = 'list'
+  } else if (result.content || result.preview) {
+    mode = 'preview'
+  }
+
+  const files: FileInfo[] = []
+  if (Array.isArray(result.files)) {
+    result.files.forEach((f: Record<string, unknown>) => {
+      files.push(parseFileInfo(f))
+    })
+  }
+  if (Array.isArray(result.entries)) {
+    result.entries.forEach((f: Record<string, unknown>) => {
+      files.push(parseFileInfo(f))
+    })
+  }
+
+  const file = result.file
+    ? parseFileInfo(result.file as Record<string, unknown>)
+    : result.path
+    ? parseFileInfo(result as Record<string, unknown>)
+    : undefined
+
+  // Determine preview type
+  let previewType: FileWidgetData['previewType']
+  if (result.content) {
+    const mimeType = (result.mime_type as string) || ''
+    if (mimeType.startsWith('image/')) previewType = 'image'
+    else if (mimeType === 'application/pdf') previewType = 'pdf'
+    else if (mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('xml'))
+      previewType = 'text'
+    else previewType = 'code'
+  }
+
+  const data: FileWidgetData = {
+    mode,
+    file,
+    files: files.length > 0 ? files : undefined,
+    currentPath: result.current_path as string | undefined,
+    previewContent: result.content as string | undefined,
+    previewType,
+  }
+
+  return {
+    type: 'file',
+    title: file?.name || 'Files',
+    data,
+    metadata: {
+      ...metadata,
+      source: {
+        ...metadata.source,
+        provider: 'file',
+      },
+    },
+    state: 'ready',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/**
  * Transform a tool result into widget data
  * @param type - The widget type to transform to
  * @param toolName - The name of the tool
@@ -366,6 +716,22 @@ export function transformToolResultToWidget(
 
     case 'image':
       return transformToImageWidget(toolName, data, metadata)
+
+    // Phase 2 widgets
+    case 'email':
+      return transformToEmailWidget(toolName, data, metadata)
+
+    case 'terminal':
+      return transformToTerminalWidget(toolName, data, metadata)
+
+    case 'workflow':
+      return transformToWorkflowWidget(toolName, data, metadata)
+
+    case 'memory':
+      return transformToMemoryWidget(toolName, data, metadata)
+
+    case 'file':
+      return transformToFileWidget(toolName, data, metadata)
 
     default:
       console.warn(`[Widget Router] No transformer for widget type: ${type}`)
