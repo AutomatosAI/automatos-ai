@@ -374,9 +374,37 @@ class MemoryInjector:
     
     async def _get_recent_memories(self, limit: int = 10, workspace_id: Optional[str] = None) -> List[Dict]:
         """Fetch the most recent memories regardless of semantic similarity. Cached for 60s."""
-        # TEMPORARY: Disable legacy memory for Mem0 isolation testing
-        logger.info("[Memory] Legacy recent memories DISABLED via code (testing mode).")
-        return []
+        # RE-ENABLED: Memory retrieval is now active
+        # Using the smart memory manager for better Mem0 integration
+        try:
+            from consumers.chatbot.smart_memory import get_smart_memory_manager
+            memory_manager = get_smart_memory_manager()
+
+            # Use smart memory manager for retrieval
+            result = await memory_manager.retrieve_memories(
+                workspace_id=str(workspace_id) if workspace_id else "default",
+                agent_id=None,
+                query="recent conversations",
+                limit=limit
+            )
+
+            if result and result.memories:
+                logger.info(f"[Memory] Retrieved {len(result.memories)} recent memories via SmartMemory")
+                # Convert to expected format
+                return [
+                    {
+                        "id": m.get("id"),
+                        "content": {"summary": m.get("memory", "")},
+                        "metadata": m.get("metadata", {})
+                    }
+                    for m in result.memories
+                ]
+            return []
+
+        except ImportError:
+            logger.debug("[Memory] SmartMemory not available, using legacy retrieval")
+        except Exception as e:
+            logger.warning(f"[Memory] SmartMemory retrieval failed: {e}")
         
         # Check cache
         now = time.time()
@@ -479,25 +507,26 @@ class MemoryInjector:
     def build_memory_injection_message(self, memory_context: str) -> Dict[str, str]:
         """
         Build the system message for memory injection.
-        
+
         Args:
             memory_context: Formatted memory context string
-            
+
         Returns:
             System message dict for LLM
         """
         return {
             "role": "system",
-            "content": f"""🧠 CRITICAL - YOUR CONVERSATION MEMORY (READ THIS FIRST):
+            "content": f"""## What I Remember About You
 
 {memory_context}
 
-INSTRUCTIONS:
-- If the user asks your name, check memory for their name
-- If asked "what did we talk about", summarize the memory above
-- NEVER say "you haven't told me your name" if their name is in memory
-- NEVER say "I don't have access to past conversations" - you DO have memory above
-- If no memories are listed above, do NOT use `query_database` or SQL to check for user details. Trust this memory section."""
+**How to use these memories:**
+- Use this context naturally - if you know their name, use it warmly!
+- Reference past conversations when relevant ("As we discussed before...")
+- Don't pretend you don't have memory - you clearly do!
+- If they ask "do you remember me?" - yes, check above!
+- Don't search databases for user info - trust what's here
+- If memory is empty, that's okay - just mention we haven't chatted before"""
         }
 
 
