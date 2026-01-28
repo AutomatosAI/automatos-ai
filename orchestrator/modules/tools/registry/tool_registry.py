@@ -1077,7 +1077,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 is_system_tool = tool_name in ["switch_context", "search_knowledge"]
                 
                 if not is_system_tool and tool_cat not in allowed_categories:
-                    self.logger.info(f"⛔ ToolRegistry: Denying {tool_name} (category: {tool_cat}) for Agent {agent_id} in context '{active_context}'")
+                    self.logger.debug(f"ℹ️ ToolRegistry: Filtering out {tool_name} (category: {tool_cat}) - not in context '{active_context}'")
                     return False, f"Tool category '{tool_cat}' not allowed in current context '{active_context}'"
 
         # All other tools allowed by default (security handled by executors)

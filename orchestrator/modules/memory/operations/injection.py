@@ -27,16 +27,23 @@ _query_classifier = None
 
 
 def get_memory_system():
-    """Get or create the hierarchical memory system instance."""
+    """Get or create the memory system instance (Mem0)."""
     global _memory_system
     if _memory_system is None:
         try:
-            # Import from new module location
-            from modules.memory.storage.knowledge_system import HierarchicalMemorySystem
-            _memory_system = HierarchicalMemorySystem()
-            logger.debug("MemoryInjector connected to HierarchicalMemorySystem")
+            # Use Mem0 Adapter
+            from modules.memory.storage.mem0_system import Mem0MemorySystem
+            _memory_system = Mem0MemorySystem()
+            logger.debug("MemoryInjector connected to Mem0MemorySystem")
         except Exception as e:
-            logger.warning(f"Could not initialize memory system: {e}")
+            logger.warning(f"Could not initialize Mem0 memory system: {e}")
+            # Fallback (optional, or just fail)
+            try:
+                from modules.memory.storage.knowledge_system import HierarchicalMemorySystem
+                _memory_system = HierarchicalMemorySystem()
+                logger.warning("Falling back to HierarchicalMemorySystem")
+            except Exception as e2:
+                 logger.error(f"Fallback failed: {e2}")
     return _memory_system
 
 
@@ -86,7 +93,7 @@ class MemoryInjector:
         """Helper to get an LLM manager for classification."""
         try:
             # Lazy import to avoid circular dependencies
-            from modules.agents.factory import AgentFactory
+            from modules.agents.factory import AgentFactory, ModelConfiguration
             from core.database.database import get_db_session
             from core.models.core import Agent
             
@@ -95,12 +102,14 @@ class MemoryInjector:
                 if agent_id:
                     agent = db.query(Agent).get(agent_id)
                     if agent:
-                        # Use agent's config
-                        return await factory._create_llm_manager(agent.model_config, agent.name)
+                        # Use agent's config - convert dict to object if needed
+                        config = agent.model_config
+                        if isinstance(config, dict):
+                            config = ModelConfiguration.from_dict(config)
+                        return await factory._create_llm_manager(config, agent.name)
                 
                 # Fallback to system default if no agent or generic
                 # Creating a temporary manager with default config
-                from core.models.core import ModelConfiguration
                 default_config = ModelConfiguration(provider="openai", model_id="gpt-3.5-turbo")
                 return await factory._create_llm_manager(default_config, "System")
         except Exception as e:
@@ -332,8 +341,8 @@ class MemoryInjector:
                 all_memories.append(('recent', mem))
         
         if not all_memories:
-            logger.debug("[Memory] No memories found")
-            return None
+            logger.debug("[Memory] No memories found - returning placeholder to ensure system prompt injection")
+            return "No previous conversation memories found."
 
         logger.debug(f"[Memory] Total unique memories: {len(all_memories)}")
         
@@ -350,17 +359,25 @@ class MemoryInjector:
             user_q = content.get('user_query', '')[:200]
             assistant_r = content.get('assistant_response', '')[:150]
             mem_chat = content.get('chat_id', '')
-            
+            mem_summary = content.get('summary', '')
+
             if user_q:
                 prefix = "[This chat] " if mem_chat == chat_id else "[Earlier] "
                 memory_lines.append(f"{prefix}You: \"{user_q}\"")
                 if assistant_r:
                     memory_lines.append(f"{prefix}Me: \"{assistant_r}\"")
+            elif mem_summary:
+                # Handle extracted facts/summaries from Mem0
+                memory_lines.append(f"[Fact] {mem_summary}")
         
-        return "\n".join(memory_lines) if memory_lines else None
+        return "\n".join(memory_lines) if memory_lines else "No previous conversation memories found."
     
     async def _get_recent_memories(self, limit: int = 10, workspace_id: Optional[str] = None) -> List[Dict]:
         """Fetch the most recent memories regardless of semantic similarity. Cached for 60s."""
+        # TEMPORARY: Disable legacy memory for Mem0 isolation testing
+        logger.info("[Memory] Legacy recent memories DISABLED via code (testing mode).")
+        return []
+        
         # Check cache
         now = time.time()
         if self._recent_cache["data"] and (now - self._recent_cache["time"] < self._cache_ttl):
@@ -416,7 +433,8 @@ class MemoryInjector:
         chat_id: str,
         user_message: str,
         assistant_response: str,
-        workspace_id: Optional[str] = None
+        workspace_id: Optional[str] = None,
+        agent_id: Optional[int] = None
     ):
         """
         Store conversation as memory for future retrieval.
@@ -425,6 +443,8 @@ class MemoryInjector:
             chat_id: Chat session ID
             user_message: The user's message
             assistant_response: The assistant's response
+            workspace_id: Workspace to scope memory to
+            agent_id: Agent to scope memory to
         """
         try:
             logger.debug(f"[Memory] Storing: {user_message[:50]}...")
@@ -445,10 +465,9 @@ class MemoryInjector:
                 "goal_relevant": True
             }
             
-            # Use None for agent_id when no specific agent is selected (general chat)
-            # This avoids foreign key violations when agent_id=1 doesn't exist
+            # Use specific agent_id if provided
             result = await memory_system.store_experience(
-                agent_id=None,
+                agent_id=agent_id,
                 experience=experience,
                 workspace_id=workspace_id
             )
@@ -477,7 +496,8 @@ INSTRUCTIONS:
 - If the user asks your name, check memory for their name
 - If asked "what did we talk about", summarize the memory above
 - NEVER say "you haven't told me your name" if their name is in memory
-- NEVER say "I don't have access to past conversations" - you DO have memory above"""
+- NEVER say "I don't have access to past conversations" - you DO have memory above
+- If no memories are listed above, do NOT use `query_database` or SQL to check for user details. Trust this memory section."""
         }
 
 

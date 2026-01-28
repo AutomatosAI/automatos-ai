@@ -776,7 +776,8 @@ class StreamingChatService:
                             chat_id,
                             latest_text,
                             full_response,
-                            workspace_id=str(self.workspace_id) if self.workspace_id else None
+                            workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                            agent_id=agent_id
                         )
 
                     return
@@ -1216,7 +1217,8 @@ class StreamingChatService:
                     chat_id,
                     latest_text,
                     full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                    agent_id=agent_id
                 )
             
         except Exception as e:
@@ -1253,17 +1255,36 @@ class StreamingChatService:
         import asyncio
         
         try:
+            # Ensure workspace_id is available for Memory and Composio tools
+            if not self.workspace_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    # Use a new session or the existing one if safe
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and agent_row.workspace_id:
+                        self.workspace_id = agent_row.workspace_id
+                        logger.info(f"Resolved workspace_id from agent {agent_id}: {self.workspace_id}")
+                except Exception as exc:
+                    logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
+
             # Start parallel tasks
             agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
             
-            # Start memory retrieval concurrently
+            # Start memory retrieval concurrently - NOW with correct scoping
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
                 memory_task = None
             else:
-                memory_task = asyncio.create_task(self.memory_injector.retrieve_relevant_memories(chat_id, latest_text))
+                memory_task = asyncio.create_task(
+                    self.memory_injector.retrieve_relevant_memories(
+                        chat_id, 
+                        latest_text,
+                        workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                        agent_id=agent_id
+                    )
+                )
             
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
@@ -1283,17 +1304,6 @@ class StreamingChatService:
                 if memory_task:
                     memory_task.cancel()
                 raise Exception(f"Failed to activate agent {agent_id}")
-
-            # Ensure workspace_id is available for Composio tools
-            if not self.workspace_id:
-                try:
-                    from core.models import Agent as AgentModel
-                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row and agent_row.workspace_id:
-                        self.workspace_id = agent_row.workspace_id
-                        logger.info(f"Resolved workspace_id from agent {agent_id}")
-                except Exception as exc:
-                    logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
             
             # Send agent info to frontend
             yield self.streaming_handler.format_aisdk_data({
@@ -1504,7 +1514,8 @@ class StreamingChatService:
                     chat_id,
                     latest_text,
                     full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                    agent_id=agent_id
                 )
             
             # Update agent metrics

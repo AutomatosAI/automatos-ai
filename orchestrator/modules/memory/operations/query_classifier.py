@@ -31,6 +31,24 @@ class ClassificationResult(BaseModel):
     extract_entities: List[str] = Field(default_factory=list)
     requires_memory: bool
 
+    from pydantic import field_validator
+    
+    @field_validator('intent', mode='before')
+    @classmethod
+    def normalize_intent(cls, v):
+        if isinstance(v, str):
+            v = v.lower()
+        return v
+
+    from pydantic import field_validator
+    
+    @field_validator('intent', mode='before')
+    @classmethod
+    def normalize_intent(cls, v):
+        if isinstance(v, str):
+            v = v.lower()
+        return v
+
 class QueryClassifier:
     """Classifies queries to determine if memory retrieval is needed."""
     
