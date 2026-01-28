@@ -35,42 +35,53 @@ class Mem0Client:
     def add(self, messages: List[Dict[str, str]], user_id: str, metadata: Optional[Dict] = None) -> Dict:
         """
         Add memories from messages.
-        
+
         Args:
             messages: List of message dicts [{"role": "user", "content": "..."}]
             user_id: Unique user identifier
             metadata: Optional metadata to attach
-            
+
         Returns:
             Response dict from server
         """
         url = f"{self.api_url}/api/v1/memories/"
-        
-        # Adapt messages to text format expected by server
-        # Server expects: {"text": "...", "user_id": "..."}
-        text_content = ""
+
+        # Convert messages to text format for OpenMemory API
+        # API expects: {"user_id": "...", "text": "...", "infer": true}
+        text_parts = []
         for msg in messages:
-            role = msg.get("role", "").capitalize()
+            role = msg.get("role", "user").capitalize()
             content = msg.get("content", "")
-            if text_content:
-                text_content += "\n"
-            text_content += f"{role}: {content}"
-            
+            text_parts.append(f"{role}: {content}")
+        text_content = "\n".join(text_parts)
+
         payload = {
-            "text": text_content,
             "user_id": user_id,
+            "text": text_content,
+            "infer": True,  # Let Mem0 extract facts/memories from the text
         }
         if metadata:
             payload["metadata"] = metadata
-            
-        # NOTE: Server validation error indicated user_id is required in QUERY params
-        params = {"user_id": user_id}
-            
+
         try:
-            logger.debug(f"[Mem0] Adding memory for user {user_id}")
-            resp = requests.post(url, json=payload, params=params, headers=self.headers, timeout=15)
+            logger.info(f"[Mem0] Adding memory for user {user_id}: {text_content[:80]}...")
+            resp = requests.post(url, json=payload, headers=self.headers, timeout=15)
+            logger.info(f"[Mem0] Add response status: {resp.status_code}")
+
+            if resp.status_code >= 400:
+                logger.error(f"[Mem0] Add failed: {resp.status_code} - {resp.text[:200]}")
+                return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+
             resp.raise_for_status()
-            return resp.json()
+
+            # Handle empty response (success with no body)
+            if not resp.text or resp.text.strip() == "" or resp.text == "null":
+                logger.info("[Mem0] Empty/null response - treating as success")
+                return {"success": True}
+
+            result = resp.json()
+            logger.info(f"[Mem0] Add result: {result}")
+            return result if result else {"success": True}
         except Exception as e:
             logger.error(f"[Mem0] Failed to add memory: {e}")
             return {"error": str(e)}
@@ -78,57 +89,86 @@ class Mem0Client:
     def search(self, query: str, user_id: str, limit: int = 5) -> List[Dict]:
         """
         Search for relevant memories.
-        
+
         Args:
             query: Search query
             user_id: User identifier to scope search
             limit: Max results
-            
+
         Returns:
             List of memory items
         """
-        # Server uses GET /api/v1/memories/ with search_query param
+        # OpenMemory API: GET /api/v1/memories/
+        # NOTE: search_query param doesn't work reliably, so we fetch all and filter client-side
         url = f"{self.api_url}/api/v1/memories/"
-        
+
+        # Get more memories to allow for client-side filtering
         params = {
-            "search_query": query,
             "user_id": user_id,
-            "size": limit, # Schema says 'size', not 'limit'
-            "page": 1
+            "page": 1,
+            "size": 50,  # Fetch more to filter from
         }
-        
+
         try:
-            logger.debug(f"[Mem0] Searching memories for user {user_id}: {query[:50]}")
+            logger.info(f"[Mem0] Fetching memories for user={user_id}")
             resp = requests.get(url, params=params, headers=self.headers, timeout=15)
-            # Handle 404 (User not found) gracefully for search
-            if resp.status_code == 404 and "User not found" in resp.text:
-                 logger.warning(f"[Mem0] User {user_id} not found during search (no memories yet)")
-                 return []
-            
+            logger.info(f"[Mem0] Response status: {resp.status_code}")
+
+            if resp.status_code >= 400:
+                logger.warning(f"[Mem0] Fetch returned {resp.status_code}: {resp.text[:100]}")
+                return []
+
             resp.raise_for_status()
-            
-            # Response is Page[MemoryResponse]: {"items": [...], "total": ..., ...}
+
             data = resp.json()
-            items = data.get("items", [])
-            
-            return [{"id": i["id"], "memory": i["content"], "score": i.get("score"), "metadata": i.get("metadata_")} for i in items]
-            
+
+            # OpenMemory returns Page[MemoryResponse]: {"items": [...], "total": int, ...}
+            if isinstance(data, dict):
+                items = data.get("items", [])
+                total = data.get("total", 0)
+                logger.info(f"[Mem0] ✅ Found {len(items)} memories (total: {total})")
+
+                results = []
+                for m in items:
+                    results.append({
+                        "id": m.get("id"),
+                        "memory": m.get("content"),  # OpenMemory uses 'content'
+                        "score": m.get("score"),
+                        "metadata": m.get("metadata_"),
+                        "created_at": m.get("created_at"),
+                    })
+
+                # Log some of the memories found
+                if results:
+                    sample = [r.get("memory", "")[:40] for r in results[:3]]
+                    logger.info(f"[Mem0] Sample memories: {sample}")
+
+                # Return most recent memories (sorted by created_at desc)
+                results.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+                return results[:limit]
+            else:
+                logger.warning(f"[Mem0] Unexpected response format: {type(data)}")
+                return []
+
         except Exception as e:
-            logger.error(f"[Mem0] Failed to search memories: {e}")
+            logger.error(f"[Mem0] Failed to fetch memories: {e}")
             return []
 
     def get_all(self, user_id: str, limit: int = 100) -> List[Dict]:
         """Get all memories for a user."""
         url = f"{self.api_url}/api/v1/memories/"
-        params = {"user_id": user_id, "size": limit, "page": 1}
-        
+        params = {"user_id": user_id}
+
         try:
             resp = requests.get(url, params=params, headers=self.headers, timeout=15)
-            if resp.status_code == 404:
+            if resp.status_code >= 400:
                 return []
             resp.raise_for_status()
             data = resp.json()
-            return data.get("items", [])
+            # Handle various response formats
+            if isinstance(data, list):
+                return data[:limit]
+            return data.get("memories", data.get("results", data.get("items", [])))[:limit]
         except Exception as e:
             logger.error(f"[Mem0] Failed to get memories: {e}")
             return []
