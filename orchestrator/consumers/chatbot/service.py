@@ -566,7 +566,7 @@ class StreamingChatService:
             # Inject memory context via modules.memory
             memory_context = None
             # Optimized: Check if we should even try to retrieve memories (save tokens/time)
-            should_retrieve = self.memory_injector.should_retrieve_memories(latest_text, chat_id)
+            should_retrieve = await self.memory_injector.should_retrieve_memories(latest_text, chat_id)
             
             if not fresh_start and should_retrieve:
                 memory_context = await self.memory_injector.retrieve_relevant_memories(
@@ -579,11 +579,15 @@ class StreamingChatService:
                     logger.info(f"[Memory] Injecting {len(memory_context)} chars")
                     llm_messages.insert(1, self.memory_injector.build_memory_injection_message(memory_context))
 
-            # Add dynamic tool candidates (hint)
+            # Add dynamic tool candidates (hint) - only suggest, don't force
+            # NOTE: Removed "Tool candidates for this request" phrasing which was triggering
+            # force_tool_choice=required in OpenAI client. Tools should be optional.
             if context_tools and latest_text:
                 candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, context_tools)
-                if candidates:
-                    candidate_names = ", ".join([c["name"] for c in candidates if c.get("name")])
+                # Only hint at tools if there's a high-confidence match (score > 2)
+                high_confidence_candidates = [c for c in candidates if c.get("score", 0) > 2]
+                if high_confidence_candidates:
+                    candidate_names = ", ".join([c["name"] for c in high_confidence_candidates[:3] if c.get("name")])
                     if candidate_names:
                         insert_at = 2 if memory_context else 1
                         llm_messages.insert(
@@ -591,8 +595,10 @@ class StreamingChatService:
                             {
                                 "role": "system",
                                 "content": (
-                                    "Tool candidates for this request: "
-                                    f"{candidate_names}. Use the most relevant tool instead of answering from memory."
+                                    f"Available tools if needed: {candidate_names}. "
+                                    "Only use tools when the user explicitly requests data lookup, "
+                                    "file operations, or external actions. For conversation, memory questions, "
+                                    "or general chat - just respond naturally without tools."
                                 )
                             }
                         )
@@ -776,7 +782,8 @@ class StreamingChatService:
                             chat_id,
                             latest_text,
                             full_response,
-                            workspace_id=str(self.workspace_id) if self.workspace_id else None
+                            workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                            agent_id=agent_id
                         )
 
                     return
@@ -1216,7 +1223,8 @@ class StreamingChatService:
                     chat_id,
                     latest_text,
                     full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                    agent_id=agent_id
                 )
             
         except Exception as e:
@@ -1253,17 +1261,36 @@ class StreamingChatService:
         import asyncio
         
         try:
+            # Ensure workspace_id is available for Memory and Composio tools
+            if not self.workspace_id:
+                try:
+                    from core.models import Agent as AgentModel
+                    # Use a new session or the existing one if safe
+                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
+                    if agent_row and agent_row.workspace_id:
+                        self.workspace_id = agent_row.workspace_id
+                        logger.info(f"Resolved workspace_id from agent {agent_id}: {self.workspace_id}")
+                except Exception as exc:
+                    logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
+
             # Start parallel tasks
             agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
             
-            # Start memory retrieval concurrently
+            # Start memory retrieval concurrently - NOW with correct scoping
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
                 memory_task = None
             else:
-                memory_task = asyncio.create_task(self.memory_injector.retrieve_relevant_memories(chat_id, latest_text))
+                memory_task = asyncio.create_task(
+                    self.memory_injector.retrieve_relevant_memories(
+                        chat_id, 
+                        latest_text,
+                        workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                        agent_id=agent_id
+                    )
+                )
             
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
@@ -1283,17 +1310,6 @@ class StreamingChatService:
                 if memory_task:
                     memory_task.cancel()
                 raise Exception(f"Failed to activate agent {agent_id}")
-
-            # Ensure workspace_id is available for Composio tools
-            if not self.workspace_id:
-                try:
-                    from core.models import Agent as AgentModel
-                    agent_row = self.db.query(AgentModel).filter(AgentModel.id == agent_id).first()
-                    if agent_row and agent_row.workspace_id:
-                        self.workspace_id = agent_row.workspace_id
-                        logger.info(f"Resolved workspace_id from agent {agent_id}")
-                except Exception as exc:
-                    logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
             
             # Send agent info to frontend
             yield self.streaming_handler.format_aisdk_data({
@@ -1382,10 +1398,13 @@ class StreamingChatService:
                     llm_messages.insert(3, self.memory_injector.build_memory_injection_message(memory_context))
 
             # Add dynamic tool candidates (no hardcoded app mapping)
+            # NOTE: Only suggest tools for high-confidence matches, don't force for conversation
             if use_tools and latest_text:
                 candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, use_tools)
-                if candidates:
-                    candidate_names = [c["name"] for c in candidates if c.get("name")]
+                # Only consider high-confidence matches (score > 2)
+                high_confidence = [c for c in candidates if c.get("score", 0) > 2]
+                if high_confidence:
+                    candidate_names = [c["name"] for c in high_confidence if c.get("name")]
                     if candidate_names:
                         # Narrow tool list to top candidates to reduce overload
                         candidate_set = set(candidate_names)
@@ -1407,9 +1426,10 @@ class StreamingChatService:
                             {
                                 "role": "system",
                                 "content": (
-                                    "Tool candidates for this request: "
-                                    f"{', '.join(candidate_names)}. "
-                                    "You MUST call one of these tools to answer."
+                                    f"Available tools if needed: {', '.join(candidate_names[:5])}. "
+                                    "Only use tools when the user explicitly requests data lookup, "
+                                    "search, or external actions. For conversation, memory questions, "
+                                    "or general chat - respond naturally without tools."
                                 )
                             }
                         )
@@ -1504,7 +1524,8 @@ class StreamingChatService:
                     chat_id,
                     latest_text,
                     full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None
+                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
+                    agent_id=agent_id
                 )
             
             # Update agent metrics
