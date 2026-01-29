@@ -18,13 +18,17 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
       type="button"
       onClick={onClick}
       className={cn(
-        // Base styles - match welcome screen suggestion chips
+        // Base styles - match bottom action buttons
         'inline-flex items-center justify-center',
         'px-4 py-2',
         'text-sm font-normal',
         'rounded-full',
         'border border-orange-500/20',
         'bg-background/80',
+
+        // Consistent sizing
+        'min-w-fit',
+        'shrink-0',
 
         // Hover effects
         'hover:border-orange-500/40',
@@ -45,7 +49,7 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
         'disabled:pointer-events-none',
         'disabled:opacity-50',
 
-        // Text
+        // Text - keep on one line
         'whitespace-nowrap',
         'cursor-pointer',
 
