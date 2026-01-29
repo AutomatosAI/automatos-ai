@@ -1,5 +1,5 @@
 /**
- * Type definitions for Dynamic Tool Suggestions (PRD-40)
+ * Type definitions for Dynamic Tool Suggestions (PRD-40/41)
  *
  * Shared types used across suggestion components.
  */
@@ -14,6 +14,8 @@ export interface SuggestionResponse {
   suggestions: string[]
   /** Source of suggestions: "curated" or "generated" */
   source: 'curated' | 'generated'
+  /** PRD-41: Whether context-aware suggestions were included */
+  has_context?: boolean
 }
 
 /**
