@@ -622,7 +622,18 @@ export function Chat({
 
               {/* Input at bottom of chat column */}
               {!isReadonly && (
-                <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                <div className="relative flex w-full flex-col gap-3 px-4 pb-4">
+                  {/* PRD-40: Tool Suggestion Bar */}
+                  <ToolSuggestionBar
+                    suggestions={toolSuggestions}
+                    activeTool={activeTool}
+                    onSuggestionClick={handleSuggestionClick}
+                    onClose={() => {
+                      setActiveTool(null)
+                      setToolSuggestions([])
+                    }}
+                    isLoading={isLoadingSuggestions}
+                  />
                   <MultimodalInput
                     chatId={id}
                     status={status}
@@ -634,6 +645,7 @@ export function Chat({
                     onAgentChange={setSelectedAgentId}
                     selectedVisibilityType={visibilityType}
                     usage={usage}
+                    onToolIconClick={handleToolIconClick}
                   />
                 </div>
               )}
@@ -681,7 +693,18 @@ export function Chat({
                   </div>
                 </div>
                 {!isReadonly && (
-                  <div className="px-4 pb-4">
+                  <div className="px-4 pb-4 space-y-3">
+                    {/* PRD-40: Tool Suggestion Bar */}
+                    <ToolSuggestionBar
+                      suggestions={toolSuggestions}
+                      activeTool={activeTool}
+                      onSuggestionClick={handleSuggestionClick}
+                      onClose={() => {
+                        setActiveTool(null)
+                        setToolSuggestions([])
+                      }}
+                      isLoading={isLoadingSuggestions}
+                    />
                     <MultimodalInput
                       chatId={id}
                       status={status}
@@ -693,6 +716,7 @@ export function Chat({
                       onAgentChange={setSelectedAgentId}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
+                      onToolIconClick={handleToolIconClick}
                     />
                   </div>
                 )}
@@ -790,7 +814,18 @@ export function Chat({
                     ))}
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
+                    {/* PRD-40: Tool Suggestion Bar */}
+                    <ToolSuggestionBar
+                      suggestions={toolSuggestions}
+                      activeTool={activeTool}
+                      onSuggestionClick={handleSuggestionClick}
+                      onClose={() => {
+                        setActiveTool(null)
+                        setToolSuggestions([])
+                      }}
+                      isLoading={isLoadingSuggestions}
+                    />
                     <MultimodalInput
                       chatId={id}
                       status={status}
@@ -802,6 +837,7 @@ export function Chat({
                       onAgentChange={setSelectedAgentId}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
+                      onToolIconClick={handleToolIconClick}
                     />
                     <div className="flex flex-wrap justify-center gap-2 pt-1">
                       {quickLinks.map((item) => {
