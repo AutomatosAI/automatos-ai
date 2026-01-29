@@ -6,6 +6,7 @@
  */
 
 import * as React from 'react'
+import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SuggestionChip } from './SuggestionChip'
@@ -34,6 +35,19 @@ export function ToolSuggestionBar({
   isLoading = false,
   className,
 }: ToolSuggestionBarProps) {
+  // Keyboard accessibility: Escape key closes suggestions
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && activeTool) {
+        e.preventDefault()
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeTool, onClose])
+
   // Don't render if no active tool or no suggestions
   if (!activeTool || suggestions.length === 0) {
     return null
