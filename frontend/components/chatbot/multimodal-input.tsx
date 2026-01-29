@@ -22,6 +22,8 @@ export interface MultimodalInputProps {
   onAgentChange?: (agentId: number | null) => void
   selectedVisibilityType: VisibilityType
   usage?: AppUsage
+  // PRD-40: Tool icon click handler
+  onToolIconClick?: (appName: string) => void
 }
 
 export function MultimodalInput({
@@ -35,6 +37,7 @@ export function MultimodalInput({
   onAgentChange,
   selectedVisibilityType,
   usage,
+  onToolIconClick,
 }: MultimodalInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -223,7 +226,14 @@ export function MultimodalInput({
             {activeAgent?.tools && activeAgent.tools.length > 0 && (
               <div className="flex gap-2 items-center animate-in fade-in zoom-in-50 duration-300">
                 {activeAgent.tools.slice(0, 4).map((tool) => (
-                  <div key={tool.id} className="relative hover:scale-110 transition-all duration-200">
+                  <button
+                    key={tool.id}
+                    type="button"
+                    onClick={() => onToolIconClick?.(tool.name)}
+                    className="relative hover:scale-110 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-lg"
+                    title={`Click for ${tool.name} suggestions`}
+                    aria-label={`Show suggestions for ${tool.name}`}
+                  >
                     <ToolLogo
                       name={tool.name}
                       logo={tool.icon}
@@ -231,7 +241,7 @@ export function MultimodalInput({
                       showBackground={true}
                       className="bg-background/80 ring-1 ring-orange-500/30 border border-orange-500/20 shadow-[0_0_10px_rgba(249,115,22,0.1)] rounded-lg"
                     />
-                  </div>
+                  </button>
                 ))}
                 {activeAgent.tools.length > 4 && (
                   <div className="w-7 h-7 rounded-lg bg-secondary/80 ring-1 ring-orange-500/30 flex items-center justify-center text-[10px] font-bold text-muted-foreground border border-orange-500/20 relative z-10">

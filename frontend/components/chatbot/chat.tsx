@@ -871,6 +871,18 @@ export function Chat({
           {!isReadonly && !showWelcomeCard && (
             <div className="sticky bottom-0 z-10 bg-transparent backdrop-blur-none supports-[backdrop-filter]:bg-transparent border-0">
               <div className="mx-auto max-w-4xl px-4 py-4 md:px-8 space-y-3">
+                {/* PRD-40: Tool Suggestion Bar */}
+                <ToolSuggestionBar
+                  suggestions={toolSuggestions}
+                  activeTool={activeTool}
+                  onSuggestionClick={handleSuggestionClick}
+                  onClose={() => {
+                    setActiveTool(null)
+                    setToolSuggestions([])
+                  }}
+                  isLoading={isLoadingSuggestions}
+                />
+
                 <MultimodalInput
                   chatId={id}
                   status={status}
@@ -882,6 +894,7 @@ export function Chat({
                   onAgentChange={setSelectedAgentId}
                   selectedVisibilityType={visibilityType}
                   usage={usage}
+                  onToolIconClick={handleToolIconClick}
                 />
                 <div className="flex flex-wrap justify-center gap-2">
                   {quickLinks.map((item) => {
