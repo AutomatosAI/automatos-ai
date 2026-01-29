@@ -99,6 +99,9 @@ class ComposioActionCache(Base):
     category = Column(String(100), index=True)
     is_premium = Column(Boolean, default=False)
 
+    # Dynamic tool suggestions (PRD-40)
+    app_suggestions = Column(JSONB, default=list)
+
     # DB column is named "metadata"
     action_metadata = Column("metadata", JSONB, default=dict)
 
