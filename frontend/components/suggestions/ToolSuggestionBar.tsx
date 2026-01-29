@@ -56,9 +56,9 @@ export function ToolSuggestionBar({
   return (
     <div
       className={cn(
-        // Base layout - match bottom action buttons layout
-        'flex items-center justify-center gap-2 flex-wrap',
-        'px-4',
+        // Container with indentation on both sides
+        'relative',
+        'px-12', // Indent from edges
 
         // Animation
         'animate-in fade-in slide-in-from-bottom-2 duration-200',
@@ -66,37 +66,39 @@ export function ToolSuggestionBar({
         className
       )}
     >
-      {/* Suggestions container */}
-      {isLoading ? (
-        // Loading skeleton
-        <>
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="h-8 w-[160px] rounded-md bg-muted/50 animate-pulse"
+      {/* 2x2 Grid layout */}
+      <div className="grid grid-cols-2 gap-2">
+        {isLoading ? (
+          // Loading skeleton
+          <>
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="h-10 rounded-full bg-muted/50 animate-pulse"
+              />
+            ))}
+          </>
+        ) : (
+          // Suggestion chips
+          suggestions.map((suggestion, index) => (
+            <SuggestionChip
+              key={`${suggestion}-${index}`}
+              text={suggestion}
+              onClick={() => onSuggestionClick(suggestion)}
             />
-          ))}
-        </>
-      ) : (
-        // Suggestion chips
-        suggestions.map((suggestion, index) => (
-          <SuggestionChip
-            key={`${suggestion}-${index}`}
-            text={suggestion}
-            onClick={() => onSuggestionClick(suggestion)}
-          />
-        ))
-      )}
+          ))
+        )}
+      </div>
 
-      {/* Close button */}
+      {/* Close button - positioned absolute top right */}
       <Button
         variant="ghost"
         size="icon"
         onClick={onClose}
-        className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive"
+        className="absolute -top-1 -right-1 h-6 w-6 hover:bg-destructive/10 hover:text-destructive rounded-full"
         aria-label="Close suggestions"
       >
-        <X className="h-3 w-3" />
+        <X className="h-4 w-4" />
       </Button>
     </div>
   )
