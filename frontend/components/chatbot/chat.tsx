@@ -72,6 +72,7 @@ export function Chat({
   const [activeTool, setActiveTool] = useState<string | null>(null)
   const [toolSuggestions, setToolSuggestions] = useState<string[]>([])
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const [hasContextSuggestions, setHasContextSuggestions] = useState(false)
 
   // PRD-41: Get user for context-aware suggestions
   const { user } = useUser()
@@ -383,6 +384,7 @@ export function Chat({
 
       const data = await apiClient.request<SuggestionResponse>(url)
       setToolSuggestions(data.suggestions || [])
+      setHasContextSuggestions(data.has_context || false)
 
       // Track suggestions loaded (including context flag)
       analytics.track('suggestions_loaded', {
@@ -648,6 +650,7 @@ export function Chat({
                       setToolSuggestions([])
                     }}
                     isLoading={isLoadingSuggestions}
+                    hasContext={hasContextSuggestions}
                   />
                   <MultimodalInput
                     chatId={id}
