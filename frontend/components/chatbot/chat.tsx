@@ -20,6 +20,10 @@ import { useWorkspaceStore } from '@/stores/workspace-store'
 import { Canvas } from '@/components/workspace'
 import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
 
+// PRD-40: Dynamic Tool Suggestions
+import { ToolSuggestionBar } from '@/components/suggestions/ToolSuggestionBar'
+import type { SuggestionResponse } from '@/components/suggestions/types'
+
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
@@ -55,11 +59,55 @@ export function Chat({
     setIsArtifactViewerVisible(false)
     setSelectedArtifact(null)
   }, [clearWidgets])
+
+  // PRD-40: Tool icon click handler
+  const handleToolIconClick = useCallback(async (appName: string) => {
+    // Toggle off if clicking same tool
+    if (activeTool === appName) {
+      setActiveTool(null)
+      setToolSuggestions([])
+      return
+    }
+
+    setActiveTool(appName)
+    setIsLoadingSuggestions(true)
+
+    try {
+      const response = await fetch(`/api/tools/${appName}/suggestions`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch suggestions: ${response.statusText}`)
+      }
+      const data: SuggestionResponse = await response.json()
+      setToolSuggestions(data.suggestions || [])
+    } catch (error) {
+      console.error('Failed to fetch tool suggestions:', error)
+      toast.error(`Failed to load suggestions for ${appName}`)
+      setToolSuggestions([])
+      setActiveTool(null)
+    } finally {
+      setIsLoadingSuggestions(false)
+    }
+  }, [activeTool])
+
+  // PRD-40: Suggestion click handler
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    // Send the suggestion as a message
+    sendMessage(suggestion)
+    // Close suggestions after use
+    setActiveTool(null)
+    setToolSuggestions([])
+  }, [sendMessage])
+
   const [canvasWidth, setCanvasWidth] = useState(800)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
+
+  // PRD-40: Dynamic Tool Suggestions state
+  const [activeTool, setActiveTool] = useState<string | null>(null)
+  const [toolSuggestions, setToolSuggestions] = useState<string[]>([])
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
 
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
