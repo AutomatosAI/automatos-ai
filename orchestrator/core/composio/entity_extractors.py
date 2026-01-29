@@ -210,6 +210,130 @@ class GmailExtractor(EntityExtractor):
         return None
 
 
+class SlackExtractor(EntityExtractor):
+    """
+    Extracts entities from Slack API responses.
+
+    Entities extracted:
+    - channels: Channel names (e.g., "#general", "#engineering")
+    - mentions: User mentions (e.g., "@john", "@sarah")
+    - message_ids: Message timestamps/IDs for reference
+
+    Slack API Response Format:
+        {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": "Hey <@U123> can you check #general?",
+                    "channel": "C456",
+                    "channel_name": "engineering",
+                    "user": "U789"
+                }
+            ],
+            "channels": [
+                {"id": "C456", "name": "engineering"}
+            ]
+        }
+    """
+
+    def extract(self, tool_result: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Extract entities from Slack API response."""
+        entities = {
+            "channels": [],
+            "mentions": [],
+            "message_ids": []
+        }
+
+        # Handle messages array
+        messages = tool_result.get("messages", [])
+        if not messages and "ts" in tool_result:
+            # Single message format
+            messages = [tool_result]
+
+        for msg in messages:
+            try:
+                # Extract channel name
+                channel_name = msg.get("channel_name") or self._extract_channel_from_text(msg.get("text", ""))
+                if channel_name:
+                    # Add # prefix if not present
+                    if not channel_name.startswith("#"):
+                        channel_name = f"#{channel_name}"
+                    if channel_name not in entities["channels"]:
+                        entities["channels"].append(channel_name)
+
+                # Extract mentions from text
+                mentions = self._extract_mentions(msg.get("text", ""))
+                for mention in mentions:
+                    if mention not in entities["mentions"]:
+                        entities["mentions"].append(mention)
+
+                # Store message timestamp as ID
+                ts = msg.get("ts")
+                if ts:
+                    entities["message_ids"].append(ts)
+
+            except Exception as e:
+                logger.warning(f"Failed to extract entities from Slack message: {e}")
+                continue
+
+        # Also check top-level channels array
+        channels_list = tool_result.get("channels", [])
+        for channel in channels_list:
+            try:
+                name = channel.get("name")
+                if name:
+                    channel_name = f"#{name}" if not name.startswith("#") else name
+                    if channel_name not in entities["channels"]:
+                        entities["channels"].append(channel_name)
+            except Exception as e:
+                logger.warning(f"Failed to extract channel from list: {e}")
+                continue
+
+        return entities
+
+    def _extract_channel_from_text(self, text: str) -> Optional[str]:
+        """Extract channel reference from message text (#channel)."""
+        import re
+        # Match #channel pattern
+        match = re.search(r'#([a-z0-9_-]+)', text, re.IGNORECASE)
+        if match:
+            return f"#{match.group(1)}"
+        return None
+
+    def _extract_mentions(self, text: str) -> List[str]:
+        """
+        Extract user mentions from Slack message text.
+
+        Slack mentions format: <@U123> or <@U123|username>
+
+        Args:
+            text: Slack message text
+
+        Returns:
+            List of mentions as @username or @U123
+        """
+        import re
+        mentions = []
+
+        # Match <@U123> or <@U123|username> pattern
+        pattern = r'<@([A-Z0-9]+)(?:\|([a-z0-9._-]+))?>'
+        matches = re.findall(pattern, text, re.IGNORECASE)
+
+        for user_id, username in matches:
+            # Prefer username if available, otherwise use user ID
+            mention = f"@{username}" if username else f"@{user_id}"
+            mentions.append(mention)
+
+        # Also match plain @mentions (less common but possible)
+        plain_mentions = re.findall(r'(?:^|\s)@([a-z0-9._-]+)', text, re.IGNORECASE)
+        for username in plain_mentions:
+            mention = f"@{username}"
+            if mention not in mentions:
+                mentions.append(mention)
+
+        return mentions
+
+
 def get_extractor(app_name: str) -> Optional[EntityExtractor]:
     """
     Factory function to get the appropriate extractor for an app.
@@ -227,7 +351,7 @@ def get_extractor(app_name: str) -> Optional[EntityExtractor]:
     """
     extractors = {
         "GMAIL": GmailExtractor(),
-        # "SLACK": SlackExtractor(),
+        "SLACK": SlackExtractor(),
         # "GITHUB": GitHubExtractor(),
     }
 

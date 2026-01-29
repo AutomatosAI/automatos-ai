@@ -9,6 +9,7 @@ import pytest
 from core.composio.entity_extractors import (
     get_extractor,
     GmailExtractor,
+    SlackExtractor,
     EntityExtractor
 )
 
@@ -190,6 +191,143 @@ class TestGmailExtractor:
         assert "msg_333" in entities["email_ids"]
 
 
+class TestSlackExtractor:
+    """Tests for Slack entity extraction"""
+
+    def test_extract_with_multiple_messages(self):
+        """Test extracting entities from Slack messages"""
+        sample_response = {
+            "messages": [
+                {
+                    "ts": "1234567890.123456",
+                    "text": "Hey <@U123|john> can you check #general?",
+                    "channel_name": "engineering"
+                },
+                {
+                    "ts": "1234567891.123456",
+                    "text": "Thanks <@U456|sarah>!",
+                    "channel_name": "engineering"
+                }
+            ]
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "#engineering" in entities["channels"]
+        assert "#general" in entities["channels"]
+        assert "@john" in entities["mentions"]
+        assert "@sarah" in entities["mentions"]
+        assert "1234567890.123456" in entities["message_ids"]
+        assert "1234567891.123456" in entities["message_ids"]
+
+    def test_extract_with_channels_array(self):
+        """Test extracting from top-level channels array"""
+        sample_response = {
+            "channels": [
+                {"id": "C123", "name": "general"},
+                {"id": "C456", "name": "random"}
+            ],
+            "messages": []
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "#general" in entities["channels"]
+        assert "#random" in entities["channels"]
+
+    def test_extract_mentions_with_user_ids(self):
+        """Test extracting mentions with only user IDs (no username)"""
+        sample_response = {
+            "messages": [{
+                "ts": "1234567892.123456",
+                "text": "Hey <@U999> are you there?",
+                "channel_name": "general"
+            }]
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "@U999" in entities["mentions"]
+
+    def test_extract_plain_mentions(self):
+        """Test extracting plain @mention format"""
+        sample_response = {
+            "messages": [{
+                "ts": "1234567893.123456",
+                "text": "Thanks @alice and @bob for the help!",
+                "channel_name": "general"
+            }]
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "@alice" in entities["mentions"]
+        assert "@bob" in entities["mentions"]
+
+    def test_extract_with_empty_messages(self):
+        """Test extracting from empty message list"""
+        sample_response = {"messages": []}
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert entities["channels"] == []
+        assert entities["mentions"] == []
+        assert entities["message_ids"] == []
+
+    def test_extract_single_message_format(self):
+        """Test extracting from single message (not in array)"""
+        sample_response = {
+            "ts": "1234567894.123456",
+            "text": "Check #announcements please",
+            "channel_name": "general"
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "#general" in entities["channels"]
+        assert "#announcements" in entities["channels"]
+        assert "1234567894.123456" in entities["message_ids"]
+
+    def test_extract_duplicate_channels(self):
+        """Test that duplicate channels are not added"""
+        sample_response = {
+            "messages": [
+                {"ts": "1", "text": "Message in #general", "channel_name": "general"},
+                {"ts": "2", "text": "Another in #general", "channel_name": "general"}
+            ]
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        # Should only have one instance of #general
+        assert entities["channels"].count("#general") == 1
+
+    def test_extract_with_malformed_message(self):
+        """Test graceful handling of malformed message"""
+        sample_response = {
+            "messages": [
+                {"ts": "1", "text": "Good message", "channel_name": "general"},
+                {"ts": "2"},  # Missing text
+                {"ts": "3", "text": "Also good", "channel_name": "random"}
+            ]
+        }
+
+        extractor = SlackExtractor()
+        entities = extractor.extract(sample_response)
+
+        # Should extract from good messages
+        assert "#general" in entities["channels"]
+        assert "#random" in entities["channels"]
+        assert len(entities["message_ids"]) == 3
+
+
 class TestGetExtractor:
     """Tests for get_extractor factory function"""
 
@@ -198,6 +336,12 @@ class TestGetExtractor:
         extractor = get_extractor("GMAIL")
         assert extractor is not None
         assert isinstance(extractor, GmailExtractor)
+
+    def test_get_slack_extractor(self):
+        """Test getting Slack extractor"""
+        extractor = get_extractor("SLACK")
+        assert extractor is not None
+        assert isinstance(extractor, SlackExtractor)
 
     def test_get_extractor_case_insensitive(self):
         """Test that app name is case-insensitive"""
