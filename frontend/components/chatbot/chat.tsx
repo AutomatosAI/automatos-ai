@@ -363,11 +363,9 @@ export function Chat({
     setIsLoadingSuggestions(true)
 
     try {
-      const response = await fetch(`/api/tools/${appName}/suggestions`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch suggestions: ${response.statusText}`)
-      }
-      const data: SuggestionResponse = await response.json()
+      const data = await apiClient.request<SuggestionResponse>(
+        `/api/tools/${appName}/suggestions`
+      )
       setToolSuggestions(data.suggestions || [])
 
       // Track suggestions loaded
