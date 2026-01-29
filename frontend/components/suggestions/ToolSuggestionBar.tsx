@@ -56,10 +56,9 @@ export function ToolSuggestionBar({
   return (
     <div
       className={cn(
-        // Base layout - single line with horizontal scroll
-        'flex items-center justify-center gap-2',
-        'overflow-x-auto scrollbar-hide',
-        'max-w-full',
+        // Base layout - match bottom action buttons layout
+        'flex items-center justify-center gap-2 flex-wrap',
+        'px-4',
 
         // Animation
         'animate-in fade-in slide-in-from-bottom-2 duration-200',
@@ -74,7 +73,7 @@ export function ToolSuggestionBar({
           {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
-              className="h-9 w-48 rounded-full bg-muted/50 animate-pulse shrink-0"
+              className="h-8 w-[160px] rounded-md bg-muted/50 animate-pulse"
             />
           ))}
         </>
@@ -94,10 +93,10 @@ export function ToolSuggestionBar({
         variant="ghost"
         size="icon"
         onClick={onClose}
-        className="h-8 w-8 shrink-0 hover:bg-destructive/10 hover:text-destructive ml-2"
+        className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive"
         aria-label="Close suggestions"
       >
-        <X className="h-4 w-4" />
+        <X className="h-3 w-3" />
       </Button>
     </div>
   )

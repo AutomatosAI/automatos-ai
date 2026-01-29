@@ -18,21 +18,21 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
       type="button"
       onClick={onClick}
       className={cn(
-        // Base styles - match bottom action buttons
-        'inline-flex items-center justify-center',
-        'px-4 py-2',
-        'text-sm font-normal',
-        'rounded-full',
-        'border border-orange-500/20',
-        'bg-background/80',
+        // Base styles - match "Create an Agent" size
+        'inline-flex items-center justify-center gap-2',
+        'px-3 py-1.5',
+        'text-xs font-normal',
+        'rounded-md',
+        'border border-border/50',
+        'bg-background',
 
-        // Consistent sizing
-        'min-w-fit',
-        'shrink-0',
+        // Size constraints - match bottom buttons
+        'max-w-[160px]',
+        'h-8',
 
         // Hover effects
-        'hover:border-orange-500/40',
-        'hover:bg-orange-500/5',
+        'hover:bg-accent/50',
+        'hover:border-accent',
 
         // Active/pressed state
         'active:scale-95',
@@ -42,15 +42,15 @@ export function SuggestionChip({ text, className, onClick, ...props }: Suggestio
 
         // Focus styles
         'focus-visible:outline-none',
-        'focus-visible:ring-2',
-        'focus-visible:ring-orange-500/50',
+        'focus-visible:ring-1',
+        'focus-visible:ring-ring',
 
         // Disabled state
         'disabled:pointer-events-none',
         'disabled:opacity-50',
 
-        // Text - keep on one line
-        'whitespace-nowrap',
+        // Text - truncate if too long
+        'truncate',
         'cursor-pointer',
 
         className
