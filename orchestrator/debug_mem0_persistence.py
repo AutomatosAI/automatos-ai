@@ -10,26 +10,26 @@ from modules.memory.storage.mem0_system import Mem0MemorySystem
 
 async def check_mem0():
     print("Initializing Mem0 System...")
-    sys = Mem0MemorySystem()
-    
+    memory_system = Mem0MemorySystem()
+
     workspace_id = "ae8320bc-95e1-4de1-bbe9-396bef19cbf8"
     agent_id = 19
-    
-    user_id = sys._get_scoped_user_id(workspace_id=workspace_id, agent_id=agent_id)
+
+    user_id = memory_system._get_scoped_user_id(workspace_id=workspace_id, agent_id=agent_id)
     print(f"\nChecking memories for User ID: {user_id}")
     
     print("\n--- Retrieving All Memories ---")
     try:
         # Search with a generic query to get recent items
-        memories = sys.client.search(query="Gerard", user_id=user_id, limit=10)
+        memories = memory_system.client.search(query="Gerard", user_id=user_id, limit=10)
         
         if not memories:
             print("❌ No memories found for this user!")
             
             # Try searching just by workspace default
-            user_id_default = sys._get_scoped_user_id(workspace_id=workspace_id, agent_id=None)
+            user_id_default = memory_system._get_scoped_user_id(workspace_id=workspace_id, agent_id=None)
             print(f"\nChecking fallback User ID: {user_id_default}")
-            memories_default = sys.client.search(query="Gerard", user_id=user_id_default, limit=10)
+            memories_default = memory_system.client.search(query="Gerard", user_id=user_id_default, limit=10)
             if memories_default:
                 print(f"⚠️ Found {len(memories_default)} memories in default scope!")
                 for mem in memories_default:

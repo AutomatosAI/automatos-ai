@@ -112,8 +112,7 @@ async def test_mem0_client_flow():
     
     # 2. Search Memory
     print("2. Searching memory...")
-    import time
-    time.sleep(2)  # Wait for indexing
+    await asyncio.sleep(2)  # Wait for indexing
     
     memories = client.search(query="favorite color", user_id=user_id)
     print(f"   Found {len(memories)} memories")
