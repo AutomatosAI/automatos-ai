@@ -10,6 +10,7 @@ from core.composio.entity_extractors import (
     get_extractor,
     GmailExtractor,
     SlackExtractor,
+    GitHubExtractor,
     EntityExtractor
 )
 
@@ -328,6 +329,159 @@ class TestSlackExtractor:
         assert len(entities["message_ids"]) == 3
 
 
+class TestGitHubExtractor:
+    """Tests for GitHub entity extraction"""
+
+    def test_extract_pull_requests(self):
+        """Test extracting entities from GitHub pull requests"""
+        sample_response = {
+            "pull_requests": [
+                {
+                    "number": 123,
+                    "title": "Fix authentication bug",
+                    "user": {"login": "johndoe"},
+                    "base": {"repo": {"full_name": "org/myrepo"}}
+                },
+                {
+                    "number": 456,
+                    "title": "Add new feature",
+                    "user": {"login": "janedoe"},
+                    "base": {"repo": {"full_name": "org/myrepo"}}
+                }
+            ]
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert 123 in entities["pr_numbers"]
+        assert 456 in entities["pr_numbers"]
+        assert "org/myrepo" in entities["repos"]
+        assert "johndoe" in entities["authors"]
+        assert "janedoe" in entities["authors"]
+
+    def test_extract_issues(self):
+        """Test extracting entities from GitHub issues"""
+        sample_response = {
+            "issues": [
+                {
+                    "number": 789,
+                    "title": "Bug report",
+                    "user": {"login": "alice"},
+                    "repository": {"full_name": "org/another-repo"}
+                }
+            ]
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert 789 in entities["issue_numbers"]
+        assert "org/another-repo" in entities["repos"]
+        assert "alice" in entities["authors"]
+
+    def test_extract_single_pr(self):
+        """Test extracting from single PR format"""
+        sample_response = {
+            "number": 111,
+            "title": "Fix typo",
+            "user": {"login": "bob"},
+            "head": {"repo": {"full_name": "org/repo"}},
+            "base": {"repo": {"full_name": "org/repo"}}
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert 111 in entities["pr_numbers"]
+        assert "org/repo" in entities["repos"]
+        assert "bob" in entities["authors"]
+
+    def test_extract_repositories_array(self):
+        """Test extracting from top-level repositories array"""
+        sample_response = {
+            "repositories": [
+                {"full_name": "org/repo1"},
+                {"full_name": "org/repo2"}
+            ]
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert "org/repo1" in entities["repos"]
+        assert "org/repo2" in entities["repos"]
+
+    def test_extract_duplicate_repos(self):
+        """Test that duplicate repos are not added"""
+        sample_response = {
+            "pull_requests": [
+                {
+                    "number": 1,
+                    "user": {"login": "user1"},
+                    "base": {"repo": {"full_name": "org/repo"}}
+                },
+                {
+                    "number": 2,
+                    "user": {"login": "user2"},
+                    "base": {"repo": {"full_name": "org/repo"}}
+                }
+            ]
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        # Should only have one instance of org/repo
+        assert entities["repos"].count("org/repo") == 1
+
+    def test_extract_with_empty_lists(self):
+        """Test extracting from empty lists"""
+        sample_response = {
+            "pull_requests": [],
+            "issues": []
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        assert entities["pr_numbers"] == []
+        assert entities["issue_numbers"] == []
+        assert entities["repos"] == []
+        assert entities["authors"] == []
+
+    def test_extract_with_malformed_pr(self):
+        """Test graceful handling of malformed PR"""
+        sample_response = {
+            "pull_requests": [
+                {
+                    "number": 100,
+                    "user": {"login": "good"},
+                    "base": {"repo": {"full_name": "org/repo"}}
+                },
+                {
+                    "number": 200
+                    # Missing user and repo
+                },
+                {
+                    "number": 300,
+                    "user": {"login": "alsogood"},
+                    "base": {"repo": {"full_name": "org/repo"}}
+                }
+            ]
+        }
+
+        extractor = GitHubExtractor()
+        entities = extractor.extract(sample_response)
+
+        # Should extract from all PRs, even malformed ones (partial data)
+        assert 100 in entities["pr_numbers"]
+        assert 200 in entities["pr_numbers"]
+        assert 300 in entities["pr_numbers"]
+        assert "good" in entities["authors"]
+        assert "alsogood" in entities["authors"]
+
+
 class TestGetExtractor:
     """Tests for get_extractor factory function"""
 
@@ -342,6 +496,12 @@ class TestGetExtractor:
         extractor = get_extractor("SLACK")
         assert extractor is not None
         assert isinstance(extractor, SlackExtractor)
+
+    def test_get_github_extractor(self):
+        """Test getting GitHub extractor"""
+        extractor = get_extractor("GITHUB")
+        assert extractor is not None
+        assert isinstance(extractor, GitHubExtractor)
 
     def test_get_extractor_case_insensitive(self):
         """Test that app name is case-insensitive"""

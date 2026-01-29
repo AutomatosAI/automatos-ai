@@ -334,6 +334,113 @@ class SlackExtractor(EntityExtractor):
         return mentions
 
 
+class GitHubExtractor(EntityExtractor):
+    """
+    Extracts entities from GitHub API responses.
+
+    Entities extracted:
+    - pr_numbers: Pull request numbers
+    - issue_numbers: Issue numbers
+    - repos: Repository names (e.g., "owner/repo")
+    - authors: Usernames of PR/issue authors
+
+    GitHub API Response Format:
+        {
+            "pull_requests": [
+                {
+                    "number": 123,
+                    "title": "Fix bug",
+                    "user": {"login": "johndoe"},
+                    "base": {"repo": {"full_name": "org/repo"}}
+                }
+            ],
+            "issues": [
+                {
+                    "number": 456,
+                    "title": "Feature request",
+                    "user": {"login": "jane"}
+                }
+            ]
+        }
+    """
+
+    def extract(self, tool_result: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Extract entities from GitHub API response."""
+        entities = {
+            "pr_numbers": [],
+            "issue_numbers": [],
+            "repos": [],
+            "authors": []
+        }
+
+        # Extract from pull requests
+        prs = tool_result.get("pull_requests", [])
+        if not prs and "number" in tool_result and ("pull_request" in tool_result or "head" in tool_result):
+            # Single PR format
+            prs = [tool_result]
+
+        for pr in prs:
+            try:
+                # Extract PR number
+                pr_num = pr.get("number")
+                if pr_num:
+                    entities["pr_numbers"].append(pr_num)
+
+                # Extract repo name
+                repo = self._safe_get(pr, "base", "repo", "full_name") or self._safe_get(pr, "repository", "full_name")
+                if repo and repo not in entities["repos"]:
+                    entities["repos"].append(repo)
+
+                # Extract author
+                author = self._safe_get(pr, "user", "login")
+                if author and author not in entities["authors"]:
+                    entities["authors"].append(author)
+
+            except Exception as e:
+                logger.warning(f"Failed to extract entities from GitHub PR: {e}")
+                continue
+
+        # Extract from issues
+        issues = tool_result.get("issues", [])
+        if not issues and "number" in tool_result and "pull_request" not in tool_result:
+            # Single issue format
+            issues = [tool_result]
+
+        for issue in issues:
+            try:
+                # Extract issue number
+                issue_num = issue.get("number")
+                if issue_num:
+                    entities["issue_numbers"].append(issue_num)
+
+                # Extract repo name
+                repo = self._safe_get(issue, "repository", "full_name") or self._safe_get(issue, "repo", "full_name")
+                if repo and repo not in entities["repos"]:
+                    entities["repos"].append(repo)
+
+                # Extract author
+                author = self._safe_get(issue, "user", "login")
+                if author and author not in entities["authors"]:
+                    entities["authors"].append(author)
+
+            except Exception as e:
+                logger.warning(f"Failed to extract entities from GitHub issue: {e}")
+                continue
+
+        # Handle top-level repositories array
+        repos_list = tool_result.get("repositories", [])
+        for repo in repos_list:
+            try:
+                repo_name = repo.get("full_name")
+                if repo_name and repo_name not in entities["repos"]:
+                    entities["repos"].append(repo_name)
+            except Exception as e:
+                logger.warning(f"Failed to extract repo from list: {e}")
+                continue
+
+        return entities
+
+
 def get_extractor(app_name: str) -> Optional[EntityExtractor]:
     """
     Factory function to get the appropriate extractor for an app.
@@ -352,7 +459,7 @@ def get_extractor(app_name: str) -> Optional[EntityExtractor]:
     extractors = {
         "GMAIL": GmailExtractor(),
         "SLACK": SlackExtractor(),
-        # "GITHUB": GitHubExtractor(),
+        "GITHUB": GitHubExtractor(),
     }
 
     normalized_app = app_name.upper() if app_name else None
