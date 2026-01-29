@@ -458,6 +458,21 @@ class ComposioToolExecutor:
 
             execution_time = int((time.time() - start_time) * 1000)
 
+            # PRD-41: Extract entities and store in Mem0 for context-aware suggestions
+            # Only extract if execution was successful
+            if result.get("success", False) and result.get("data"):
+                try:
+                    self._extract_and_store_entities(
+                        app_name=app_name,
+                        action_name=action_upper,
+                        tool_result=result.get("data", {}),
+                        workspace_id=workspace_id,
+                        agent_id=agent_id
+                    )
+                except Exception as extract_error:
+                    # Log but don't fail the execution
+                    logger.warning(f"Failed to extract/store entities for {app_name}: {extract_error}")
+
             return {
                 "success": result.get("success", False),
                 "data": result.get("data"),
@@ -466,7 +481,7 @@ class ComposioToolExecutor:
                 "action": action_upper,
                 "entity_id": composio_entity_id
             }
-            
+
         except Exception as e:
             error_msg = str(e)
             error_type = None
@@ -593,3 +608,97 @@ class ComposioToolExecutor:
             ):
                 count += 1
         return count
+
+    def _extract_and_store_entities(
+        self,
+        app_name: str,
+        action_name: str,
+        tool_result: Dict[str, Any],
+        workspace_id: UUID,
+        agent_id: int
+    ) -> None:
+        """
+        Extract entities from tool result and store in Mem0 (PRD-41: US-005, US-006).
+
+        This enables context-aware suggestions by remembering what tools showed
+        the user (e.g., "urgent email from Sarah", "PR #123").
+
+        Args:
+            app_name: Composio app name (e.g., "GMAIL")
+            action_name: Action that was executed
+            tool_result: Response data from tool execution
+            workspace_id: Workspace UUID (used as session_id for Mem0)
+            agent_id: Agent ID (used as user_id for Mem0)
+        """
+        from core.composio.entity_extractors import get_extractor
+        from datetime import datetime, timezone
+        import json
+
+        # Get appropriate extractor for this app
+        extractor = get_extractor(app_name)
+        if not extractor:
+            # No extractor for this app yet (e.g., Calendar, Notion)
+            logger.debug(f"No entity extractor available for {app_name}")
+            return
+
+        # Extract entities
+        entities = extractor.extract(tool_result)
+        if not entities or not any(entities.values()):
+            logger.debug(f"No entities extracted from {app_name} result")
+            return
+
+        # Store in Mem0
+        try:
+            from modules.memory.integrations.mem0_client import Mem0Client
+
+            mem0_client = Mem0Client()
+
+            # Create structured memory entry
+            memory_data = {
+                "type": "tool_result",
+                "tool": app_name,
+                "action": action_name,
+                "entities": entities,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+            # Format as natural language for Mem0 to process
+            entity_summary = []
+            if entities.get("senders"):
+                entity_summary.append(f"emails from {', '.join(entities['senders'][:3])}")
+            if entities.get("subjects"):
+                entity_summary.append(f"subjects: {', '.join(entities['subjects'][:2])}")
+            if entities.get("channels"):
+                entity_summary.append(f"channels: {', '.join(entities['channels'][:3])}")
+            if entities.get("mentions"):
+                entity_summary.append(f"mentioned {', '.join(entities['mentions'][:3])}")
+            if entities.get("pr_numbers"):
+                entity_summary.append(f"PRs: #{', #'.join(map(str, entities['pr_numbers'][:3]))}")
+            if entities.get("issue_numbers"):
+                entity_summary.append(f"issues: #{', #'.join(map(str, entities['issue_numbers'][:3]))}")
+
+            summary_text = f"{app_name} {action_name}: {'; '.join(entity_summary)}"
+
+            # Add to Mem0 with workspace_id as user_id
+            result = mem0_client.add(
+                messages=[{
+                    "role": "system",
+                    "content": summary_text
+                }],
+                user_id=str(workspace_id),  # Scope to workspace
+                metadata={
+                    "type": "tool_result",
+                    "tool": app_name,
+                    "action": action_name,
+                    "agent_id": agent_id,
+                    "entities_json": json.dumps(entities)  # Store full entities for retrieval
+                }
+            )
+
+            if result.get("error"):
+                logger.warning(f"Mem0 storage failed for {app_name}: {result.get('error')}")
+            else:
+                logger.info(f"Stored tool context in Mem0: {summary_text[:80]}...")
+
+        except Exception as e:
+            logger.error(f"Failed to store entities in Mem0: {e}")
