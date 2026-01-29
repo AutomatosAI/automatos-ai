@@ -486,54 +486,200 @@ async def sync_history(
     return {"jobs": service.get_sync_history(limit), "count": limit}
 
 
-# PRD-40: Dynamic Tool Suggestions
+# PRD-40/41: Dynamic Tool Suggestions (Phase 1 + Phase 2: Context-Aware)
 class SuggestionsOut(BaseModel):
     """Response model for tool suggestions"""
     app: str
     suggestions: List[str]
     source: str  # "curated" or "generated"
+    has_context: bool = False  # PRD-41: Whether context suggestions were included
 
 
 @router.get("/{app_name}/suggestions", response_model=SuggestionsOut)
 async def get_tool_suggestions(
     app_name: str,
+    user_id: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """
     Get suggestion prompts for a specific tool/app.
 
-    Returns curated suggestions if available, otherwise generates
+    Phase 1: Returns curated suggestions if available, otherwise generates
     basic suggestions from action schemas.
+
+    Phase 2 (PRD-41): If user_id and session_id provided, merges context-aware
+    suggestions based on recent tool results from Mem0.
 
     Args:
         app_name: The Composio app name (case-insensitive)
+        user_id: Optional user/workspace ID for context retrieval
+        session_id: Optional session ID for context filtering
 
     Returns:
-        SuggestionsOut with app name, suggestions list, and source type
+        SuggestionsOut with app name, suggestions list, source type, and has_context flag
     """
     # Normalize app name to uppercase (Composio convention)
     app_name_upper = app_name.upper()
 
+    # PRD-41: Check for context-aware suggestions if user_id provided
+    context_suggestions = []
+    has_context = False
+
+    if user_id and session_id:
+        try:
+            from modules.memory.context_manager import get_recent_tool_context
+
+            # Get recent tool context for this app
+            contexts = get_recent_tool_context(
+                user_id=user_id,
+                tool_name=app_name_upper,
+                max_age_minutes=10,
+                limit=5
+            )
+
+            if contexts:
+                # Generate context-aware suggestions from entities
+                for context in contexts:
+                    entities = context.get("entities", {})
+                    if entities:
+                        context_sugg = generate_context_suggestions(
+                            app_name_upper,
+                            entities,
+                            limit=2
+                        )
+                        context_suggestions.extend(context_sugg)
+                        if context_sugg:
+                            has_context = True
+                        break  # Use most recent context only
+
+        except Exception as e:
+            logger.warning(f"Failed to retrieve context suggestions for {app_name_upper}: {e}")
+            # Continue with Phase 1 behavior
+
+    # Get curated or generated suggestions (Phase 1)
+    base_suggestions = []
+    source = "curated"
+
     # Try to get curated suggestions from cache
-    # Note: app_suggestions is stored per-action but same for all actions of an app
     cached = db.query(ComposioActionCache).filter(
         ComposioActionCache.app_name == app_name_upper
     ).first()
 
     if cached and cached.app_suggestions and len(cached.app_suggestions) > 0:
-        return SuggestionsOut(
-            app=app_name_upper,
-            suggestions=cached.app_suggestions,
-            source="curated"
-        )
+        base_suggestions = cached.app_suggestions
+        source = "curated"
+    else:
+        # Fallback: Generate from action schemas
+        base_suggestions = _generate_suggestions_from_schema(app_name_upper, db)
+        source = "generated"
 
-    # Fallback: Generate from action schemas
-    suggestions = _generate_suggestions_from_schema(app_name_upper, db)
+    # Merge context + base suggestions
+    # Context suggestions appear first (top 2 positions)
+    # Then fill with base suggestions to reach 4 total
+    if context_suggestions:
+        final_suggestions = context_suggestions[:2]  # Top 2 context suggestions
+        remaining = 4 - len(final_suggestions)
+        final_suggestions.extend(base_suggestions[:remaining])
+    else:
+        final_suggestions = base_suggestions[:4]
+
     return SuggestionsOut(
         app=app_name_upper,
-        suggestions=suggestions,
-        source="generated"
+        suggestions=final_suggestions,
+        source=source,
+        has_context=has_context
     )
+
+
+def generate_context_suggestions(
+    tool_name: str,
+    entities: Dict[str, List[Any]],
+    limit: int = 2
+) -> List[str]:
+    """
+    Generate context-aware suggestions from extracted entities (PRD-41: US-008).
+
+    Creates natural language suggestions that reference specific entities
+    from recent tool results. For example:
+    - Gmail: "Reply to Sarah's email" (from sender entity)
+    - Slack: "Send message to #general" (from channel entity)
+    - GitHub: "Review PR #123" (from PR number entity)
+
+    Args:
+        tool_name: The tool/app name (e.g., "GMAIL", "SLACK", "GITHUB")
+        entities: Dictionary of extracted entities from tool result
+        limit: Maximum number of suggestions to generate (default: 2)
+
+    Returns:
+        List of context-specific suggestion strings
+
+    Example:
+        >>> entities = {"senders": ["Sarah Johnson"], "labels": ["IMPORTANT"]}
+        >>> generate_context_suggestions("GMAIL", entities, limit=2)
+        ["Reply to Sarah Johnson's email", "Reply to the urgent email"]
+    """
+    suggestions = []
+
+    if tool_name == "GMAIL":
+        # Reference specific senders
+        senders = entities.get("senders", [])
+        if senders:
+            # Use first sender, truncate long names
+            sender = senders[0]
+            if len(sender) > 25:
+                sender = sender[:22] + "..."
+            suggestions.append(f"Reply to {sender}'s email")
+
+        # Reference urgent/important emails
+        labels = entities.get("labels", [])
+        if "IMPORTANT" in labels or "urgent" in str(labels).lower():
+            suggestions.append("Reply to the urgent email")
+
+        # Reference subjects (truncated)
+        subjects = entities.get("subjects", [])
+        if subjects and len(suggestions) < limit:
+            subject = subjects[0]
+            if len(subject) > 30:
+                subject = subject[:27] + "..."
+            suggestions.append(f"Show email about '{subject}'")
+
+    elif tool_name == "SLACK":
+        # Reference channels
+        channels = entities.get("channels", [])
+        if channels:
+            channel = channels[0]
+            suggestions.append(f"Send message to {channel}")
+
+        # Reference mentions
+        mentions = entities.get("mentions", [])
+        if mentions and len(suggestions) < limit:
+            mention = mentions[0]
+            suggestions.append(f"Reply to {mention}")
+
+    elif tool_name == "GITHUB":
+        # Reference PRs
+        pr_numbers = entities.get("pr_numbers", [])
+        if pr_numbers:
+            pr_num = pr_numbers[0]
+            suggestions.append(f"Review PR #{pr_num}")
+
+        # Reference issues
+        issue_numbers = entities.get("issue_numbers", [])
+        if issue_numbers and len(suggestions) < limit:
+            issue_num = issue_numbers[0]
+            suggestions.append(f"Comment on issue #{issue_num}")
+
+        # Reference repos
+        repos = entities.get("repos", [])
+        if repos and len(suggestions) < limit:
+            repo = repos[0]
+            if len(repo) > 30:
+                repo = repo[:27] + "..."
+            suggestions.append(f"Show activity in {repo}")
+
+    # Return up to limit
+    return suggestions[:limit]
 
 
 def _generate_suggestions_from_schema(app_name: str, db: Session) -> List[str]:
