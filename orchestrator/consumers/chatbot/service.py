@@ -1458,10 +1458,10 @@ class StreamingChatService:
                             "Use `composio_execute` with action name and params.",
                         ]
 
+                        top_action_params: Dict[str, str] = {}
                         if q_tokens:
                             from modules.tools.formatting.schema_detector import ParameterHintExtractor
 
-                            top_action_params: Dict[str, str] = {}
                             for app in allowed_apps[:6]:
                                 token_filters = []
                                 for tok in q_tokens:

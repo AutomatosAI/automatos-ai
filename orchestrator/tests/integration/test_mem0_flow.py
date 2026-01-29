@@ -79,7 +79,7 @@ class Mem0Client:
         try:
             resp = requests.get(url, params=params, headers=self.headers, timeout=10)
             if resp.status_code == 404:
-                 return []
+                return []
             resp.raise_for_status()
             return resp.json().get("items", [])
         except requests.exceptions.RequestException as e:

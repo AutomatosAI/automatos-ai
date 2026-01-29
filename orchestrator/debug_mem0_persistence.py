@@ -53,7 +53,7 @@ async def check_mem0():
     print("\n--- Testing Memory Addition ---")
     try:
         # We won't add unless we find nothing, to avoid polluting if it's just a retrieval issue
-         pass
+        pass
     except Exception as e:
         print(f"Error: {e}")
 

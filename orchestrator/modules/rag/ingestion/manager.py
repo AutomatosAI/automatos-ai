@@ -382,7 +382,8 @@ class DocumentManager:
                     created_by VARCHAR(100) DEFAULT 'system',
                     tags TEXT[] DEFAULT ARRAY[]::TEXT[],
                     description TEXT DEFAULT '',
-                    file_hash VARCHAR(64) UNIQUE
+                    file_hash VARCHAR(64) UNIQUE,
+                    workspace_id TEXT
                 );
             """)
             
@@ -395,7 +396,10 @@ class DocumentManager:
                     content TEXT NOT NULL,
                     embedding TEXT,
                     metadata JSONB DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    workspace_id TEXT,
+                    parent_content TEXT,
+                    headers JSONB DEFAULT '{}'
                 );
             """)
             

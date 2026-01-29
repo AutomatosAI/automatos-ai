@@ -102,4 +102,3 @@ slowapi>=0.1.9
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
 composio-core>=0.6.0
 composio-openai>=0.6.0
-mem0ai>=0.1.20
