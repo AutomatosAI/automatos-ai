@@ -92,6 +92,124 @@ class EntityExtractor(ABC):
         return current if current is not None else default
 
 
+class GmailExtractor(EntityExtractor):
+    """
+    Extracts entities from Gmail API responses.
+
+    Entities extracted:
+    - senders: Email sender names (e.g., "Sarah Johnson")
+    - subjects: Email subject lines
+    - labels: Gmail labels (IMPORTANT, INBOX, etc.)
+    - email_ids: Message IDs for reference
+
+    Gmail API Response Format:
+        {
+            "messages": [
+                {
+                    "id": "msg_123",
+                    "labelIds": ["INBOX", "IMPORTANT"],
+                    "payload": {
+                        "headers": [
+                            {"name": "From", "value": "Sarah <sarah@example.com>"},
+                            {"name": "Subject", "value": "Urgent: Deadline"}
+                        ]
+                    }
+                }
+            ]
+        }
+    """
+
+    def extract(self, tool_result: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Extract entities from Gmail API response."""
+        entities = {
+            "senders": [],
+            "subjects": [],
+            "labels": [],
+            "email_ids": []
+        }
+
+        # Handle both "messages" array and single message format
+        messages = tool_result.get("messages", [])
+        if not messages and "id" in tool_result:
+            # Single message format
+            messages = [tool_result]
+
+        for msg in messages:
+            try:
+                # Extract sender from headers
+                sender = self._extract_sender(msg)
+                if sender:
+                    entities["senders"].append(sender)
+
+                # Extract subject
+                subject = self._extract_subject(msg)
+                if subject:
+                    entities["subjects"].append(subject)
+
+                # Extract labels
+                labels = msg.get("labelIds", [])
+                if labels:
+                    entities["labels"].extend(labels)
+
+                # Store email ID
+                email_id = msg.get("id")
+                if email_id:
+                    entities["email_ids"].append(email_id)
+
+            except Exception as e:
+                logger.warning(f"Failed to extract entities from Gmail message: {e}")
+                continue
+
+        return entities
+
+    def _extract_sender(self, message: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract sender name from email headers.
+
+        Args:
+            message: Gmail message object
+
+        Returns:
+            Sender name (e.g., "Sarah Johnson") or None
+        """
+        headers = self._safe_get(message, "payload", "headers", default=[])
+        if not isinstance(headers, list):
+            return None
+
+        for header in headers:
+            if header.get("name") == "From":
+                from_value = header.get("value", "")
+                # Extract name from "Sarah Johnson <sarah@example.com>" format
+                if "<" in from_value:
+                    name = from_value.split("<")[0].strip()
+                    # Remove quotes if present
+                    name = name.strip('"').strip("'")
+                    return name if name else from_value
+                return from_value
+
+        return None
+
+    def _extract_subject(self, message: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract subject from email headers.
+
+        Args:
+            message: Gmail message object
+
+        Returns:
+            Email subject line or None
+        """
+        headers = self._safe_get(message, "payload", "headers", default=[])
+        if not isinstance(headers, list):
+            return None
+
+        for header in headers:
+            if header.get("name") == "Subject":
+                return header.get("value")
+
+        return None
+
+
 def get_extractor(app_name: str) -> Optional[EntityExtractor]:
     """
     Factory function to get the appropriate extractor for an app.
@@ -107,10 +225,8 @@ def get_extractor(app_name: str) -> Optional[EntityExtractor]:
         if extractor:
             entities = extractor.extract(result)
     """
-    # Import here to avoid circular dependencies and allow lazy loading
-    # Extractors will be added in subsequent user stories
     extractors = {
-        # "GMAIL": GmailExtractor(),
+        "GMAIL": GmailExtractor(),
         # "SLACK": SlackExtractor(),
         # "GITHUB": GitHubExtractor(),
     }
