@@ -484,3 +484,107 @@ async def sync_history(
 ):
     service = MetadataSyncService(db)
     return {"jobs": service.get_sync_history(limit), "count": limit}
+
+
+# PRD-40: Dynamic Tool Suggestions
+class SuggestionsOut(BaseModel):
+    """Response model for tool suggestions"""
+    app: str
+    suggestions: List[str]
+    source: str  # "curated" or "generated"
+
+
+@router.get("/{app_name}/suggestions", response_model=SuggestionsOut)
+async def get_tool_suggestions(
+    app_name: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get suggestion prompts for a specific tool/app.
+
+    Returns curated suggestions if available, otherwise generates
+    basic suggestions from action schemas.
+
+    Args:
+        app_name: The Composio app name (case-insensitive)
+
+    Returns:
+        SuggestionsOut with app name, suggestions list, and source type
+    """
+    # Normalize app name to uppercase (Composio convention)
+    app_name_upper = app_name.upper()
+
+    # Try to get curated suggestions from cache
+    # Note: app_suggestions is stored per-action but same for all actions of an app
+    cached = db.query(ComposioActionCache).filter(
+        ComposioActionCache.app_name == app_name_upper
+    ).first()
+
+    if cached and cached.app_suggestions and len(cached.app_suggestions) > 0:
+        return SuggestionsOut(
+            app=app_name_upper,
+            suggestions=cached.app_suggestions,
+            source="curated"
+        )
+
+    # Fallback: Generate from action schemas
+    suggestions = _generate_suggestions_from_schema(app_name_upper, db)
+    return SuggestionsOut(
+        app=app_name_upper,
+        suggestions=suggestions,
+        source="generated"
+    )
+
+
+def _generate_suggestions_from_schema(app_name: str, db: Session) -> List[str]:
+    """
+    Generate basic suggestions from action descriptions.
+
+    This is a fallback for apps without curated suggestions.
+    Analyzes action descriptions to create natural language prompts.
+
+    Args:
+        app_name: The app name to generate suggestions for
+        db: Database session
+
+    Returns:
+        List of generated suggestion strings (3-4 suggestions)
+    """
+    # Get top 10 actions for this app
+    actions = db.query(ComposioActionCache).filter(
+        ComposioActionCache.app_name == app_name.upper()
+    ).limit(10).all()
+
+    if not actions:
+        return [f"Get started with {app_name}"]
+
+    suggestions = set()
+
+    for action in actions:
+        desc = (action.description or "").lower()
+        action_display = action.display_name or action.action_name
+
+        # Pattern matching to generate prompts
+        if any(verb in desc for verb in ["list", "fetch", "get", "retrieve", "show"]):
+            suggestions.add(f"Show my {app_name.lower()} items")
+        if any(verb in desc for verb in ["send", "create", "post", "add"]):
+            suggestions.add(f"Create a new {app_name.lower()} item")
+        if "search" in desc or "find" in desc:
+            suggestions.add(f"Search {app_name.lower()} for...")
+        if any(verb in desc for verb in ["update", "edit", "modify", "change"]):
+            suggestions.add(f"Update a {app_name.lower()} item")
+        if any(verb in desc for verb in ["delete", "remove", "revoke"]):
+            suggestions.add(f"Delete a {app_name.lower()} item")
+
+    # Return up to 4 suggestions
+    result = list(suggestions)[:4]
+
+    # If we have fewer than 3, add generic ones
+    if len(result) < 3:
+        result.extend([
+            f"Connect to {app_name}",
+            f"Explore {app_name} features",
+            f"Get help with {app_name}"
+        ])
+
+    return result[:4]
