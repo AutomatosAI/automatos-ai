@@ -56,14 +56,8 @@ export function ToolSuggestionBar({
   return (
     <div
       className={cn(
-        // Base layout
-        'flex items-center gap-3',
-        'px-4 py-2.5',
-        'rounded-lg',
-
-        // Background and border
-        'bg-muted/50 backdrop-blur',
-        'border border-border/50',
+        // Base layout - match welcome screen suggestions
+        'flex items-center justify-center gap-2 flex-wrap',
 
         // Animation
         'animate-in fade-in slide-in-from-bottom-2 duration-200',
@@ -71,42 +65,34 @@ export function ToolSuggestionBar({
         className
       )}
     >
-      {/* Tool label */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-fit">
-        <span className="font-medium">{activeTool}</span>
-        <span className="text-muted-foreground/60">suggestions:</span>
-      </div>
-
       {/* Suggestions container */}
-      <div className="flex gap-2 flex-wrap flex-1 overflow-x-auto scrollbar-hide">
-        {isLoading ? (
-          // Loading skeleton
-          <>
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-8 w-32 rounded-full bg-muted/50 animate-pulse"
-              />
-            ))}
-          </>
-        ) : (
-          // Suggestion chips
-          suggestions.map((suggestion, index) => (
-            <SuggestionChip
-              key={`${suggestion}-${index}`}
-              text={suggestion}
-              onClick={() => onSuggestionClick(suggestion)}
+      {isLoading ? (
+        // Loading skeleton
+        <>
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="h-9 w-32 rounded-full bg-muted/50 animate-pulse"
             />
-          ))
-        )}
-      </div>
+          ))}
+        </>
+      ) : (
+        // Suggestion chips
+        suggestions.map((suggestion, index) => (
+          <SuggestionChip
+            key={`${suggestion}-${index}`}
+            text={suggestion}
+            onClick={() => onSuggestionClick(suggestion)}
+          />
+        ))
+      )}
 
       {/* Close button */}
       <Button
         variant="ghost"
         size="icon"
         onClick={onClose}
-        className="h-8 w-8 shrink-0 hover:bg-muted/80"
+        className="h-8 w-8 shrink-0 hover:bg-destructive/10 hover:text-destructive"
         aria-label="Close suggestions"
       >
         <X className="h-4 w-4" />

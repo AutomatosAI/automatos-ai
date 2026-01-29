@@ -25,36 +25,37 @@ depends_on = None
 
 
 # Curated suggestions for popular apps
+# Note: No {{placeholders}} - suggestions are sent directly to LLM as-is
 INITIAL_SUGGESTIONS = {
     "GMAIL": [
         "Summarize unread emails from this morning",
         "Draft replies to urgent messages",
         "Find emails with attachments from last week",
-        "Show emails from {{contact}}"
+        "Check my unread emails"
     ],
     "SLACK": [
-        "Send a message to #{{channel}}",
-        "Summarize today's messages in #general",
-        "Find messages mentioning {{keyword}}",
-        "Check my unread DMs"
+        "Send a message to the team",
+        "Summarize today's messages",
+        "Check my unread DMs",
+        "Show recent channel activity"
     ],
     "GITHUB": [
         "Show my open pull requests",
         "List issues assigned to me",
-        "Check CI status for {{repo}}",
-        "Create a new issue in {{repo}}"
+        "Check recent commits",
+        "Show repository activity"
     ],
     "GOOGLECALENDAR": [
         "What's on my calendar today?",
-        "Schedule a meeting with {{person}}",
+        "Show my next meeting",
         "Find my next free slot this week",
         "Show meetings for tomorrow"
     ],
     "NOTION": [
-        "Search my Notion for {{topic}}",
-        "Create a new page in {{database}}",
-        "Show recent updates to my workspace",
-        "Find notes about {{subject}}"
+        "Search my Notion workspace",
+        "Show recent updates",
+        "List all my pages",
+        "Show recent notes"
     ]
 }
 
