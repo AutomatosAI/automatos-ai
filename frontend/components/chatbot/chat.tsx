@@ -61,64 +61,6 @@ export function Chat({
     setSelectedArtifact(null)
   }, [clearWidgets])
 
-  // PRD-40: Tool icon click handler
-  const handleToolIconClick = useCallback(async (appName: string) => {
-    // Track tool icon click
-    analytics.track('tool_icon_clicked', {
-      app: appName,
-      location: 'chat',
-    })
-
-    // Toggle off if clicking same tool
-    if (activeTool === appName) {
-      setActiveTool(null)
-      setToolSuggestions([])
-      return
-    }
-
-    setActiveTool(appName)
-    setIsLoadingSuggestions(true)
-
-    try {
-      const response = await fetch(`/api/tools/${appName}/suggestions`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch suggestions: ${response.statusText}`)
-      }
-      const data: SuggestionResponse = await response.json()
-      setToolSuggestions(data.suggestions || [])
-
-      // Track suggestions loaded
-      analytics.track('suggestions_loaded', {
-        app: appName,
-        source: data.source,
-        count: data.suggestions.length,
-      })
-    } catch (error) {
-      console.error('Failed to fetch tool suggestions:', error)
-      toast.error(`Failed to load suggestions for ${appName}`)
-      setToolSuggestions([])
-      setActiveTool(null)
-    } finally {
-      setIsLoadingSuggestions(false)
-    }
-  }, [activeTool])
-
-  // PRD-40: Suggestion click handler
-  const handleSuggestionClick = useCallback((suggestion: string) => {
-    // Track suggestion click
-    analytics.track('suggestion_clicked', {
-      app: activeTool || 'unknown',
-      suggestion: suggestion,
-      location: 'chat',
-    })
-
-    // Send the suggestion as a message
-    sendMessage(suggestion)
-    // Close suggestions after use
-    setActiveTool(null)
-    setToolSuggestions([])
-  }, [sendMessage, activeTool])
-
   const [canvasWidth, setCanvasWidth] = useState(800)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
@@ -401,6 +343,64 @@ export function Chat({
       }
     }
   }, [messages, activeChatId, hasGeneratedTitle])
+
+  // PRD-40: Tool icon click handler
+  const handleToolIconClick = useCallback(async (appName: string) => {
+    // Track tool icon click
+    analytics.track('tool_icon_clicked', {
+      app: appName,
+      location: 'chat',
+    })
+
+    // Toggle off if clicking same tool
+    if (activeTool === appName) {
+      setActiveTool(null)
+      setToolSuggestions([])
+      return
+    }
+
+    setActiveTool(appName)
+    setIsLoadingSuggestions(true)
+
+    try {
+      const response = await fetch(`/api/tools/${appName}/suggestions`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch suggestions: ${response.statusText}`)
+      }
+      const data: SuggestionResponse = await response.json()
+      setToolSuggestions(data.suggestions || [])
+
+      // Track suggestions loaded
+      analytics.track('suggestions_loaded', {
+        app: appName,
+        source: data.source,
+        count: data.suggestions.length,
+      })
+    } catch (error) {
+      console.error('Failed to fetch tool suggestions:', error)
+      toast.error(`Failed to load suggestions for ${appName}`)
+      setToolSuggestions([])
+      setActiveTool(null)
+    } finally {
+      setIsLoadingSuggestions(false)
+    }
+  }, [activeTool])
+
+  // PRD-40: Suggestion click handler
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    // Track suggestion click
+    analytics.track('suggestion_clicked', {
+      app: activeTool || 'unknown',
+      suggestion: suggestion,
+      location: 'chat',
+    })
+
+    // Send the suggestion as a message
+    sendMessage(suggestion)
+    // Close suggestions after use
+    setActiveTool(null)
+    setToolSuggestions([])
+  }, [sendMessage, activeTool])
 
   // Handle selections
   const handleArtifactSelect = useCallback((artifact: Artifact) => {
