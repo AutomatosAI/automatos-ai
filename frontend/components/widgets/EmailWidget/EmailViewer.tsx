@@ -4,6 +4,7 @@
  * EmailViewer Component for PRD-38.2 Extended Widgets
  *
  * Full email display with HTML support and XSS prevention via DOMPurify.
+ * Modern, clean design inspired by premium email clients.
  * SECURITY: All HTML content is sanitized before rendering.
  */
 
@@ -18,9 +19,17 @@ import {
   Paperclip,
   Download,
   ExternalLink,
+  Calendar,
+  User,
+  Users,
+  Mail,
+  Reply,
+  Forward,
+  MoreHorizontal,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { format } from 'date-fns'
+import { format, isToday, isYesterday } from 'date-fns'
 import { EmailActions } from './EmailActions'
 import type { EmailFull, EmailAddress, EmailAttachment } from '../types'
 
@@ -86,6 +95,34 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/**
+ * Get sender initials for avatar
+ */
+function getSenderInitials(from: EmailAddress): string {
+  const name = from.name || from.email
+  const parts = name.split(/[\s@]/)
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase()
+  }
+  return name.substring(0, 2).toUpperCase()
+}
+
+/**
+ * Generate consistent color for sender avatar
+ */
+function getAvatarColor(email: string): string {
+  const colors = [
+    'bg-blue-500', 'bg-green-500', 'bg-purple-500',
+    'bg-orange-500', 'bg-pink-500', 'bg-teal-500',
+    'bg-indigo-500', 'bg-rose-500', 'bg-cyan-500'
+  ]
+  let hash = 0
+  for (let i = 0; i < email.length; i++) {
+    hash = email.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return colors[Math.abs(hash) % colors.length]
+}
+
 interface EmailViewerProps {
   email: EmailFull
   onBack?: () => void
@@ -110,98 +147,185 @@ export function EmailViewer({
     return proxyExternalImages(sanitized)
   }, [email.bodyHtml])
 
-  // Format date
+  // Format date - smart formatting
   const formattedDate = useMemo(() => {
     try {
-      return format(new Date(email.date), 'MMM d, yyyy h:mm a')
+      const date = new Date(email.date)
+      if (isToday(date)) {
+        return `Today at ${format(date, 'h:mm a')}`
+      } else if (isYesterday(date)) {
+        return `Yesterday at ${format(date, 'h:mm a')}`
+      }
+      return format(date, "EEEE, MMMM d, yyyy 'at' h:mm a")
     } catch {
       return email.date
     }
   }, [email.date])
 
+  // Check if we have body content
+  const hasBodyContent = Boolean(email.body || sanitizedHtml)
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
-        {onBack && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 -ml-2"
-            onClick={onBack}
-          >
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Back
-          </Button>
-        )}
+      {/* Header with navigation and actions */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40 bg-muted/20">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 -ml-2"
+              onClick={onBack}
+            >
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              <span className="text-sm">Back</span>
+            </Button>
+          )}
+        </div>
 
-        <EmailActions
-          email={email}
-          onReply={onReply}
-          onForward={onForward}
-          onArchive={onArchive}
-          onDelete={onDelete}
-          compact
-        />
+        <div className="flex items-center gap-1">
+          {onReply && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => onReply(email)}
+            >
+              <Reply className="h-4 w-4 mr-1.5" />
+              Reply
+            </Button>
+          )}
+          {onForward && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => onForward(email)}
+            >
+              <Forward className="h-4 w-4 mr-1.5" />
+              Forward
+            </Button>
+          )}
+          <EmailActions
+            email={email}
+            onArchive={onArchive}
+            onDelete={onDelete}
+            compact
+          />
+        </div>
       </div>
 
       {/* Email content */}
       <ScrollArea className="flex-1">
-        <div className="p-4">
+        <div className="p-4 space-y-4">
           {/* Subject */}
-          <h2 className="text-lg font-semibold mb-2">{email.subject}</h2>
+          <div>
+            <h1 className="text-xl font-semibold leading-tight text-foreground">
+              {email.subject || '(No Subject)'}
+            </h1>
+            {email.labels && email.labels.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {email.labels.map((label) => (
+                  <Badge
+                    key={label}
+                    variant="secondary"
+                    className="text-xs px-2 py-0.5 bg-muted/80"
+                  >
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
 
-          {/* Sender info */}
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <div className="font-medium">
-                {email.from.name || email.from.email}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                To: {email.to.map(formatAddress).join(', ')}
-              </div>
-              {email.cc && email.cc.length > 0 && (
-                <div className="text-sm text-muted-foreground">
-                  Cc: {email.cc.map(formatAddress).join(', ')}
-                </div>
-              )}
+          {/* Sender card */}
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border/40">
+            {/* Avatar */}
+            <div className={cn(
+              "flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-white text-sm font-medium",
+              getAvatarColor(email.from.email)
+            )}>
+              {getSenderInitials(email.from)}
             </div>
-            <div className="text-sm text-muted-foreground">
-              {formattedDate}
+
+            {/* Sender info */}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-semibold text-sm">
+                    {email.from.name || email.from.email}
+                  </div>
+                  {email.from.name && (
+                    <div className="text-xs text-muted-foreground">
+                      {email.from.email}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Calendar className="h-3 w-3" />
+                  {formattedDate}
+                </div>
+              </div>
+
+              {/* Recipients */}
+              <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                <div className="flex items-start gap-1.5">
+                  <span className="text-muted-foreground/70 min-w-[24px]">To:</span>
+                  <span className="flex-1 break-all">
+                    {email.to.map(formatAddress).join(', ')}
+                  </span>
+                </div>
+                {email.cc && email.cc.length > 0 && (
+                  <div className="flex items-start gap-1.5">
+                    <span className="text-muted-foreground/70 min-w-[24px]">Cc:</span>
+                    <span className="flex-1 break-all">
+                      {email.cc.map(formatAddress).join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Labels */}
-          {email.labels && email.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-4">
-              {email.labels.map((label) => (
-                <Badge key={label} variant="secondary" className="text-xs">
-                  {label}
-                </Badge>
-              ))}
-            </div>
-          )}
-
-          <Separator className="my-4" />
+          {/* Divider */}
+          <div className="border-t border-border/30" />
 
           {/* Body content */}
-          <div className="email-body">
+          <div className="email-body min-h-[100px]">
             {sanitizedHtml ? (
               <div
-                className="prose prose-sm max-w-none dark:prose-invert"
+                className={cn(
+                  "prose prose-sm max-w-none dark:prose-invert",
+                  "prose-headings:font-semibold prose-headings:text-foreground",
+                  "prose-p:text-foreground/90 prose-p:leading-relaxed",
+                  "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+                  "prose-blockquote:border-l-primary/50 prose-blockquote:text-muted-foreground",
+                  "prose-code:bg-muted prose-code:px-1 prose-code:rounded",
+                  "prose-pre:bg-muted prose-pre:border prose-pre:border-border/50"
+                )}
                 dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
               />
-            ) : (
-              <pre className="whitespace-pre-wrap font-sans text-sm">
+            ) : hasBodyContent ? (
+              <div className="whitespace-pre-wrap font-sans text-sm text-foreground/90 leading-relaxed">
                 {email.body}
-              </pre>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <FileText className="h-12 w-12 text-muted-foreground/30 mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  No email content available
+                </p>
+                <p className="text-xs text-muted-foreground/70 mt-1">
+                  The email body could not be loaded
+                </p>
+              </div>
             )}
           </div>
 
           {/* Attachments */}
           {email.attachments && email.attachments.length > 0 && (
-            <div className="mt-6">
-              <Separator className="mb-4" />
+            <div className="pt-2">
+              <div className="border-t border-border/30 pt-4" />
               <div className="flex items-center gap-2 mb-3">
                 <Paperclip className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">
@@ -210,9 +334,9 @@ export function EmailViewer({
                 </span>
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {email.attachments.map((attachment) => (
-                  <AttachmentItem key={attachment.id} attachment={attachment} />
+                  <AttachmentCard key={attachment.id} attachment={attachment} />
                 ))}
               </div>
             </div>
@@ -224,28 +348,50 @@ export function EmailViewer({
 }
 
 /**
- * Single attachment display
+ * Attachment card component
  */
-function AttachmentItem({ attachment }: { attachment: EmailAttachment }) {
+function AttachmentCard({ attachment }: { attachment: EmailAttachment }) {
   const handleDownload = () => {
     if (attachment.downloadUrl) {
       window.open(attachment.downloadUrl, '_blank')
     }
   }
 
+  // Get file icon based on mime type
+  const getFileIcon = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return '🖼️'
+    if (mimeType.startsWith('video/')) return '🎬'
+    if (mimeType.startsWith('audio/')) return '🎵'
+    if (mimeType.includes('pdf')) return '📄'
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '📊'
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📽️'
+    if (mimeType.includes('document') || mimeType.includes('word')) return '📝'
+    if (mimeType.includes('zip') || mimeType.includes('compressed')) return '📦'
+    return '📎'
+  }
+
   return (
     <div
       className={cn(
-        'flex items-center gap-3 px-3 py-2 rounded-md',
-        'bg-muted/30 hover:bg-muted/50 transition-colors'
+        'flex items-center gap-3 px-3 py-2.5 rounded-lg',
+        'bg-muted/40 border border-border/40',
+        'hover:bg-muted/60 hover:border-border/60 transition-colors',
+        'group cursor-pointer'
       )}
+      onClick={handleDownload}
+      role="button"
+      tabIndex={0}
     >
-      <Paperclip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+      <div className="text-xl flex-shrink-0">
+        {getFileIcon(attachment.mimeType)}
+      </div>
 
       <div className="flex-1 min-w-0">
-        <div className="text-sm truncate">{attachment.filename}</div>
+        <div className="text-sm font-medium truncate text-foreground/90">
+          {attachment.filename}
+        </div>
         <div className="text-xs text-muted-foreground">
-          {attachment.mimeType} - {formatFileSize(attachment.size)}
+          {formatFileSize(attachment.size)}
         </div>
       </div>
 
@@ -253,8 +399,11 @@ function AttachmentItem({ attachment }: { attachment: EmailAttachment }) {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8 flex-shrink-0"
-          onClick={handleDownload}
+          className="h-8 w-8 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation()
+            handleDownload()
+          }}
           title="Download"
         >
           <Download className="h-4 w-4" />

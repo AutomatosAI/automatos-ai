@@ -286,6 +286,8 @@ export interface EmailAttachment {
 
 /**
  * Email summary (for list view)
+ * Note: body/bodyHtml are optional here but may be populated by backend
+ * for display in detail view without a separate fetch
  */
 export interface EmailSummary {
   id: string
@@ -297,6 +299,12 @@ export interface EmailSummary {
   isRead: boolean
   hasAttachments: boolean
   labels?: string[]
+  // Optional body content (populated by backend, used when viewing email)
+  body?: string
+  bodyHtml?: string
+  // Optional additional fields that might come from backend
+  threadId?: string
+  attachments?: EmailAttachment[]
 }
 
 /**

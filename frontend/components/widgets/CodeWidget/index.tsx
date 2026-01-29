@@ -111,17 +111,6 @@ export function CodeWidget({
       onMaximize={onMaximize}
       onCopy={handleCopy}
       canCopy
-      customActions={[
-        {
-          label: copied ? 'Copied!' : 'Copy Code',
-          icon: copied ? (
-            <Check className="h-4 w-4 mr-2 text-green-500" />
-          ) : (
-            <Copy className="h-4 w-4 mr-2" />
-          ),
-          onClick: handleCopy,
-        },
-      ]}
     >
       <div className="flex flex-col h-full">
         {/* File info bar */}
@@ -146,31 +135,30 @@ export function CodeWidget({
 
         {/* Code block */}
         <div className="flex-1 overflow-auto bg-[#2d2d2d]">
-          <pre
-            className={cn(
-              'p-4 text-sm leading-relaxed m-0 min-h-full',
-              showLineNumbers && 'pl-12 relative'
-            )}
-          >
+          <div className="flex min-h-full">
+            {/* Line numbers - separate column */}
             {showLineNumbers && (
-              <div className="absolute left-0 top-0 bottom-0 w-10 bg-[#252525] border-r border-[#3a3a3a] flex flex-col items-end pr-2 pt-4 text-xs text-gray-500 select-none font-mono">
+              <div className="flex-shrink-0 w-12 bg-[#252525] border-r border-[#3a3a3a] text-right pr-3 py-4 text-xs text-gray-500 select-none font-mono">
                 {Array.from({ length: lineCount }, (_, i) => (
-                  <div key={i} className="leading-relaxed">
+                  <div key={i} className="leading-relaxed text-sm">
                     {i + 1}
                   </div>
                 ))}
               </div>
             )}
-            <code
-              ref={codeRef}
-              className={cn(
-                `language-${language}`,
-                'font-mono text-sm'
-              )}
-            >
-              {data.code}
-            </code>
-          </pre>
+            {/* Code content */}
+            <pre className="flex-1 p-4 text-sm leading-relaxed m-0 overflow-x-auto">
+              <code
+                ref={codeRef}
+                className={cn(
+                  `language-${language}`,
+                  'font-mono text-sm'
+                )}
+              >
+                {data.code}
+              </code>
+            </pre>
+          </div>
         </div>
 
         {/* Explanation */}

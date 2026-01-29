@@ -49,11 +49,13 @@ export function EmailWidget({
 
   // Handle email selection from list
   const handleEmailSelect = useCallback((email: EmailSummary) => {
-    // In a real implementation, we'd fetch the full email content
-    // For now, we'll use the summary data
+    // Use actual body if available from backend, otherwise fallback to snippet
     const fullEmail: EmailFull = {
       ...email,
-      body: email.snippet,
+      body: email.body || email.snippet || '',
+      bodyHtml: email.bodyHtml,
+      attachments: email.attachments,
+      threadId: email.threadId,
     }
     setSelectedEmail(fullEmail)
     setViewMode('view')

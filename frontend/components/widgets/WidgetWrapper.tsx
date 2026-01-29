@@ -7,12 +7,14 @@
  * the appropriate widget component with all necessary props.
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import { getWidget } from './registry'
 import { WidgetBase } from './WidgetBase'
 import { useWorkspaceStore } from '@/stores/workspace-store'
 import type { Widget } from './types'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, X, Minimize2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface WidgetWrapperProps {
   widget: Widget
@@ -23,6 +25,7 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
   const removeWidget = useWorkspaceStore((s) => s.removeWidget)
   const setActiveWidget = useWorkspaceStore((s) => s.setActiveWidget)
   const bringToFront = useWorkspaceStore((s) => s.bringToFront)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Get widget definition from registry
   const definition = useMemo(() => getWidget(widget.type), [widget.type])
@@ -38,8 +41,18 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
   }, [widget.id, setActiveWidget, bringToFront])
 
   const handleMaximize = useCallback(() => {
-    // TODO: Implement maximize behavior (Phase 2)
-    console.log('[WidgetWrapper] Maximize not yet implemented')
+    setIsFullscreen(true)
+  }, [])
+
+  const handleMinimize = useCallback(() => {
+    setIsFullscreen(false)
+  }, [])
+
+  // Reset fullscreen when widget becomes inactive or component unmounts
+  useEffect(() => {
+    return () => {
+      setIsFullscreen(false)
+    }
   }, [])
 
   // Handle unknown widget type
@@ -68,6 +81,57 @@ export function WidgetWrapper({ widget, isActive }: WidgetWrapperProps) {
   }
 
   const WidgetComponent = definition.component
+
+  // Fullscreen modal
+  if (isFullscreen) {
+    return (
+      <>
+        {/* Fullscreen overlay */}
+        <div className="fixed inset-0 z-[100] bg-background flex flex-col">
+          {/* Fullscreen header */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+            <h2 className="text-sm font-medium">{widget.title}</h2>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={handleMinimize}
+                title="Exit fullscreen"
+              >
+                <Minimize2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                onClick={handleClose}
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Fullscreen content */}
+          <div className="flex-1 overflow-hidden">
+            <WidgetComponent
+              id={widget.id}
+              type={widget.type}
+              title={widget.title}
+              data={widget.data}
+              metadata={widget.metadata}
+              isActive={true}
+              isLoading={widget.state === 'loading'}
+              error={widget.state === 'error' ? widget.error : null}
+              onClose={handleClose}
+              onMaximize={handleMinimize}
+            />
+          </div>
+        </div>
+      </>
+    )
+  }
 
   return (
     <div onClick={handleClick} className="h-full">

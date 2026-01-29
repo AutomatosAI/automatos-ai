@@ -484,7 +484,7 @@ class CodeGraphService:
                         line_number=node.lineno,
                         signature=signature,
                         docstring=docstring,
-                        code_snippet=code_snippet[:1000],  # Limit snippet size
+                        code_snippet=code_snippet[:5000],  # Limit snippet size (increased for full functions)
                         metadata={
                             'args': [arg.arg for arg in node.args.args],
                             'decorators': [d.id if isinstance(d, ast.Name) else str(d) for d in node.decorator_list],
@@ -517,7 +517,7 @@ class CodeGraphService:
                         line_number=node.lineno,
                         signature=f"class {node.name}({', '.join(bases)})",
                         docstring=docstring,
-                        code_snippet=code_snippet[:1000],
+                        code_snippet=code_snippet[:5000],  # Increased for full class definitions
                         metadata={
                             'bases': bases,
                             'methods': [m.name for m in node.body if isinstance(m, ast.FunctionDef)]

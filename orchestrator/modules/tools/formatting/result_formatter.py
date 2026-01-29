@@ -280,50 +280,62 @@ class ToolResultFormatter:
     def format_code(raw_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Format code search results consistently.
-        
+
         Input: List of raw code symbol dicts from CodeGraph
         Output: Standardized format for frontend/LLM
         """
         formatted = []
-        
+
         for r in raw_results:
+            file_path = (
+                r.get('file') or
+                r.get('file_path') or
+                r.get('path') or
+                ''
+            )
+            # Detect language from file extension
+            lang = r.get('language', '')
+            if not lang and file_path:
+                ext = file_path.split('.')[-1].lower() if '.' in file_path else ''
+                lang_map = {'py': 'python', 'ts': 'typescript', 'tsx': 'typescript',
+                           'js': 'javascript', 'jsx': 'javascript', 'go': 'go',
+                           'rs': 'rust', 'java': 'java', 'rb': 'ruby'}
+                lang = lang_map.get(ext, ext or 'python')
+
             formatted.append({
                 'symbol_name': (
-                    r.get('symbol') or 
-                    r.get('symbol_name') or 
-                    r.get('name') or 
+                    r.get('symbol') or
+                    r.get('symbol_name') or
+                    r.get('name') or
                     'Unknown'
                 ),
                 'symbol_type': (
-                    r.get('type') or 
-                    r.get('symbol_type') or 
+                    r.get('type') or
+                    r.get('symbol_type') or
                     'code'
                 ),
-                'file_path': (
-                    r.get('file') or 
-                    r.get('file_path') or 
-                    r.get('path') or 
-                    ''
-                ),
+                'file_path': file_path,
                 'line_number': (
-                    r.get('line_number') or 
-                    r.get('line') or 
+                    r.get('line_number') or
+                    r.get('line') or
                     0
                 ),
                 'code': (
-                    r.get('code') or 
-                    r.get('code_snippet') or 
-                    r.get('content') or 
+                    r.get('code') or
+                    r.get('code_snippet') or
+                    r.get('content') or
                     ''
                 ),
-                'language': r.get('language', 'python'),
+                'language': lang,
                 'docstring': (
-                    r.get('docstring') or 
-                    r.get('description') or 
+                    r.get('docstring') or
+                    r.get('description') or
                     ''
                 ),
+                'signature': r.get('signature', ''),
+                'explanation': r.get('explanation', ''),
             })
-        
+
         return formatted
     
     @staticmethod
@@ -489,6 +501,7 @@ class ToolResultFormatter:
         
         elif tool_name in ['search_codebase', 'search_code']:
             frontend_data['code_snippets'] = standardized['results']
+            logger.info(f"[FrontendData] search_codebase: {len(standardized['results'])} code snippets")
         
         elif tool_name in ['query_database', 'smart_query_database']:
             # Frontend expects database_results as an array with pandas_ai inside
@@ -521,11 +534,74 @@ class ToolResultFormatter:
             # Frontend expects an array of results
             frontend_data['database_results'] = [db_result]
 
+        elif tool_name == "execute_command":
+            # Create terminal widget data for command execution
+            logger.info(f"[TerminalWidget] Creating terminal widget for command: {result.get('command', 'N/A')}")
+            frontend_data['terminal_output'] = {
+                'command': result.get('command', ''),
+                'output': result.get('output', result.get('stdout', '')),
+                'stderr': result.get('stderr', ''),
+                'exitCode': result.get('exit_code', result.get('returncode', 0)),
+                'executionTime': result.get('execution_time_ms', 0),
+                'workingDirectory': result.get('cwd', result.get('working_directory', '')),
+            }
+            logger.info(f"[TerminalWidget] Added terminal_output to frontend_data")
+
         elif tool_name == "composio_execute" or tool_name.startswith("composio_"):
-            # Generic external-api artifact payload. Even if the UI doesn't have a dedicated
-            # renderer, this makes the result available in `tool_data` for inspection.
+            # Schema-driven widget type detection (PRD-38 Enhancement)
+            # Instead of hardcoding "GMAIL" or "OUTLOOK", we detect from response structure
+            from modules.tools.formatting.schema_detector import ResponseTypeDetector, GenericDataExtractor
+
+            action = result.get("action", "")
+            raw_data = result.get("data", {})
+            response_schema = result.get("response_schema")  # May be passed from executor
+
+            logger.info(f"[SchemaDetector] Composio action: {action}, has_schema: {bool(response_schema)}")
+
+            # Detect widget type using schema-driven approach
+            # This works for Gmail, Outlook, Yahoo, or ANY email provider
+            widget_type = ResponseTypeDetector.detect(
+                response_schema=response_schema,
+                result=raw_data,
+                action_name=action
+            )
+            logger.info(f"[SchemaDetector] Detected widget type: {widget_type}")
+
+            # Extract data based on detected type (generic, not provider-specific)
+            if widget_type == "email":
+                emails = GenericDataExtractor.extract_emails(raw_data)
+                if emails:
+                    frontend_data["emails"] = emails
+                    logger.info(f"[SchemaDetector] Extracted {len(emails)} emails for widget")
+                    for i, e in enumerate(emails[:2]):
+                        logger.info(f"[SchemaDetector] Email {i+1}: subject='{str(e.get('subject', 'N/A'))[:50]}', from='{e.get('from', 'N/A')}'")
+                else:
+                    logger.warning(f"[SchemaDetector] Email type detected but no valid emails extracted")
+
+            elif widget_type == "data":
+                columns, rows = GenericDataExtractor.extract_table_data(raw_data)
+                if rows:
+                    frontend_data["table_data"] = {
+                        "columns": columns,
+                        "rows": rows,
+                        "row_count": len(rows)
+                    }
+                    logger.info(f"[SchemaDetector] Extracted table with {len(columns)} columns, {len(rows)} rows")
+
+            elif widget_type == "file":
+                # File data - pass through for FileWidget
+                frontend_data["files"] = raw_data.get("files") or raw_data.get("data") or [raw_data]
+                logger.info(f"[SchemaDetector] Extracted file data for widget")
+
+            elif widget_type == "calendar":
+                # Calendar events - pass through for future CalendarWidget
+                frontend_data["events"] = raw_data.get("events") or raw_data.get("items") or raw_data.get("data")
+                logger.info(f"[SchemaDetector] Extracted calendar data for widget")
+
+            # Always include generic API results for fallback display
             frontend_data["api_results"] = standardized["results"]
             frontend_data["api_metadata"] = standardized.get("metadata", {})
+            frontend_data["detected_type"] = widget_type  # Let frontend know what was detected
         
         return frontend_data
     
@@ -587,14 +663,18 @@ class ToolResultFormatter:
             # Provide a compact, structured preview of external API results
             # so the LLM can actually answer using the returned data.
             preview = standardized["results"][:3]
+            logger.info(f"[LLM-Context] Composio results count: {len(standardized['results'])}, preview items: {len(preview)}")
             if preview:
                 try:
                     preview_json = json.dumps(preview, default=str, indent=2)[:1800]
-                except Exception:
+                    logger.info(f"[LLM-Context] Composio preview (first 500 chars): {preview_json[:500]}")
+                except Exception as e:
                     preview_json = str(preview)[:1800]
+                    logger.warning(f"[LLM-Context] JSON dump failed: {e}")
                 summary_parts.append("\nAPI result preview (use this to answer):")
                 summary_parts.append(preview_json)
             else:
+                logger.warning("[LLM-Context] Composio returned 0 items - LLM will hallucinate!")
                 summary_parts.append("\nAPI returned 0 items for this query.")
         
         full_summary = "\n".join(summary_parts)

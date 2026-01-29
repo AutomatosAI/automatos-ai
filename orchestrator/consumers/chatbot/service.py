@@ -664,8 +664,13 @@ class StreamingChatService:
 
                         # Pull candidate actions *from the DB* using a filtered query per app.
                         # This avoids loading thousands of actions into Python for scoring.
+                        # Schema-driven: Also fetch parameters to provide LLM hints
                         if q_tokens:
+                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
+
                             app_matches: List[tuple[str, List[str]]] = []
+                            top_action_params: Dict[str, str] = {}  # action_name -> param hints
+
                             for app in allowed_apps[:12]:
                                 token_filters = []
                                 for tok in q_tokens:
@@ -673,22 +678,30 @@ class StreamingChatService:
                                     token_filters.append(ComposioActionCache.action_name.ilike(like))
                                     token_filters.append(ComposioActionCache.description.ilike(like))
 
+                                # Fetch action_name AND parameters for schema-driven hints
                                 rows = (
-                                    self.db.query(ComposioActionCache.action_name)
+                                    self.db.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
                                     .filter(ComposioActionCache.app_name == app)
                                     .filter(or_(*token_filters))
                                     .limit(24)
                                     .all()
                                 )
-                                actions = [str(r[0]) for r in rows if r and r[0]]
-                                if is_messaging_intent:
-                                    filtered = []
-                                    for a in actions:
-                                        al = a.lower()
+                                actions = []
+                                for r in rows:
+                                    if not r or not r[0]:
+                                        continue
+                                    action_name = str(r[0])
+                                    if is_messaging_intent:
+                                        al = action_name.lower()
                                         if any(tok in al for tok in dangerous_tokens):
                                             continue
-                                        filtered.append(a)
-                                    actions = filtered
+                                    actions.append(action_name)
+                                    # Extract param hints for top 3 actions per app
+                                    if len(top_action_params) < 10 and r[1]:
+                                        param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
+                                        if param_hints:
+                                            top_action_params[action_name] = param_hints
+
                                 # Deduplicate while preserving order
                                 seen = set()
                                 actions = [a for a in actions if not (a in seen or seen.add(a))]
@@ -700,10 +713,18 @@ class StreamingChatService:
                             for app, actions in app_matches[:6]:
                                 hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
 
+                            # Add parameter hints for top candidate actions (schema-driven, not hardcoded)
+                            if top_action_params:
+                                hint_lines.append("\nParameter hints for key actions:")
+                                for action_name, params in list(top_action_params.items())[:5]:
+                                    hint_lines.append(f"\n{action_name}:")
+                                    hint_lines.append(params)
+
                         insert_at = 2 if memory_context else 1
                         llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
+                        logger.info(f"[Composio Hints] Injected hints for apps={allowed_apps}, tokens={q_tokens}, param_hints={len(top_action_params)}")
             except Exception as exc:
-                logger.debug(f"Composio hint injection skipped: {exc}")
+                logger.warning(f"Composio hint injection failed: {exc}", exc_info=True)
 
             # Explicit tool call bypass (e.g., "Use tool X with params {...}")
             explicit_call = self.prompt_analyzer.parse_explicit_tool_call(latest_text)
@@ -976,9 +997,12 @@ class StreamingChatService:
                                 tool_data.update(r["frontend_data"])
                                 if isinstance(r["frontend_data"], dict) and r["frontend_data"].get("documents"):
                                     documents_tool_used = True
+                                logger.info(f"[TOOL-DATA] Yielding tool-data for {r['tool_name']}: keys={list(r['frontend_data'].keys())}")
                                 yield self.streaming_handler.format_aisdk_tool_data(r["frontend_data"])
                                 sent_tool_data = True
                                 await asyncio.sleep(0)
+                            else:
+                                logger.warning(f"[TOOL-DATA] NOT yielding tool-data - success={r.get('success')}, has_frontend_data={bool(r.get('frontend_data'))}")
 
                         tool_results.append({
                             "tool_call_id": r["tool_call_id"],
@@ -1387,7 +1411,96 @@ class StreamingChatService:
                     ),
                 },
             )
-            
+
+            # Provide Composio app/action hints based on agent assignments (schema-driven)
+            try:
+                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+                from core.composio.entity_manager import EntityManager
+                from sqlalchemy import or_
+
+                if latest_text and agent_id:
+                    assigned = (
+                        self.db.query(AgentAppAssignment)
+                        .filter(
+                            AgentAppAssignment.agent_id == agent_id,
+                            AgentAppAssignment.is_active == True,
+                            AgentAppAssignment.app_type == "EXTERNAL",
+                        )
+                        .all()
+                    )
+                    assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
+
+                    connected_apps: List[str] = []
+                    if self.workspace_id:
+                        manager = EntityManager(self.db)
+                        entity = manager.get_entity_by_workspace(self.workspace_id)
+                        if entity:
+                            connected_apps = [
+                                (c.get("app_name") or "").upper()
+                                for c in manager.get_entity_connections(entity["id"])
+                                if c.get("status") == "active"
+                            ]
+
+                    allowed_apps = assigned_apps
+                    if connected_apps:
+                        connected_set = set(connected_apps)
+                        allowed_apps = [a for a in assigned_apps if a in connected_set]
+
+                    if allowed_apps:
+                        q = (latest_text or "").lower()
+                        q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+                        stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+                        q_tokens = [t for t in q_tokens if t not in stop][:10]
+
+                        hint_lines = [
+                            "You have these external apps assigned (via Composio): "
+                            + ", ".join(sorted(set(allowed_apps))) + ".",
+                            "Use `composio_execute` with action name and params.",
+                        ]
+
+                        if q_tokens:
+                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
+
+                            top_action_params: Dict[str, str] = {}
+                            for app in allowed_apps[:6]:
+                                token_filters = []
+                                for tok in q_tokens:
+                                    like = f"%{tok}%"
+                                    token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                    token_filters.append(ComposioActionCache.description.ilike(like))
+
+                                rows = (
+                                    self.db.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
+                                    .filter(ComposioActionCache.app_name == app)
+                                    .filter(or_(*token_filters))
+                                    .limit(10)
+                                    .all()
+                                )
+                                actions = []
+                                for r in rows:
+                                    if not r or not r[0]:
+                                        continue
+                                    action_name = str(r[0])
+                                    actions.append(action_name)
+                                    if len(top_action_params) < 5 and r[1]:
+                                        param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
+                                        if param_hints:
+                                            top_action_params[action_name] = param_hints
+
+                                if actions:
+                                    hint_lines.append(f"- {app} actions: {', '.join(actions[:5])}")
+
+                            if top_action_params:
+                                hint_lines.append("\nParameter hints:")
+                                for action_name, params in list(top_action_params.items())[:3]:
+                                    hint_lines.append(f"\n{action_name}:")
+                                    hint_lines.append(params)
+
+                        llm_messages.insert(3, {"role": "system", "content": "\n".join(hint_lines)})
+                        logger.info(f"[Composio Hints] Agent {agent_id}: apps={allowed_apps}, tokens={q_tokens}, hints={len(top_action_params)}")
+            except Exception as exc:
+                logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
+
             # Await memory result
             memory_context = None
             if memory_task:
@@ -1930,6 +2043,15 @@ YOUR SPECIALIZED SKILLS:
                     })
                     if result.get("success"):
                         executed_any_success = True
+
+                    # CRITICAL: Yield tool-data for frontend widgets (documents, code, etc.)
+                    # This was missing for selected agents - widgets only worked with default agent
+                    frontend_data = result.get("frontend_data", {})
+                    if result.get("success") and frontend_data:
+                        tool_data.update(frontend_data)
+                        logger.info(f"[TOOL-DATA] Yielding tool-data for {tool_name}: keys={list(frontend_data.keys())}")
+                        yield self.streaming_handler.format_aisdk_tool_data(frontend_data)
+                        await asyncio.sleep(0)
 
                     # Stop immediately on deterministic "unavailable" errors (no point retrying),
                     # EXCEPT: allow a single recovery attempt for "action not mapped" so the model

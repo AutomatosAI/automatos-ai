@@ -334,6 +334,7 @@ class ToolRouter:
                 llm_context = self.formatter.format_for_llm(result, tool_name)
 
                 logger.info(f"[tool-trace {trace_id}] {tool_name} succeeded")
+                logger.info(f"[tool-trace {trace_id}] frontend_data keys: {list(frontend_data.keys()) if frontend_data else 'EMPTY'}")
                 return {
                     "success": True,
                     "frontend_data": frontend_data,

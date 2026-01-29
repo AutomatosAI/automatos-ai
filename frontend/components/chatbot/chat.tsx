@@ -17,7 +17,7 @@ import { toast } from 'sonner'
 
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
-import { Canvas, WidgetTray } from '@/components/workspace'
+import { Canvas } from '@/components/workspace'
 import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
 
 export interface ChatProps {
@@ -46,7 +46,15 @@ export function Chat({
   // Widget Architecture (PRD-38.1) - workspace store
   const widgetIds = useWorkspaceStore((s) => s.widgetIds)
   const addWidget = useWorkspaceStore((s) => s.addWidget)
+  const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
   const hasWidgets = widgetIds.length > 0
+
+  // Handler to close canvas and reset all overlay states
+  const handleCloseCanvas = useCallback(() => {
+    clearWidgets()
+    setIsArtifactViewerVisible(false)
+    setSelectedArtifact(null)
+  }, [clearWidgets])
   const [canvasWidth, setCanvasWidth] = useState(800)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
@@ -75,6 +83,200 @@ export function Chat({
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
+      }
+
+      // PRD-38.1: Auto-create widgets when tool-data arrives
+      if (dataPart.type === 'tool-data' && dataPart.data) {
+        const toolData = dataPart.data
+
+        // Create widgets for database results
+        if (toolData.database_results && Array.isArray(toolData.database_results)) {
+          toolData.database_results.forEach((dbResult: any) => {
+            const columns = dbResult.columns && dbResult.columns.length > 0
+              ? dbResult.columns
+              : (dbResult.data && dbResult.data.length > 0 ? Object.keys(dbResult.data[0]) : [])
+
+            const charts = dbResult.pandas_ai?.charts?.map((chart: any) => ({
+              filename: chart.filename || 'chart.png',
+              mimeType: chart.mime_type || 'image/png',
+              base64: chart.base64,
+            }))
+
+            addWidget({
+              type: 'data',
+              title: `${dbResult.database || 'Query'} Result`,
+              data: {
+                columns,
+                rows: dbResult.data || [],
+                sql: dbResult.sql,
+                database: dbResult.database,
+                rowCount: dbResult.row_count || dbResult.data?.length || 0,
+                executionTime: dbResult.execution_time_ms,
+                charts,
+                pandasAiSummary: dbResult.pandas_ai?.summary,
+                explanation: dbResult.explanation,
+                rephrased_query: dbResult.rephrased_query,
+                follow_up_questions: dbResult.follow_up_questions,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'smart_query_database', provider: 'nl2sql' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widgets for documents
+        if (toolData.documents && Array.isArray(toolData.documents)) {
+          toolData.documents.forEach((doc: any) => {
+            const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || ''
+            const chunks = doc.chunks?.map((chunk: any) => ({
+              content: chunk.content || chunk.excerpt || '',
+              excerpt: chunk.excerpt,
+              similarity: chunk.similarity,
+              chunkIndex: chunk.chunk_index,
+            }))
+
+            addWidget({
+              type: 'document',
+              title: doc.filename || doc.title || 'Document',
+              data: {
+                content: initialContent,
+                format: 'markdown',
+                filename: doc.filename,
+                filePath: doc.file_path,
+                similarity: doc.similarity,
+                relevance: doc.relevance,
+                chunkCount: doc.chunk_count,
+                chunks,
+                downloadUrl: doc.download_url,
+                hasFullContent: doc.has_full_content ?? false,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'search_knowledge', provider: 'rag' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: doc.has_full_content ? 'ready' : 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widgets for code snippets
+        if (toolData.code_snippets && Array.isArray(toolData.code_snippets)) {
+          toolData.code_snippets.forEach((snippet: any) => {
+            addWidget({
+              type: 'code',
+              title: snippet.symbol_name || snippet.file_path || 'Code Snippet',
+              data: {
+                code: snippet.code,
+                language: snippet.language || 'python',
+                filePath: snippet.file_path,
+                lineNumber: snippet.line_number,
+                explanation: snippet.explanation,
+                symbolName: snippet.symbol_name,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'search_codebase', provider: 'codegraph' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widget for emails (Composio Gmail/Outlook)
+        // EmailWidget expects data.emails array for list mode
+        console.log('[Widget] tool-data received:', Object.keys(toolData))
+        if (toolData.emails && Array.isArray(toolData.emails) && toolData.emails.length > 0) {
+          console.log('[Widget] Creating email widget with', toolData.emails.length, 'emails')
+
+          // Helper to parse email address string like "John Doe <john@example.com>" into { name, email }
+          const parseEmailAddress = (addr: any): { email: string; name?: string } => {
+            if (!addr) return { email: 'unknown' }
+            if (typeof addr === 'object' && addr.email) return addr
+            if (typeof addr !== 'string') return { email: String(addr) }
+
+            // Match "Name <email>" or just "email"
+            const match = addr.match(/^(.+?)\s*<([^>]+)>$/)
+            if (match) {
+              return { name: match[1].trim(), email: match[2].trim() }
+            }
+            return { email: addr.trim() }
+          }
+
+          // Helper to parse array of email addresses
+          const parseEmailAddresses = (addrs: any): { email: string; name?: string }[] => {
+            if (!addrs) return []
+            if (typeof addrs === 'string') return [parseEmailAddress(addrs)]
+            if (Array.isArray(addrs)) return addrs.map(parseEmailAddress)
+            return [parseEmailAddress(addrs)]
+          }
+
+          // Transform emails to the format EmailWidget expects
+          const emailList = toolData.emails.map((email: any) => ({
+            id: email.id || email.messageId || crypto.randomUUID(),
+            threadId: email.threadId,
+            subject: email.subject || '(No Subject)',
+            from: parseEmailAddress(email.from || email.sender),
+            to: parseEmailAddresses(email.to || email.recipients),
+            date: email.date || email.receivedAt || new Date().toISOString(),
+            snippet: email.snippet || email.body?.substring(0, 200) || '',
+            body: email.body || email.content || email.snippet || '',
+            bodyHtml: email.bodyHtml,  // HTML content for rich rendering
+            isRead: email.isRead ?? true,
+            hasAttachments: email.hasAttachments || (email.attachments?.length > 0),
+            attachments: email.attachments,
+            labels: email.labels || email.tags,
+          }))
+
+          addWidget({
+            type: 'email',
+            title: `Emails (${emailList.length})`,
+            data: {
+              mode: 'list',
+              emails: emailList,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'composio_execute', provider: 'gmail' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
+        // Create widget for terminal/command output
+        if (toolData.terminal_output) {
+          const term = toolData.terminal_output
+          console.log('[Widget] Creating terminal widget for command:', term.command)
+          addWidget({
+            type: 'terminal',
+            title: term.command ? `$ ${term.command.substring(0, 30)}${term.command.length > 30 ? '...' : ''}` : 'Terminal',
+            data: {
+              command: term.command || '',
+              output: term.output || '',
+              stderr: term.stderr || '',
+              exitCode: term.exitCode ?? 0,
+              executionTime: term.executionTime,
+              workingDirectory: term.workingDirectory,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'execute_command', provider: 'shell' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
       }
     },
     onChatIdUpdate: (newChatId) => {
@@ -139,9 +341,24 @@ export function Chat({
 
   const handleCodeSelect = useCallback((code: CodeSnippet) => {
     // PRD-38.1: Create widget instead of artifact
+    const codeTitle = code.symbol_name || code.file_path || 'Code Snippet'
+
+    // Check if a widget for this code already exists - if so, just activate it
+    const existingWidgets = useWorkspaceStore.getState().widgets
+    const existingWidget = Object.values(existingWidgets).find(
+      w => w.type === 'code' && (
+        (w.data as any)?.filePath === code.file_path &&
+        (w.data as any)?.symbolName === code.symbol_name
+      )
+    )
+    if (existingWidget) {
+      useWorkspaceStore.getState().setActiveWidget(existingWidget.id)
+      return
+    }
+
     const widgetData: Omit<import('@/components/widgets/types').Widget<CodeWidgetData>, 'id'> = {
       type: 'code',
-      title: code.symbol_name || code.file_path || 'Code Snippet',
+      title: codeTitle,
       data: {
         code: code.code,
         language: code.language || 'python',
@@ -164,6 +381,17 @@ export function Chat({
   const handleDocumentSelect = useCallback((doc: DocumentReference) => {
     // PRD-38.1: Create widget instead of artifact
     const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || ''
+    const docFilename = doc.filename || doc.title || 'Document'
+
+    // Check if a widget for this document already exists - if so, just activate it
+    const existingWidgets = useWorkspaceStore.getState().widgets
+    const existingWidget = Object.values(existingWidgets).find(
+      w => w.type === 'document' && (w.data as any)?.filename === docFilename
+    )
+    if (existingWidget) {
+      useWorkspaceStore.getState().setActiveWidget(existingWidget.id)
+      return
+    }
 
     // Transform chunks to widget format
     const chunks = doc.chunks?.map((chunk: any) => ({
@@ -175,11 +403,11 @@ export function Chat({
 
     const widgetData: Omit<import('@/components/widgets/types').Widget<DocumentWidgetData>, 'id'> = {
       type: 'document',
-      title: doc.filename || 'Document',
+      title: docFilename,
       data: {
         content: initialContent,
         format: 'markdown',
-        filename: doc.filename,
+        filename: docFilename,
         filePath: doc.file_path,
         similarity: doc.similarity,
         relevance: doc.relevance,
@@ -292,131 +520,65 @@ export function Chat({
   return (
     <>
       {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
-      <AnimatePresence>
-        {hasWidgets && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { delay: 0.4 } }}
-            className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-transparent"
-          >
-            {/* Background */}
-            <motion.div
-              initial={{ width: '100%', right: 0 }}
-              animate={{ width: '100%', right: 0 }}
-              exit={{ width: '100%', right: 0 }}
-              className="fixed h-screen bg-background"
-            />
-
-            {/* Chat Column - LEFT 400px */}
-            <motion.div
-              initial={{ opacity: 0, x: 10, scale: 1 }}
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1,
-                transition: {
-                  delay: 0.1,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 30,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                x: 0,
-                scale: 1,
-                transition: { duration: 0 },
-              }}
-              className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background border-r border-border/50"
-            >
-              <div className="flex h-full flex-col items-center justify-between">
-                {/* Messages */}
-                <div
-                  ref={messagesContainerRef}
-                  className="flex-1 w-full overflow-y-scroll overscroll-contain"
-                  style={{ overflowAnchor: 'none' }}
-                >
-                  <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
-                    <AnimatePresence>
-                      {messages.map((message, index) => (
-                        <Message
-                          key={message.id}
-                          chatId={id}
-                          message={message}
-                          isLoading={isTyping && index === messages.length - 1}
-                          setMessages={setMessages}
-                          regenerate={regenerate}
-                          isReadonly={isReadonly}
-                          onArtifactSelect={handleArtifactSelect}
-                          onCodeSelect={handleCodeSelect}
-                          onDocumentSelect={handleDocumentSelect}
-                          onDatabaseSelect={handleDatabaseSelect}
-                        />
-                      ))}
-                    </AnimatePresence>
-                    <div ref={messagesEndRef} />
-                  </div>
-                </div>
-
-                {/* Input at bottom of chat column */}
-                {!isReadonly && (
-                  <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
-                    <MultimodalInput
+      {hasWidgets && (
+        <div className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-background">
+          {/* Chat Column - LEFT 400px */}
+          <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background border-r border-border/50">
+            <div className="flex h-full flex-col items-center justify-between">
+              {/* Messages */}
+              <div
+                ref={messagesContainerRef}
+                className="flex-1 w-full overflow-y-scroll overscroll-contain"
+                style={{ overflowAnchor: 'none' }}
+              >
+                <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
+                  {messages.map((message, index) => (
+                    <Message
+                      key={message.id}
                       chatId={id}
-                      status={status}
-                      stop={stop}
-                      sendMessage={sendMessage}
-                      selectedModelId={currentModelId}
-                      onModelChange={setCurrentModelId}
-                      selectedAgentId={selectedAgentId}
-                      onAgentChange={setSelectedAgentId}
-                      selectedVisibilityType={visibilityType}
-                      usage={usage}
+                      message={message}
+                      isLoading={isTyping && index === messages.length - 1}
+                      setMessages={setMessages}
+                      regenerate={regenerate}
+                      isReadonly={isReadonly}
+                      onArtifactSelect={handleArtifactSelect}
+                      onCodeSelect={handleCodeSelect}
+                      onDocumentSelect={handleDocumentSelect}
+                      onDatabaseSelect={handleDatabaseSelect}
                     />
-                  </div>
-                )}
-              </div>
-            </motion.div>
-
-            {/* PRD-38.1: Widget Canvas - RIGHT side, rest of space */}
-            <motion.div
-              initial={{ opacity: 0, x: windowWidth, scale: 0.98 }}
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1,
-                transition: {
-                  delay: 0.2,
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 40,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                x: 400,
-                scale: 0.98,
-                transition: {
-                  delay: 0,
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 40,
-                },
-              }}
-              className="relative z-10 flex h-full flex-1 flex-col bg-background"
-            >
-              {/* Canvas area */}
-              <div className="flex-1 overflow-hidden">
-                <Canvas width={canvasWidth} />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
 
-              {/* Widget Tray at bottom */}
-              <WidgetTray />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              {/* Input at bottom of chat column */}
+              {!isReadonly && (
+                <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                  <MultimodalInput
+                    chatId={id}
+                    status={status}
+                    stop={stop}
+                    sendMessage={sendMessage}
+                    selectedModelId={currentModelId}
+                    onModelChange={setCurrentModelId}
+                    selectedAgentId={selectedAgentId}
+                    onAgentChange={setSelectedAgentId}
+                    selectedVisibilityType={visibilityType}
+                    usage={usage}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PRD-38.1: Widget Canvas - RIGHT side */}
+          <div className="relative z-10 flex h-full flex-1 flex-col bg-background">
+            <div className="flex-1 overflow-hidden">
+              <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Legacy Artifact Viewer overlay - for backward compatibility */}
       <AnimatePresence>
@@ -482,7 +644,7 @@ export function Chat({
 
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
-        <div className="relative flex h-full w-full flex-col bg-transparent">
+        <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
           {/* Incredible-style centered welcome card (empty state) */}
           {showWelcomeCard && (
             <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">

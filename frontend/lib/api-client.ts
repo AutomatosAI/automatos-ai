@@ -1312,6 +1312,28 @@ class ApiClient {
     const headers: any = { ...this.defaultHeaders }
     delete headers['Content-Type'] // Let browser set multipart/form-data with boundary
 
+    // Inject Workspace ID from LocalStorage (same as request method)
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) {
+        headers['X-Workspace-ID'] = workspaceId
+        console.log('[Upload] 🏢 Injected workspace context:', workspaceId)
+      }
+    }
+
+    // Add Clerk JWT token if available
+    if (this.getClerkToken) {
+      try {
+        const token = await this.getClerkToken()
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+          console.log('[Upload] 🔐 Added Clerk JWT to upload request')
+        }
+      } catch (error) {
+        console.warn('[Upload] ⚠️ Failed to get Clerk token:', error)
+      }
+    }
+
     // CRITICAL: Upload must go DIRECTLY to backend, bypassing Next.js proxy
     const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || ''
     const url = `${BACKEND_URL}/api/documents/upload`

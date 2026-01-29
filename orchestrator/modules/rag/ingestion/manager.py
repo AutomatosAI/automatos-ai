@@ -515,10 +515,16 @@ class DocumentManager:
         self._ensure_database_initialized()
         try:
             logger.info(f"Starting document processing for document {document_id}, type: {file_type}")
-            
+
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
-            
+
+            # Fetch workspace_id from document record
+            cursor.execute("SELECT workspace_id FROM documents WHERE id = %s", (document_id,))
+            doc_row = cursor.fetchone()
+            workspace_id = doc_row[0] if doc_row else None
+            logger.info(f"Processing document {document_id} for workspace {workspace_id}")
+
             # Extract text
             text = self.processor.extract_text_from_file(file_path)
             logger.info(f"Extracted {len(text)} characters from document {document_id}")
@@ -748,13 +754,14 @@ class DocumentManager:
                 
                 # Save chunk to database (with parent_content and headers for smart chunking)
                 cursor.execute("""
-                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers, workspace_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     chunk.document_id, chunk.chunk_index, chunk.content,
                     embedding, json.dumps(chunk.metadata),
                     chunk.parent_content,  # NEW: Store parent content
-                    json.dumps(chunk.headers) if chunk.headers else '{}'  # NEW: Store headers
+                    json.dumps(chunk.headers) if chunk.headers else '{}',  # NEW: Store headers
+                    workspace_id  # Include workspace_id from parent document
                 ))
                 valid_chunks.append(chunk)
             
