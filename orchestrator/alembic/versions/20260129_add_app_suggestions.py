@@ -19,7 +19,7 @@ import json
 
 # revision identifiers, used by Alembic.
 revision = '20260129_app_suggestions'
-down_revision = '20260127_add_workspace_member_unique_constraint'
+down_revision = '20260127_workspace_member_uq'
 branch_labels = None
 depends_on = None
 
