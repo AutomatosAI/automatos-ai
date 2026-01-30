@@ -104,7 +104,13 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     specializations: [] as string[],
     maxConcurrentTasks: 3,
     priority: 'medium',  // Backend expects: low, medium, high, critical
-    autoStart: true
+    autoStart: true,
+    // Marketplace fields
+    shareToMarketplace: false,
+    marketplacePublicName: '',
+    marketplaceDescription: '',
+    marketplaceCategory: '',
+    marketplaceTags: ''
   })
 
   // PRD-15: Model configuration state
@@ -158,6 +164,18 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       return
     }
 
+    // US-006: Validate marketplace fields if sharing is enabled
+    if (agentData.shareToMarketplace) {
+      if (!agentData.marketplaceCategory) {
+        toast.error('Please select a marketplace category')
+        return
+      }
+      if (!agentData.marketplaceDescription) {
+        toast.error('Please provide a marketplace description')
+        return
+      }
+    }
+
     console.log('✅ Validation passed, creating agent...')
     try {
       // Prepare agent payload matching backend API expectations
@@ -209,6 +227,49 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
       toast.success(`Agent "${agentData.name}" created successfully!`)
 
+      // US-006: Submit to marketplace if enabled
+      if (agentData.shareToMarketplace && newAgent?.id) {
+        try {
+          const marketplaceTags = agentData.marketplaceTags
+            .split(',')
+            .map(tag => tag.trim())
+            .filter(Boolean)
+
+          const marketplacePayload = {
+            type: 'agent',
+            name: agentData.marketplacePublicName || agentData.name,
+            description: agentData.marketplaceDescription || agentData.description,
+            creator_name: 'You', // Backend will set actual username
+            category: agentData.marketplaceCategory || 'Custom',
+            tags: marketplaceTags,
+            metadata: {
+              agent_id: newAgent.id,
+              agent_type: agentData.type,
+              skills: agentData.skills,
+              tools: agentData.tools
+            }
+          }
+
+          console.log('Submitting agent to marketplace:', marketplacePayload)
+          const response = await fetch('/api/marketplace/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(marketplacePayload)
+          })
+
+          if (response.ok) {
+            toast.success('Agent submitted to marketplace for approval!')
+          } else {
+            const error = await response.json()
+            console.error('Marketplace submission failed:', error)
+            toast.error('Agent created but marketplace submission failed')
+          }
+        } catch (error) {
+          console.error('Marketplace submission error:', error)
+          toast.error('Agent created but marketplace submission failed')
+        }
+      }
+
       // Notify parent component and close modal
       onSuccess()
       onClose()
@@ -219,13 +280,17 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         type: '',
         description: '',
         tags: '',
-        tags: '',
         skills: [],
         tools: [],
         specializations: [],
         maxConcurrentTasks: 3,
         priority: 'medium',
-        autoStart: true
+        autoStart: true,
+        shareToMarketplace: false,
+        marketplacePublicName: '',
+        marketplaceDescription: '',
+        marketplaceCategory: '',
+        marketplaceTags: ''
       })
       setModelConfig({
         provider: 'openai',
@@ -450,6 +515,109 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           />
                         </div>
                       </div>
+                    </div>
+
+                    {/* US-006: Marketplace Sharing */}
+                    <div className="pt-6 border-t border-border/30">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <Label htmlFor="share-marketplace" className="text-base font-medium">
+                            Share to <span className="text-orange-500">Marketplace</span>
+                          </Label>
+                          <p className="text-sm text-muted-foreground">
+                            Make this agent available for others to discover and install
+                          </p>
+                        </div>
+                        <Switch
+                          id="share-marketplace"
+                          checked={agentData.shareToMarketplace}
+                          onCheckedChange={(checked) => setAgentData(prev => ({ ...prev, shareToMarketplace: checked }))}
+                        />
+                      </div>
+
+                      {agentData.shareToMarketplace && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-4 mt-4"
+                        >
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="marketplace-public-name">Public Name</Label>
+                              <Input
+                                id="marketplace-public-name"
+                                placeholder="Display name in marketplace"
+                                value={agentData.marketplacePublicName}
+                                onChange={(e) => setAgentData(prev => ({ ...prev, marketplacePublicName: e.target.value }))}
+                                className="bg-secondary/50"
+                              />
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Leave blank to use agent name
+                              </p>
+                            </div>
+
+                            <div>
+                              <Label htmlFor="marketplace-category">Category <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={agentData.marketplaceCategory}
+                                onValueChange={(value) => setAgentData(prev => ({ ...prev, marketplaceCategory: value }))}
+                              >
+                                <SelectTrigger id="marketplace-category" className="bg-secondary/50">
+                                  <SelectValue placeholder="Select category..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Personal Assistant">Personal Assistant</SelectItem>
+                                  <SelectItem value="Customer Support">Customer Support</SelectItem>
+                                  <SelectItem value="DevOps">DevOps</SelectItem>
+                                  <SelectItem value="Social Media">Social Media</SelectItem>
+                                  <SelectItem value="Accounting">Accounting</SelectItem>
+                                  <SelectItem value="E-commerce">E-commerce</SelectItem>
+                                  <SelectItem value="Content Creation">Content Creation</SelectItem>
+                                  <SelectItem value="HR">HR</SelectItem>
+                                  <SelectItem value="Data Analysis">Data Analysis</SelectItem>
+                                  <SelectItem value="Custom">Custom</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="marketplace-description">Marketplace Description <span className="text-red-500">*</span></Label>
+                            <Textarea
+                              id="marketplace-description"
+                              placeholder="Describe what makes this agent useful for others..."
+                              value={agentData.marketplaceDescription}
+                              onChange={(e) => setAgentData(prev => ({ ...prev, marketplaceDescription: e.target.value }))}
+                              className="bg-secondary/50 min-h-[80px]"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              This will be shown in the marketplace listing
+                            </p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="marketplace-tags">Marketplace Tags</Label>
+                            <Input
+                              id="marketplace-tags"
+                              placeholder="e.g. productivity, automation, sales"
+                              value={agentData.marketplaceTags}
+                              onChange={(e) => setAgentData(prev => ({ ...prev, marketplaceTags: e.target.value }))}
+                              className="bg-secondary/50"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Comma-separated tags for discoverability
+                            </p>
+                          </div>
+
+                          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                            <p className="text-sm text-orange-200">
+                              <strong>Note:</strong> Your agent will be submitted to the approval queue.
+                              Trusted users' submissions are auto-published.
+                            </p>
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
 
                     {selectedType && (
