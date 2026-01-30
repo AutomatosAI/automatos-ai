@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import Link from 'next/link'
 import {
   Search,
   Filter,
@@ -30,7 +31,8 @@ import {
   Activity,
   Trash2,
   MoreVertical,
-  Eye
+  Eye,
+  Store
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -609,6 +611,13 @@ export function ToolsDashboard() {
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
 
+          <Link href="/marketplace?tab=tools">
+            <Button className="bg-orange-500 hover:bg-orange-600 text-white">
+              <Store className="w-4 h-4 mr-2" />
+              Browse Marketplace
+            </Button>
+          </Link>
+
           <Button
             variant="outline"
             disabled={(syncCacheMutation as any).isLoading}
@@ -714,10 +723,6 @@ export function ToolsDashboard() {
                   <CheckCircle className="w-4 h-4" />
                   <span>Connected ({enabledToolsCount})</span>
                 </TabsTrigger>
-                <TabsTrigger value="marketplace" className="flex items-center gap-1.5 px-3">
-                  <Grid3X3 className="w-4 h-4" />
-                  <span>Marketplace</span>
-                </TabsTrigger>
               </TabsList>
 
               {/* Sort Dropdown */}
@@ -800,79 +805,6 @@ export function ToolsDashboard() {
             </div>
           </TabsContent>
 
-          <TabsContent value="marketplace" className="space-y-4">
-
-            {/* Categories */}
-            <div className="flex overflow-x-auto pb-4 gap-2 no-scrollbar scroll-smooth">
-              {toolCategories.map((category) => (
-                <Button
-                  key={category.id}
-                  variant={selectedCategory === category.id ? 'default' : 'outline'}
-                  onClick={() => setSelectedCategory(category.id)}
-                  className={`flex-shrink-0 flex items-center space-x-2 ${selectedCategory === category.id
-                    ? 'bg-gray-800 border-orange-400/50 text-white'
-                    : 'hover:border-orange-500/50'
-                    }`}
-                >
-                  <span>{category.name}</span>
-                  <Badge variant="outline" className="ml-1 text-xs">
-                    {getCategoryCount(category.id)}
-                  </Badge>
-                </Button>
-              ))}
-            </div>
-
-            {/* Tools Grid/List */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <AnimatePresence>
-                {filteredTools.map((tool, index) => (
-                  <ToolCard
-                    key={tool?.id}
-                    tool={tool}
-                    viewMode={viewMode}
-                    index={index}
-                    onInstall={() => {
-                      if (tool.provider === 'Composio') {
-                        handleToolConnect(tool)
-                      }
-                    }}
-                    onDetails={() => handleToolDetails(tool)}
-                    onUninstall={() => handleToolConfigure(tool)}
-                    onConfigure={() => handleToolConfigure(tool)}
-                    loading={loading}
-                  />
-                ))}
-              </AnimatePresence>
-            </div>
-
-            {/* Pagination */}
-            {paginationData.total > pageSize && (
-              <EnhancedPagination
-                data={paginationData}
-                onPageChange={(page) => setCurrentPage(page)}
-                className="mt-6"
-              />
-            )}
-
-            {/* Empty State */}
-            {filteredTools?.length === 0 && (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
-                  <Search className="w-8 h-8 text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-semibold mb-2">No tools found</h3>
-                <p className="text-muted-foreground mb-4">
-                  Try adjusting your search or category filter
-                </p>
-                <Button variant="outline" onClick={() => {
-                  setSearchQuery('')
-                  setSelectedCategory('all')
-                }}>
-                  Clear Filters
-                </Button>
-              </div>
-            )}
-          </TabsContent>
 
           {/* Installed tab removed; Enabled is now first */}
 
