@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { MarketplaceGrid } from './marketplace-grid'
 import { MarketplaceItemModal } from './marketplace-item-modal'
+import { MarketplaceToolsTab } from './marketplace-tools-tab'
 
 export interface MarketplaceItem {
   id: number
@@ -244,11 +245,7 @@ export function MarketplaceHomepage() {
         </TabsContent>
 
         <TabsContent value="tools" className="mt-6">
-          <MarketplaceGrid
-            type="tool"
-            search={searchQuery}
-            onItemClick={setSelectedItem}
-          />
+          <MarketplaceToolsTab />
         </TabsContent>
 
         <TabsContent value="agents" className="mt-6">
