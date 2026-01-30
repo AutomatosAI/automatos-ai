@@ -64,23 +64,30 @@ class Mem0Client:
             payload["metadata"] = metadata
 
         try:
-            logger.info(f"[Mem0] Adding memory for user {user_id}: {text_content[:80]}...")
+            logger.info(
+                "[Mem0] Adding memory: user_id_len=%s, text_len=%s, has_metadata=%s",
+                len(user_id) if user_id else 0,
+                len(text_content),
+                bool(metadata),
+            )
+            logger.debug("[Mem0] Payload (redacted): user_id and text omitted for PII")
             resp = requests.post(url, json=payload, headers=self.headers, timeout=15)
-            logger.info(f"[Mem0] Add response status: {resp.status_code}")
+            logger.info("[Mem0] Add response status: %s", resp.status_code)
+            logger.debug("[Mem0] Add response body: %s", (resp.text or "")[:300])
 
             if resp.status_code >= 400:
-                logger.error(f"[Mem0] Add failed: {resp.status_code} - {resp.text[:200]}")
+                logger.error("[Mem0] Add failed: status=%s", resp.status_code)
                 return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
             resp.raise_for_status()
 
-            # Handle empty response (success with no body)
-            if not resp.text or resp.text.strip() == "" or resp.text == "null":
-                logger.info("[Mem0] Empty/null response - treating as success")
-                return {"success": True}
+            normalized = (resp.text or "").strip().lower()
+            if normalized == "" or normalized == "null":
+                logger.warning("[Mem0] Empty/null response - memory may not have been stored!")
+                return {"success": False, "error": "Empty response from Mem0"}
 
             result = resp.json()
-            logger.info(f"[Mem0] Add result: {result}")
+            logger.debug("[Mem0] Add result (omitted for PII)")
             return result if result else {"success": True}
         except Exception as e:
             logger.error(f"[Mem0] Failed to add memory: {e}")

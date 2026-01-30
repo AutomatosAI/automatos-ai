@@ -1,0 +1,298 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/dynamic-tool-suggestions",
+  "description": "Dynamic Tool Suggestions - Context-aware suggestion chips that appear when users click tool icons (Gmail, Slack, etc.) on both welcome and chat screens",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add app_suggestions column to composio_actions_cache table",
+      "description": "As a developer, I need to store curated suggestions per Composio app in the database so that the API can serve them.",
+      "acceptanceCriteria": [
+        "Create migration file: orchestrator/migrations/add_app_suggestions.py",
+        "Add app_suggestions JSONB column with default '[]' to composio_actions_cache table",
+        "Migration includes upgrade() and downgrade() functions",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Completed: Migration file created with curated suggestions for 5 apps"
+    },
+    {
+      "id": "US-002",
+      "title": "Populate initial curated suggestions for 5 apps",
+      "description": "As a product manager, I want curated suggestions for Gmail, Slack, GitHub, Google Calendar, and Notion so users get helpful prompts.",
+      "acceptanceCriteria": [
+        "Update migration to populate GMAIL with 4 suggestions including 'Summarize unread emails from this morning'",
+        "Update migration to populate SLACK with 4 suggestions including 'Send a message to #{{channel}}'",
+        "Update migration to populate GITHUB with 4 suggestions including 'Show my open pull requests'",
+        "Update migration to populate GOOGLECALENDAR with 4 suggestions",
+        "Update migration to populate NOTION with 4 suggestions",
+        "All suggestions use natural language and {{placeholder}} syntax where appropriate",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Completed: Migration file created with curated suggestions for 5 apps"
+    },
+    {
+      "id": "US-003",
+      "title": "Run database migration",
+      "description": "As a developer, I need to apply the migration to add the app_suggestions column and populate initial data.",
+      "acceptanceCriteria": [
+        "Run migration successfully using Alembic",
+        "Verify app_suggestions column exists in composio_actions_cache table",
+        "Verify 5 apps have populated suggestions in database",
+        "No migration errors or warnings"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Completed: Migration applied, 5 apps populated with 4 suggestions each"
+    },
+    {
+      "id": "US-004",
+      "title": "Add GET /api/tools/{app_name}/suggestions endpoint",
+      "description": "As a frontend developer, I need an API endpoint to fetch suggestions for a specific tool/app.",
+      "acceptanceCriteria": [
+        "Create or update orchestrator/api/tools.py with new endpoint",
+        "Endpoint GET /api/tools/{app_name}/suggestions returns JSON with app, suggestions array, and source field",
+        "Endpoint queries composio_actions_cache for app_suggestions where app_name matches (case-insensitive)",
+        "Returns curated suggestions if available with source='curated'",
+        "Endpoint handles missing/unknown apps gracefully",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Completed: GET /api/tools/{app_name}/suggestions endpoint created with curated and generated support"
+    },
+    {
+      "id": "US-005",
+      "title": "Add schema-based suggestion generator (fallback)",
+      "description": "As a system, I need to generate basic suggestions from action schemas when curated suggestions are not available.",
+      "acceptanceCriteria": [
+        "Add generate_suggestions_from_schema() function in orchestrator/api/tools.py",
+        "Function queries top 10 actions for given app_name",
+        "Extracts verbs from action descriptions (list, send, search, update, etc.)",
+        "Generates 3-4 natural language suggestions based on patterns",
+        "Returns suggestions with source='generated'",
+        "Fallback triggers when app_suggestions is null or empty",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Completed: _generate_suggestions_from_schema() function implemented as fallback"
+    },
+    {
+      "id": "US-006",
+      "title": "Register tools API endpoint in router",
+      "description": "As a backend developer, I need to ensure the new suggestions endpoint is registered and accessible.",
+      "acceptanceCriteria": [
+        "Import and register tools router in orchestrator/api/__init__.py or main app",
+        "Endpoint accessible at /api/tools/{app_name}/suggestions",
+        "CORS configured correctly for frontend requests",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Completed: tools_router already registered in main.py:394, CORS configured"
+    },
+    {
+      "id": "US-007",
+      "title": "Create SuggestionChip component",
+      "description": "As a frontend developer, I need a reusable suggestion chip component to display individual suggestions.",
+      "acceptanceCriteria": [
+        "Create frontend/components/suggestions/SuggestionChip.tsx",
+        "Component accepts text and onClick props",
+        "Styled as rounded chip/badge with hover effect",
+        "Truncates long text with ellipsis",
+        "Has click animation (scale or color change)",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Completed: SuggestionChip component with hover, focus, and accessibility"
+    },
+    {
+      "id": "US-008",
+      "title": "Create ToolSuggestionBar component",
+      "description": "As a frontend developer, I need a container component to display multiple suggestion chips with tool context.",
+      "acceptanceCriteria": [
+        "Create frontend/components/suggestions/ToolSuggestionBar.tsx",
+        "Component accepts suggestions array, activeTool, onSuggestionClick, onClose props",
+        "Displays tool icon and tool name",
+        "Renders array of SuggestionChip components",
+        "Has close button (X icon)",
+        "Styled with background, border, padding (matches design system)",
+        "Returns null when activeTool is null or suggestions empty",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Completed: ToolSuggestionBar with loading states, animations, and close button"
+    },
+    {
+      "id": "US-009",
+      "title": "Create suggestion types definition",
+      "description": "As a frontend developer, I need TypeScript types for suggestion-related data structures.",
+      "acceptanceCriteria": [
+        "Create frontend/components/suggestions/types.ts",
+        "Define ToolSuggestionBarProps interface",
+        "Define SuggestionChipProps interface",
+        "Define SuggestionResponse interface (matches API response)",
+        "Export all types",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Completed: TypeScript types for SuggestionResponse, ToolSuggestionBarProps, SuggestionChipProps"
+    },
+    {
+      "id": "US-010",
+      "title": "Add tool icon click handler to chat component",
+      "description": "As a user, I want to click tool icons to see tool-specific suggestions.",
+      "acceptanceCriteria": [
+        "Add activeTool state (string | null) to frontend/components/chatbot/chat.tsx",
+        "Add toolSuggestions state (string[]) to chat component",
+        "Add isLoadingSuggestions state (boolean) to chat component",
+        "Create handleToolIconClick async function that fetches from /api/tools/{app}/suggestions",
+        "Toggle behavior: clicking same tool again clears suggestions (sets activeTool to null)",
+        "Clicking different tool switches to that tool's suggestions",
+        "Handle fetch errors gracefully (log and clear suggestions)",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Completed: handleToolIconClick with fetch, toggle, and error handling"
+    },
+    {
+      "id": "US-011",
+      "title": "Add suggestion click handler to chat component",
+      "description": "As a user, I want clicking a suggestion to send that message to the agent.",
+      "acceptanceCriteria": [
+        "Create handleSuggestionClick function in frontend/components/chatbot/chat.tsx",
+        "Function accepts suggestion text as parameter",
+        "Calls existing sendMessage() function with suggestion text",
+        "Clears activeTool state (closes suggestion bar)",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Completed: handleSuggestionClick sends message and clears state"
+    },
+    {
+      "id": "US-012",
+      "title": "Render ToolSuggestionBar in chat screen",
+      "description": "As a user, I want to see suggestions above the chat input when a tool is selected.",
+      "acceptanceCriteria": [
+        "Import ToolSuggestionBar in frontend/components/chatbot/chat.tsx",
+        "Render ToolSuggestionBar above chat input (below messages)",
+        "Pass suggestions, activeTool, onSuggestionClick, onClose props",
+        "Component positioned correctly in layout",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Completed: ToolSuggestionBar rendered above chat input"
+    },
+    {
+      "id": "US-013",
+      "title": "Wire tool icon clicks in multimodal input",
+      "description": "As a user, I want tool icons in the input area to be clickable and trigger suggestion display.",
+      "acceptanceCriteria": [
+        "Update frontend/components/chatbot/multimodal-input.tsx to accept onToolIconClick prop",
+        "Add onClick handlers to tool icon buttons/elements",
+        "Pass app_name to onToolIconClick when clicked",
+        "Add cursor-pointer and hover styles to tool icons",
+        "Add tooltips: 'Click for {app} suggestions'",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Completed: Tool icons clickable with handler wired up"
+    },
+    {
+      "id": "US-014",
+      "title": "Add loading state to suggestion bar",
+      "description": "As a user, I want to see a loading indicator while suggestions are being fetched.",
+      "acceptanceCriteria": [
+        "Update ToolSuggestionBar to accept isLoading prop",
+        "Display loading spinner or skeleton chips when isLoading is true",
+        "Hide loading state when suggestions load",
+        "Maintain bar layout during loading (no layout shift)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Completed: isLoading prop and skeleton chips already implemented in ToolSuggestionBar"
+    },
+    {
+      "id": "US-015",
+      "title": "Add mobile responsive styling to suggestions",
+      "description": "As a mobile user, I want suggestions to be usable on small screens.",
+      "acceptanceCriteria": [
+        "ToolSuggestionBar uses horizontal scroll on mobile (overflow-x-auto)",
+        "Suggestion chips maintain readable size on mobile (min-width)",
+        "Close button remains accessible on mobile",
+        "Test on viewport widths: 375px, 768px, 1024px",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill with mobile viewport"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Completed: ToolSuggestionBar uses overflow-x-auto, SuggestionChip has max-w-[280px]"
+    },
+    {
+      "id": "US-016",
+      "title": "Add analytics tracking for suggestion interactions",
+      "description": "As a product manager, I want to track how users interact with suggestions to measure success.",
+      "acceptanceCriteria": [
+        "Add analytics.track('suggestion_clicked') event with app, suggestion, source, location properties",
+        "Add analytics.track('tool_icon_clicked') event with app, location properties",
+        "Add analytics.track('suggestions_loaded') event with app, source, count properties",
+        "Events fire in handleToolIconClick and handleSuggestionClick functions",
+        "Verify events log to console in development",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Completed: Analytics tracking for all suggestion events"
+    },
+    {
+      "id": "US-017",
+      "title": "Add smooth animations to suggestion bar",
+      "description": "As a user, I want smooth transitions when suggestions appear/disappear for better UX.",
+      "acceptanceCriteria": [
+        "ToolSuggestionBar has fade-in animation when appearing",
+        "ToolSuggestionBar has fade-out animation when closing",
+        "SuggestionChip has scale animation on hover",
+        "Animations use Tailwind animate classes or Framer Motion",
+        "No jarring layout shifts",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Completed: Animations already implemented (fade-in, slide-in, scale on hover)"
+    },
+    {
+      "id": "US-018",
+      "title": "Add keyboard accessibility to suggestions",
+      "description": "As a keyboard user, I want to navigate suggestions without a mouse.",
+      "acceptanceCriteria": [
+        "Tab key cycles through suggestion chips",
+        "Enter key on focused chip sends that suggestion",
+        "Escape key closes suggestion bar",
+        "Tool icons are keyboard focusable",
+        "ARIA labels added to all interactive elements",
+        "Focus visible (outline on focused elements)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill with keyboard only"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Completed: Escape key handler, Tab/Enter work natively, ARIA labels present, focus-visible rings"
+    }
+  ]
+}

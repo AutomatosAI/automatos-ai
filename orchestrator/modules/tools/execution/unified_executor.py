@@ -307,10 +307,8 @@ class UnifiedToolExecutor:
                 }
             
             # PRD-36: Route Composio tools explicitly
-            # IMPORTANT: `composio_execute` is a GENERIC dispatcher and must read `action`
-            # from parameters. Do NOT derive action from tool name (would become "execute").
             if tool_name == "composio_execute":
-                logger.info(f"[tool-trace {trace}] Routing to Composio generic executor: {tool_name}")
+                logger.info(f"[tool-trace {trace}] Routing to Composio executor: {tool_name}")
                 return await self._execute_composio_execute(
                     tool_name,
                     parameters,
@@ -1090,6 +1088,73 @@ class UnifiedToolExecutor:
             agent_id=agent_id,
             workspace_id=workspace_id
         )
+
+    async def _execute_composio_tool_router(
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        agent_id: int,
+        workspace_id: Optional[UUID] = None,
+        trace_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute Composio Tool Router meta-tools (search_tools, execute_tool).
+
+        Tool Router is scoped to agent's assigned apps for better action selection.
+        """
+        from modules.tools.execution.composio_router_executor import ComposioToolRouterExecutor
+
+        try:
+            # Initialize Tool Router executor for this agent
+            executor = ComposioToolRouterExecutor(
+                db_session=self.db_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id
+            )
+
+            # Route to appropriate method
+            if tool_name == "composio_search_tools":
+                query = parameters.get("query")
+                max_results = parameters.get("max_results", 5)
+
+                if not query:
+                    return {
+                        "success": False,
+                        "error": "Missing required parameter: query",
+                        "tool": tool_name
+                    }
+
+                result = executor.search_tools(query, max_results)
+
+            elif tool_name == "composio_execute_tool":
+                action = parameters.get("action")
+                params = parameters.get("params", {})
+
+                if not action:
+                    return {
+                        "success": False,
+                        "error": "Missing required parameter: action",
+                        "tool": tool_name
+                    }
+
+                result = executor.execute_tool(action, params)
+
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unknown Tool Router tool: {tool_name}",
+                    "tool": tool_name
+                }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[Tool Router] Execution failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "tool": tool_name
+            }
 
     async def _execute_composio_execute(
         self,
