@@ -97,7 +97,7 @@ export function MarketplaceItemModal({
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl bg-[#1a1a1a] border-gray-800 text-white">
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
@@ -122,23 +122,23 @@ export function MarketplaceItemModal({
 
         <div className="space-y-4">
           <div>
-            <h4 className="font-semibold mb-2">Description</h4>
-            <p className="text-gray-600">{item.description}</p>
+            <h4 className="font-semibold mb-2 text-white">Description</h4>
+            <p className="text-gray-400">{item.description}</p>
           </div>
 
           {item.category && (
             <div>
-              <h4 className="font-semibold mb-2">Category</h4>
-              <Badge variant="outline">{item.category}</Badge>
+              <h4 className="font-semibold mb-2 text-white">Category</h4>
+              <Badge variant="outline" className="border-gray-700 text-gray-300">{item.category}</Badge>
             </div>
           )}
 
           {item.tags.length > 0 && (
             <div>
-              <h4 className="font-semibold mb-2">Tags</h4>
+              <h4 className="font-semibold mb-2 text-white">Tags</h4>
               <div className="flex flex-wrap gap-2">
                 {item.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
+                  <Badge key={tag} className="bg-orange-500/20 text-orange-500 border-orange-500/30">
                     {tag}
                   </Badge>
                 ))}
@@ -146,7 +146,7 @@ export function MarketplaceItemModal({
             </div>
           )}
 
-          <div className="flex items-center gap-4 text-sm text-gray-500">
+          <div className="flex items-center gap-4 text-sm text-gray-400">
             <div className="flex items-center gap-1">
               <Download className="h-4 w-4" />
               {item.install_count} installs
@@ -155,10 +155,10 @@ export function MarketplaceItemModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} className="border-gray-700 text-gray-300 hover:bg-gray-800">
             Cancel
           </Button>
-          <Button onClick={handleInstall} disabled={installing}>
+          <Button onClick={handleInstall} disabled={installing} className="bg-orange-500 hover:bg-orange-600 text-white">
             {installing ? 'Installing...' : 'Install'}
           </Button>
         </DialogFooter>
