@@ -3,27 +3,28 @@ Entity Extractors for Composio Tool Results (PRD-41: Context-Aware Suggestions)
 ================================================================================
 
 Extracts meaningful entities from Composio tool execution results to enable
-context-aware suggestions. Each tool type has a specialized extractor that knows
-how to parse its specific API response format.
+context-aware suggestions. Works with ALL 850+ tools automatically.
 
-Entities are stored in Mem0 and used to generate contextual suggestions like:
+Entities are stored in Redis (10-minute TTL) and used to generate contextual suggestions:
 - "Reply to Sarah's urgent email" (from Gmail results)
 - "Send message to #general" (from Slack results)
 - "Review PR #123" (from GitHub results)
+- "View details for '[item name]'" (from ANY tool via GenericExtractor)
 
 Architecture:
-    Base EntityExtractor abstract class defines the interface.
-    Tool-specific extractors (GmailExtractor, SlackExtractor, etc.) implement
-    the extraction logic for their respective API formats.
+    - Base EntityExtractor abstract class defines the interface
+    - Specialized extractors (Gmail, Slack, GitHub) for optimized precision
+    - GenericExtractor handles ALL other tools automatically (no hardcoding needed)
 
 Usage:
     from core.composio.entity_extractors import get_extractor
 
-    # After tool execution
-    extractor = get_extractor("GMAIL")
-    if extractor:
-        entities = extractor.extract(tool_result)
-        # entities = {"senders": ["Sarah"], "subjects": ["Deadline"], ...}
+    # After tool execution (works with ANY tool)
+    extractor = get_extractor("GMAIL")   # Returns GmailExtractor
+    extractor = get_extractor("LINEAR")  # Returns GenericExtractor
+    extractor = get_extractor("JIRA")    # Returns GenericExtractor
+    entities = extractor.extract(tool_result)
+    # entities = {"names": [...], "ids": [...], "emails": [...], ...}
 """
 
 import logging
@@ -128,11 +129,16 @@ class GmailExtractor(EntityExtractor):
             "email_ids": []
         }
 
+        # Unwrap Composio's nested "data" structure if present
+        data = tool_result
+        if "data" in data and isinstance(data["data"], dict):
+            data = data["data"]
+
         # Handle both "messages" array and single message format
-        messages = tool_result.get("messages", [])
-        if not messages and "id" in tool_result:
+        messages = data.get("messages", [])
+        if not messages and "id" in data:
             # Single message format
-            messages = [tool_result]
+            messages = [data]
 
         for msg in messages:
             try:
@@ -334,6 +340,110 @@ class SlackExtractor(EntityExtractor):
         return mentions
 
 
+class GenericExtractor(EntityExtractor):
+    """
+    Universal extractor that works with ANY tool using heuristics.
+
+    This extractor scans tool responses for common patterns and extracts:
+    - names: Any field containing name/title/subject
+    - ids: Any field containing id/identifier
+    - emails: Email addresses found anywhere
+    - urls: URLs found in responses
+    - key_values: Other important-looking fields
+
+    Works with 850+ tools without hardcoding anything.
+    """
+
+    def extract(self, tool_result: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Extract entities using generic heuristics."""
+        entities = {
+            "names": [],      # Names, titles, subjects
+            "ids": [],        # IDs, identifiers, references
+            "emails": [],     # Email addresses
+            "urls": [],       # URLs
+            "key_values": []  # Other important values
+        }
+
+        # Unwrap Composio's nested "data" structure if present
+        data = tool_result
+        if "data" in data and isinstance(data["data"], dict):
+            data = data["data"]
+
+        # Recursively scan the response
+        self._scan_dict(data, entities)
+
+        # Deduplicate all lists
+        for key in entities:
+            entities[key] = list(set(entities[key]))[:10]  # Limit to 10 per type
+
+        return entities
+
+    def _scan_dict(self, data: Any, entities: Dict[str, List[str]], depth: int = 0) -> None:
+        """
+        Recursively scan dictionary/list for extractable entities.
+
+        Args:
+            data: Data structure to scan
+            entities: Dictionary to populate with extracted entities
+            depth: Current recursion depth (limit to 5 levels)
+        """
+        if depth > 5:  # Prevent infinite recursion
+            return
+
+        if isinstance(data, dict):
+            for key, value in data.items():
+                key_lower = key.lower()
+
+                # Extract based on key names (field names tell us what the data is)
+                if isinstance(value, str) and value:
+                    # Names/Titles/Subjects
+                    if any(pattern in key_lower for pattern in ['name', 'title', 'subject', 'label', 'summary']):
+                        if len(value) < 200:  # Skip long text
+                            entities["names"].append(value)
+
+                    # IDs/References
+                    elif any(pattern in key_lower for pattern in ['id', 'identifier', 'reference', 'number', 'key']):
+                        if len(value) < 100:  # IDs are usually short
+                            entities["ids"].append(str(value))
+
+                    # Emails (extract from any field)
+                    if '@' in value and '.' in value:
+                        email = self._extract_email(value)
+                        if email:
+                            entities["emails"].append(email)
+
+                    # URLs (extract from any field)
+                    if value.startswith(('http://', 'https://')):
+                        entities["urls"].append(value[:200])  # Truncate long URLs
+
+                    # Generic important-looking short strings
+                    elif len(value) < 100 and not key_lower.startswith('_'):
+                        # Skip internal/meta fields (those starting with _)
+                        if any(pattern in key_lower for pattern in ['status', 'type', 'category', 'priority', 'state']):
+                            entities["key_values"].append(f"{key}: {value}")
+
+                # Recurse into nested structures
+                elif isinstance(value, (dict, list)):
+                    self._scan_dict(value, entities, depth + 1)
+
+                # Extract numeric values for important fields
+                elif isinstance(value, (int, float)) and key_lower in ['number', 'count', 'total', 'id']:
+                    entities["ids"].append(str(value))
+
+        elif isinstance(data, list):
+            # Process first few items in arrays (don't scan entire 1000-item lists)
+            for item in data[:20]:  # Limit to first 20 items
+                if isinstance(item, (dict, list)):
+                    self._scan_dict(item, entities, depth + 1)
+
+    def _extract_email(self, text: str) -> Optional[str]:
+        """Extract email address from text."""
+        import re
+        # Simple email regex
+        match = re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
+        return match.group(0) if match else None
+
+
 class GitHubExtractor(EntityExtractor):
     """
     Extracts entities from GitHub API responses.
@@ -441,26 +551,42 @@ class GitHubExtractor(EntityExtractor):
         return entities
 
 
-def get_extractor(app_name: str) -> Optional[EntityExtractor]:
+def get_extractor(app_name: str) -> EntityExtractor:
     """
     Factory function to get the appropriate extractor for an app.
 
+    This function is fully agnostic - it works with ALL 850+ tools.
+    Specialized extractors (Gmail, Slack, GitHub) provide better precision,
+    but GenericExtractor handles everything else automatically.
+
     Args:
-        app_name: Name of the Composio app (e.g., "GMAIL", "SLACK", "GITHUB")
+        app_name: Name of the Composio app (e.g., "GMAIL", "SLACK", "LINEAR", "JIRA", etc.)
 
     Returns:
-        EntityExtractor instance for the app, or None if no extractor exists
+        EntityExtractor instance - ALWAYS returns an extractor (never None)
+        - Specialized extractor if one exists for this tool
+        - GenericExtractor as fallback for all other tools
 
     Usage:
-        extractor = get_extractor("GMAIL")
-        if extractor:
-            entities = extractor.extract(result)
+        extractor = get_extractor("GMAIL")  # Returns GmailExtractor
+        extractor = get_extractor("LINEAR")  # Returns GenericExtractor
+        extractor = get_extractor("JIRA")    # Returns GenericExtractor
+        entities = extractor.extract(result)
     """
-    extractors = {
+    # Specialized extractors for tools we've optimized
+    specialized_extractors = {
         "GMAIL": GmailExtractor(),
         "SLACK": SlackExtractor(),
         "GITHUB": GitHubExtractor(),
     }
 
-    normalized_app = app_name.upper() if app_name else None
-    return extractors.get(normalized_app)
+    normalized_app = app_name.upper() if app_name else ""
+
+    # Return specialized extractor if available, otherwise use GenericExtractor
+    extractor = specialized_extractors.get(normalized_app)
+    if extractor:
+        logger.debug(f"Using specialized {extractor.__class__.__name__} for {app_name}")
+        return extractor
+    else:
+        logger.debug(f"Using GenericExtractor for {app_name} (agnostic mode)")
+        return GenericExtractor()

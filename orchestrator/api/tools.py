@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -500,6 +500,7 @@ async def get_tool_suggestions(
     app_name: str,
     user_id: Optional[str] = Query(None),
     session_id: Optional[str] = Query(None),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -526,28 +527,40 @@ async def get_tool_suggestions(
     context_suggestions = []
     has_context = False
 
-    if user_id and session_id:
+    # Get workspace_id from headers (frontend sends via X-Workspace-ID)
+    workspace_id = request.headers.get("x-workspace-id") if request else None
+
+    if workspace_id and session_id:
         try:
             from modules.memory.context_manager import get_recent_tool_context
 
-            # Get recent tool context for this app
+            # Format user_id with ws_ prefix for consistency with SmartMemory
+            context_user_id = f"ws_{workspace_id}"
+
+            logger.info(f"[ContextSuggestions] Fetching for workspace_id={workspace_id}, user_id={context_user_id}, app={app_name_upper}")
+
+            # Query Redis for recent tool context (10-minute TTL)
             contexts = get_recent_tool_context(
-                user_id=user_id,
+                user_id=context_user_id,
                 tool_name=app_name_upper,
                 max_age_minutes=10,
                 limit=5
             )
 
+            logger.info(f"[ContextSuggestions] Retrieved {len(contexts) if contexts else 0} contexts from Redis for user_id={context_user_id}")
+
             if contexts:
                 # Generate context-aware suggestions from entities
                 for context in contexts:
                     entities = context.get("entities", {})
+                    logger.info(f"[ContextSuggestions] Context entities: {entities}")
                     if entities:
                         context_sugg = generate_context_suggestions(
                             app_name_upper,
                             entities,
                             limit=2
                         )
+                        logger.info(f"[ContextSuggestions] Generated {len(context_sugg)} context suggestions: {context_sugg}")
                         context_suggestions.extend(context_sugg)
                         if context_sugg:
                             has_context = True
@@ -581,8 +594,10 @@ async def get_tool_suggestions(
         final_suggestions = context_suggestions[:2]  # Top 2 context suggestions
         remaining = 4 - len(final_suggestions)
         final_suggestions.extend(base_suggestions[:remaining])
+        logger.info(f"[ContextSuggestions] Final result: {len(context_suggestions)} context + {remaining} base = {len(final_suggestions)} total")
     else:
         final_suggestions = base_suggestions[:4]
+        logger.info(f"[ContextSuggestions] No context suggestions, using {len(final_suggestions)} base suggestions only")
 
     return SuggestionsOut(
         app=app_name_upper,
@@ -600,24 +615,31 @@ def generate_context_suggestions(
     """
     Generate context-aware suggestions from extracted entities (PRD-41: US-008).
 
-    Creates natural language suggestions that reference specific entities
-    from recent tool results. For example:
-    - Gmail: "Reply to Sarah's email" (from sender entity)
-    - Slack: "Send message to #general" (from channel entity)
-    - GitHub: "Review PR #123" (from PR number entity)
+    Works with ALL 850+ tools. Specialized logic for Gmail/Slack/GitHub,
+    generic fallback for everything else (Linear, Jira, Notion, Asana, etc.).
+
+    Creates natural language suggestions that reference specific entities:
+    - Gmail: "Reply to Sarah's email" (specialized)
+    - Slack: "Send message to #general" (specialized)
+    - GitHub: "Review PR #123" (specialized)
+    - Linear/Jira/ANY tool: "View details for '[item]'" (generic)
 
     Args:
-        tool_name: The tool/app name (e.g., "GMAIL", "SLACK", "GITHUB")
+        tool_name: The tool/app name (e.g., "GMAIL", "LINEAR", "JIRA", etc.)
         entities: Dictionary of extracted entities from tool result
         limit: Maximum number of suggestions to generate (default: 2)
 
     Returns:
-        List of context-specific suggestion strings
+        List of context-specific suggestion strings (always returns suggestions)
 
     Example:
         >>> entities = {"senders": ["Sarah Johnson"], "labels": ["IMPORTANT"]}
         >>> generate_context_suggestions("GMAIL", entities, limit=2)
         ["Reply to Sarah Johnson's email", "Reply to the urgent email"]
+
+        >>> entities = {"names": ["Bug fix"], "ids": ["ISS-123"]}
+        >>> generate_context_suggestions("JIRA", entities, limit=2)
+        ["View details for 'Bug fix'", "Open item #ISS-123"]
     """
     suggestions = []
 
@@ -677,6 +699,41 @@ def generate_context_suggestions(
             if len(repo) > 30:
                 repo = repo[:27] + "..."
             suggestions.append(f"Show activity in {repo}")
+
+    # GENERIC FALLBACK: Handle all other tools (850+ tools)
+    # If we don't have specialized suggestions yet, generate from generic entities
+    if not suggestions and entities:
+        # Try names (most common - titles, subjects, labels, etc.)
+        names = entities.get("names", [])
+        if names:
+            name = names[0]
+            if len(name) > 30:
+                name = name[:27] + "..."
+            suggestions.append(f"View details for '{name}'")
+
+        # Try IDs (second most common)
+        ids = entities.get("ids", [])
+        if ids and len(suggestions) < limit:
+            item_id = str(ids[0])
+            if len(item_id) > 20:
+                item_id = item_id[:17] + "..."
+            suggestions.append(f"Open item #{item_id}")
+
+        # Try key_values (status, type, etc.)
+        key_values = entities.get("key_values", [])
+        if key_values and len(suggestions) < limit:
+            kv = key_values[0]
+            if len(kv) > 40:
+                kv = kv[:37] + "..."
+            suggestions.append(f"Show items with {kv}")
+
+        # Try emails (if email-based tool)
+        emails = entities.get("emails", [])
+        if emails and len(suggestions) < limit:
+            email = emails[0]
+            if len(email) > 30:
+                email = email[:27] + "..."
+            suggestions.append(f"Contact {email}")
 
     # Return up to limit
     return suggestions[:limit]

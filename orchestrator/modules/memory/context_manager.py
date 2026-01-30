@@ -2,7 +2,7 @@
 Context Manager for Tool Results (PRD-41: Context-Aware Suggestions)
 ====================================================================
 
-Retrieves recent tool execution context from Mem0 to enable context-aware
+Retrieves recent tool execution context from Redis to enable context-aware
 suggestions. When a user clicks a tool icon, the system can fetch what that
 tool recently showed them and generate relevant suggestions.
 
@@ -36,10 +36,10 @@ def get_recent_tool_context(
     limit: int = 5
 ) -> List[Dict[str, Any]]:
     """
-    Retrieve recent tool execution results from Mem0.
+    Retrieve recent tool execution results from Redis.
 
     Args:
-        user_id: User/workspace identifier (workspace_id in our case)
+        user_id: User/workspace identifier (format: ws_{workspace_id})
         tool_name: Optional filter for specific tool (e.g., "GMAIL", "SLACK")
         max_age_minutes: Only return results from last N minutes (default: 10)
         limit: Maximum number of results to return
@@ -49,7 +49,7 @@ def get_recent_tool_context(
         Each item contains: {"tool": str, "action": str, "entities": dict, "timestamp": str}
 
     Example:
-        >>> context = get_recent_tool_context("workspace_123", tool_name="GMAIL")
+        >>> context = get_recent_tool_context("ws_workspace_123", tool_name="GMAIL")
         >>> context[0]
         {
             "tool": "GMAIL",
@@ -64,112 +64,55 @@ def get_recent_tool_context(
         }
     """
     try:
-        from modules.memory.integrations.mem0_client import Mem0Client
+        from core.redis.client import get_redis_client
 
-        mem0_client = Mem0Client()
-
-        # Search for tool_result memories
-        # Note: Mem0 search doesn't have perfect filtering, so we filter client-side
-        query = f"tool_result {tool_name}" if tool_name else "tool_result"
-
-        memories = mem0_client.search(
-            query=query,
-            user_id=user_id,
-            limit=50  # Fetch more to allow for filtering
-        )
-
-        if not memories:
-            logger.debug(f"No tool context found in Mem0 for user {user_id}")
+        redis_client = get_redis_client()
+        if not redis_client:
+            logger.warning("[ContextManager] Redis client not available")
             return []
 
-        # Filter and parse memories
-        results = []
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        # Get actual Redis connection
+        redis_conn = redis_client.get_redis()
 
-        for memory in memories:
-            try:
-                metadata = memory.get("metadata", {})
+        # Redis key: tool_context:{workspace_id}:{tool_name}
+        # Strip ws_ prefix to get actual workspace UUID
+        workspace_id = user_id.replace("ws_", "") if user_id.startswith("ws_") else user_id
 
-                # Filter by type
-                if metadata.get("type") != "tool_result":
-                    continue
+        if tool_name:
+            # Get context for specific tool
+            redis_key = f"tool_context:{workspace_id}:{tool_name}"
+            logger.info(f"[ContextManager] Fetching from Redis: {redis_key}")
 
-                # Filter by tool name if specified
-                memory_tool = metadata.get("tool", "").upper()
-                if tool_name and memory_tool != tool_name.upper():
-                    continue
+            data = redis_conn.get(redis_key)
+            redis_conn.close()
 
-                # Filter by age
-                created_at = memory.get("created_at")
-                if created_at:
-                    # Parse timestamp (could be string or timestamp)
-                    if isinstance(created_at, str):
-                        try:
-                            memory_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        except:
-                            # Try parsing as timestamp
-                            memory_time = datetime.fromtimestamp(float(created_at), tz=timezone.utc)
-                    else:
-                        memory_time = datetime.fromtimestamp(created_at, tz=timezone.utc)
+            if data:
+                context_data = json.loads(data)
+                logger.info(f"[ContextManager] ✅ Found tool context in Redis for {tool_name}")
+                return [context_data]
+            else:
+                logger.info(f"[ContextManager] No tool context found in Redis for {tool_name}")
+                return []
+        else:
+            # Get all tool contexts for workspace (scan pattern)
+            pattern = f"tool_context:{workspace_id}:*"
+            keys = list(redis_conn.scan_iter(match=pattern, count=100))
 
-                    if memory_time < cutoff_time:
-                        continue  # Too old
-
-                # Parse entities from metadata
-                entities_json = metadata.get("entities_json", "{}")
+            results = []
+            for key in keys[:limit]:
                 try:
-                    entities = json.loads(entities_json) if isinstance(entities_json, str) else entities_json
-                except:
-                    entities = {}
+                    data = redis_conn.get(key)
+                    if data:
+                        context_data = json.loads(data)
+                        results.append(context_data)
+                except Exception as e:
+                    logger.warning(f"Failed to parse Redis key {key}: {e}")
+                    continue
 
-                # Build context object
-                context = {
-                    "tool": memory_tool,
-                    "action": metadata.get("action", ""),
-                    "entities": entities,
-                    "timestamp": created_at,
-                    "agent_id": metadata.get("agent_id")
-                }
-
-                results.append(context)
-
-                if len(results) >= limit:
-                    break
-
-            except Exception as e:
-                logger.warning(f"Failed to parse tool context from Mem0 memory: {e}")
-                continue
-
-        logger.info(f"Retrieved {len(results)} tool contexts from Mem0 for {tool_name or 'all tools'}")
-        return results
+            redis_conn.close()
+            logger.info(f"[ContextManager] Found {len(results)} tool contexts in Redis")
+            return results[:limit]
 
     except Exception as e:
-        logger.error(f"Failed to retrieve tool context from Mem0: {e}")
-        # Return empty list on failure (graceful degradation)
+        logger.error(f"Failed to retrieve tool context from Redis: {e}")
         return []
-
-
-def clear_old_tool_context(
-    user_id: str,
-    max_age_hours: int = 24
-) -> int:
-    """
-    Clear tool context older than specified hours.
-
-    This is a maintenance function to prevent Mem0 from filling up
-    with old tool results. Can be called periodically.
-
-    Args:
-        user_id: User/workspace identifier
-        max_age_hours: Clear contexts older than this many hours
-
-    Returns:
-        Number of contexts cleared
-
-    Note:
-        Currently Mem0 doesn't support deletion by query, so this is a placeholder.
-        In production, you'd need to implement batch deletion via Mem0 API.
-    """
-    # TODO: Implement when Mem0 supports deletion API
-    logger.info(f"Context cleanup requested for user {user_id} (not yet implemented)")
-    return 0

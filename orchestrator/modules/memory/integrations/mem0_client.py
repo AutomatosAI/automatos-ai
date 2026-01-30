@@ -65,8 +65,10 @@ class Mem0Client:
 
         try:
             logger.info(f"[Mem0] Adding memory for user {user_id}: {text_content[:80]}...")
+            logger.info(f"[Mem0] Payload: user_id={user_id}, text_len={len(text_content)}, has_metadata={bool(metadata)}")
             resp = requests.post(url, json=payload, headers=self.headers, timeout=15)
             logger.info(f"[Mem0] Add response status: {resp.status_code}")
+            logger.info(f"[Mem0] Add response body: {resp.text[:300]}")
 
             if resp.status_code >= 400:
                 logger.error(f"[Mem0] Add failed: {resp.status_code} - {resp.text[:200]}")
@@ -76,8 +78,8 @@ class Mem0Client:
 
             # Handle empty response (success with no body)
             if not resp.text or resp.text.strip() == "" or resp.text == "null":
-                logger.info("[Mem0] Empty/null response - treating as success")
-                return {"success": True}
+                logger.warning("[Mem0] Empty/null response - memory may not have been stored!")
+                return {"success": False, "error": "Empty response from Mem0"}
 
             result = resp.json()
             logger.info(f"[Mem0] Add result: {result}")
