@@ -45,10 +45,13 @@ interface MarketplaceAgent {
   }
 }
 
-export function MarketplaceAgentsTab() {
+interface MarketplaceAgentsTabProps {
+  searchQuery: string
+}
+
+export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedAgent, setSelectedAgent] = useState<MarketplaceAgent | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
@@ -108,18 +111,6 @@ export function MarketplaceAgentsTab() {
 
   return (
     <div className="space-y-6">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-        <Input
-          type="text"
-          placeholder="Search agents..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10 bg-[#1a1a1a] border-gray-800 text-white placeholder:text-gray-500"
-        />
-      </div>
-
       {/* Category Filter Buttons */}
       <div className="flex flex-wrap gap-2">
         {AGENT_CATEGORIES.map((category) => (
@@ -130,8 +121,8 @@ export function MarketplaceAgentsTab() {
             onClick={() => setSelectedCategory(category.id)}
             className={
               selectedCategory === category.id
-                ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
             }
           >
             {category.name}
@@ -139,24 +130,24 @@ export function MarketplaceAgentsTab() {
         ))}
       </div>
 
-      {/* Agents Grid */}
+      {/* Agents Grid - 4 columns like Agent Management page */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-64 bg-gray-800 animate-pulse rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-64 glass-card animate-pulse" />
           ))}
         </div>
       ) : agents.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          <Bot className="w-12 h-12 mx-auto mb-4 text-gray-600" />
+        <div className="text-center py-12 text-muted-foreground">
+          <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No agents found. Try adjusting your search or filters.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {agents.map((agent: MarketplaceAgent) => (
             <Card
               key={agent.id}
-              className="bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all duration-200 cursor-pointer"
+              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleAgentClick(agent)}
             >
               <CardHeader className="pb-3">

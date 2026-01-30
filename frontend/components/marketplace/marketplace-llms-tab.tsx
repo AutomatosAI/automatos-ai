@@ -17,8 +17,11 @@ const PROVIDER_FILTERS = [
   { id: 'together', name: 'Together' },
 ]
 
-export function MarketplaceLlmsTab() {
-  const [searchQuery, setSearchQuery] = useState('')
+interface MarketplaceLlmsTabProps {
+  searchQuery: string
+}
+
+export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const [selectedProvider, setSelectedProvider] = useState('all')
 
   const { data: llms = [], isLoading } = useQuery({
@@ -35,17 +38,6 @@ export function MarketplaceLlmsTab() {
 
   return (
     <div className="space-y-6">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-        <Input
-          type="text"
-          placeholder="Search LLM models..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10 bg-[#1a1a1a] border-gray-800 text-white placeholder:text-gray-500"
-        />
-      </div>
-
       <div className="flex flex-wrap gap-2">
         {PROVIDER_FILTERS.map((provider) => (
           <Button
@@ -55,8 +47,8 @@ export function MarketplaceLlmsTab() {
             onClick={() => setSelectedProvider(provider.id)}
             className={
               selectedProvider === provider.id
-                ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                : 'border-gray-700 text-gray-300 hover:bg-gray-800'
+                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                : 'border-secondary text-muted-foreground hover:bg-secondary'
             }
           >
             {provider.name}
@@ -65,42 +57,42 @@ export function MarketplaceLlmsTab() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-48 bg-gray-800 animate-pulse rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-48 glass-card animate-pulse" />
           ))}
         </div>
       ) : llms.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          <Zap className="w-12 h-12 mx-auto mb-4 text-gray-600" />
+        <div className="text-center py-12 text-muted-foreground">
+          <Zap className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No LLMs found.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {llms.map((llm: any) => (
-            <Card key={llm.id} className="bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all">
+            <Card key={llm.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
                     <Zap className="w-5 h-5 text-purple-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-white line-clamp-1">{llm.name}</h3>
-                    <p className="text-xs text-gray-500">{llm.category}</p>
+                    <h3 className="font-semibold line-clamp-1">{llm.name}</h3>
+                    <p className="text-xs text-muted-foreground">{llm.category}</p>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm text-gray-400 line-clamp-2">{llm.description}</p>
+                <p className="text-sm text-muted-foreground line-clamp-2">{llm.description}</p>
                 <div className="flex flex-wrap gap-1">
                   {llm.tags.map((tag: string, idx: number) => (
-                    <Badge key={idx} variant="outline" className="text-xs border-gray-700 text-gray-400">
+                    <Badge key={idx} variant="outline" className="text-xs">
                       {tag}
                     </Badge>
                   ))}
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-gray-800">
-                  <span className="text-xs text-gray-500">
+                <div className="flex items-center justify-between pt-2 border-t border-secondary">
+                  <span className="text-xs text-muted-foreground">
                     {llm.metadata?.context_window ? `${llm.metadata.context_window.toLocaleString()} tokens` : 'N/A'}
                   </span>
                   <Button size="sm" variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-500/10">
