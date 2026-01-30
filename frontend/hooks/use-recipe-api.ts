@@ -1,0 +1,117 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { apiClient } from '@/lib/api-client'
+
+// Query key factory
+export const recipeKeys = {
+  all: ['workflow-recipes'] as const,
+  lists: () => [...recipeKeys.all, 'list'] as const,
+  list: (params?: any) => [...recipeKeys.lists(), params] as const,
+  details: () => [...recipeKeys.all, 'detail'] as const,
+  detail: (id: string) => [...recipeKeys.details(), id] as const,
+  featured: () => [...recipeKeys.all, 'featured'] as const,
+  categories: () => [...recipeKeys.all, 'categories'] as const,
+}
+
+// List recipes with filtering
+export function useWorkflowRecipes(params?: {
+  category?: string
+  difficulty?: string
+  is_featured?: boolean
+  is_public?: boolean
+  search?: string
+  skip?: number
+  limit?: number
+  sort_by?: string
+}) {
+  return useQuery({
+    queryKey: recipeKeys.list(params),
+    queryFn: () => apiClient.listWorkflowRecipes(params),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  })
+}
+
+// Get single recipe
+export function useWorkflowRecipe(recipeId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.detail(recipeId || ''),
+    queryFn: () => apiClient.getWorkflowRecipeById(recipeId!),
+    enabled: !!recipeId,
+  })
+}
+
+// Get featured recipes
+export function useFeaturedRecipes(limit?: number) {
+  return useQuery({
+    queryKey: recipeKeys.featured(),
+    queryFn: () => apiClient.getFeaturedRecipes(limit),
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  })
+}
+
+// Get recipe categories
+export function useRecipeCategories() {
+  return useQuery({
+    queryKey: recipeKeys.categories(),
+    queryFn: () => apiClient.getRecipeCategories(),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+  })
+}
+
+// Create recipe mutation
+export function useCreateRecipe() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (recipeData: any) => apiClient.createWorkflowRecipe(recipeData),
+    onSuccess: () => {
+      // Invalidate all recipe lists
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.featured() })
+    },
+  })
+}
+
+// Update recipe mutation
+export function useUpdateRecipe() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: ({ recipeId, recipeData }: { recipeId: string; recipeData: any }) =>
+      apiClient.updateWorkflowRecipe(recipeId, recipeData),
+    onSuccess: (_, variables) => {
+      // Invalidate the specific recipe and all lists
+      queryClient.invalidateQueries({ queryKey: recipeKeys.detail(variables.recipeId) })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.featured() })
+    },
+  })
+}
+
+// Delete recipe mutation
+export function useDeleteRecipe() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (recipeId: string) => apiClient.deleteWorkflowRecipe(recipeId),
+    onSuccess: () => {
+      // Invalidate all recipe lists
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.featured() })
+    },
+  })
+}
+
+// Record recipe usage mutation
+export function useRecordRecipeUsage() {
+  const queryClient = useQueryClient()
+  
+  return useMutation({
+    mutationFn: (recipeId: string) => apiClient.recordRecipeUsage(recipeId),
+    onSuccess: (_, recipeId) => {
+      // Invalidate the specific recipe to refresh use_count
+      queryClient.invalidateQueries({ queryKey: recipeKeys.detail(recipeId) })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+    },
+  })
+}
+
