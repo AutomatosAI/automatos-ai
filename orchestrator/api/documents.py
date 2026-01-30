@@ -468,7 +468,11 @@ async def get_item(
         raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
 
 @router.get("/{document_id}/delete-impact")
-async def get_delete_impact(document_id: int, db: Session = Depends(get_db)):
+async def get_delete_impact(
+    document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get deletion impact analysis for a document
     
@@ -530,7 +534,11 @@ async def get_delete_impact(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error analyzing delete impact: {str(e)}")
 
 @router.delete("/{document_id}")
-async def delete_document(document_id: int, db: Session = Depends(get_db)):
+async def delete_document(
+    document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Delete document"""
     try:
         document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
@@ -558,7 +566,11 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
 
 @router.post("/{document_id}/reprocess")
-async def reprocess_document(document_id: int, db: Session = Depends(get_db)):
+async def reprocess_document(
+    document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Reprocess a document - regenerate chunks and embeddings
     
@@ -626,7 +638,11 @@ async def reprocess_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
 
 @router.get("/{document_id}/content")
-async def get_document_content(document_id: int, db: Session = Depends(get_db)):
+async def get_document_content(
+    document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Get document content/chunks"""
     try:
         document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()

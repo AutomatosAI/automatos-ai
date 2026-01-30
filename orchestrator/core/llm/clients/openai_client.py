@@ -131,10 +131,12 @@ class OpenAIProvider(BaseLLMProvider):
                         # Tool already executed - let LLM decide if more are needed
                         kwargs["tool_choice"] = "auto"
                     else:
-                        # First iteration - check if we should force tool use
+                        # First iteration - only force tool use when explicitly required
+                        # CHANGED: Removed "Tool candidates for this request" trigger since
+                        # that was causing tools to be forced for conversational queries.
+                        # Now only "You MUST call" (explicit instruction) triggers forced tools.
                         force_tool_choice = any(
-                            (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
-                            or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                            (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
                             for m in (messages or [])
                         )
                         kwargs["tool_choice"] = "required" if force_tool_choice else "auto"
@@ -175,9 +177,9 @@ class OpenAIProvider(BaseLLMProvider):
                             if has_tool_results:
                                 kwargs["tool_choice"] = "auto"
                             else:
+                                # Only force tool use when explicitly required
                                 force_tool_choice = any(
-                                    (m.get("role") == "system" and "Tool candidates for this request" in (m.get("content") or ""))
-                                    or (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
+                                    (m.get("role") == "system" and "You MUST call" in (m.get("content") or ""))
                                     for m in (messages or [])
                                 )
                                 kwargs["tool_choice"] = "required" if force_tool_choice else "auto"

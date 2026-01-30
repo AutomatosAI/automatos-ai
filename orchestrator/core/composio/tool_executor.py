@@ -455,9 +455,9 @@ class ComposioToolExecutor:
                 params=params,
                 entity_id=composio_entity_id
             )
-            
+
             execution_time = int((time.time() - start_time) * 1000)
-            
+
             return {
                 "success": result.get("success", False),
                 "data": result.get("data"),
@@ -488,7 +488,7 @@ class ComposioToolExecutor:
                 "data": None,
                 "execution_time_ms": int((time.time() - start_time) * 1000)
             }
-    
+
     def get_agent_enabled_actions(
         self,
         agent_id: int,

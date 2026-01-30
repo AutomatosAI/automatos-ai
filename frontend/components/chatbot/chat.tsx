@@ -15,6 +15,11 @@ import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, Docu
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 
+// Widget Architecture (PRD-38.1)
+import { useWorkspaceStore } from '@/stores/workspace-store'
+import { Canvas } from '@/components/workspace'
+import type { CodeWidgetData, DataWidgetData, DocumentWidgetData } from '@/components/widgets/types'
+
 export interface ChatProps {
   id: string
   initialMessages?: ChatMessage[]
@@ -37,6 +42,20 @@ export function Chat({
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [isArtifactViewerVisible, setIsArtifactViewerVisible] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(initialChatModel)
+
+  // Widget Architecture (PRD-38.1) - workspace store
+  const widgetIds = useWorkspaceStore((s) => s.widgetIds)
+  const addWidget = useWorkspaceStore((s) => s.addWidget)
+  const clearWidgets = useWorkspaceStore((s) => s.clearWidgets)
+  const hasWidgets = widgetIds.length > 0
+
+  // Handler to close canvas and reset all overlay states
+  const handleCloseCanvas = useCallback(() => {
+    clearWidgets()
+    setIsArtifactViewerVisible(false)
+    setSelectedArtifact(null)
+  }, [clearWidgets])
+  const [canvasWidth, setCanvasWidth] = useState(800)
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
@@ -64,6 +83,200 @@ export function Chat({
     onData: (dataPart) => {
       if (dataPart.type === 'data-usage') {
         setUsage(dataPart.data)
+      }
+
+      // PRD-38.1: Auto-create widgets when tool-data arrives
+      if (dataPart.type === 'tool-data' && dataPart.data) {
+        const toolData = dataPart.data
+
+        // Create widgets for database results
+        if (toolData.database_results && Array.isArray(toolData.database_results)) {
+          toolData.database_results.forEach((dbResult: any) => {
+            const columns = dbResult.columns && dbResult.columns.length > 0
+              ? dbResult.columns
+              : (dbResult.data && dbResult.data.length > 0 ? Object.keys(dbResult.data[0]) : [])
+
+            const charts = dbResult.pandas_ai?.charts?.map((chart: any) => ({
+              filename: chart.filename || 'chart.png',
+              mimeType: chart.mime_type || 'image/png',
+              base64: chart.base64,
+            }))
+
+            addWidget({
+              type: 'data',
+              title: `${dbResult.database || 'Query'} Result`,
+              data: {
+                columns,
+                rows: dbResult.data || [],
+                sql: dbResult.sql,
+                database: dbResult.database,
+                rowCount: dbResult.row_count || dbResult.data?.length || 0,
+                executionTime: dbResult.execution_time_ms,
+                charts,
+                pandasAiSummary: dbResult.pandas_ai?.summary,
+                explanation: dbResult.explanation,
+                rephrased_query: dbResult.rephrased_query,
+                follow_up_questions: dbResult.follow_up_questions,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'smart_query_database', provider: 'nl2sql' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widgets for documents
+        if (toolData.documents && Array.isArray(toolData.documents)) {
+          toolData.documents.forEach((doc: any) => {
+            const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || ''
+            const chunks = doc.chunks?.map((chunk: any) => ({
+              content: chunk.content || chunk.excerpt || '',
+              excerpt: chunk.excerpt,
+              similarity: chunk.similarity,
+              chunkIndex: chunk.chunk_index,
+            }))
+
+            addWidget({
+              type: 'document',
+              title: doc.filename || doc.title || 'Document',
+              data: {
+                content: initialContent,
+                format: 'markdown',
+                filename: doc.filename,
+                filePath: doc.file_path,
+                similarity: doc.similarity,
+                relevance: doc.relevance,
+                chunkCount: doc.chunk_count,
+                chunks,
+                downloadUrl: doc.download_url,
+                hasFullContent: doc.has_full_content ?? false,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'search_knowledge', provider: 'rag' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: doc.has_full_content ? 'ready' : 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widgets for code snippets
+        if (toolData.code_snippets && Array.isArray(toolData.code_snippets)) {
+          toolData.code_snippets.forEach((snippet: any) => {
+            addWidget({
+              type: 'code',
+              title: snippet.symbol_name || snippet.file_path || 'Code Snippet',
+              data: {
+                code: snippet.code,
+                language: snippet.language || 'python',
+                filePath: snippet.file_path,
+                lineNumber: snippet.line_number,
+                explanation: snippet.explanation,
+                symbolName: snippet.symbol_name,
+              },
+              metadata: {
+                source: { type: 'tool', name: 'search_codebase', provider: 'codegraph' },
+                createdAt: new Date(),
+                conversationId: id,
+              },
+              state: 'ready',
+              createdAt: new Date().toISOString(),
+            } as any)
+          })
+        }
+
+        // Create widget for emails (Composio Gmail/Outlook)
+        // EmailWidget expects data.emails array for list mode
+        console.log('[Widget] tool-data received:', Object.keys(toolData))
+        if (toolData.emails && Array.isArray(toolData.emails) && toolData.emails.length > 0) {
+          console.log('[Widget] Creating email widget with', toolData.emails.length, 'emails')
+
+          // Helper to parse email address string like "John Doe <john@example.com>" into { name, email }
+          const parseEmailAddress = (addr: any): { email: string; name?: string } => {
+            if (!addr) return { email: 'unknown' }
+            if (typeof addr === 'object' && addr.email) return addr
+            if (typeof addr !== 'string') return { email: String(addr) }
+
+            // Match "Name <email>" or just "email"
+            const match = addr.match(/^(.+?)\s*<([^>]+)>$/)
+            if (match) {
+              return { name: match[1].trim(), email: match[2].trim() }
+            }
+            return { email: addr.trim() }
+          }
+
+          // Helper to parse array of email addresses
+          const parseEmailAddresses = (addrs: any): { email: string; name?: string }[] => {
+            if (!addrs) return []
+            if (typeof addrs === 'string') return [parseEmailAddress(addrs)]
+            if (Array.isArray(addrs)) return addrs.map(parseEmailAddress)
+            return [parseEmailAddress(addrs)]
+          }
+
+          // Transform emails to the format EmailWidget expects
+          const emailList = toolData.emails.map((email: any) => ({
+            id: email.id || email.messageId || crypto.randomUUID(),
+            threadId: email.threadId,
+            subject: email.subject || '(No Subject)',
+            from: parseEmailAddress(email.from || email.sender),
+            to: parseEmailAddresses(email.to || email.recipients),
+            date: email.date || email.receivedAt || new Date().toISOString(),
+            snippet: email.snippet || email.body?.substring(0, 200) || '',
+            body: email.body || email.content || email.snippet || '',
+            bodyHtml: email.bodyHtml,  // HTML content for rich rendering
+            isRead: email.isRead ?? true,
+            hasAttachments: email.hasAttachments || (email.attachments?.length > 0),
+            attachments: email.attachments,
+            labels: email.labels || email.tags,
+          }))
+
+          addWidget({
+            type: 'email',
+            title: `Emails (${emailList.length})`,
+            data: {
+              mode: 'list',
+              emails: emailList,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'composio_execute', provider: 'gmail' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
+
+        // Create widget for terminal/command output
+        if (toolData.terminal_output) {
+          const term = toolData.terminal_output
+          console.log('[Widget] Creating terminal widget for command:', term.command)
+          addWidget({
+            type: 'terminal',
+            title: term.command ? `$ ${term.command.substring(0, 30)}${term.command.length > 30 ? '...' : ''}` : 'Terminal',
+            data: {
+              command: term.command || '',
+              output: term.output || '',
+              stderr: term.stderr || '',
+              exitCode: term.exitCode ?? 0,
+              executionTime: term.executionTime,
+              workingDirectory: term.workingDirectory,
+            },
+            metadata: {
+              source: { type: 'tool', name: 'execute_command', provider: 'shell' },
+              createdAt: new Date(),
+              conversationId: id,
+            },
+            state: 'ready',
+            createdAt: new Date().toISOString(),
+          } as any)
+        }
       }
     },
     onChatIdUpdate: (newChatId) => {
@@ -127,175 +340,163 @@ export function Chat({
   }, [])
 
   const handleCodeSelect = useCallback((code: CodeSnippet) => {
-    setSelectedArtifact({
-      id: `code-${Date.now()}`,
-      kind: 'code',
-      title: code.symbol_name || 'Code Snippet',
-      content: code.code,
-      language: code.language,
-      metadata: code,
-    })
-    setIsArtifactViewerVisible(true)
-  }, [])
+    // PRD-38.1: Create widget instead of artifact
+    const codeTitle = code.symbol_name || code.file_path || 'Code Snippet'
 
-  const handleDocumentSelect = useCallback((doc: DocumentReference) => {
-    const artifactId = `doc-${Date.now()}`
-    const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || 'Loading document...'
-
-    const curatedMetadata: Record<string, any> = {
-      document_id: doc.id,
-      filename: doc.filename,
-      similarity: doc.similarity,
-      chunk_count: doc.chunk_count ?? undefined,
-      preview_chunk_start: doc.preview_chunk_start ?? undefined,
-      preview_chunk_end: doc.preview_chunk_end ?? undefined,
-      has_full_content: doc.has_full_content ?? false,
-      preview_excerpt: doc.excerpt,
-      is_loading_full_content: !doc.has_full_content,
-      download_url: doc.download_url,
-      file_path: doc.file_path,
-      chunks: doc.chunks,
-    }
-
-    setSelectedArtifact({
-      id: artifactId,
-      kind: 'text',
-      title: doc.filename,
-      content: initialContent,
-      metadata: curatedMetadata,
-    })
-    setIsArtifactViewerVisible(true)
-
-    if (!doc.id) {
+    // Check if a widget for this code already exists - if so, just activate it
+    const existingWidgets = useWorkspaceStore.getState().widgets
+    const existingWidget = Object.values(existingWidgets).find(
+      w => w.type === 'code' && (
+        (w.data as any)?.filePath === code.file_path &&
+        (w.data as any)?.symbolName === code.symbol_name
+      )
+    )
+    if (existingWidget) {
+      useWorkspaceStore.getState().setActiveWidget(existingWidget.id)
       return
     }
 
-    apiClient.request(`/api/documents/${doc.id}/content`)
-      .then((data: any) => {
-        const fullContent = Array.isArray(data?.chunks)
-          ? data.chunks.map((chunk: any) => chunk?.content ?? '').filter(Boolean).join('\n\n')
-          : initialContent
+    const widgetData: Omit<import('@/components/widgets/types').Widget<CodeWidgetData>, 'id'> = {
+      type: 'code',
+      title: codeTitle,
+      data: {
+        code: code.code,
+        language: code.language || 'python',
+        filePath: code.file_path,
+        lineNumber: code.line_number,
+        explanation: code.explanation,
+        symbolName: code.symbol_name,
+      },
+      metadata: {
+        source: { type: 'tool', name: 'search_codebase', provider: 'codegraph' },
+        createdAt: new Date(),
+        conversationId: id,
+      },
+      state: 'ready',
+      createdAt: new Date().toISOString(),
+    }
+    addWidget(widgetData)
+  }, [id, addWidget])
 
-        setSelectedArtifact((current) => {
-          if (!current || current.id !== artifactId) {
-            return current
-          }
-          return {
-            ...current,
-            content: fullContent || initialContent,
-            metadata: {
-              ...(current.metadata || {}),
-              chunk_count: data?.chunk_count ?? current.metadata?.chunk_count,
-              document_id: data?.document_id ?? current.metadata?.document_id ?? doc.id,
-              is_loading_full_content: false,
+  const handleDocumentSelect = useCallback((doc: DocumentReference) => {
+    // PRD-38.1: Create widget instead of artifact
+    const initialContent = doc.full_content || doc.excerpt || doc.preview || doc.content || ''
+    const docFilename = doc.filename || doc.title || 'Document'
+
+    // Check if a widget for this document already exists - if so, just activate it
+    const existingWidgets = useWorkspaceStore.getState().widgets
+    const existingWidget = Object.values(existingWidgets).find(
+      w => w.type === 'document' && (w.data as any)?.filename === docFilename
+    )
+    if (existingWidget) {
+      useWorkspaceStore.getState().setActiveWidget(existingWidget.id)
+      return
+    }
+
+    // Transform chunks to widget format
+    const chunks = doc.chunks?.map((chunk: any) => ({
+      content: chunk.content || chunk.excerpt || '',
+      excerpt: chunk.excerpt,
+      similarity: chunk.similarity,
+      chunkIndex: chunk.chunk_index,
+    }))
+
+    const widgetData: Omit<import('@/components/widgets/types').Widget<DocumentWidgetData>, 'id'> = {
+      type: 'document',
+      title: docFilename,
+      data: {
+        content: initialContent,
+        format: 'markdown',
+        filename: docFilename,
+        filePath: doc.file_path,
+        similarity: doc.similarity,
+        relevance: doc.relevance,
+        chunkCount: doc.chunk_count,
+        chunks,
+        downloadUrl: doc.download_url,
+        hasFullContent: doc.has_full_content ?? false,
+      },
+      metadata: {
+        source: { type: 'tool', name: 'search_knowledge', provider: 'rag' },
+        createdAt: new Date(),
+        conversationId: id,
+      },
+      state: doc.has_full_content ? 'ready' : 'loading',
+      createdAt: new Date().toISOString(),
+    }
+
+    const widgetId = addWidget(widgetData)
+
+    // Fetch full content if needed
+    if (doc.id && !doc.has_full_content) {
+      apiClient.request(`/api/documents/${doc.id}/content`)
+        .then((data: any) => {
+          const fullContent = Array.isArray(data?.chunks)
+            ? data.chunks.map((chunk: any) => chunk?.content ?? '').filter(Boolean).join('\n\n')
+            : initialContent
+
+          // Update widget with full content
+          useWorkspaceStore.getState().updateWidget(widgetId, {
+            data: {
+              ...widgetData.data,
+              content: fullContent || initialContent,
+              chunkCount: data?.chunk_count ?? doc.chunk_count,
+              hasFullContent: true,
             },
-          }
+            state: 'ready',
+          })
         })
-      })
-      .catch((error) => {
-        console.error('Failed to load document content', error)
-        toast.error('Failed to load full document content')
-        setSelectedArtifact((current) => {
-          if (!current || current.id !== artifactId) {
-            return current
-          }
-          return {
-            ...current,
-            metadata: {
-              ...(current.metadata || {}),
-              is_loading_full_content: false,
-              load_error: 'Unable to load full document',
-            },
-          }
+        .catch((error) => {
+          console.error('Failed to load document content', error)
+          toast.error('Failed to load full document content')
+          useWorkspaceStore.getState().updateWidget(widgetId, {
+            state: 'error',
+            error: { message: 'Failed to load full document' },
+          })
         })
-      })
-  }, [])
+    }
+  }, [id, addWidget])
 
   const handleDatabaseSelect = useCallback((db: DatabaseResult) => {
-    const idBase = `db-${Date.now()}`
+    // PRD-38.1: Create widget instead of artifact
     const columns = db.columns && db.columns.length > 0
       ? db.columns
       : (db.data && db.data.length > 0 ? Object.keys(db.data[0]) : [])
 
-    const summaryContentLines = [
-      `# ${db.database} Insight`,
-      `**Rows returned:** ${db.row_count}`,
-      `**Execution time:** ${db.execution_time_ms?.toFixed(0)} ms`,
-    ]
+    // Transform pandas_ai charts to widget format
+    const charts = db.pandas_ai?.charts?.map((chart: any) => ({
+      filename: chart.filename || 'chart.png',
+      mimeType: chart.mime_type || 'image/png',
+      base64: chart.base64,
+    }))
 
-    if (db.pandas_ai?.summary) {
-      summaryContentLines.push('', db.pandas_ai.summary)
-    }
-
-    if (db.data && db.data.length > 0) {
-      const numericColumns = columns.filter((col) =>
-        db.data!.some((row) => typeof row[col] === 'number' && !Number.isNaN(row[col]))
-      )
-
-      if (numericColumns.length > 0) {
-        summaryContentLines.push('', '## Key Metrics')
-        numericColumns.slice(0, 3).forEach((col) => {
-          const values = db.data!
-            .map((row) => (typeof row[col] === 'number' ? (row[col] as number) : null))
-            .filter((value): value is number => value !== null && !Number.isNaN(value))
-
-          if (values.length > 0) {
-            const max = Math.max(...values)
-            const min = Math.min(...values)
-            const avg = values.reduce((acc, val) => acc + val, 0) / values.length
-
-            summaryContentLines.push(
-              `- **${col}** → peak ${max.toFixed(2)}, low ${min.toFixed(2)}, avg ${avg.toFixed(2)}`
-            )
-          }
-        })
-      }
-    }
-
-    if (columns.length > 0 && db.data && db.data.length > 0) {
-      summaryContentLines.push('', '## Sample Data (first 5 rows)', '')
-      const headerRow = `| ${columns.join(' | ')} |`
-      const separatorRow = `| ${columns.map(() => '---').join(' | ')} |`
-      summaryContentLines.push(headerRow, separatorRow)
-      db.data.slice(0, 5).forEach((row) => {
-        const rowValues = columns.map((col) => {
-          const value = row[col]
-          if (value === null || value === undefined) return '-'
-          const str = String(value)
-          return str.length > 60 ? `${str.slice(0, 57)}…` : str
-        })
-        summaryContentLines.push(`| ${rowValues.join(' | ')} |`)
-      })
-    }
-
-    summaryContentLines.push('', '<details><summary>View SQL query</summary>', '', '```sql', db.sql, '```', '', '</details>')
-
-    const artifact = {
-      id: idBase,
-      kind: 'sheet' as const,
-      title: `${db.database} Insight`,
-      content: summaryContentLines.join('\n'),
-      metadata: {
-        database: db.database,
-        status: db.status,
-        sql: db.sql,
-        row_count: db.row_count,
-        execution_time_ms: db.execution_time_ms,
+    const widgetData: Omit<import('@/components/widgets/types').Widget<DataWidgetData>, 'id'> = {
+      type: 'data',
+      title: `${db.database || 'Query'} Result`,
+      data: {
         columns,
-        data: db.data,
-        pandas_ai: db.pandas_ai,
+        rows: db.data || [],
+        sql: db.sql,
+        database: db.database,
+        rowCount: db.row_count || db.data?.length || 0,
+        executionTime: db.execution_time_ms,
+        charts,
+        pandasAiSummary: db.pandas_ai?.summary,
         explanation: db.explanation,
         rephrased_query: db.rephrased_query,
-        visualization: db.visualization,
         follow_up_questions: db.follow_up_questions,
-        clarifications: db.clarifications,
-        message: db.message,
       },
+      metadata: {
+        source: { type: 'tool', name: 'smart_query_database', provider: 'nl2sql' },
+        createdAt: new Date(),
+        conversationId: id,
+      },
+      state: 'ready',
+      createdAt: new Date().toISOString(),
     }
 
-    setSelectedArtifact(artifact)
-    setIsArtifactViewerVisible(true)
-  }, [])
+    addWidget(widgetData)
+  }, [id, addWidget])
 
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
@@ -318,77 +519,100 @@ export function Chat({
 
   return (
     <>
-      {/* Full-screen artifact overlay - like ai-chatbot */}
+      {/* PRD-38.1: Widget Canvas Layout - shows when widgets exist */}
+      {hasWidgets && (
+        <div className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-background">
+          {/* Chat Column - LEFT 400px */}
+          <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background border-r border-border/50">
+            <div className="flex h-full flex-col items-center justify-between">
+              {/* Messages */}
+              <div
+                ref={messagesContainerRef}
+                className="flex-1 w-full overflow-y-scroll overscroll-contain"
+                style={{ overflowAnchor: 'none' }}
+              >
+                <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
+                  {messages.map((message, index) => (
+                    <Message
+                      key={message.id}
+                      chatId={id}
+                      message={message}
+                      isLoading={isTyping && index === messages.length - 1}
+                      setMessages={setMessages}
+                      regenerate={regenerate}
+                      isReadonly={isReadonly}
+                      onArtifactSelect={handleArtifactSelect}
+                      onCodeSelect={handleCodeSelect}
+                      onDocumentSelect={handleDocumentSelect}
+                      onDatabaseSelect={handleDatabaseSelect}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              </div>
+
+              {/* Input at bottom of chat column */}
+              {!isReadonly && (
+                <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                  <MultimodalInput
+                    chatId={id}
+                    status={status}
+                    stop={stop}
+                    sendMessage={sendMessage}
+                    selectedModelId={currentModelId}
+                    onModelChange={setCurrentModelId}
+                    selectedAgentId={selectedAgentId}
+                    onAgentChange={setSelectedAgentId}
+                    selectedVisibilityType={visibilityType}
+                    usage={usage}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PRD-38.1: Widget Canvas - RIGHT side */}
+          <div className="relative z-10 flex h-full flex-1 flex-col bg-background">
+            <div className="flex-1 overflow-hidden">
+              <Canvas width={canvasWidth} onClose={handleCloseCanvas} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legacy Artifact Viewer overlay - for backward compatibility */}
       <AnimatePresence>
-        {isArtifactViewerVisible && selectedArtifact && (
+        {isArtifactViewerVisible && selectedArtifact && !hasWidgets && (
           <motion.div
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { delay: 0.4 } }}
             className="fixed top-0 left-0 z-50 flex h-screen w-screen flex-row bg-transparent"
           >
-            {/* Background */}
-            <motion.div
-              initial={{ width: '100%', right: 0 }}
-              animate={{ width: '100%', right: 0 }}
-              exit={{ width: '100%', right: 0 }}
-              className="fixed h-screen bg-background"
-            />
-
-            {/* Chat Column - LEFT 400px */}
-            <motion.div
-              initial={{ opacity: 0, x: 10, scale: 1 }}
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1,
-                transition: {
-                  delay: 0.1,
-                  type: 'spring',
-                  stiffness: 300,
-                  damping: 30,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                x: 0,
-                scale: 1,
-                transition: { duration: 0 },
-              }}
-              className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background"
-            >
-              <div className="flex h-full flex-col items-center justify-between">
-                {/* Messages */}
-                <div
-                  ref={messagesContainerRef}
-                  className="flex-1 w-full overflow-y-scroll overscroll-contain"
-                  style={{ overflowAnchor: 'none' }}
-                >
-                  <div className="mx-auto flex min-w-0 flex-col gap-4 px-4 py-4 md:gap-6">
-                    <AnimatePresence>
-                      {messages.map((message, index) => (
-                        <Message
-                          key={message.id}
-                          chatId={id}
-                          message={message}
-                          isLoading={isTyping && index === messages.length - 1}
-                          setMessages={setMessages}
-                          regenerate={regenerate}
-                          isReadonly={isReadonly}
-                          onArtifactSelect={handleArtifactSelect}
-                          onCodeSelect={handleCodeSelect}
-                          onDocumentSelect={handleDocumentSelect}
-                          onDatabaseSelect={handleDatabaseSelect}
-                        />
-                      ))}
-                    </AnimatePresence>
-                    <div ref={messagesEndRef} />
+            <motion.div className="fixed h-screen bg-background w-full" />
+            <div className="relative h-screen w-[400px] shrink-0 bg-muted dark:bg-background">
+              <div className="flex h-full flex-col">
+                <div className="flex-1 w-full overflow-y-scroll">
+                  <div className="flex flex-col gap-4 px-4 py-4">
+                    {messages.map((message, index) => (
+                      <Message
+                        key={message.id}
+                        chatId={id}
+                        message={message}
+                        isLoading={isTyping && index === messages.length - 1}
+                        setMessages={setMessages}
+                        regenerate={regenerate}
+                        isReadonly={isReadonly}
+                        onArtifactSelect={handleArtifactSelect}
+                        onCodeSelect={handleCodeSelect}
+                        onDocumentSelect={handleDocumentSelect}
+                        onDatabaseSelect={handleDatabaseSelect}
+                      />
+                    ))}
                   </div>
                 </div>
-
-                {/* Input at bottom of chat column */}
                 {!isReadonly && (
-                  <div className="relative flex w-full flex-row items-end gap-2 px-4 pb-4">
+                  <div className="px-4 pb-4">
                     <MultimodalInput
                       chatId={id}
                       status={status}
@@ -404,35 +628,8 @@ export function Chat({
                   </div>
                 )}
               </div>
-            </motion.div>
-
-            {/* Artifact Viewer - RIGHT side, rest of space */}
-            <motion.div
-              initial={{ opacity: 0, x: windowWidth, scale: 0.98 }}
-              animate={{
-                opacity: 1,
-                x: 0,
-                scale: 1,
-                transition: {
-                  delay: 0.2,
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 40,
-                },
-              }}
-              exit={{
-                opacity: 0,
-                x: 400,
-                scale: 0.98,
-                transition: {
-                  delay: 0,
-                  type: 'spring',
-                  stiffness: 400,
-                  damping: 40,
-                },
-              }}
-              className="relative z-10 flex h-full flex-1 flex-col overflow-y-scroll bg-background"
-            >
+            </div>
+            <div className="flex-1 overflow-y-scroll bg-background">
               <ArtifactViewer
                 artifact={selectedArtifact}
                 onClose={() => {
@@ -440,14 +637,14 @@ export function Chat({
                   setSelectedArtifact(null)
                 }}
               />
-            </motion.div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Normal chat view - NO artifact */}
-      {!isArtifactViewerVisible && (
-        <div className="relative flex h-full w-full flex-col bg-transparent">
+      {/* Normal chat view - NO widgets */}
+      {!hasWidgets && !isArtifactViewerVisible && (
+        <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
           {/* Incredible-style centered welcome card (empty state) */}
           {showWelcomeCard && (
             <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">

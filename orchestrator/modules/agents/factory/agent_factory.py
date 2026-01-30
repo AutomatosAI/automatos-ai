@@ -829,19 +829,29 @@ Available Shell Tools:
         
         api_key = None
         if provider == LLMProviderEnum.OPENAI:
-            api_key = resolver.get_credential_field("development_openai", "api_key")
+            try:
+                api_key = resolver.get_credential_field("development_openai", "api_key")
+            except Exception as e:
+                self.logger.warning(f"Failed to retrieve/decrypt 'development_openai' credential: {e}")
+                api_key = None
+                
             # Fallback to environment variable if credential resolver fails
             if not api_key:
                 api_key = os.getenv("OPENAI_API_KEY")
                 if api_key:
-                    self.logger.info(f"Using OPENAI_API_KEY from environment variable for {agent_name}")
+                    self.logger.info(f"Using OPENAI_API_KEY from environment variable for {agent_name} (fallback)")
         elif provider == LLMProviderEnum.ANTHROPIC:
-            api_key = resolver.get_credential_field("development_anthropic", "api_key")
+            try:
+                api_key = resolver.get_credential_field("development_anthropic", "api_key")
+            except Exception as e:
+                self.logger.warning(f"Failed to retrieve/decrypt 'development_anthropic' credential: {e}")
+                api_key = None
+                
             # Fallback to environment variable
             if not api_key:
                 api_key = os.getenv("ANTHROPIC_API_KEY")
                 if api_key:
-                    self.logger.info(f"Using ANTHROPIC_API_KEY from environment variable for {agent_name}")
+                    self.logger.info(f"Using ANTHROPIC_API_KEY from environment variable for {agent_name} (fallback)")
         
         if not api_key:
             raise ValueError(f"API key not found for provider: {model_config.provider}")

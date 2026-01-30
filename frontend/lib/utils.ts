@@ -72,12 +72,13 @@ export function formatTimestamp(timestamp: string | Date): string {
     return `${days} day${days > 1 ? 's' : ''} ago`
   }
 
-  // Format as date
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-  })
+  // Format as date - use fixed format to avoid SSR hydration mismatch
+  const month = date.toLocaleDateString('en-US', { month: 'short' })
+  const day = date.getDate()
+  const year = date.getFullYear()
+  const currentYear = now.getFullYear()
+
+  return year !== currentYear ? `${month} ${day}, ${year}` : `${month} ${day}`
 }
 
 /**

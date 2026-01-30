@@ -224,70 +224,57 @@ export function Message({
     )
   }
 
+  // Format tool name for display (e.g., "composio_execute" -> "Composio", "search_knowledge" -> "Searching docs")
+  const formatToolName = (toolName: string): string => {
+    const toolLabels: Record<string, string> = {
+      'composio_execute': 'Composio',
+      'search_knowledge': 'Searching docs',
+      'search_codebase': 'Searching code',
+      'query_database': 'Querying database',
+      'smart_query_database': 'Querying database',
+      'get_memories': 'Checking memory',
+      'search_memories': 'Searching memory',
+      'execute_command': 'Running command',
+    }
+    return toolLabels[toolName] || toolName.replace(/_/g, ' ')
+  }
+
   const renderToolCalls = () => {
     if (message.role !== 'assistant') return null
     const toolCalls = message.toolCalls || []
     if (toolCalls.length === 0) return null
 
-    const getStatus = (toolCall: ToolCall) => {
-      if (toolCall.state === 'running') {
-        return { label: 'Running', icon: <Loader2 className="w-4 h-4 animate-spin" />, className: 'bg-orange-500/10 border-orange-500/30 text-orange-200' }
-      }
-      if (toolCall.state === 'error') {
-        return { label: 'Error', icon: <XCircle className="w-4 h-4 text-red-400" />, className: 'bg-red-500/10 border-red-500/30 text-red-200' }
-      }
-      return { label: 'Completed', icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" />, className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' }
-    }
+    // Only show running tools - hide completed ones for cleaner UX
+    const runningTools = toolCalls.filter(tc => tc.state === 'running')
+    const errorTools = toolCalls.filter(tc => tc.state === 'error')
+
+    // If nothing is running and no errors, don't show anything
+    if (runningTools.length === 0 && errorTools.length === 0) return null
 
     return (
-      <div className="space-y-2">
-        {toolCalls.map((tc) => {
-          const status = getStatus(tc)
-          const durationText = typeof tc.durationMs === 'number' ? `${tc.durationMs.toFixed(0)}ms` : null
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Show running tools with spinner */}
+        {runningTools.map((tc) => (
+          <div
+            key={tc.toolCallId}
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/30 text-orange-300"
+          >
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>{formatToolName(tc.toolName)}</span>
+          </div>
+        ))}
 
-          return (
-            <details
-              key={tc.toolCallId}
-              className="rounded-xl border border-border/60 bg-card/50 dark:border-gray-800/60 dark:bg-gray-900/30"
-              open={tc.state === 'running'}
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Wrench className="w-4 h-4 text-muted-foreground" />
-                  <span className="truncate text-sm font-medium text-foreground dark:text-gray-200">{tc.toolName}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {durationText && (
-                    <span className="text-xs text-muted-foreground font-mono">{durationText}</span>
-                  )}
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${status.className}`}
-                  >
-                    {status.icon}
-                    <span>{status.label}</span>
-                  </span>
-                </div>
-              </summary>
-
-              <div className="space-y-3 border-t border-border/60 px-4 py-3 dark:border-gray-800/60">
-                {tc.input && (
-                  <div>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Parameters</div>
-                    <pre className="mt-2 overflow-x-auto rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-foreground dark:border-gray-800/60 dark:bg-gray-900/60 dark:text-gray-200">
-                      {JSON.stringify(tc.input, null, 2)}
-                    </pre>
-                  </div>
-                )}
-
-                {tc.error && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                    {tc.error}
-                  </div>
-                )}
-              </div>
-            </details>
-          )
-        })}
+        {/* Only show errors (users need to know if something failed) */}
+        {errorTools.map((tc) => (
+          <div
+            key={tc.toolCallId}
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-red-500/10 border border-red-500/30 text-red-300"
+            title={tc.error || 'Tool failed'}
+          >
+            <XCircle className="w-3 h-3" />
+            <span>{formatToolName(tc.toolName)} failed</span>
+          </div>
+        ))}
       </div>
     )
   }
@@ -389,53 +376,18 @@ export function Message({
                 return (
                   <button
                     key={idx}
-                    onClick={async () => {
-                      // Prefer streaming/tool payloads (fast) before fetching
-                      if (onArtifactSelect && (fullContent || (chunks && chunks.length > 0))) {
-                        onArtifactSelect({
-                          id: `doc-${Date.now()}-${idx}`,
+                    onClick={() => {
+                      // PRD-38.1: Use onDocumentSelect to create a DocumentWidget
+                      if (onDocumentSelect) {
+                        onDocumentSelect({
+                          ...doc,
                           title,
-                          kind: 'text',
-                          language: 'markdown',
-                          content: fullContent || preview || doc.excerpt || '',
-                          metadata: {
-                            source: doc.filename,
-                            relevance,
-                            chunk_count: chunkCount,
-                            download_url: downloadUrl,
-                            chunks,
-                          },
+                          full_content: fullContent || preview || doc.excerpt || '',
+                          relevance,
+                          chunk_count: chunkCount,
+                          download_url: downloadUrl,
+                          chunks,
                         })
-                        return
-                      }
-
-                      // Fallback: fetch full document content from API by file_path
-                      if (doc.file_path && onArtifactSelect) {
-                        try {
-                          const response = await fetch(`/api/documents/content?path=${encodeURIComponent(doc.file_path)}`)
-                          if (response.ok) {
-                            const data = await response.json()
-                            onArtifactSelect({
-                              id: `doc-${Date.now()}-${idx}`,
-                              title: title,
-                              kind: 'text',
-                              language: 'markdown',
-                              content: data.content,
-                              metadata: {
-                                source: data.filename,
-                                relevance: relevance,
-                                chunk_count: chunkCount,
-                                download_url: downloadUrl
-                              }
-                            })
-                          } else {
-                            console.error('Failed to fetch document:', response.statusText)
-                          }
-                        } catch (error) {
-                          console.error('Error fetching document:', error)
-                        }
-                      } else if (onDocumentSelect) {
-                        onDocumentSelect(doc)
                       }
                     }}
                     className="w-full text-left rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 hover:border-blue-400/60 hover:bg-blue-500/10 transition-all group"

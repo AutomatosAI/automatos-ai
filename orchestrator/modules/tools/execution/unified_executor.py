@@ -635,7 +635,18 @@ class UnifiedToolExecutor:
                     "message": "Please provide more details to complete the query.",
                     "original_query": query,
                 }
-            
+
+            # Handle error from SmartNL2SQLAgent (e.g., SQL validation failed)
+            if result.get('status') == 'error':
+                error_msg = result.get('error') or result.get('message') or 'Query failed'
+                logger.warning(f"🚫 Smart query failed: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "sql": result.get('sql', ''),
+                    "original_query": query,
+                }
+
             # Add PandasAI insight if not already present
             if result.get('data') and not result.get('pandas_ai'):
                 pandasai = get_pandasai_service()
@@ -1128,13 +1139,42 @@ class UnifiedToolExecutor:
             f"(raw: {raw_action}) agent={agent_id} workspace={workspace_id} params_keys={list(params.keys())}"
         )
 
-        return await self.composio_executor.execute(
+        result = await self.composio_executor.execute(
             action=action,
             params=params,
             agent_id=agent_id,
             workspace_id=workspace_id,
             app_name=str(app_name).upper().strip() if app_name else None,
         )
+
+        # Schema-driven enhancement: Look up response_schema from cache
+        # This enables generic widget detection without hardcoding provider names
+        # Try both the original action and the actually-executed action (may differ due to auto-mapping)
+        try:
+            from core.models.composio_cache import ComposioActionCache
+            from sqlalchemy import or_
+
+            executed_action = result.get("action", action)  # May have been remapped
+            action_cache = self.db.query(ComposioActionCache).filter(
+                or_(
+                    ComposioActionCache.action_name == action,
+                    ComposioActionCache.action_name == executed_action,
+                    ComposioActionCache.action_slug == action.lower().replace("_", "-"),
+                )
+            ).first()
+
+            if action_cache:
+                if action_cache.response_schema:
+                    result["response_schema"] = action_cache.response_schema
+                    logger.info(f"[Composio] Attached response_schema for {action_cache.action_name}")
+                if action_cache.parameters:
+                    result["parameters_schema"] = action_cache.parameters
+            else:
+                logger.warning(f"[Composio] No cache entry found for action={action} or executed={executed_action}")
+        except Exception as e:
+            logger.warning(f"[Composio] Could not lookup schema: {e}")
+
+        return result
     
     def get_available_tools(self, categories: Optional[list] = None) -> list:
         """

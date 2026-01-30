@@ -266,7 +266,7 @@ class AgentPlatformTools:
                     result_dict = await self.code_graph.search_symbols(
                         project_name=project_name,
                         query=query,
-                        limit=5,
+                        limit=20,  # Fetch more, will filter down to 10
                         workspace_id=workspace_id,
                     )
                     # search_symbols returns a dict with 'results' key
@@ -287,15 +287,25 @@ class AgentPlatformTools:
                     )
                 
                 # Convert to raw format for formatter
+                # Filter out partial results (less than 50 chars of code) and limit to 10
                 raw_results = []
-                for r in results[:5]:
+                for r in results:
+                    code_snippet = r.get("code_snippet", "")
+                    # Skip results with too little code (just signatures, not full functions)
+                    if len(code_snippet.strip()) < 50:
+                        continue
                     raw_results.append({
                         "symbol_name": r.get("name", "Unknown"),
                         "file_path": r.get("file_path", "Unknown"),
                         "symbol_type": r.get("symbol_type", "symbol"),
-                        "code": r.get("code_snippet", "")[:600],
+                        "line_number": r.get("line_number", 0),
+                        "code": code_snippet,  # Full code, no truncation
+                        "docstring": r.get("docstring", ""),
+                        "signature": r.get("signature", ""),
                         "score": r.get("score", 0.8)
                     })
+                    if len(raw_results) >= 10:  # Limit to 10 best results
+                        break
                 
                 # Use unified formatter
                 formatted = ToolResultFormatter.format_code(raw_results)
