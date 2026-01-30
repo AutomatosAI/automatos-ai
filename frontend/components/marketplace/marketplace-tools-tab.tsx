@@ -188,19 +188,21 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                 </Button>
             </div>
 
-            {/* Tools Grid - Removed category buttons since they're above now */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {appsLoading ? (
-                    [...Array(8)].map((_, i) => (
+            {/* Tools Grid */}
+            {appsLoading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {[...Array(8)].map((_, i) => (
                         <div key={i} className="h-48 glass-card animate-pulse" />
-                    ))
-                ) : filteredApps.length === 0 ? (
-                    <div className="col-span-full text-center py-12 text-muted-foreground">
-                        <Search className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p>No tools found. Try adjusting your search or filters.</p>
-                    </div>
-                ) : (
-                    filteredApps.map((app) => (
+                    ))}
+                </div>
+            ) : filteredApps.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                    <Search className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No tools found. Try adjusting your search or filters.</p>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {filteredApps.map((app) => (
                         <Card key={app.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
                             <CardHeader className="pb-3">
                                 <div className="flex items-center gap-3">
@@ -250,7 +252,9 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                                 </div>
                             </CardContent>
                         </Card>
-                ))}
+                    ))}
+                </div>
+            )}
             </div>
         </div>
     )
