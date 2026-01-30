@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'rename_templates_to_recipes'
-down_revision = None  # Update this if there are previous migrations
+down_revision = '20260130_marketplace_schema'
 branch_labels = None
 depends_on = None
 
