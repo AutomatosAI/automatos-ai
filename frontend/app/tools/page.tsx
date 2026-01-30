@@ -1,7 +1,7 @@
 'use client'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { MyToolsDashboard } from '@/components/tools/my-tools-dashboard'
+import { ToolsDashboard } from '@/components/tools/tools-dashboard'
 import { usePageAPI } from '@/hooks/use-page-api'
 
 export default function ToolsPage() {
@@ -9,7 +9,7 @@ export default function ToolsPage() {
 
   return (
     <MainLayout>
-      <MyToolsDashboard />
+      <ToolsDashboard />
     </MainLayout>
   )
 }

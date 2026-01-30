@@ -52,11 +52,11 @@ const navigationItems = [
     description: 'Manage AI agents and skills'
   },
   {
-    name: 'My Tools',
+    name: 'Tools & Integrations',
     href: '/tools',
     icon: Wrench,
     iconColor: 'text-yellow-400',
-    description: 'Manage connected integrations'
+    description: 'Development and utility tools'
   },
   {
     name: 'Community Marketplace',
