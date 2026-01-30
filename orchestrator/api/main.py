@@ -57,6 +57,7 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
+from api.marketplace import router as marketplace_router  # PRD-40: Community Marketplace
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -396,6 +397,7 @@ app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
 app.include_router(templates_router)
+app.include_router(marketplace_router)  # PRD-40: Community Marketplace
 
 # Include MISSING API routers
 app.include_router(orchestrator_router)
