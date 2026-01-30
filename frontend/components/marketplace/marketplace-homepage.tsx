@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { MarketplaceGrid } from './marketplace-grid'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
+import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 
 export interface MarketplaceItem {
   id: number
@@ -249,11 +250,7 @@ export function MarketplaceHomepage() {
         </TabsContent>
 
         <TabsContent value="agents" className="mt-6">
-          <MarketplaceGrid
-            type="agent"
-            search={searchQuery}
-            onItemClick={setSelectedItem}
-          />
+          <MarketplaceAgentsTab />
         </TabsContent>
 
         <TabsContent value="recipes" className="mt-6">

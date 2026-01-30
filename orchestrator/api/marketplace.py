@@ -247,11 +247,76 @@ async def install_item(
             raise HTTPException(status_code=404, detail="Marketplace item not found")
 
         item_type = item[1]
+        item_name = item[2]
+        item_metadata = item[4] or {}
         cloned_items = []
         warnings = []
 
-        # TODO: Implement actual cloning logic based on item type
-        # For now, just record the installation
+        # Clone agent if type is 'agent'
+        if item_type == 'agent':
+            # Check if agent name already exists
+            name_check = text("""
+                SELECT COUNT(*) FROM agents WHERE name = :name AND workspace_id = :workspace_id
+            """)
+            name_exists = db.execute(name_check, {
+                "name": item_name,
+                "workspace_id": ctx.workspace_id
+            }).scalar() > 0
+
+            agent_name = f"{item_name}-copy" if name_exists else item_name
+
+            # Clone agent
+            clone_agent = text("""
+                INSERT INTO agents (name, agent_type, description, workspace_id, created_by, priority_level, max_concurrent_tasks, auto_start, tags, configuration)
+                VALUES (:name, :agent_type, :description, :workspace_id, :created_by, :priority_level, :max_concurrent_tasks, :auto_start, :tags, :configuration)
+                RETURNING id
+            """)
+
+            agent_result = db.execute(clone_agent, {
+                "name": agent_name,
+                "agent_type": item_metadata.get("agent_type", "custom"),
+                "description": item[3],
+                "workspace_id": ctx.workspace_id,
+                "created_by": ctx.user_id,
+                "priority_level": item_metadata.get("priority_level", "medium"),
+                "max_concurrent_tasks": item_metadata.get("max_concurrent_tasks", 3),
+                "auto_start": item_metadata.get("auto_start", False),
+                "tags": item_metadata.get("tags", []),
+                "configuration": item_metadata.get("configuration", {})
+            })
+
+            new_agent_id = agent_result.scalar()
+            cloned_items.append({
+                "type": "agent",
+                "name": agent_name,
+                "id": new_agent_id
+            })
+
+            # Clone tool assignments if present
+            if "tools" in item_metadata and item_metadata["tools"]:
+                for tool_id in item_metadata["tools"]:
+                    try:
+                        assign_tool = text("""
+                            INSERT INTO agent_app_assignments (agent_id, app_id)
+                            VALUES (:agent_id, :app_id)
+                            ON CONFLICT DO NOTHING
+                        """)
+                        db.execute(assign_tool, {"agent_id": new_agent_id, "app_id": tool_id})
+                    except Exception as e:
+                        logger.warning(f"Failed to assign tool {tool_id}: {e}")
+
+            # Clone skill assignments if present
+            if "skills" in item_metadata and item_metadata["skills"]:
+                for skill_id in item_metadata["skills"]:
+                    try:
+                        assign_skill = text("""
+                            INSERT INTO agent_skills (agent_id, skill_id)
+                            VALUES (:agent_id, :skill_id)
+                            ON CONFLICT DO NOTHING
+                        """)
+                        db.execute(assign_skill, {"agent_id": new_agent_id, "skill_id": skill_id})
+                    except Exception as e:
+                        logger.warning(f"Failed to assign skill {skill_id}: {e}")
 
         # Record installation
         install_query = text("""
