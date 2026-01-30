@@ -52,6 +52,7 @@ import {
   useUpdateSkill
 } from '@/hooks/use-agent-api'
 import { useSkillsApi } from '@/hooks/use-skills-api'
+import { apiClient } from '@/lib/api-client'
 
 import { CreateSkillModal } from "./create-skill-modal"
 import { SkillConfigurationModal } from "./skill-configuration-modal"
@@ -152,7 +153,9 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
         // PRD-22: Direct API fallback with supported limit only if empty
         if (!results || results.length === 0) {
           try {
-            const res = await fetch('/api/v1/skills?limit=200')
+            const base = apiClient.getBaseUrl()
+            const url = base ? `${base}/api/v1/skills?limit=200` : '/api/v1/skills?limit=200'
+            const res = await fetch(url)
             if (res.ok) {
               const json = await res.json()
               const maybe = Array.isArray(json) ? json : (json?.items || json?.skills || [])

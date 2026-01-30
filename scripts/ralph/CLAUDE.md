@@ -18,7 +18,8 @@ You are an autonomous coding agent working on a software project.
 ## Progress Report Format
 
 APPEND to progress.txt (never replace, always append):
-```
+
+```text
 ## [Date/Time] - [Story ID]
 - What was implemented
 - Files changed
@@ -35,7 +36,7 @@ The learnings section is critical - it helps future iterations avoid repeating m
 
 If you discover a **reusable pattern** that future iterations should know, add it to the `## Codebase Patterns` section at the TOP of progress.txt (create it if it doesn't exist). This section should consolidate the most important learnings:
 
-```
+```text
 ## Codebase Patterns
 - Example: Use `sql<number>` template for aggregations
 - Example: Always use `IF NOT EXISTS` for migrations

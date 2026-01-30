@@ -170,11 +170,74 @@ def get_chatbot_tools(agent_id: Optional[int] = None, db_session=None, workspace
         openai_tools = []
         for tool in filtered_tools:
             schema = tool.to_openai_format()
+
+            # Enrich composio_execute with available actions from cache
+            if tool.name == "composio_execute" and agent_id is not None:
+                try:
+                    from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+
+                    # Get assigned apps for this agent
+                    assignments = (
+                        session_used.query(AgentAppAssignment)
+                        .filter(
+                            AgentAppAssignment.agent_id == agent_id,
+                            AgentAppAssignment.is_active == True,
+                            AgentAppAssignment.app_type == "EXTERNAL"
+                        )
+                        .all()
+                    )
+
+                    if assignments:
+                        app_names = [a.app_name for a in assignments if a.app_name]
+
+                        # Get top actions for these apps from cache
+                        actions = (
+                            session_used.query(ComposioActionCache)
+                            .filter(
+                                ComposioActionCache.app_name.in_(app_names),
+                                ComposioActionCache.enabled == True
+                            )
+                            .order_by(ComposioActionCache.app_name, ComposioActionCache.display_name)
+                            .limit(50)  # Top 50 actions across all assigned apps
+                            .all()
+                        )
+
+                        if actions:
+                            # Group by app
+                            actions_by_app = {}
+                            for action in actions:
+                                app = action.app_name
+                                if app not in actions_by_app:
+                                    actions_by_app[app] = []
+
+                                # Use display_name for readability, fallback to action_name
+                                action_display = action.display_name or action.action_name
+                                desc = action.description or ""
+                                actions_by_app[app].append(f"  - {action.action_name}: {desc[:80]}")
+
+                            # Build enriched description
+                            action_list = []
+                            for app in sorted(actions_by_app.keys()):
+                                action_list.append(f"\n{app} actions:")
+                                action_list.extend(actions_by_app[app][:10])  # Max 10 per app
+
+                            enriched_desc = (
+                                schema["description"] +
+                                "\n\nAvailable actions (use exact action_name):" +
+                                "\n".join(action_list)
+                            )
+
+                            schema["description"] = enriched_desc
+                            logger.info(f"[tool-trace {trace_id}] Enriched composio_execute with {len(actions)} actions from {len(app_names)} apps")
+
+                except Exception as e:
+                    logger.warning(f"[tool-trace {trace_id}] Failed to enrich composio_execute: {e}")
+
             openai_tools.append({
                 "type": "function",
                 "function": schema
             })
-        
+
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(
             f"[tool-trace {trace_id}] Loaded {len(openai_tools)} tools "

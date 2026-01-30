@@ -905,11 +905,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 category=ToolCategory.API_TOOLS,
                 description=(
                     "Execute an external app action via Composio (connected third-party apps). "
-                    "Use this for actions in email/messaging and developer tools—e.g., "
-                    "read/send emails, post messages, create/manage repositories, issues, and pull requests. "
-                    "IMPORTANT: This tool has a 2-attempt limit per conversation turn. If the first attempt "
-                    "fails, check the error message carefully before retrying. Do NOT retry with the same "
-                    "parameters if validation failed or action was not found."
+                    "Use this for actions in email/messaging and developer tools."
                 ),
                 executor_class="ComposioToolExecutor",
                 executor_method="execute",
@@ -923,13 +919,13 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     ToolParameter(
                         name="action",
                         type="string",
-                        description="Action name from composio_actions_cache (e.g., 'GMAIL_LIST_EMAILS')",
+                        description="Action name (e.g., 'GMAIL_LIST_EMAILS', 'SLACK_SEND_MESSAGE')",
                         required=True,
                     ),
                     ToolParameter(
                         name="params",
                         type="object",
-                        description="Action parameters (schema depends on the action)",
+                        description="Action parameters",
                         required=False,
                         default={},
                     ),
@@ -940,9 +936,8 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     {
                         "action": "composio_execute",
                         "params": {
-                            "app_name": "<APP_NAME>",
-                            "action": "<MAPPED_ACTION_NAME_FROM_COMPOSIO_ACTIONS_CACHE>",
-                            "params": {},
+                            "action": "SLACK_SEND_MESSAGE",
+                            "params": {"channel": "#general", "text": "Hello"}
                         },
                     },
                 ],

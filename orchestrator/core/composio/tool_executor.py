@@ -14,7 +14,7 @@ This executor:
 import logging
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import re
 from difflib import SequenceMatcher
@@ -363,8 +363,7 @@ class ComposioToolExecutor:
                     # Use the raw action name - let Composio decide if it's valid
                     action_upper = raw_action.upper()
 
-            # If we matched on slug, normalize to canonical action_name
-            action_upper = str(mapped.action_name or action_upper).upper()
+            # Action name is already set above (no more auto-mapping)
         except Exception as exc:
             return {
                 "success": False,
@@ -591,7 +590,6 @@ class ComposioToolExecutor:
             agent_id: Agent ID (stored in context metadata)
         """
         from core.composio.entity_extractors import get_extractor
-        from datetime import datetime, timezone
         import json
 
         # Get appropriate extractor for this app (always returns an extractor)

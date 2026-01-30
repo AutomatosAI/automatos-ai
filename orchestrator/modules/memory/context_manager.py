@@ -63,6 +63,21 @@ def get_recent_tool_context(
             "timestamp": "2026-01-29T10:30:00Z"
         }
     """
+    def _parse_timestamp(ts: Optional[str]) -> Optional[datetime]:
+        if not ts:
+            return None
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+
+    def _within_max_age(context_data: Dict[str, Any]) -> bool:
+        ts = _parse_timestamp(context_data.get("timestamp"))
+        if ts is None:
+            return True
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        return ts >= cutoff
+
     try:
         from core.redis.client import get_redis_client
 
@@ -71,47 +86,46 @@ def get_recent_tool_context(
             logger.warning("[ContextManager] Redis client not available")
             return []
 
-        # Get actual Redis connection
         redis_conn = redis_client.get_redis()
+        try:
+            # Redis key: tool_context:{workspace_id}:{tool_name}
+            workspace_id = user_id.replace("ws_", "") if user_id.startswith("ws_") else user_id
 
-        # Redis key: tool_context:{workspace_id}:{tool_name}
-        # Strip ws_ prefix to get actual workspace UUID
-        workspace_id = user_id.replace("ws_", "") if user_id.startswith("ws_") else user_id
+            if tool_name:
+                redis_key = f"tool_context:{workspace_id}:{tool_name}"
+                logger.info(f"[ContextManager] Fetching from Redis: {redis_key}")
 
-        if tool_name:
-            # Get context for specific tool
-            redis_key = f"tool_context:{workspace_id}:{tool_name}"
-            logger.info(f"[ContextManager] Fetching from Redis: {redis_key}")
+                data = redis_conn.get(redis_key)
 
-            data = redis_conn.get(redis_key)
-            redis_conn.close()
-
-            if data:
-                context_data = json.loads(data)
-                logger.info(f"[ContextManager] ✅ Found tool context in Redis for {tool_name}")
-                return [context_data]
-            else:
-                logger.info(f"[ContextManager] No tool context found in Redis for {tool_name}")
+                if data:
+                    context_data = json.loads(data)
+                    if _within_max_age(context_data):
+                        logger.info(f"[ContextManager] ✅ Found tool context in Redis for {tool_name}")
+                        return [context_data]
+                    logger.info(f"[ContextManager] Tool context for {tool_name} exceeded max_age_minutes")
+                else:
+                    logger.info(f"[ContextManager] No tool context found in Redis for {tool_name}")
                 return []
-        else:
-            # Get all tool contexts for workspace (scan pattern)
-            pattern = f"tool_context:{workspace_id}:*"
-            keys = list(redis_conn.scan_iter(match=pattern, count=100))
+            else:
+                pattern = f"tool_context:{workspace_id}:*"
+                keys = list(redis_conn.scan_iter(match=pattern, count=100))
 
-            results = []
-            for key in keys[:limit]:
-                try:
-                    data = redis_conn.get(key)
-                    if data:
-                        context_data = json.loads(data)
-                        results.append(context_data)
-                except Exception as e:
-                    logger.warning(f"Failed to parse Redis key {key}: {e}")
-                    continue
+                results = []
+                for key in keys[:limit]:
+                    try:
+                        data = redis_conn.get(key)
+                        if data:
+                            context_data = json.loads(data)
+                            if _within_max_age(context_data):
+                                results.append(context_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse Redis key {key}: {e}")
+                        continue
 
+                logger.info(f"[ContextManager] Found {len(results)} tool contexts in Redis")
+                return results[:limit]
+        finally:
             redis_conn.close()
-            logger.info(f"[ContextManager] Found {len(results)} tool contexts in Redis")
-            return results[:limit]
 
     except Exception as e:
         logger.error(f"Failed to retrieve tool context from Redis: {e}")

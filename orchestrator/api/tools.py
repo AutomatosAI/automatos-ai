@@ -523,19 +523,17 @@ async def get_tool_suggestions(
     # Normalize app name to uppercase (Composio convention)
     app_name_upper = app_name.upper()
 
-    # PRD-41: Check for context-aware suggestions if user_id provided
+    # PRD-41: Check for context-aware suggestions if user_id or workspace provided
     context_suggestions = []
     has_context = False
 
-    # Get workspace_id from headers (frontend sends via X-Workspace-ID)
+    # Use user_id query param as override, else derive from request headers
     workspace_id = request.headers.get("x-workspace-id") if request else None
+    context_user_id = user_id if user_id else (f"ws_{workspace_id}" if workspace_id else None)
 
-    if workspace_id and session_id:
+    if context_user_id and session_id:
         try:
             from modules.memory.context_manager import get_recent_tool_context
-
-            # Format user_id with ws_ prefix for consistency with SmartMemory
-            context_user_id = f"ws_{workspace_id}"
 
             logger.info(f"[ContextSuggestions] Fetching for workspace_id={workspace_id}, user_id={context_user_id}, app={app_name_upper}")
 

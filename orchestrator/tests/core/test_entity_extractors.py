@@ -11,6 +11,7 @@ from core.composio.entity_extractors import (
     GmailExtractor,
     SlackExtractor,
     GitHubExtractor,
+    GenericExtractor,
     EntityExtractor
 )
 
@@ -510,11 +511,13 @@ class TestGetExtractor:
         assert isinstance(extractor, GmailExtractor)
 
     def test_get_unknown_extractor(self):
-        """Test getting extractor for unknown app"""
+        """Test getting extractor for unknown app (falls back to GenericExtractor)"""
         extractor = get_extractor("UNKNOWN_APP")
-        assert extractor is None
+        assert extractor is not None
+        assert isinstance(extractor, GenericExtractor)
 
     def test_get_extractor_with_none(self):
-        """Test getting extractor with None app name"""
+        """Test getting extractor with None app name (falls back to GenericExtractor)"""
         extractor = get_extractor(None)
-        assert extractor is None
+        assert extractor is not None
+        assert isinstance(extractor, GenericExtractor)

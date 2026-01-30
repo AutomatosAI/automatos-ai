@@ -772,6 +772,27 @@ class ApiClient {
     return [] // Return empty array instead of empty object to prevent .slice errors
   }
 
+  /** Public base URL for building backend requests (e.g. skills API that uses raw fetch). */
+  getBaseUrl(): string {
+    return (this.baseUrl || '').replace(/\/$/, '')
+  }
+
+  /** Auth headers (Clerk JWT + workspace) for use with raw fetch. */
+  async getAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {}
+    if (typeof window !== 'undefined') {
+      const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+      if (workspaceId) headers['X-Workspace-ID'] = workspaceId
+    }
+    if (this.getClerkToken) {
+      try {
+        const token = await this.getClerkToken()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      } catch (_) {}
+    }
+    return headers
+  }
+
   async request<T>(
     endpoint: string,
     options: RequestInit = {}

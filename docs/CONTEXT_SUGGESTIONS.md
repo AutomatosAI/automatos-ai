@@ -11,7 +11,8 @@
 Phase 2 builds on PRD-40's dynamic tool suggestions by adding **context awareness**. When users interact with tools (Gmail, Slack, GitHub), the system remembers what those tools showed and generates personalized suggestions based on recent activity.
 
 **Example:**
-```
+
+```text
 User: "Check my email"
 Agent: [Runs Gmail tool, finds urgent email from Sarah]
 
@@ -28,7 +29,7 @@ Agent: [Runs Gmail tool, finds urgent email from Sarah]
 
 ### Data Flow
 
-```
+```text
 Tool Execution → Entity Extraction → Mem0 Storage
                                           ↓
 User Clicks Tool Icon → Context Retrieval → Suggestion Generation
@@ -168,7 +169,8 @@ User Clicks Tool Icon → Context Retrieval → Suggestion Generation
 ```
 
 **Natural Language Summary (for Mem0 processing):**
-```
+
+```text
 GMAIL GMAIL_GET_EMAILS: emails from Sarah Johnson; subjects: Urgent: Deadline Update
 ```
 
@@ -179,7 +181,7 @@ GMAIL GMAIL_GET_EMAILS: emails from Sarah Johnson; subjects: Urgent: Deadline Up
 ### Gmail Examples
 
 | Entities | Generated Suggestion |
-|----------|---------------------|
+| --- | --- |
 | `senders: ["Sarah Johnson"]` | "Reply to Sarah Johnson's email" |
 | `labels: ["IMPORTANT"]` | "Reply to the urgent email" |
 | `subjects: ["Project deadline"]` | "Show email about 'Project deadline'" |
@@ -187,14 +189,14 @@ GMAIL GMAIL_GET_EMAILS: emails from Sarah Johnson; subjects: Urgent: Deadline Up
 ### Slack Examples
 
 | Entities | Generated Suggestion |
-|----------|---------------------|
+| --- | --- |
 | `channels: ["#general"]` | "Send message to #general" |
 | `mentions: ["@john"]` | "Reply to @john" |
 
 ### GitHub Examples
 
 | Entities | Generated Suggestion |
-|----------|---------------------|
+| --- | --- |
 | `pr_numbers: [123]` | "Review PR #123" |
 | `issue_numbers: [456]` | "Comment on issue #456" |
 | `repos: ["org/myrepo"]` | "Show activity in org/myrepo" |
@@ -459,4 +461,4 @@ logger.debug(f"Context entities: {results}")
 
 ---
 
-**End of Documentation**
+## End of Documentation
