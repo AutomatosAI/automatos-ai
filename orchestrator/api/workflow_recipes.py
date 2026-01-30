@@ -136,13 +136,22 @@ async def create_workflow_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new workflow recipe.
+    Create a new workflow recipe (simple or complex).
 
     Required fields:
     - template_id: Unique identifier (e.g., "my-custom-recipe")
     - name: Display name
     - description: Description of what the recipe does
     - category: Category (e.g., "Development", "Data Processing")
+    - recipe_type: 'simple' or 'complex' (default: 'complex')
+
+    For simple recipes (recipe_type='simple'):
+    - agent_id: ID of agent to run the recipe
+    - prompt: Prompt text for the agent
+    - inputs: Array of {name, type, required, default}
+    - schedule: Optional cron string
+
+    For complex recipes (recipe_type='complex'):
     - template_definition: JSON structure with steps, agents, config
 
     Optional fields:
@@ -157,7 +166,15 @@ async def create_workflow_recipe(
     """
     try:
         # Validate required fields
-        required_fields = ['template_id', 'name', 'description', 'category', 'template_definition']
+        recipe_type = recipe_data.get('recipe_type', 'complex')
+        required_fields = ['template_id', 'name', 'description', 'category']
+
+        # Add type-specific required fields
+        if recipe_type == 'simple':
+            required_fields.extend(['agent_id', 'prompt'])
+        else:  # complex
+            required_fields.append('template_definition')
+
         for field in required_fields:
             if field not in recipe_data:
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
