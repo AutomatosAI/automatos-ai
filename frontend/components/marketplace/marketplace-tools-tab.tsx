@@ -1,12 +1,13 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Search, CheckCircle, Loader2, ExternalLink } from 'lucide-react'
+import { Search, CheckCircle, Loader2, ExternalLink, Download } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
     useAvailableApps,
     useConnectedApps,
@@ -26,6 +27,7 @@ const APP_CATEGORIES = [
 
 export function MarketplaceToolsTab() {
     const { toast } = useToast()
+    const queryClient = useQueryClient()
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [connectingApp, setConnectingApp] = useState<string | null>(null)
@@ -36,6 +38,29 @@ export function MarketplaceToolsTab() {
 
     // Mutations
     const initiateConnection = useInitiateConnection()
+
+    // Sync marketplace mutation
+    const syncCacheMutation = useMutation({
+        mutationFn: async () => {
+            const response = await fetch('/api/tools/sync-cache', { method: 'POST' })
+            if (!response.ok) throw new Error('Sync failed')
+            return response.json()
+        },
+        onSuccess: () => {
+            toast({
+                title: 'Marketplace Synced',
+                description: 'Tool marketplace has been updated',
+            })
+            queryClient.invalidateQueries(['availableApps'])
+        },
+        onError: (error: any) => {
+            toast({
+                title: 'Sync Failed',
+                description: error.message || 'Failed to sync marketplace',
+                variant: 'destructive',
+            })
+        },
+    })
 
     // Get connected app names for quick lookup
     const connectedApps = useMemo(() => {
@@ -121,7 +146,7 @@ export function MarketplaceToolsTab() {
 
     return (
         <div className="space-y-6">
-            {/* Search and Filters */}
+            {/* Search and Sync Button */}
             <div className="flex flex-col sm:flex-row gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -133,6 +158,24 @@ export function MarketplaceToolsTab() {
                         className="pl-10 bg-[#1a1a1a] border-gray-800 text-white placeholder:text-gray-500"
                     />
                 </div>
+                <Button
+                    variant="outline"
+                    disabled={syncCacheMutation.isPending}
+                    onClick={() => syncCacheMutation.mutate()}
+                    className="border-orange-500/30 hover:border-orange-500/60 text-white shrink-0"
+                >
+                    {syncCacheMutation.isPending ? (
+                        <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Syncing…
+                        </>
+                    ) : (
+                        <>
+                            <Download className="w-4 h-4 mr-2" />
+                            Sync marketplace
+                        </>
+                    )}
+                </Button>
             </div>
 
             {/* Category Filter Buttons */}

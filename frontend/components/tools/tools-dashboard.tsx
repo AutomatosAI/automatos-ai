@@ -611,31 +611,6 @@ export function ToolsDashboard() {
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
 
-          <Link href="/marketplace?tab=tools">
-            <Button className="bg-orange-500 hover:bg-orange-600 text-white">
-              <Store className="w-4 h-4 mr-2" />
-              Browse Marketplace
-            </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            disabled={(syncCacheMutation as any).isLoading}
-            onClick={() => syncCacheMutation.mutate()}
-            className="border-orange-500/30 hover:border-orange-500/60"
-          >
-            {(syncCacheMutation as any).isLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Syncing…
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4 mr-2" />
-                Sync marketplace
-              </>
-            )}
-          </Button>
 
           {/* Agent Assignment Button Removed */}
         </div>
