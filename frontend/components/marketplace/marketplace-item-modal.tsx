@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/use-toast'
 import type { MarketplaceItem } from './marketplace-homepage'
+import { apiClient } from '@/lib/api-client'
 
 interface MarketplaceItemModalProps {
   itemId: number
@@ -34,11 +35,8 @@ export function MarketplaceItemModal({
 
   async function fetchItem() {
     try {
-      const response = await fetch(`/api/marketplace/items/${itemId}`)
-      if (response.ok) {
-        const data = await response.json()
-        setItem(data)
-      }
+      const data = await apiClient.get(`/api/marketplace/items/${itemId}`)
+      setItem(data)
     } catch (error) {
       console.error('Failed to fetch item details:', error)
       toast({
@@ -56,20 +54,12 @@ export function MarketplaceItemModal({
 
     setInstalling(true)
     try {
-      const response = await fetch(`/api/marketplace/items/${item.id}/install`, {
-        method: 'POST'
+      const result = await apiClient.post(`/api/marketplace/items/${item.id}/install`)
+      toast({
+        title: 'Success',
+        description: result.message || 'Item installed successfully'
       })
-
-      if (response.ok) {
-        const result = await response.json()
-        toast({
-          title: 'Success',
-          description: result.message || 'Item installed successfully'
-        })
-        onClose()
-      } else {
-        throw new Error('Installation failed')
-      }
+      onClose()
     } catch (error) {
       console.error('Failed to install item:', error)
       toast({

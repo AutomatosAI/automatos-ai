@@ -11,6 +11,7 @@ import { MarketplaceItemModal } from './marketplace-item-modal'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
+import { apiClient } from '@/lib/api-client'
 
 export interface MarketplaceItem {
   id: number
@@ -51,11 +52,8 @@ export function MarketplaceHomepage() {
 
   async function fetchFeaturedItems() {
     try {
-      const response = await fetch('/api/marketplace/featured?limit=8')
-      if (response.ok) {
-        const items = await response.json()
-        setFeaturedItems(items)
-      }
+      const items = await apiClient.get('/api/marketplace/featured?limit=8')
+      setFeaturedItems(items)
     } catch (error) {
       console.error('Failed to fetch featured items:', error)
     } finally {
@@ -65,11 +63,8 @@ export function MarketplaceHomepage() {
 
   async function fetchPopularItems() {
     try {
-      const response = await fetch('/api/marketplace/items?limit=10')
-      if (response.ok) {
-        const items = await response.json()
-        setPopularItems(items)
-      }
+      const items = await apiClient.get('/api/marketplace/items?limit=10')
+      setPopularItems(items)
     } catch (error) {
       console.error('Failed to fetch popular items:', error)
     }
@@ -77,20 +72,17 @@ export function MarketplaceHomepage() {
 
   async function fetchStats() {
     try {
-      const response = await fetch('/api/marketplace/items?limit=1000')
-      if (response.ok) {
-        const items = await response.json()
-        const categories = new Set(items.map((i: MarketplaceItem) => i.category).filter(Boolean))
-        const totalInstalls = items.reduce((sum: number, i: MarketplaceItem) => sum + i.install_count, 0)
-        const featuredCount = items.filter((i: MarketplaceItem) => i.is_featured).length
+      const items = await apiClient.get('/api/marketplace/items?limit=1000')
+      const categories = new Set(items.map((i: MarketplaceItem) => i.category).filter(Boolean))
+      const totalInstalls = items.reduce((sum: number, i: MarketplaceItem) => sum + i.install_count, 0)
+      const featuredCount = items.filter((i: MarketplaceItem) => i.is_featured).length
 
-        setStats({
-          totalItems: items.length,
-          categories: categories.size,
-          totalInstalls,
-          featuredCount
-        })
-      }
+      setStats({
+        totalItems: items.length,
+        categories: categories.size,
+        totalInstalls,
+        featuredCount
+      })
     } catch (error) {
       console.error('Failed to fetch stats:', error)
     }

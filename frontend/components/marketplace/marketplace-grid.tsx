@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { MarketplaceCard } from './marketplace-card'
 import type { MarketplaceItem } from './marketplace-homepage'
+import { apiClient } from '@/lib/api-client'
 
 interface MarketplaceGridProps {
   items?: MarketplaceItem[]
@@ -37,11 +38,8 @@ export function MarketplaceGrid({
       if (search) params.append('search', search)
       params.append('limit', '50')
 
-      const response = await fetch(`/api/marketplace/items?${params}`)
-      if (response.ok) {
-        const data = await response.json()
-        setGridItems(data)
-      }
+      const data = await apiClient.get(`/api/marketplace/items?${params}`)
+      setGridItems(data)
     } catch (error) {
       console.error('Failed to fetch marketplace items:', error)
     } finally {

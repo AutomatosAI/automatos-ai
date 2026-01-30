@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useQuery } from '@tanstack/react-query'
+import { apiClient } from '@/lib/api-client'
 
 const PROVIDER_FILTERS = [
   { id: 'all', name: 'All Providers' },
@@ -28,9 +29,7 @@ export function MarketplaceLlmsTab() {
         ...(selectedProvider !== 'all' && { category: selectedProvider }),
         ...(searchQuery && { search: searchQuery }),
       })
-      const response = await fetch(`/api/marketplace/items?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch LLMs')
-      return response.json()
+      return apiClient.get(`/api/marketplace/items?${params}`)
     },
   })
 

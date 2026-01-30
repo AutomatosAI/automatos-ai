@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { apiClient } from '@/lib/api-client'
 
 // Agent categories matching US-006
 const AGENT_CATEGORIES = [
@@ -61,23 +62,14 @@ export function MarketplaceAgentsTab() {
         ...(selectedCategory !== 'all' && { category: selectedCategory }),
         ...(searchQuery && { search: searchQuery }),
       })
-      const response = await fetch(`/api/marketplace/items?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch agents')
-      return response.json()
+      return apiClient.get(`/api/marketplace/items?${params}`)
     },
   })
 
   // Install agent mutation
   const installMutation = useMutation({
     mutationFn: async (agentId: number) => {
-      const response = await fetch(`/api/marketplace/items/${agentId}/install`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to install agent')
-      }
-      return response.json()
+      return apiClient.post(`/api/marketplace/items/${agentId}/install`)
     },
     onSuccess: (data, agentId) => {
       const agent = agents.find((a: MarketplaceAgent) => a.id === agentId)
