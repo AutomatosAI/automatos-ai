@@ -10,6 +10,7 @@ import { MarketplaceGrid } from './marketplace-grid'
 import { MarketplaceItemModal } from './marketplace-item-modal'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
+import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 
 export interface MarketplaceItem {
   id: number
@@ -262,11 +263,7 @@ export function MarketplaceHomepage() {
         </TabsContent>
 
         <TabsContent value="llms" className="mt-6">
-          <MarketplaceGrid
-            type="llm"
-            search={searchQuery}
-            onItemClick={setSelectedItem}
-          />
+          <MarketplaceLlmsTab />
         </TabsContent>
       </Tabs>
 
