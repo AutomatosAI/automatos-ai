@@ -4,12 +4,12 @@
 import React, { useState, useRef, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { 
-  Upload, 
-  Search, 
-  Filter, 
-  FileText, 
-  File, 
+import {
+  Upload,
+  Search,
+  Filter,
+  FileText,
+  File,
   Image,
   Database,
   Trash2,
@@ -18,7 +18,8 @@ import {
   MoreVertical,
   FolderOpen,
   Plus,
-  History
+  History,
+  Cloud,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,6 +44,8 @@ import { DeleteConfirmationModal } from './delete-confirmation-modal'
 import { SemanticSearch } from './semantic-search'
 import { DocumentProcessing } from './document-processing'
 import { DocumentAnalytics } from './document-analytics'
+// Cloud Storage (PRD-42)
+import { CloudStoragePanel } from './cloud-storage-panel'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
@@ -368,10 +371,14 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-grid bg-secondary/50">
             <TabsTrigger value="library" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span className="hidden sm:inline">Library</span>
+            </TabsTrigger>
+            <TabsTrigger value="cloud" className="flex items-center space-x-2">
+              <Cloud className="w-4 h-4" />
+              <span className="hidden sm:inline">Cloud</span>
             </TabsTrigger>
             <TabsTrigger value="multimodal" className="flex items-center space-x-2">
               <Image className="w-4 h-4" />
@@ -560,6 +567,10 @@ export function DocumentManagement() {
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="cloud" className="space-y-6">
+            <CloudStoragePanel />
           </TabsContent>
 
           <TabsContent value="multimodal" className="space-y-6">

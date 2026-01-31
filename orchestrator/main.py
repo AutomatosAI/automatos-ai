@@ -60,6 +60,11 @@ try:
     from api.composio import router as composio_router
 except ImportError:
     composio_router = None
+# PRD-42: Cloud Document Sync with S3 Vectors (optional module)
+try:
+    from api.cloud_documents import router as cloud_documents_router
+except ImportError:
+    cloud_documents_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -415,6 +420,8 @@ app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 if composio_router is not None:
     app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
+if cloud_documents_router is not None:
+    app.include_router(cloud_documents_router)  # PRD-42: Cloud Document Sync
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)

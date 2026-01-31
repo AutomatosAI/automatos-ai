@@ -121,8 +121,15 @@ class RAGService:
     - modules.rag.chunking.SemanticChunker
     """
     
-    def __init__(self, config: RAGConfig = None):
+    def __init__(
+        self,
+        config: RAGConfig = None,
+        vector_backend: str = "pgvector",
+        workspace_id: str = None,
+    ):
         self.config = config or RAGConfig()
+        self._vector_backend = vector_backend
+        self._workspace_id = workspace_id
         self._context_optimizer = None
         self._semantic_chunker = None
         self._embedding_manager = None
@@ -157,18 +164,26 @@ class RAGService:
         except Exception as e:
             logger.error(f"Failed to initialize embedding manager: {e}")
         
-        # NEW: Initialize EnhancedVectorStore for centralized vector search
+        # Initialize vector store via factory (supports pgvector and s3_vectors)
         try:
-            from modules.search import EnhancedVectorStore
-            import os
-            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
-            self._vector_store = EnhancedVectorStore(
-                database_url=db_url,
-                table_name="document_chunks"  # Use RAG's existing table
-            )
-            logger.info("✅ Using modules.search.EnhancedVectorStore for vector search")
+            from modules.search.vector_store import get_vector_store
+            if self._vector_backend == "s3_vectors" and self._workspace_id:
+                self._vector_store = get_vector_store(
+                    backend="s3_vectors",
+                    workspace_id=self._workspace_id,
+                )
+                logger.info("✅ Using S3VectorsBackend for cloud document search")
+            else:
+                import os
+                db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/automatos")
+                self._vector_store = get_vector_store(
+                    backend="pgvector",
+                    database_url=db_url,
+                    table_name="document_chunks",
+                )
+                logger.info("✅ Using EnhancedVectorStore (pgvector) for vector search")
         except Exception as e:
-            logger.warning(f"EnhancedVectorStore not available, using fallback: {e}")
+            logger.warning(f"Vector store not available, using fallback: {e}")
             
         try:
             from modules.rag.chunking import SemanticChunker, ChunkingStrategy
