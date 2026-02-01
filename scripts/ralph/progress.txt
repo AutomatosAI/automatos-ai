@@ -1,0 +1,37 @@
+# Ralph Progress Log
+Started: Sun Feb  1 18:17:29 WET 2026
+---
+
+## Codebase Patterns
+- ORM models import Base from `core.database.base` (separate file to avoid circular imports)
+- All ORM models use `extend_existing=True` in `__table_args__` for safety
+- Enums use `(str, Enum)` pattern for automatic string serialization
+- Pydantic and SQLAlchemy models co-exist in the same module file under `core/models/`
+- Register new model modules in `core/models/__init__.py` with wildcard imports
+- Timestamps use `func.now()` from `sqlalchemy.sql` for server-side defaults
+- JSON/flexible columns use `JSONB` from `sqlalchemy.dialects.postgresql`
+- UUID columns use `PGUUID(as_uuid=True)` from `sqlalchemy.dialects.postgresql`
+- Workspace isolation: most models include `workspace_id` FK to workspaces table
+
+---
+
+## 2026-02-01 - US-001
+- **What was implemented:** Created routing data models in `orchestrator/core/models/routing.py`
+- **Models created:**
+  - `ChannelSource` enum (chatbot, jira_trigger, slack, whatsapp, api, workflow)
+  - `RequestUser` Pydantic model (id, email, name, auth_type, clerk_user_id)
+  - `RequestEnvelope` Pydantic model (id, source, content, raw_payload, user, workspace_id, metadata, override_agent_id, override_workflow_id, conversation_id, timestamp)
+  - `RoutingDecision` Pydantic model (route_type, agent_id, workflow_id, confidence, reasoning, cached, intent_category)
+  - `RoutingDecisionRecord` SQLAlchemy ORM (routing_decisions table)
+  - `RoutingRule` SQLAlchemy ORM (routing_rules table)
+  - `UnroutedEvent` SQLAlchemy ORM (unrouted_events table)
+- **Files changed:**
+  - `orchestrator/core/models/routing.py` (new)
+  - `orchestrator/core/models/__init__.py` (added routing import)
+  - `scripts/ralph/prd.json` (updated to PRD-50 content)
+- **Learnings for future iterations:**
+  - Python deps (sqlalchemy, pydantic) not installed globally — use `python3 -c "import ..."` in orchestrator dir for validation
+  - No mypy/pyright installed — use `py_compile` for syntax validation and runtime import checks
+  - `TriggerSubscription` model already exists in `core/models/composio.py` — routing engine can reference it directly
+  - `ComposioEntity` table links `entity_id` to `workspace_id` — needed for Jira trigger workspace resolution
+---
