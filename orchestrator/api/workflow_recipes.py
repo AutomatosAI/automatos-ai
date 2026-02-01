@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from uuid import uuid4
 from core.database.database import get_db
 import logging
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
-from core.models.core import Agent
+from core.models.core import Agent, RecipeExecution
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
@@ -529,6 +530,82 @@ async def list_featured_recipes(
     except Exception as e:
         logger.error(f"Error listing featured recipes: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing featured recipes: {str(e)}")
+
+
+@router.post("/{recipe_id}/execute")
+async def execute_recipe(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db)
+):
+    """
+    Execute a recipe with optional input data.
+    Creates an execution record with status='pending' and returns execution_id
+    immediately for async tracking.
+
+    Body (optional):
+    - input_data: Dict matching the recipe's inputs schema
+    """
+    try:
+        # Fetch recipe and validate ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        input_data = body.get('input_data')
+
+        # Validate input_data against recipe's inputs schema if both exist
+        if recipe.inputs and input_data is not None:
+            for param_name, param_def in recipe.inputs.items():
+                if isinstance(param_def, dict) and param_def.get('required') and param_name not in input_data:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Missing required input: {param_name}"
+                    )
+
+        # Create execution record
+        execution_id = f"exec-{uuid4().hex[:12]}"
+        execution = RecipeExecution(
+            execution_id=execution_id,
+            recipe_id=recipe.id,
+            workspace_id=ctx.workspace_id,
+            status='pending',
+            input_data=input_data,
+            current_stage=1,
+            current_step=0,
+            triggered_by=ctx.user.email if ctx.user else 'anonymous',
+        )
+
+        db.add(execution)
+
+        # Update recipe usage stats
+        recipe.use_count += 1
+        recipe.last_used_at = datetime.now()
+
+        db.commit()
+        db.refresh(execution)
+
+        logger.info(f"Created recipe execution: {execution_id} for recipe {recipe_id}")
+
+        return {
+            "execution_id": execution.execution_id,
+            "status": execution.status,
+            "recipe_id": recipe.template_id,
+            "message": "Execution created successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing recipe {recipe_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error executing recipe: {str(e)}")
 
 
 # ===================================================================

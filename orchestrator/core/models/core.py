@@ -1184,6 +1184,9 @@ class WorkflowTemplate(Base):
 
         return True, None
 
+    # Relationship to executions
+    recipe_executions = relationship('RecipeExecution', back_populates='recipe', cascade='all, delete-orphan')
+
     def to_dict(self):
         """Convert template to dictionary for API responses"""
         return {
@@ -1227,4 +1230,52 @@ class WorkflowTemplate(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'created_by': self.created_by,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None
+        }
+
+
+class RecipeExecution(Base):
+    """
+    Tracks individual recipe executions.
+    Each execution record stores input/output data, step-level results,
+    current stage in the 9-stage workflow, and status.
+    """
+    __tablename__ = 'recipe_executions'
+
+    id = Column(Integer, primary_key=True)
+    execution_id = Column(String(255), unique=True, nullable=False, index=True)
+    recipe_id = Column(Integer, ForeignKey('workflow_recipes.id', ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(UUID, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    status = Column(String(50), nullable=False, default='pending', server_default='pending')
+    input_data = Column(JSONB, nullable=True)
+    output_data = Column(JSONB, nullable=True)
+    step_results = Column(JSONB, nullable=True)
+    current_stage = Column(Integer, nullable=True)
+    current_step = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    triggered_by = Column(String(255), nullable=True)
+    execution_metadata = Column(JSONB, nullable=True)
+
+    # Relationships
+    recipe = relationship('WorkflowTemplate', back_populates='recipe_executions')
+
+    def to_dict(self):
+        """Convert execution to dictionary for API responses"""
+        return {
+            'id': self.id,
+            'execution_id': self.execution_id,
+            'recipe_id': self.recipe_id,
+            'workspace_id': str(self.workspace_id) if self.workspace_id else None,
+            'status': self.status,
+            'input_data': self.input_data,
+            'output_data': self.output_data,
+            'step_results': self.step_results,
+            'current_stage': self.current_stage,
+            'current_step': self.current_step,
+            'error_message': self.error_message,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'triggered_by': self.triggered_by,
+            'execution_metadata': self.execution_metadata,
         }
