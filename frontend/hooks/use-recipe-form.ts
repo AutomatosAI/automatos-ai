@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { useCreateRecipe } from './use-recipe-api'
+import { useCreateRecipe, useUpdateRecipe } from './use-recipe-api'
 import { toast } from './use-toast'
 import type { RecipeFormValues } from '@/components/workflows/create-recipe-modal'
 
@@ -150,6 +150,7 @@ function validateFormData(data: RecipeFormValues): string | null {
 export interface UseRecipeFormReturn {
   isSubmitting: boolean
   submitRecipe: (data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
+  updateRecipe: (recipeId: string, data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
 }
 
 /**
@@ -158,6 +159,7 @@ export interface UseRecipeFormReturn {
  */
 export function useRecipeForm(): UseRecipeFormReturn {
   const createRecipeMutation = useCreateRecipe()
+  const updateRecipeMutation = useUpdateRecipe()
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const submitRecipe = useCallback(
@@ -206,8 +208,55 @@ export function useRecipeForm(): UseRecipeFormReturn {
     [createRecipeMutation]
   )
 
+  const updateRecipe = useCallback(
+    async (recipeId: string, data: RecipeFormValues, onSuccess?: () => void) => {
+      // Validate form data
+      const validationError = validateFormData(data)
+      if (validationError) {
+        toast({
+          title: 'Validation Error',
+          description: validationError,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      setIsSubmitting(true)
+
+      try {
+        const payload = transformFormToApiPayload(data)
+
+        await updateRecipeMutation.mutateAsync({ recipeId, recipeData: payload })
+
+        toast({
+          title: 'Recipe Updated',
+          description: `"${data.name}" has been updated successfully.`,
+        })
+
+        onSuccess?.()
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : typeof err === 'object' && err !== null && 'detail' in err
+              ? String((err as { detail: unknown }).detail)
+              : 'Failed to update recipe. Please try again.'
+
+        toast({
+          title: 'Error Updating Recipe',
+          description: message,
+          variant: 'destructive',
+        })
+      } finally {
+        setIsSubmitting(false)
+      }
+    },
+    [updateRecipeMutation]
+  )
+
   return {
     isSubmitting,
     submitRecipe,
+    updateRecipe,
   }
 }

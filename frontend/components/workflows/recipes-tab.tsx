@@ -24,13 +24,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   useWorkflowRecipes,
-  useUpdateRecipe,
   useDeleteRecipe,
   useRecordRecipeUsage,
   useSubmitRecipeToMarketplace,
@@ -38,6 +35,7 @@ import {
 } from '@/hooks/use-recipe-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
+import { ViewRecipeModal } from './view-recipe-modal'
 import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
 
 interface RecipesTabProps {
@@ -50,32 +48,12 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showEditModal, setShowEditModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
   const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
-  const [viewTab, setViewTab] = useState<'details' | 'suggestions'>('details')
-  const [recipeForm, setRecipeForm] = useState<any>({
-    recipe_id: '',
-    name: '',
-    description: '',
-    goal: '',  // NEW: Workflow goal
-    context: {},  // NEW: Workflow context
-    category: 'Development',
-    difficulty: 'intermediate',
-    tags: [],
-    icon: '📋',
-    recipe_definition: {
-      steps: [],
-      agents: [],
-      config: {}
-    },
-    recommended_agents: [],
-    estimated_time: '',
-    is_public: true,
-    is_featured: false
-  })
+  const [editRecipeData, setEditRecipeData] = useState<any>(null)
+  const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
 
   // Fetch recipes with filtering
   const { data: recipesData, isLoading, error, refetch } = useWorkflowRecipes({
@@ -85,7 +63,6 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     limit: 100
   })
 
-  const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
   const recordUsageMutation = useRecordRecipeUsage()
   const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
@@ -98,21 +75,6 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
 
   const recipes = recipesData?.items || []
 
-  const handleUpdateRecipe = async () => {
-    if (!selectedRecipe) return
-    try {
-      await updateMutation.mutateAsync({
-        recipeId: selectedRecipe.recipe_id,
-        recipeData: recipeForm
-      })
-      setShowEditModal(false)
-      setSelectedRecipe(null)
-      resetForm()
-      refetch()
-    } catch (error) {
-      console.error('Error updating recipe:', error)
-    }
-  }
 
   const handleDeleteRecipe = async () => {
     if (!selectedRecipe) return
@@ -139,29 +101,41 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     }
   }
 
-  const handleViewClick = (recipe: any, tab: 'details' | 'suggestions' = 'details') => {
+  const handleViewClick = (recipe: any) => {
     setSelectedRecipe(recipe)
-    setViewTab(tab)
     setShowViewModal(true)
   }
 
   const handleEditClick = (recipe: any) => {
-    setSelectedRecipe(recipe)
-    setRecipeForm({
-      recipe_id: recipe.recipe_id,
-      name: recipe.name,
-      description: recipe.description,
-      category: recipe.category,
-      difficulty: recipe.difficulty,
-      tags: recipe.tags || [],
-      icon: recipe.icon || '📋',
-      recipe_definition: recipe.recipe_definition || { steps: [], agents: [], config: {} },
-      recommended_agents: recipe.recommended_agents || [],
-      estimated_time: recipe.estimated_time || '',
-      is_public: recipe.is_public,
-      is_featured: recipe.is_featured
-    })
-    setShowEditModal(true)
+    // Transform recipe data to CreateRecipeModal format
+    const initialData = {
+      name: recipe.name || '',
+      description: recipe.description || '',
+      inputs: typeof recipe.inputs === 'string' ? recipe.inputs : JSON.stringify(recipe.inputs || {}, null, 2),
+      outputs: typeof recipe.outputs === 'string' ? recipe.outputs : JSON.stringify(recipe.outputs || {}, null, 2),
+      steps: recipe.steps || [],
+      execution_config: recipe.execution_config || {
+        mode: 'sequential',
+        max_retries: 3,
+        retry_delay: 1000,
+        backoff_strategy: 'exponential',
+        timeout_per_step: 120000,
+        total_timeout: 600000,
+        quality_threshold: 0.7,
+        auto_learning: true,
+        parallel_limit: 5,
+        memory_isolation: 'shared',
+      },
+      schedule_config: recipe.schedule_config || {
+        type: 'manual',
+        cron_expression: '',
+        trigger_config: {},
+      },
+    }
+
+    setEditRecipeData(initialData)
+    setEditRecipeId(recipe.template_id || recipe.id?.toString())
+    setShowCreateModal(true)
   }
 
   const handleDeleteClick = (recipe: any) => {
@@ -203,26 +177,6 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     }
   }
 
-  const resetForm = () => {
-    setRecipeForm({
-      recipe_id: '',
-      name: '',
-      description: '',
-      category: 'Development',
-      difficulty: 'intermediate',
-      tags: [],
-      icon: '📋',
-      recipe_definition: {
-        steps: [],
-        agents: [],
-        config: {}
-      },
-      recommended_agents: [],
-      estimated_time: '',
-      is_public: true,
-      is_featured: false
-    })
-  }
 
   if (isLoading) {
     return (
@@ -326,28 +280,27 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                         {recipe.description}
                       </p>
                       <div className="flex items-center gap-2 mt-2">
-                        <Badge variant="outline" className="text-xs">
-                          {recipe.category}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs capitalize">
-                          {recipe.difficulty}
-                        </Badge>
+                        {recipe.marketplace_category && (
+                          <Badge variant="outline" className="text-xs">
+                            {recipe.marketplace_category}
+                          </Badge>
+                        )}
                         {recipe.is_system && (
                           <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
                             System
                           </Badge>
                         )}
-                        {recipe.learning_data?.latest_suggestions?.length > 0 && (
+                        {recipe.learning_data?.suggestions?.length > 0 && (
                           <Badge
                             variant="outline"
                             className="text-xs bg-orange-500/10 text-orange-400 border-orange-500/20 cursor-pointer hover:bg-orange-500/20 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleViewClick(recipe, 'suggestions')
+                              handleViewClick(recipe)
                             }}
                           >
                             <Lightbulb className="w-3 h-3 mr-1" />
-                            {recipe.learning_data.latest_suggestions.length} suggestion{recipe.learning_data.latest_suggestions.length !== 1 ? 's' : ''}
+                            {recipe.learning_data.suggestions.length} suggestion{recipe.learning_data.suggestions.length !== 1 ? 's' : ''}
                           </Badge>
                         )}
                       </div>
@@ -359,7 +312,9 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Used {recipe.use_count} times</span>
-                      {recipe.estimated_time && <span>{recipe.estimated_time}</span>}
+                      {recipe.quality_score && (
+                        <span>Quality: {(recipe.quality_score * 100).toFixed(0)}%</span>
+                      )}
                     </div>
                     
                     {/* Recommended Agents */}
@@ -444,291 +399,46 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
         </div>
       )}
 
-      {/* Create Recipe Modal (new 4-step wizard) */}
+      {/* Create/Edit Recipe Modal (4-step wizard) */}
       <CreateRecipeModal
         open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        onClose={() => {
+          setShowCreateModal(false)
+          setEditRecipeData(null)
+          setEditRecipeId(null)
+        }}
         onSave={() => {
           setShowCreateModal(false)
+          setEditRecipeData(null)
+          setEditRecipeId(null)
           refetch()
         }}
+        initialData={editRecipeData}
+        recipeId={editRecipeId || undefined}
       />
 
       {/* View Recipe Modal */}
-      <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">{selectedRecipe?.icon || '📋'}</span>
-                <div>
-                  <DialogTitle className="text-2xl">{selectedRecipe?.name}</DialogTitle>
-                  <p className="text-sm text-muted-foreground mt-1">{selectedRecipe?.recipe_id}</p>
-                </div>
-              </div>
-              {!selectedRecipe?.is_system && (
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => {
-                    setShowViewModal(false)
-                    handleEditClick(selectedRecipe)
-                  }}
-                >
-                  <Edit className="w-3 h-3 mr-2" />
-                  Edit
-                </Button>
-              )}
-            </div>
-          </DialogHeader>
-          
-          {selectedRecipe && (
-            <div className="space-y-6">
-              {/* Tab Navigation */}
-              <div className="flex gap-1 p-1 bg-secondary/30 rounded-lg">
-                <button
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    viewTab === 'details'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  onClick={() => setViewTab('details')}
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  Details
-                </button>
-                <button
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    viewTab === 'suggestions'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  onClick={() => setViewTab('suggestions')}
-                >
-                  <Lightbulb className="w-3.5 h-3.5" />
-                  Suggestions
-                  {selectedRecipeSuggestions?.suggestions?.length > 0 && (
-                    <Badge variant="outline" className="text-[10px] h-4 bg-orange-500/10 text-orange-400 border-orange-500/20">
-                      {selectedRecipeSuggestions.suggestions.length}
-                    </Badge>
-                  )}
-                </button>
-              </div>
-
-              {/* Details Tab */}
-              {viewTab === 'details' && (
-                <>
-                  {/* Badges */}
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline" className="text-xs">{selectedRecipe.category}</Badge>
-                    <Badge variant="outline" className="text-xs capitalize">{selectedRecipe.difficulty}</Badge>
-                    {selectedRecipe.is_system && (
-                      <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
-                        System Recipe
-                      </Badge>
-                    )}
-                    {selectedRecipe.is_featured && (
-                      <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
-                        <Star className="w-3 h-3 mr-1" />
-                        Featured
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* Description */}
-                  <div>
-                    <h3 className="text-sm font-semibold mb-2">Description</h3>
-                    <p className="text-sm text-muted-foreground">{selectedRecipe.description}</p>
-                  </div>
-
-                  {/* Stats */}
-                  <div className="grid grid-cols-3 gap-4 p-4 bg-secondary/30 rounded-lg">
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">Used</div>
-                      <div className="text-lg font-semibold">{selectedRecipe.use_count} times</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
-                      <div className="text-lg font-semibold">{selectedRecipe.success_rate || 0}%</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">
-                        <Clock className="w-3 h-3 inline mr-1" />
-                        Duration
-                      </div>
-                      <div className="text-lg font-semibold">{selectedRecipe.estimated_time || 'N/A'}</div>
-                    </div>
-                  </div>
-
-                  {/* Recommended Agents */}
-                  {selectedRecipe.recommended_agents && selectedRecipe.recommended_agents.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2 flex items-center">
-                        <Users className="w-4 h-4 mr-2" />
-                        Recommended Agents ({selectedRecipe.recommended_agents.length})
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedRecipe.recommended_agents.map((agent: string, idx: number) => (
-                          <Badge key={idx} variant="outline">{agent}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Tags */}
-                  {selectedRecipe.tags && selectedRecipe.tags.length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2">Tags</h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedRecipe.tags.map((tag: string, idx: number) => (
-                          <Badge key={idx} variant="secondary" className="text-xs">#{tag}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recipe Definition */}
-                  {selectedRecipe.recipe_definition && (
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2 flex items-center">
-                        <CheckCircle className="w-4 h-4 mr-2" />
-                        Workflow Steps
-                      </h3>
-                      {selectedRecipe.recipe_definition.steps && selectedRecipe.recipe_definition.steps.length > 0 ? (
-                        <div className="space-y-2">
-                          {selectedRecipe.recipe_definition.steps.map((step: any, idx: number) => (
-                            <div key={idx} className="flex items-start p-3 bg-secondary/30 rounded-lg">
-                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-semibold mr-3 flex-shrink-0">
-                                {idx + 1}
-                              </div>
-                              <div className="flex-1">
-                                <div className="font-medium text-sm">{step.name || step}</div>
-                                {step.type && <div className="text-xs text-muted-foreground mt-1">Type: {step.type}</div>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">No steps defined</p>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Metadata */}
-                  <div className="pt-4 border-t border-secondary text-xs text-muted-foreground space-y-1">
-                    <div>Created by: {selectedRecipe.created_by}</div>
-                    <div>Version: {selectedRecipe.version}</div>
-                    {selectedRecipe.created_at && (
-                      <div>Created: {new Date(selectedRecipe.created_at).toLocaleDateString()}</div>
-                    )}
-                    {selectedRecipe.last_used_at && (
-                      <div>Last used: {new Date(selectedRecipe.last_used_at).toLocaleDateString()}</div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Suggestions Tab */}
-              {viewTab === 'suggestions' && (
-                <RecipeSuggestionsPanel
-                  data={selectedRecipeSuggestions || {
-                    recipe_id: selectedRecipe.template_id || selectedRecipe.recipe_id || '',
-                    quality_score: selectedRecipe.quality_score ?? null,
-                    suggestions: selectedRecipe.learning_data?.latest_suggestions || [],
-                    patterns: selectedRecipe.learning_data?.latest_patterns || [],
-                    performance_metrics: selectedRecipe.learning_data?.latest_performance || null,
-                    last_analyzed_at: selectedRecipe.learning_data?.last_analyzed_at || null,
-                    analysis_count: selectedRecipe.learning_data?.analyses?.length || 0,
-                  }}
-                  recipeName={selectedRecipe.name}
-                  onApplyPromptRewrite={(suggestion) => {
-                    setShowViewModal(false)
-                    handleEditClick(selectedRecipe)
-                    toast({
-                      title: 'Prompt Rewrite Suggestion',
-                      description: `Edit step ${suggestion.target_step !== undefined ? suggestion.target_step + 1 : ''} prompt: ${suggestion.description}`,
-                    })
-                  }}
-                  onApplyModelUpgrade={(suggestion) => {
-                    toast({
-                      title: 'Model Upgrade Suggested',
-                      description: suggestion.description,
-                    })
-                  }}
-                  onApplyToolAddition={(suggestion) => {
-                    toast({
-                      title: 'Tool Addition Suggested',
-                      description: suggestion.description,
-                    })
-                  }}
-                />
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4 border-t border-secondary">
-                <Button
-                  className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                  onClick={() => {
-                    setShowViewModal(false)
-                    handleUseRecipe(selectedRecipe)
-                  }}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Use This Recipe
-                </Button>
-                {!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      handleShareToMarketplace(selectedRecipe)
-                    }}
-                    disabled={submitToMarketplaceMutation.isPending}
-                  >
-                    {submitToMarketplaceMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Share2 className="w-4 h-4 mr-2" />
-                    )}
-                    {submitToMarketplaceMutation.isPending ? 'Sharing...' : 'Share to Marketplace'}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => setShowViewModal(false)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Recipe Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Recipe</DialogTitle>
-            <DialogDescription>
-              Update recipe information and configuration
-            </DialogDescription>
-          </DialogHeader>
-          
-          <RecipeForm
-            form={recipeForm}
-            onChange={setRecipeForm}
-            onSubmit={handleUpdateRecipe}
-            onCancel={() => {
-              setShowEditModal(false)
-              setSelectedRecipe(null)
-              resetForm()
-            }}
-            isLoading={updateMutation.isPending}
-            submitLabel="Update Recipe"
-            isEdit
-          />
-        </DialogContent>
-      </Dialog>
+      <ViewRecipeModal
+        open={showViewModal}
+        onClose={() => {
+          setShowViewModal(false)
+          setSelectedRecipe(null)
+        }}
+        recipe={selectedRecipe}
+        suggestions={selectedRecipeSuggestions}
+        onEdit={() => {
+          setShowViewModal(false)
+          handleEditClick(selectedRecipe)
+        }}
+        onExecute={() => {
+          setShowViewModal(false)
+          handleUseRecipe(selectedRecipe)
+        }}
+        onShare={!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item
+          ? () => handleShareToMarketplace(selectedRecipe)
+          : undefined
+        }
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
@@ -764,190 +474,4 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   )
 }
 
-// Recipe Form Component
-interface RecipeFormProps {
-  form: any
-  onChange: (form: any) => void
-  onSubmit: () => void
-  onCancel: () => void
-  isLoading: boolean
-  submitLabel: string
-  isEdit?: boolean
-}
-
-function RecipeForm({ form, onChange, onSubmit, onCancel, isLoading, submitLabel, isEdit }: RecipeFormProps) {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="recipe_id">Recipe ID *</Label>
-          <Input
-            id="recipe_id"
-            value={form.recipe_id}
-            onChange={(e) => onChange({ ...form, recipe_id: e.target.value })}
-            placeholder="my-custom-recipe"
-            disabled={isEdit}
-            className="bg-secondary/50 border-secondary"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Unique identifier (lowercase, hyphens only)
-          </p>
-        </div>
-        
-        <div>
-          <Label htmlFor="icon">Icon</Label>
-          <Input
-            id="icon"
-            value={form.icon}
-            onChange={(e) => onChange({ ...form, icon: e.target.value })}
-            placeholder="📋"
-            className="bg-secondary/50 border-secondary"
-          />
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="name">Recipe Name *</Label>
-        <Input
-          id="name"
-          value={form.name}
-          onChange={(e) => onChange({ ...form, name: e.target.value })}
-          placeholder="My Workflow Recipe"
-          className="bg-secondary/50 border-secondary"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="description">Description *</Label>
-        <Textarea
-          id="description"
-          value={form.description}
-          onChange={(e) => onChange({ ...form, description: e.target.value })}
-          placeholder="Describe what this recipe does..."
-          className="bg-secondary/50 border-secondary min-h-[80px]"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="goal">Workflow Goal (Optional)</Label>
-        <Input
-          id="goal"
-          value={form.goal || ''}
-          onChange={(e) => onChange({ ...form, goal: e.target.value })}
-          placeholder="e.g., Review PR #123 for security vulnerabilities"
-          className="bg-secondary/50 border-secondary"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          High-level objective - overrides description if provided
-        </p>
-      </div>
-
-      <div>
-        <Label htmlFor="context">Workflow Context (Optional JSON)</Label>
-        <Textarea
-          id="context"
-          value={typeof form.context === 'string' ? form.context : JSON.stringify(form.context || {}, null, 2)}
-          onChange={(e) => {
-            try {
-              const parsed = JSON.parse(e.target.value)
-              onChange({ ...form, context: parsed })
-            } catch {
-              // Invalid JSON, keep as string temporarily
-              onChange({ ...form, context: e.target.value })
-            }
-          }}
-          placeholder={'{\n  "codegraph_project": "my-app",\n  "pr_number": 123,\n  "git_url": "https://github.com/..."\n}'}
-          className="bg-secondary/50 border-secondary min-h-[100px] font-mono text-xs"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
-        </p>
-        <div className="mt-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs text-orange-300 flex items-start gap-2">
-          <span className="text-sm">⚡</span>
-          <span><strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 py-0.5 rounded">codegraph_project</code> in context to give agents access to indexed code.</span>
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="tags">Tags (Optional)</Label>
-        <Input
-          id="tags"
-          value={Array.isArray(form.tags) ? form.tags.join(', ') : ''}
-          onChange={(e) => {
-            const tagArray = e.target.value.split(',').map(t => t.trim()).filter(Boolean)
-            onChange({ ...form, tags: tagArray })
-          }}
-          placeholder="project:automatos-ai, type:pr-review, automated"
-          className="bg-secondary/50 border-secondary"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Comma-separated tags for organization and filtering
-        </p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <Label htmlFor="category">Category *</Label>
-          <Select 
-            value={form.category}
-            onValueChange={(value) => onChange({ ...form, category: value })}
-          >
-            <SelectTrigger className="bg-secondary/50 border-secondary">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Support">Support</SelectItem>
-              <SelectItem value="Data Processing">Data Processing</SelectItem>
-              <SelectItem value="Content">Content</SelectItem>
-              <SelectItem value="Security">Security</SelectItem>
-              <SelectItem value="Development">Development</SelectItem>
-              <SelectItem value="Marketing">Marketing</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label htmlFor="difficulty">Difficulty *</Label>
-          <Select 
-            value={form.difficulty}
-            onValueChange={(value) => onChange({ ...form, difficulty: value })}
-          >
-            <SelectTrigger className="bg-secondary/50 border-secondary">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="beginner">Beginner</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label htmlFor="estimated_time">Estimated Time</Label>
-          <Input
-            id="estimated_time"
-            value={form.estimated_time}
-            onChange={(e) => onChange({ ...form, estimated_time: e.target.value })}
-            placeholder="5-10 minutes"
-            className="bg-secondary/50 border-secondary"
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-4 pt-4 border-t border-secondary">
-        <Button variant="outline" onClick={onCancel} disabled={isLoading}>
-          Cancel
-        </Button>
-        <Button 
-          onClick={onSubmit} 
-          disabled={isLoading || !form.recipe_id || !form.name || !form.description}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-        >
-          {isLoading ? 'Saving...' : submitLabel}
-        </Button>
-      </div>
-    </div>
-  )
-}
 

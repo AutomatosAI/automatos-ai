@@ -62,13 +62,16 @@ interface CreateRecipeModalProps {
   open: boolean
   onClose: () => void
   onSave?: (data: RecipeFormValues) => void
+  initialData?: RecipeFormValues
+  recipeId?: string
 }
 
-export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalProps) {
+export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId }: CreateRecipeModalProps) {
   const [currentStep, setCurrentStep] = React.useState(0)
   const [inputsValid, setInputsValid] = React.useState(true)
   const [outputsValid, setOutputsValid] = React.useState(true)
-  const { isSubmitting, submitRecipe } = useRecipeForm()
+  const { isSubmitting, submitRecipe, updateRecipe } = useRecipeForm()
+  const isEditMode = !!recipeId
 
   const methods = useForm<RecipeFormValues>({
     defaultValues: {
@@ -105,6 +108,13 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
   const watchedInputs = methods.watch('inputs')
   const watchedOutputs = methods.watch('outputs')
 
+  // Populate form when initialData is provided (edit mode)
+  React.useEffect(() => {
+    if (initialData && open) {
+      methods.reset(initialData)
+    }
+  }, [initialData, open, methods])
+
   const canGoNext = React.useMemo(() => {
     const values = methods.getValues()
     switch (currentStepId) {
@@ -138,10 +148,17 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
 
   const handleSave = async () => {
     const data = methods.getValues()
-    await submitRecipe(data, () => {
-      onSave?.(data)
-      handleClose()
-    })
+    if (isEditMode && recipeId) {
+      await updateRecipe(recipeId, data, () => {
+        onSave?.(data)
+        handleClose()
+      })
+    } else {
+      await submitRecipe(data, () => {
+        onSave?.(data)
+        handleClose()
+      })
+    }
   }
 
   const handleClose = () => {
@@ -177,7 +194,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
               <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4 flex-shrink-0">
                 <CardTitle className="flex items-center space-x-2">
                   <ChefHat className="w-6 h-6 text-primary" />
-                  <span>Create Recipe</span>
+                  <span>{isEditMode ? 'Edit Recipe' : 'Create Recipe'}</span>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={handleClose}>
                   <X className="w-5 h-5" />
@@ -354,7 +371,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                                 ) : (
                                   <Save className="w-4 h-4 mr-2" />
                                 )}
-                                {isSubmitting ? 'Saving...' : 'Save Recipe'}
+                                {isSubmitting ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Recipe' : 'Save Recipe')}
                               </Button>
                             </motion.div>
                           )}
