@@ -1059,6 +1059,13 @@ class WorkflowTemplate(Base):
     template_definition = Column(JSONB, nullable=False)  # Full workflow structure
     # Contains: { steps: [], agents: [], config: {}, variables: [] }
 
+    # Workflow definition (new 9-stage architecture)
+    steps = Column(JSONB, nullable=True)  # Array of step definitions: [{ step_number, agent_id, prompt_template, pass_to, error_handling }]
+    inputs = Column(JSONB, nullable=True)  # Input schema like function signature: { "param": { "type": "string", "required": true } }
+    outputs = Column(JSONB, nullable=True)  # Expected output format: { "field": { "type": "string" } }
+    execution_config = Column(JSONB, nullable=True)  # Runtime behavior: { mode, max_retries, timeout_per_step, quality_threshold }
+    schedule_config = Column(JSONB, nullable=True)  # Scheduling: { type: "manual"|"cron"|"trigger", cron_expression, trigger_config }
+
     # Recommended configuration
     recommended_agents = Column(JSONB, default=list)  # Agent types that work well with this template
     estimated_time = Column(String(50))  # "5-10 minutes"
