@@ -244,3 +244,27 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Config class uses class-level attributes (not `__init__`) with type annotations — new config vars follow this pattern
   - `.env.example` serves as documentation for deployment — include sensible defaults for non-secret values
 ---
+
+## 2026-02-01 - US-010
+- **What was implemented:** Created routing API endpoints in `orchestrator/api/routing.py` and registered router in `main.py`
+- **Endpoints created:**
+  - `GET /api/routing/decisions` — list recent routing decisions with optional filters (source, agent_id, was_corrected), paginated via skip/limit
+  - `POST /api/routing/rules` — create a routing rule with source_pattern, intent_keywords, target_agent_id/target_workflow_id, priority
+  - `GET /api/routing/rules` — list all active routing rules for the workspace (ordered by priority desc)
+  - `DELETE /api/routing/rules/{rule_id}` — soft delete (sets is_active=False) with workspace scoping
+  - `POST /api/routing/corrections` — record user correction: updates RoutingDecisionRecord.was_corrected + corrected_agent_id
+  - `GET /api/routing/cache/stats` — returns cache size, hits, misses, hit_rate, top 10 routes
+- **Request/response schemas:** CreateRuleRequest, RuleResponse, DecisionResponse, CorrectionRequest (Pydantic BaseModel)
+- **Auth:** All endpoints use `get_request_context_hybrid` dependency for Clerk JWT / API key / dev fallback
+- **Files changed:**
+  - `orchestrator/api/routing.py` (new)
+  - `orchestrator/main.py` (added routing_router import and include_router)
+  - `scripts/ralph/prd.json` (US-010 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - API files follow pattern: imports → logger → router → schemas → endpoints. Schemas defined locally in the API file (not in core/models) when they are endpoint-specific
+  - All list endpoints should workspace-scope where possible — RoutingDecisionRecord doesn't have workspace_id column, so decisions are not workspace-filtered (future improvement)
+  - Soft-delete pattern: set `is_active=False` rather than hard-deleting rows — consistent with RoutingRule and other models
+  - The RoutingCache is a module-level singleton — each API module (chat.py, composio.py, routing.py) creates its own instance; a shared singleton across modules would need a factory or import from a common module
+  - Corrections endpoint records in DB but cannot directly update cache without original content — the cache will self-correct via re-routing + user re-correction flow
+---
