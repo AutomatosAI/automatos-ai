@@ -173,8 +173,8 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-6xl max-h-[90vh] overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4">
+            <Card className="glass-card w-full max-w-6xl flex flex-col max-h-[90vh]">
+              <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4 flex-shrink-0">
                 <CardTitle className="flex items-center space-x-2">
                   <ChefHat className="w-6 h-6 text-primary" />
                   <span>Create Recipe</span>
@@ -184,7 +184,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                 </Button>
               </CardHeader>
 
-              <CardContent className="overflow-y-auto pt-6">
+              <CardContent className="overflow-y-auto pt-6 flex-1 min-h-0">
                 <FormProvider {...methods}>
                   <div className="flex gap-6">
                     {/* Left: Form Content */}

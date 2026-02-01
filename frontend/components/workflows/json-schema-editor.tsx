@@ -70,6 +70,12 @@ export function JsonSchemaEditor({
     [onValidation]
   )
 
+  // Validate on mount with initial value
+  React.useEffect(() => {
+    validateJson(value)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run once on mount
+
   const handleBlur = () => {
     setIsFocused(false)
     validateJson(value)
