@@ -12,16 +12,11 @@ import {
   Bot,
   Brain,
   Zap,
-  Database,
   CheckCircle,
   Clock,
   AlertCircle,
   MessageSquare,
-  Layers,
-  Search,
   FileText,
-  GitBranch,
-  Target,
   Sparkles,
   Activity
 } from 'lucide-react'
@@ -30,23 +25,23 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api-client'
 import { WorkflowStreamViewer } from './workflow-stream-viewer'
-import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+
+// New theater sub-components
+import { TheaterStageProgress } from './theater/theater-stage-progress'
+import { TheaterStepExecution, type StepExecutionData } from './theater/theater-step-execution'
+import {
+  TheaterSelfLearningPanel,
+  type LearningData,
+  type QualityData,
+  type MemoryData,
+} from './theater/theater-self-learning-panel'
 
 interface ExecutionTheaterProps {
   workflowId: number
   onBack: () => void
   autoStart?: boolean
-}
-
-interface StageInfo {
-  id: number
-  name: string
-  shortName: string
-  icon: React.ReactNode
-  description: string
-  color: string
 }
 
 interface LogEntry {
@@ -57,7 +52,7 @@ interface LogEntry {
   message: string
   agent?: string
   details?: string
-  fullResponse?: string  // Full LLM response, not truncated
+  fullResponse?: string
   tokens?: number
   duration?: number
   model?: string
@@ -65,378 +60,32 @@ interface LogEntry {
   toolsUsed?: string[]
 }
 
-// 9-Stage Configuration - Using platform colors (orange accent, emerald success)
-const STAGES: StageInfo[] = [
-  { id: 1, name: 'Task Decomposition', shortName: 'Decompose', icon: <GitBranch className="w-4 h-4" />, description: 'Breaking task into subtasks', color: '#ff6b35' },
-  { id: 2, name: 'Agent Selection', shortName: 'Select', icon: <Bot className="w-4 h-4" />, description: 'Choosing best agents', color: '#ff8c5a' },
-  { id: 3, name: 'Context Engineering', shortName: 'Context', icon: <Search className="w-4 h-4" />, description: 'Optimizing context', color: '#fbbf24' },
-  { id: 4, name: 'Agent Execution', shortName: 'Execute', icon: <Zap className="w-4 h-4" />, description: 'Running agents', color: '#ff6b35' },
-  { id: 5, name: 'Result Aggregation', shortName: 'Aggregate', icon: <Layers className="w-4 h-4" />, description: 'Combining results', color: '#10b981' },
-  { id: 6, name: 'Learning Update', shortName: 'Learn', icon: <Brain className="w-4 h-4" />, description: 'Extracting patterns', color: '#f97316' },
-  { id: 7, name: 'Quality Assessment', shortName: 'Quality', icon: <Target className="w-4 h-4" />, description: 'Validating output', color: '#ff6b35' },
-  { id: 8, name: 'Memory Storage', shortName: 'Memory', icon: <Database className="w-4 h-4" />, description: 'Storing learnings', color: '#f97316' },
-  { id: 9, name: 'Response Generation', shortName: 'Response', icon: <FileText className="w-4 h-4" />, description: 'Final output', color: '#10b981' },
+// 9-Stage names for log display
+const STAGE_NAMES = [
+  'Task Decomposition',
+  'Agent Selection',
+  'Context Engineering',
+  'Agent Execution',
+  'Result Aggregation',
+  'Learning Update',
+  'Quality Assessment',
+  'Memory Storage',
+  'Response Generation',
 ]
 
-const formatPercent = (value?: number) => `${Math.round(((value ?? 0) * 100) || 0)}%`
+const STAGE_SHORT_NAMES = [
+  'Decompose', 'Select', 'Context', 'Execute', 'Aggregate',
+  'Learn', 'Quality', 'Memory', 'Response',
+]
+
+const STAGE_COLORS = [
+  '#ff6b35', '#ff8c5a', '#fbbf24', '#ff6b35', '#10b981',
+  '#f97316', '#ff6b35', '#f97316', '#10b981',
+]
+
 const formatDuration = (ms?: number) => (ms ? `${(ms / 1000).toFixed(1)}s` : '—')
 
-// Stage Pipeline Component
-function StagePipeline({ currentStage, completedStages, onStageClick }: { currentStage: number, completedStages: number[], onStageClick: (stage: number) => void }) {
-  return (
-    <div className="glass-panel rounded-2xl p-4">
-      <div className="flex items-center justify-between gap-2">
-        {STAGES.map((stage, index) => {
-          const isCompleted = completedStages.includes(stage.id)
-          const isActive = currentStage === stage.id
-          const isPending = !isCompleted && !isActive
-
-          return (
-            <div key={stage.id} className="flex items-center flex-1">
-              <motion.button
-                onClick={() => onStageClick(stage.id)}
-                className={cn(
-                  "relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all min-w-[80px]",
-                  isCompleted && "stage-completed",
-                  isActive && "stage-active",
-                  isPending && "stage-pending"
-                )}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <div className={cn("mb-1 transition-colors", isCompleted && "text-emerald-400", isActive && "text-primary", isPending && "text-gray-500")} style={{ color: isActive ? stage.color : undefined }}>
-                  {isCompleted ? <CheckCircle className="w-5 h-5" /> : stage.icon}
-                </div>
-                <span className={cn("text-xs font-medium", isCompleted && "text-emerald-300", isActive && "text-white", isPending && "text-gray-500")}>{stage.shortName}</span>
-                <div className={cn("absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", isCompleted && "bg-emerald-500 text-white", isActive && "bg-primary text-white", isPending && "bg-gray-700 text-gray-400")}>{stage.id}</div>
-                {isActive && <motion.div className="absolute -bottom-1 left-1/2 w-2 h-2 rounded-full bg-primary" animate={{ scale: [1, 1.5, 1] }} transition={{ duration: 1.5, repeat: Infinity }} style={{ marginLeft: -4 }} />}
-              </motion.button>
-              {index < STAGES.length - 1 && (
-                <div className="flex-1 mx-1 relative h-[2px]">
-                  <div className={cn("absolute inset-0 rounded-full", isCompleted ? "stage-connector-completed" : isActive ? "stage-connector-active" : "stage-connector")} />
-                  {isActive && <div className="absolute inset-0 overflow-hidden"><div className="flow-particle w-4 h-full bg-gradient-to-r from-transparent via-primary to-transparent" /></div>}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-      <div className="mt-4 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-        <motion.div className="h-full bg-gradient-to-r from-emerald-500 via-primary to-orange-600 relative" initial={{ width: 0 }} animate={{ width: `${((currentStage - 1 + (completedStages.length / 9)) / 9) * 100}%` }} transition={{ duration: 0.5 }}>
-          <div className="absolute inset-0 progress-shimmer" />
-        </motion.div>
-      </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-        <span>Stage {currentStage} of 9</span>
-        <span>{STAGES[currentStage - 1]?.description}</span>
-      </div>
-    </div>
-  )
-}
-
-interface StageDetailPanelProps {
-  stage: number
-  subtasks: any[]
-  execution?: any
-  collapsed: boolean
-  onToggle: () => void
-}
-
-function StageMetric({ label, value, hint }: { label: string, value: React.ReactNode, hint?: string }) {
-  return (
-    <div className="rounded-xl border border-white/5 bg-white/5 p-3">
-      <div className="text-[11px] uppercase text-muted-foreground tracking-wide">{label}</div>
-      <div className="text-lg font-semibold mt-1">{value}</div>
-      {hint && <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>}
-    </div>
-  )
-}
-
-function StageDetailPanel({ stage, subtasks, execution, collapsed, onToggle }: StageDetailPanelProps) {
-  const stageInfo = STAGES[stage - 1]
-  if (!stageInfo) return null
-
-  const aggregatedResult = execution?.output_data?.aggregated_result || execution?.output_data?.final_report
-  const learningUpdates = execution?.output_data?.learning_updates || []
-  const memoryWrites = execution?.output_data?.memory_stored
-
-  const renderStage1 = () => {
-    const highPriority = subtasks.filter((s: any) => (s.priority || '').toLowerCase() === 'high').length
-    const withoutAgents = subtasks.filter((s: any) => !s.selected_agent).length
-    const completedDrafts = subtasks.filter((s: any) => s.execution_result).length
-
-    return (
-      <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StageMetric label="Subtasks" value={subtasks.length} hint="Created in decomposition" />
-          <StageMetric label="High priority" value={highPriority} hint="Marked as high urgency" />
-          <StageMetric label="Awaiting agent" value={withoutAgents} hint="Need assignment in Stage 2" />
-          <StageMetric label="With drafts" value={completedDrafts} hint="Already have agent output" />
-        </div>
-        <div className="overflow-x-auto mt-4 max-h-64 pr-1">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase text-muted-foreground">
-              <tr>
-                <th className="py-2 pr-3 text-left">#</th>
-                <th className="py-2 pr-3 text-left">Task</th>
-                <th className="py-2 pr-3 text-left">Priority</th>
-                <th className="py-2 pr-3 text-left">Assigned Agent</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {subtasks.map((task: any, index: number) => (
-                <tr key={`stage1-${index}`} className="align-top">
-                  <td className="py-2 pr-3 text-muted-foreground">{index + 1}</td>
-                  <td className="py-2 pr-3">{task.description || '—'}</td>
-                  <td className="py-2 pr-3 text-xs uppercase text-muted-foreground">{task.priority || 'n/a'}</td>
-                  <td className="py-2 pr-3 text-sm text-muted-foreground">{task.selected_agent?.agent_name || 'Not selected'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    )
-  }
-
-  const renderStage2 = () => {
-    const assigned = subtasks.filter((s: any) => s.selected_agent).length
-    const unassigned = subtasks.length - assigned
-    return (
-      <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StageMetric label="Agents Assigned" value={`${assigned}/${subtasks.length}`} hint="Tasks with an agent selected" />
-          <StageMetric label="Pending Assignment" value={unassigned} hint="Tasks still waiting for an agent" />
-          <StageMetric label="Avg. Match Score" value={
-            assigned
-              ? `${Math.round((subtasks.reduce((sum: number, s: any) => sum + (s.agent_score || 0), 0) / assigned) * 100)}%`
-              : '—'
-          } hint="Based on selector output" />
-        </div>
-        <div className="overflow-x-auto mt-4 max-h-64 pr-1">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase text-muted-foreground">
-              <tr>
-                <th className="py-2 pr-3 text-left">Task</th>
-                <th className="py-2 pr-3 text-left">Agent</th>
-                <th className="py-2 pr-3 text-left">Agent Type</th>
-                <th className="py-2 pr-3 text-left">Match</th>
-                <th className="py-2 pr-3 text-left">Capabilities</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {subtasks.map((task: any, index: number) => (
-                <tr key={`stage2-${index}`}>
-                  <td className="py-2 pr-3">{task.description || '—'}</td>
-                  <td className="py-2 pr-3">{task.selected_agent?.agent_name || <span className="text-muted-foreground">Unassigned</span>}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.selected_agent?.agent_type || '—'}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.agent_score ? formatPercent(task.agent_score) : 'n/a'}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.selected_agent?.capabilities?.join(', ') || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    )
-  }
-
-  const renderStage3 = () => {
-    // Read from context_enhancement object instead of retrieved_docs/memory_items
-    const withContext = subtasks.filter((s: any) => (s.context_enhancement?.num_sources || 0) > 0).length
-    const withoutContext = subtasks.length - withContext
-
-    return (
-      <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StageMetric label="Context Ready" value={`${withContext}/${subtasks.length}`} hint="Tasks with retrieved docs or memories" />
-          <StageMetric label="Missing Context" value={withoutContext} hint="Needs RAG or memory" />
-          <StageMetric label="Avg. Context Quality" value={
-            subtasks.length ? formatPercent(subtasks.reduce((sum: number, s: any) => sum + (s.context_enhancement?.context_quality || s.context_quality || 0), 0) / subtasks.length) : '0%'
-          } />
-        </div>
-        {withoutContext === subtasks.length && (
-          <div className="mt-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-100 text-sm flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 mt-0.5" />
-            <div>
-              <div className="font-semibold text-amber-200">No context retrieved</div>
-              <p>RAG and memory lookups returned zero sources for every subtask. Verify embeddings or vector DB connectivity.</p>
-            </div>
-          </div>
-        )}
-        <div className="overflow-x-auto mt-4 max-h-64 pr-1">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase text-muted-foreground">
-              <tr>
-                <th className="py-2 pr-3 text-left">Task</th>
-                <th className="py-2 pr-3 text-left">Context Quality</th>
-                <th className="py-2 pr-3 text-left">Docs</th>
-                <th className="py-2 pr-3 text-left">Memories</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {subtasks.map((task: any, index: number) => (
-                <tr key={`stage3-${index}`}>
-                  <td className="py-2 pr-3">{task.description || '—'}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{formatPercent(task.context_enhancement?.context_quality || task.context_quality || 0)}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.context_enhancement?.num_sources || 0}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">0</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    )
-  }
-
-  const renderStage4 = () => {
-    const completed = subtasks.filter((s: any) => s.execution_result?.status === 'completed').length
-    const failed = subtasks.filter((s: any) => s.execution_result?.status === 'failed').length
-    return (
-      <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StageMetric label="Completed" value={`${completed}/${subtasks.length}`} />
-          <StageMetric label="Failed" value={failed} />
-          <StageMetric label="Avg. Tokens" value={
-            completed ? Math.round(subtasks.reduce((sum: number, s: any) => sum + (s.execution_result?.tokens_used || 0), 0) / completed) : 0
-          } hint="Per completed task" />
-        </div>
-        <div className="overflow-x-auto mt-4 max-h-64 pr-1">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase text-muted-foreground">
-              <tr>
-                <th className="py-2 pr-3 text-left">Task</th>
-                <th className="py-2 pr-3 text-left">Agent</th>
-                <th className="py-2 pr-3 text-left">Status</th>
-                <th className="py-2 pr-3 text-left">Tokens</th>
-                <th className="py-2 pr-3 text-left">Duration</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {subtasks.map((task: any, index: number) => (
-                <tr key={`stage4-${index}`} className="align-top">
-                  <td className="py-2 pr-3">{task.description || '—'}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.selected_agent?.agent_name || '—'}</td>
-                  <td className="py-2 pr-3">
-                    <Badge variant="outline" className={cn(
-                      'text-[11px]',
-                      task.execution_result?.status === 'completed' && 'text-emerald-400 border-emerald-400/40',
-                      task.execution_result?.status === 'failed' && 'text-red-400 border-red-400/40'
-                    )}>
-                      {task.execution_result?.status || 'pending'}
-                    </Badge>
-                  </td>
-                  <td className="py-2 pr-3 text-muted-foreground">{task.execution_result?.tokens_used?.toLocaleString() || '—'}</td>
-                  <td className="py-2 pr-3 text-muted-foreground">{formatDuration(task.execution_result?.execution_time_ms)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    )
-  }
-
-  const renderStage5 = () => (
-    aggregatedResult
-      ? <pre className="text-sm bg-black/30 border border-white/5 rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">{aggregatedResult}</pre>
-      : <p className="text-sm text-muted-foreground">No aggregated result has been generated yet.</p>
-  )
-
-  const renderStage6 = () => (
-    learningUpdates.length > 0
-      ? (
-        <ul className="space-y-3">
-          {learningUpdates.map((update: any, index: number) => (
-            <li key={`learning-${index}`} className="p-3 rounded-xl border border-white/5 bg-white/5">
-              <div className="text-xs text-muted-foreground uppercase mb-1">{update.agent_name || 'Agent'}</div>
-              <p className="text-sm">{update.summary || JSON.stringify(update, null, 2)}</p>
-            </li>
-          ))}
-        </ul>
-      )
-      : <p className="text-sm text-muted-foreground">No learning updates were recorded for this execution.</p>
-  )
-
-  const renderStage7 = () => {
-    const avgQuality = subtasks.length
-      ? subtasks.reduce((sum: number, s: any) => sum + (s.context_quality || 0), 0) / subtasks.length
-      : 0
-    const lowQuality = subtasks.filter((s: any) => (s.context_quality || 0) < 0.3).length
-    return (
-      <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StageMetric label="Overall Quality" value={formatPercent(avgQuality)} hint="Proxy from context quality" />
-          <StageMetric label="At Risk Tasks" value={lowQuality} hint="<30% quality" />
-        </div>
-        <p className="text-sm text-muted-foreground mt-3">
-          Quality combines completeness, accuracy, efficiency, reliability, and coherence. Improve context quality to raise these scores.
-        </p>
-      </>
-    )
-  }
-
-  const renderStage8 = () => (
-    memoryWrites
-      ? <pre className="text-sm bg-black/30 border border-white/5 rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">{JSON.stringify(memoryWrites, null, 2)}</pre>
-      : <p className="text-sm text-muted-foreground">No new memories were stored for this run.</p>
-  )
-
-  const renderStage9 = () => (
-    execution?.output_data?.final_report
-      ? <pre className="text-sm bg-black/30 border border-white/5 rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">{execution.output_data.final_report}</pre>
-      : <p className="text-sm text-muted-foreground">Final response has not been generated yet.</p>
-  )
-
-  const stageContent = () => {
-    switch (stage) {
-      case 1: return renderStage1()
-      case 2: return renderStage2()
-      case 3: return renderStage3()
-      case 4: return renderStage4()
-      case 5: return renderStage5()
-      case 6: return renderStage6()
-      case 7: return renderStage7()
-      case 8: return renderStage8()
-      case 9: return renderStage9()
-      default: return <p className="text-sm text-muted-foreground">No diagnostics available for this stage.</p>
-    }
-  }
-
-  return (
-    <div className={cn("glass-panel rounded-2xl p-5 transition-all", collapsed && "py-3")}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Stage Insight</p>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold truncate">{stageInfo.name}</h3>
-            <Badge variant="outline" className="text-xs flex-shrink-0">{stageInfo.shortName}</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground truncate">{stageInfo.description}</p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onToggle} className="text-xs">
-          {collapsed ? (
-            <>
-              <Maximize2 className="w-3 h-3 mr-2" /> Expand
-            </>
-          ) : (
-            <>
-              <Minimize2 className="w-3 h-3 mr-2" /> Collapse
-            </>
-          )}
-        </Button>
-      </div>
-      {!collapsed && (
-        <div className="mt-4 space-y-4">
-          {stageContent()}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Streaming Log Component with FULL details
+// Streaming Log Component
 function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[], selectedStage: number | null, onClearFilter: () => void }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -516,11 +165,10 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 flex-shrink-0">{getLogIcon(log.type)}</div>
                     <div className="flex-1 min-w-0">
-                      {/* Header row */}
                       <div className="flex items-center flex-wrap gap-2 mb-2">
                         <span className="text-xs text-muted-foreground font-mono-logs">{formatTime(log.timestamp)}</span>
-                        <Badge variant="outline" className="text-[10px] h-5" style={{ borderColor: STAGES[log.stage - 1]?.color + '40', color: STAGES[log.stage - 1]?.color }}>
-                          {STAGES[log.stage - 1]?.shortName || `S${log.stage}`}
+                        <Badge variant="outline" className="text-[10px] h-5" style={{ borderColor: STAGE_COLORS[log.stage - 1] + '40', color: STAGE_COLORS[log.stage - 1] }}>
+                          {STAGE_SHORT_NAMES[log.stage - 1] || `S${log.stage}`}
                         </Badge>
                         {log.agent && <Badge variant="secondary" className="text-[10px] h-5 bg-primary/20 text-primary">🤖 {log.agent}</Badge>}
                         {log.model && <Badge variant="outline" className="text-[10px] h-5 text-cyan-400 border-cyan-400/30">{log.model}</Badge>}
@@ -531,17 +179,14 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                         )}
                       </div>
 
-                      {/* Message - always visible */}
                       <p className="text-sm font-medium mb-2">{log.message}</p>
 
-                      {/* Task description if available */}
                       {log.taskDescription && (
                         <div className="text-sm text-muted-foreground mb-2">
                           <span className="text-xs text-primary/60 uppercase">Task:</span> {log.taskDescription}
                         </div>
                       )}
 
-                      {/* Expanded content - FULL details */}
                       <AnimatePresence>
                         {isExpanded && (
                           <motion.div
@@ -550,7 +195,6 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                             exit={{ height: 0, opacity: 0 }}
                             className="overflow-hidden"
                           >
-                            {/* Full LLM Response */}
                             {log.fullResponse && (
                               <div className="mt-3 p-3 bg-black/30 rounded-lg border border-white/5">
                                 <div className="text-xs text-primary/60 uppercase mb-2 flex items-center gap-2">
@@ -563,7 +207,6 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                               </div>
                             )}
 
-                            {/* Additional details */}
                             {log.details && !log.fullResponse && (
                               <div className="mt-3 p-3 bg-black/30 rounded-lg border border-white/5">
                                 <div className="text-xs text-primary/60 uppercase mb-2">Details</div>
@@ -573,7 +216,6 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                               </div>
                             )}
 
-                            {/* Tools used */}
                             {log.toolsUsed && log.toolsUsed.length > 0 && (
                               <div className="mt-3 flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-primary/60 uppercase">Tools:</span>
@@ -586,7 +228,6 @@ function StreamingLog({ logs, selectedStage, onClearFilter }: { logs: LogEntry[]
                         )}
                       </AnimatePresence>
 
-                      {/* Metrics row - only show if we have actual values */}
                       {((log.tokens && log.tokens > 0) || (log.duration && log.duration > 0)) && (
                         <div className="flex items-center gap-4 mt-3 pt-2 border-t border-white/5 text-xs text-muted-foreground">
                           {log.tokens && log.tokens > 0 && <span className="flex items-center gap-1"><Sparkles className="w-3 h-3 text-primary" />{log.tokens.toLocaleString()} tokens</span>}
@@ -631,11 +272,11 @@ function MetricsSidebar({ currentStage, executionData, isExecuting }: { currentS
       <div className="glass-panel rounded-2xl p-4">
         <div className="text-xs text-muted-foreground mb-2">CURRENT STAGE</div>
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: STAGES[currentStage - 1]?.color + '20' }}>
-            <span style={{ color: STAGES[currentStage - 1]?.color }}>{STAGES[currentStage - 1]?.icon}</span>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: STAGE_COLORS[currentStage - 1] + '20' }}>
+            <span className="text-sm font-bold" style={{ color: STAGE_COLORS[currentStage - 1] }}>{currentStage}</span>
           </div>
           <div>
-            <div className="font-semibold">{STAGES[currentStage - 1]?.name}</div>
+            <div className="font-semibold">{STAGE_NAMES[currentStage - 1]}</div>
             <div className="text-xs text-muted-foreground">Stage {currentStage} of 9</div>
           </div>
         </div>
@@ -692,6 +333,131 @@ function MetricsSidebar({ currentStage, executionData, isExecuting }: { currentS
   )
 }
 
+// Build step execution data from workflow execution subtasks
+function buildStepExecutionData(execution: any): StepExecutionData[] {
+  if (!execution?.output_data?.subtasks) return []
+
+  const subtasks = execution.output_data.subtasks || []
+  return subtasks.map((subtask: any, index: number) => {
+    const execResult = subtask.execution_result || {}
+    const agent = subtask.selected_agent || {}
+
+    let status: StepExecutionData['status'] = 'pending'
+    if (execResult.status === 'completed') status = 'success'
+    else if (execResult.status === 'failed') status = 'failed'
+    else if (execResult.status === 'running') status = 'running'
+
+    return {
+      step_id: subtask.description?.slice(0, 40) || `step-${index + 1}`,
+      order: index + 1,
+      agent_id: agent.agent_id,
+      agent_name: agent.agent_name,
+      agent_model: agent.model_id || agent.agent_type,
+      agent_tool_count: agent.capabilities?.length,
+      prompt_template: subtask.description,
+      status,
+      started_at: execResult.started_at,
+      completed_at: execResult.completed_at,
+      duration_ms: execResult.execution_time_ms,
+      tokens_used: execResult.tokens_used,
+      messages: execResult.messages,
+      tool_calls: execResult.tool_calls?.map((tc: any) => ({
+        app_name: tc.app_name || tc.tool_name || 'Tool',
+        action_name: tc.action_name || tc.function_name || tc.name || 'action',
+        params: tc.params || tc.arguments,
+        result: tc.result || tc.output,
+        status: tc.status || (tc.error ? 'error' : 'success'),
+        duration_ms: tc.duration_ms,
+      })),
+      result: execResult.llm_response || execResult.result || execResult.output,
+      error: execResult.error,
+      retries: execResult.retries || 0,
+    } as StepExecutionData
+  })
+}
+
+// Build self-learning data from execution output
+function buildLearningData(execution: any): LearningData | null {
+  const learningSystem = execution?.output_data?.learning_system_metadata ||
+    execution?.output_data?.learning_system ||
+    execution?.output_data?.learning_updates
+
+  if (!learningSystem) return null
+
+  const updates = learningSystem.updates || learningSystem
+  if (!updates || (Array.isArray(updates) && updates.length === 0)) return null
+
+  const patterns = Array.isArray(updates)
+    ? updates.map((u: any) => ({
+        type: u.type || 'learning',
+        description: u.summary || u.description || JSON.stringify(u),
+        severity: u.severity || 'medium' as const,
+        step: u.step_index ?? u.subtask_index ?? null,
+      }))
+    : Object.entries(updates).map(([key, value]: [string, any]) => ({
+        type: key,
+        description: typeof value === 'string' ? value : (value?.summary || JSON.stringify(value)),
+        severity: 'medium' as const,
+        step: null,
+      }))
+
+  return {
+    patterns,
+    suggestions: [],
+    performance_metrics: {
+      total_duration_ms: execution?.output_data?.total_execution_time_ms,
+      success_rate: execution?.output_data?.subtasks
+        ? execution.output_data.subtasks.filter((s: any) => s.execution_result?.status === 'completed').length / execution.output_data.subtasks.length
+        : undefined,
+    },
+  }
+}
+
+// Build quality data from execution output
+function buildQualityData(execution: any): QualityData | null {
+  const qualityScores = execution?.output_data?.quality_scores ||
+    execution?.output_data?.result_aggregation_metadata?.quality_scores
+
+  if (!qualityScores) return null
+
+  const overall = qualityScores.overall ?? qualityScores.quality_score ?? 0
+
+  return {
+    quality_score: overall,
+    breakdown: {
+      completeness: qualityScores.completeness ?? overall,
+      accuracy: qualityScores.accuracy ?? overall,
+      efficiency: qualityScores.efficiency ?? overall,
+      reliability: qualityScores.reliability ?? overall,
+      cost: qualityScores.cost ?? overall,
+    },
+    grade: overall >= 0.9 ? 'A' : overall >= 0.75 ? 'B' : overall >= 0.6 ? 'C' : overall >= 0.4 ? 'D' : 'F',
+    bottlenecks: [],
+  }
+}
+
+// Build memory data from execution output
+function buildMemoryData(execution: any): MemoryData | null {
+  const memoryStorage = execution?.output_data?.memory_storage_metadata ||
+    execution?.output_data?.memory_storage ||
+    execution?.output_data?.memory_integration_summary ||
+    execution?.output_data?.memory_consolidation_metadata
+
+  if (!memoryStorage) return null
+
+  return {
+    stored_memories: memoryStorage.stored_count || memoryStorage.memories_stored || 0,
+    scopes: memoryStorage.scopes || [],
+    memories: (memoryStorage.entries || memoryStorage.memories || []).map((m: any) => ({
+      scope: m.scope || 'unknown',
+      type: m.type || 'execution',
+      agent_id: m.agent_id,
+      step_index: m.step_index,
+    })),
+    errors: memoryStorage.errors,
+  }
+}
+
 // Main Component
 export function ExecutionTheater({ workflowId, onBack, autoStart = false }: ExecutionTheaterProps) {
   const [isExecuting, setIsExecuting] = useState(false)
@@ -705,22 +471,33 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [useAISDK, setUseAISDK] = useState(false)
 
-  // Refs for auto-scrolling
+  // Step execution data for TheaterStepExecution components
+  const [stepExecutions, setStepExecutions] = useState<StepExecutionData[]>([])
+
+  // Self-learning data for TheaterSelfLearningPanel
+  const [learningData, setLearningData] = useState<LearningData | null>(null)
+  const [qualityData, setQualityData] = useState<QualityData | null>(null)
+  const [memoryData, setMemoryData] = useState<MemoryData | null>(null)
+
   const logsEndRef = useRef<HTMLDivElement>(null)
   const execution = executionData?.execution
-  const subtasksForInsights = execution?.output_data?.subtasks || []
-  const [isStagePanelCollapsed, setIsStagePanelCollapsed] = useState(false)
   const lastExecutionIdRef = useRef<number | null>(null)
+
+  // Update step execution and self-learning data when execution changes
+  const updateDerivedData = useCallback((exec: any) => {
+    if (!exec) return
+    setStepExecutions(buildStepExecutionData(exec))
+    setLearningData(buildLearningData(exec))
+    setQualityData(buildQualityData(exec))
+    setMemoryData(buildMemoryData(exec))
+  }, [])
 
   const generateLogsFromExecution = useCallback((execution: any) => {
     if (!execution) return
 
     const output = execution.output_data || {}
-
-    // If execution is just starting (no output data yet), don't show stage 3 logs
     const hasNoData = !output.subtasks && !output.agent_selection_metadata && !output.context_engineering_metadata
     if (hasNoData && execution.status !== 'completed') {
-      // Execution just started, only show stage 1
       setCurrentStage(1)
       setCompletedStages([])
       setLogs([{
@@ -732,8 +509,9 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       }])
       return
     }
+
     const subtasks = output.subtasks || []
-    const agentSelectionMeta = output.agent_selection_metadata || output.agent_selection_metadata
+    const agentSelectionMeta = output.agent_selection_metadata
     const contextMeta = output.context_engineering_metadata || {
       summary: output.context_engineering?.summary,
       enhancements: output.context_engineering?.enhancements,
@@ -741,50 +519,30 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     const agentExecutionMeta = output.agent_execution_metadata || output.agent_execution
     const resultAggregationMeta = output.result_aggregation_metadata || output.result_aggregation
     const learningSystemMeta = output.learning_system_metadata || output.learning_system
-    const learningUpdates = Array.isArray(output.learning_updates)
-      ? output.learning_updates
-      : []
+    const learningUpdates = Array.isArray(output.learning_updates) ? output.learning_updates : []
     const memoryStorageMeta = output.memory_storage_metadata || output.memory_storage
     const memoryIntegrationSummary = output.memory_integration_summary
-    const memoryConsolidationMeta = output.memory_consolidation_metadata || output.memory_consolidation
     const newLogs: LogEntry[] = []
     let time = new Date(execution.started_at || Date.now())
     let current = 1
 
-    // Stage 1: Task Decomposition - only if subtasks exist
+    // Stage 1: Task Decomposition
     if (subtasks.length > 0) {
       newLogs.push({
-        id: 'decomp-start',
-        timestamp: time,
-        stage: 1,
-        type: 'stage_start',
+        id: 'decomp-start', timestamp: time, stage: 1, type: 'stage_start',
         message: `⚡ STAGE 1: TASK DECOMPOSITION`,
         details: `Original query: ${execution.input_data?.user_query || execution.input_data?.query || 'N/A'}`
       })
       time = new Date(time.getTime() + 500)
-
-      const decompositionDetails = subtasks.map((s: any, i: number) => {
-        return `\n━━━ Subtask ${i + 1} ━━━\n` +
-          `Description: ${s.description || 'N/A'}\n` +
-          `Complexity: ${s.complexity || 'N/A'}\n` +
-          `Required Capabilities: ${s.required_capabilities?.join(', ') || 'N/A'}\n` +
-          `Priority: ${s.priority || 'N/A'}`
-      }).join('\n')
-
-      newLogs.push({
-        id: 'decomp-result',
-        timestamp: time,
-        stage: 1,
-        type: 'stage_complete',
-        message: `✓ Decomposed into ${subtasks.length} subtasks`,
-        fullResponse: decompositionDetails || 'No subtasks generated'
-      })
+      const decompositionDetails = subtasks.map((s: any, i: number) =>
+        `\n━━━ Subtask ${i + 1} ━━━\nDescription: ${s.description || 'N/A'}\nComplexity: ${s.complexity || 'N/A'}\nRequired Capabilities: ${s.required_capabilities?.join(', ') || 'N/A'}\nPriority: ${s.priority || 'N/A'}`
+      ).join('\n')
+      newLogs.push({ id: 'decomp-result', timestamp: time, stage: 1, type: 'stage_complete', message: `✓ Decomposed into ${subtasks.length} subtasks`, fullResponse: decompositionDetails || 'No subtasks generated' })
       current = 2
     }
 
-    // Stage 2: Agent Selection - only if agents are selected
-    const assignmentEntries = Object.entries(agentSelectionMeta?.summary?.assignments || agentSelectionMeta?.assignments || {})
-      .filter(([key]) => key.startsWith('subtask_'))
+    // Stage 2: Agent Selection
+    const assignmentEntries = Object.entries(agentSelectionMeta?.summary?.assignments || agentSelectionMeta?.assignments || {}).filter(([key]) => key.startsWith('subtask_'))
     const hasAgents = assignmentEntries.length > 0 || subtasks.some((s: any) => s.selected_agent)
     if (hasAgents) {
       time = new Date(time.getTime() + 500)
@@ -792,32 +550,23 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       assignmentEntries.forEach(([key, agents]) => {
         const subtaskIndex = parseInt(key.replace('subtask_', ''), 10)
         const subtaskDescription = subtasks[subtaskIndex]?.description || `Subtask ${subtaskIndex + 1}`
-          ; (agents as any[]).forEach((agent, idx) => {
-            time = new Date(time.getTime() + 200)
-            newLogs.push({
-              id: `agent-${key}-${idx}`,
-              timestamp: time,
-              stage: 2,
-              type: 'agent_spawn',
-              message: `🤖 Selected: ${agent.agent_name}`,
-              agent: agent.agent_name,
-              taskDescription: subtaskDescription,
-              fullResponse:
-                `Match Score: ${(agent.match_score * 100).toFixed(1)}%\n` +
-                `Reasoning: ${agent.reasoning || 'N/A'}`
-            })
+        ;(agents as any[]).forEach((agent, idx) => {
+          time = new Date(time.getTime() + 200)
+          newLogs.push({
+            id: `agent-${key}-${idx}`, timestamp: time, stage: 2, type: 'agent_spawn',
+            message: `🤖 Selected: ${agent.agent_name}`, agent: agent.agent_name, taskDescription: subtaskDescription,
+            fullResponse: `Match Score: ${(agent.match_score * 100).toFixed(1)}%\nReasoning: ${agent.reasoning || 'N/A'}`
           })
+        })
       })
       time = new Date(time.getTime() + 300)
       newLogs.push({ id: 'select-complete', timestamp: time, stage: 2, type: 'stage_complete', message: `✓ STAGE 2: AGENT SELECTION COMPLETE` })
       current = 3
     }
 
-    // Stage 3: Context Engineering - detect from metadata and actual retrieved context
-    const totalContextTasks = contextMeta?.summary?.total_subtasks ?? subtasks.length
+    // Stage 3: Context Engineering
     const subtasksWithContext = contextMeta?.summary?.subtasks_with_context ?? 0
     const shouldShowContextStage = !!contextMeta || subtasks.length > 0
-
     if (shouldShowContextStage) {
       time = new Date(time.getTime() + 300)
       const enhancements = contextMeta?.enhancements || {}
@@ -825,33 +574,15 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         const enhancement = enhancements[`subtask_${i}`] || enhancements[i]
         const quality = enhancement?.context_quality ?? s?.context_quality ?? 0
         const sources = enhancement?.num_sources ?? (s?.retrieved_docs?.length || 0) + (s?.memory_items?.length || 0)
-        return `Subtask ${i + 1}:\n` +
-          `  Context Quality: ${(quality * 100).toFixed(2)}%\n` +
-          `  Sources Retrieved: ${sources}`
+        return `Subtask ${i + 1}:\n  Context Quality: ${(quality * 100).toFixed(2)}%\n  Sources Retrieved: ${sources}`
       }).join('\n')
-
-      newLogs.push({
-        id: 'context-start',
-        timestamp: time,
-        stage: 3,
-        type: 'stage_start',
-        message: `⚡ STAGE 3: CONTEXT ENGINEERING`,
-        fullResponse: contextDetails || 'Context preparation in progress...'
-      })
+      newLogs.push({ id: 'context-start', timestamp: time, stage: 3, type: 'stage_start', message: `⚡ STAGE 3: CONTEXT ENGINEERING`, fullResponse: contextDetails || 'Context preparation in progress...' })
       time = new Date(time.getTime() + 300)
-      newLogs.push({
-        id: 'context-complete',
-        timestamp: time,
-        stage: 3,
-        type: 'stage_complete',
-        message: subtasksWithContext > 0
-          ? `✓ STAGE 3: CONTEXT ENGINEERING COMPLETE`
-          : `⚠️ STAGE 3: CONTEXT ENGINEERING - No context retrieved`
-      })
+      newLogs.push({ id: 'context-complete', timestamp: time, stage: 3, type: 'stage_complete', message: subtasksWithContext > 0 ? `✓ STAGE 3: CONTEXT ENGINEERING COMPLETE` : `⚠️ STAGE 3: CONTEXT ENGINEERING - No context retrieved` })
       current = 4
     }
 
-    // Stage 4: Agent Execution - only if execution has started
+    // Stage 4: Agent Execution
     const execResults = agentExecutionMeta?.results || {}
     const resultEntries = Object.entries(execResults)
     const hasExecutionResults = resultEntries.length > 0 || subtasks.some((s: any) => s.execution_result)
@@ -861,46 +592,30 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     if (hasExecutionResults) {
       time = new Date(time.getTime() + 300)
       newLogs.push({ id: 'exec-start', timestamp: time, stage: 4, type: 'stage_start', message: `⚡ STAGE 4: AGENT EXECUTION` })
-
       resultEntries.forEach(([key, result]: any) => {
         const subtaskIndex = parseInt(key.replace('subtask_', ''), 10)
         const subtaskDescription = subtasks[subtaskIndex]?.description || `Subtask ${subtaskIndex + 1}`
         time = new Date(time.getTime() + 800)
         newLogs.push({
-          id: `exec-${key}`,
-          timestamp: time,
-          stage: 4,
+          id: `exec-${key}`, timestamp: time, stage: 4,
           type: result.status === 'completed' ? 'task_complete' : 'task_error',
-          message: result.status === 'completed'
-            ? `✓ ${subtaskDescription.slice(0, 80)}`
-            : `✗ ${subtaskDescription.slice(0, 80)} failed: ${result.error || 'Unknown error'}`,
-          agent: result.agent_name,
-          tokens: result.tokens_used,
-          duration: result.execution_time_ms,
-          taskDescription: subtaskDescription
+          message: result.status === 'completed' ? `✓ ${subtaskDescription.slice(0, 80)}` : `✗ ${subtaskDescription.slice(0, 80)} failed: ${result.error || 'Unknown error'}`,
+          agent: result.agent_name, tokens: result.tokens_used, duration: result.execution_time_ms, taskDescription: subtaskDescription
         })
       })
-      // Only mark stage 4 complete if all subtasks are done
       if (allTasksDone && subtasks.length > 0) {
         time = new Date(time.getTime() + 500)
         newLogs.push({ id: 'exec-complete', timestamp: time, stage: 4, type: 'stage_complete', message: `✓ STAGE 4: AGENT EXECUTION COMPLETE` })
         current = 5
       } else {
-        current = 4 // Still executing
+        current = 4
       }
     }
 
     // Stage 5: Result Aggregation
     if (resultAggregationMeta || output.aggregated_result || output.final_report) {
       time = new Date(time.getTime() + 500)
-      newLogs.push({
-        id: 'aggregate',
-        timestamp: time,
-        stage: 5,
-        type: 'stage_complete',
-        message: `⚡ STAGE 5: RESULT AGGREGATION`,
-        fullResponse: output.aggregated_result || output.final_report || 'Results aggregated'
-      })
+      newLogs.push({ id: 'aggregate', timestamp: time, stage: 5, type: 'stage_complete', message: `⚡ STAGE 5: RESULT AGGREGATION`, fullResponse: output.aggregated_result || output.final_report || 'Results aggregated' })
       current = 6
     }
 
@@ -908,14 +623,7 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     const hasLearningUpdate = !!(learningSystemMeta?.updates && Object.keys(learningSystemMeta.updates).length > 0)
     if (hasLearningUpdate) {
       time = new Date(time.getTime() + 300)
-      newLogs.push({
-        id: 'learning',
-        timestamp: time,
-        stage: 6,
-        type: 'stage_complete',
-        message: `⚡ STAGE 6: LEARNING UPDATE`,
-        fullResponse: JSON.stringify(learningSystemMeta.updates, null, 2)
-      })
+      newLogs.push({ id: 'learning', timestamp: time, stage: 6, type: 'stage_complete', message: `⚡ STAGE 6: LEARNING UPDATE`, fullResponse: JSON.stringify(learningSystemMeta.updates, null, 2) })
       current = 7
     }
 
@@ -923,78 +631,39 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     const qualityScores = resultAggregationMeta?.quality_scores || output.quality_scores
     if (qualityScores) {
       time = new Date(time.getTime() + 300)
-      newLogs.push({
-        id: 'quality',
-        timestamp: time,
-        stage: 7,
-        type: 'stage_complete',
-        message: `⚡ STAGE 7: QUALITY ASSESSMENT - Overall ${(qualityScores.overall * 100).toFixed(1)}%`
-      })
+      newLogs.push({ id: 'quality', timestamp: time, stage: 7, type: 'stage_complete', message: `⚡ STAGE 7: QUALITY ASSESSMENT - Overall ${(qualityScores.overall * 100).toFixed(1)}%` })
       current = 8
     }
 
     // Stage 8: Memory Storage
     if (memoryStorageMeta || memoryIntegrationSummary) {
       time = new Date(time.getTime() + 300)
-      newLogs.push({
-        id: 'memory',
-        timestamp: time,
-        stage: 8,
-        type: 'memory_write',
-        message: `⚡ STAGE 8: MEMORY STORAGE`,
-        fullResponse: JSON.stringify(memoryStorageMeta || memoryIntegrationSummary, null, 2)
-      })
+      newLogs.push({ id: 'memory', timestamp: time, stage: 8, type: 'memory_write', message: `⚡ STAGE 8: MEMORY STORAGE`, fullResponse: JSON.stringify(memoryStorageMeta || memoryIntegrationSummary, null, 2) })
       current = 9
     }
 
     // Stage 9: Final Response
     if (execution.status === 'completed') {
       time = new Date(time.getTime() + 500)
-      const finalReport = execution.output_data?.final_report ||
-        execution.output_data?.aggregated_result ||
-        subtasks[subtasks.length - 1]?.execution_result?.llm_response ||
-        'Workflow completed'
-
-      newLogs.push({
-        id: 'complete',
-        timestamp: time,
-        stage: 9,
-        type: 'stage_complete',
-        message: `✅ STAGE 9: RESPONSE GENERATION COMPLETE`,
-        fullResponse: finalReport
-      })
+      const finalReport = execution.output_data?.final_report || execution.output_data?.aggregated_result || subtasks[subtasks.length - 1]?.execution_result?.llm_response || 'Workflow completed'
+      newLogs.push({ id: 'complete', timestamp: time, stage: 9, type: 'stage_complete', message: `✅ STAGE 9: RESPONSE GENERATION COMPLETE`, fullResponse: finalReport })
       current = 9
     }
 
-    const aggregationExists = !!(resultAggregationMeta || output.aggregated_result || output.final_report)
-    const qualityScoreAvailable = !!qualityScores
-    const memoryStoredExists = !!(memoryStorageMeta || memoryIntegrationSummary)
-
-    // Stage 3 completion: only if context was actually retrieved
-    const hasContextRetrieved = subtasksWithContext > 0 ||
-      subtasks.some((s: any) => (s.context_enhancement?.num_sources || 0) > 0 ||
-        (s.retrieved_docs?.length || 0) > 0 ||
-        (s.memory_items?.length || 0) > 0)
+    const hasContextRetrieved = subtasksWithContext > 0 || subtasks.some((s: any) => (s.context_enhancement?.num_sources || 0) > 0 || (s.retrieved_docs?.length || 0) > 0 || (s.memory_items?.length || 0) > 0)
 
     const stageCompletionFlags: Record<number, boolean> = {
-      1: subtasks.length > 0,
-      2: hasAgents,
-      3: hasContextRetrieved || currentStage > 3, // Complete if context found OR we moved past it
-      4: hasExecutionResults && allTasksDone,
-      5: aggregationExists,
-      6: hasLearningUpdate || learningUpdates.length > 0,
-      7: qualityScoreAvailable,
-      8: memoryStoredExists,
-      9: execution.status === 'completed'
+      1: subtasks.length > 0, 2: hasAgents,
+      3: hasContextRetrieved || currentStage > 3, 4: hasExecutionResults && allTasksDone,
+      5: !!(resultAggregationMeta || output.aggregated_result || output.final_report),
+      6: hasLearningUpdate || learningUpdates.length > 0, 7: !!qualityScores,
+      8: !!(memoryStorageMeta || memoryIntegrationSummary), 9: execution.status === 'completed'
     }
 
     let highestComplete = 0
     for (let stage = 1; stage <= 9; stage++) {
-      if (stageCompletionFlags[stage] && highestComplete === stage - 1) {
-        highestComplete = stage
-      } else {
-        break
-      }
+      if (stageCompletionFlags[stage] && highestComplete === stage - 1) highestComplete = stage
+      else break
     }
 
     const sequentialCompleted = Array.from({ length: highestComplete }, (_, idx) => idx + 1)
@@ -1008,18 +677,20 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     setCompletedStages(sequentialCompleted)
     setCurrentStage(nextStage)
     setLogs(newLogs)
-  }, [])
+
+    // Update derived data for new sub-components
+    updateDerivedData(execution)
+  }, [updateDerivedData])
 
   const loadExecutionById = useCallback(async (executionId: number) => {
     try {
       const executionDetails = await apiClient.getWorkflowExecution(executionId.toString())
       setExecutionData((prev: any) => ({ ...prev, execution: executionDetails }))
-      // generateLogsFromExecution will set currentStage and completedStages based on actual execution state
       generateLogsFromExecution(executionDetails)
     } catch (err) { console.error('Error loading execution:', err) }
   }, [generateLogsFromExecution])
 
-  // AISDK stream - direct connection to AISDK endpoint
+  // AISDK stream
   const [aisdkConnected, setAisdkConnected] = useState(false)
   const streamAbortRef = useRef<AbortController | null>(null)
 
@@ -1031,27 +702,17 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         setAisdkConnected(true)
         streamAbortRef.current = new AbortController()
 
-        // Use the same API URL as apiClient (from NEXT_PUBLIC_API_URL env var)
-        // This should be set to the remote backend URL (e.g., https://api.automatos.app)
         const apiUrl = process.env.NEXT_PUBLIC_API_URL ||
           (typeof window !== 'undefined' ? window.location.origin : '')
 
         if (!apiUrl) {
-          throw new Error('NEXT_PUBLIC_API_URL not configured. Cannot connect to AISDK stream.')
+          throw new Error('NEXT_PUBLIC_API_URL not configured.')
         }
 
         const url = `${apiUrl}/api/workflows/executions/${currentExecutionId}/stream/aisdk`
+        const response = await fetch(url, { method: 'GET', signal: streamAbortRef.current.signal })
 
-        console.log('[AISDK] Connecting to stream:', url)
-
-        const response = await fetch(url, {
-          method: 'GET',
-          signal: streamAbortRef.current.signal
-        })
-
-        if (!response.ok) {
-          throw new Error(`Stream failed: ${response.statusText}`)
-        }
+        if (!response.ok) throw new Error(`Stream failed: ${response.statusText}`)
 
         const reader = response.body?.getReader()
         const decoder = new TextDecoder()
@@ -1070,7 +731,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           for (const line of lines) {
             if (!line.trim()) continue
 
-            // AISDK format: d:{"type":"..."} or 0:"text" or e:{"error":"..."}
             if (line.startsWith('d:')) {
               try {
                 const event = JSON.parse(line.slice(2))
@@ -1150,11 +810,20 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     connectAISDKStream()
 
     return () => {
-      if (streamAbortRef.current) {
-        streamAbortRef.current.abort()
-      }
+      if (streamAbortRef.current) streamAbortRef.current.abort()
     }
   }, [currentExecutionId, loadExecutionById])
+
+  // Polling for real-time updates during execution
+  useEffect(() => {
+    if (!isExecuting || !currentExecutionId) return
+
+    const pollInterval = setInterval(() => {
+      loadExecutionById(currentExecutionId)
+    }, 3000)
+
+    return () => clearInterval(pollInterval)
+  }, [isExecuting, currentExecutionId, loadExecutionById])
 
   useEffect(() => {
     const loadWorkflow = async () => {
@@ -1168,7 +837,6 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           executionDetails = await apiClient.getWorkflowExecution(latest.id.toString())
           setCurrentExecutionId(latest.id)
           if (executionDetails?.status === 'running') setIsExecuting(true)
-          // generateLogsFromExecution will set currentStage and completedStages based on actual state
           generateLogsFromExecution(executionDetails)
         }
         setExecutionData({ ...(workflow as any), execution: executionDetails })
@@ -1181,26 +849,24 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
   const handleStartExecution = async () => {
     try {
-      // Reset everything for new execution
       lastExecutionIdRef.current = null
       setIsExecuting(true)
       setCurrentStage(1)
       setCompletedStages([])
+      setStepExecutions([])
+      setLearningData(null)
+      setQualityData(null)
+      setMemoryData(null)
       setLogs([{
-        id: 'start',
-        timestamp: new Date(),
-        stage: 1,
-        type: 'stage_start',
+        id: 'start', timestamp: new Date(), stage: 1, type: 'stage_start',
         message: '🚀 Starting workflow execution...'
       }])
 
-      // Start stream FIRST before executing workflow
       const result: any = await apiClient.executeWorkflow(workflowId.toString(), {})
       if (result?.execution_id || result?.id) {
         const execId = result.execution_id || result.id
         lastExecutionIdRef.current = execId
-        setCurrentExecutionId(execId) // This will trigger the stream useEffect
-        // Wait a bit before loading to ensure backend has started processing
+        setCurrentExecutionId(execId)
         setTimeout(() => loadExecutionById(execId), 500)
       }
     } catch (error) {
@@ -1211,81 +877,37 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
 
   const handlePauseExecution = async () => {
     try {
-      // Step 1: Abort the client-side stream
-      if (streamAbortRef.current) {
-        streamAbortRef.current.abort()
-        console.log('✅ Client-side stream aborted')
-      }
-
-      // Step 2: Call backend cancel API if we have an execution ID
+      if (streamAbortRef.current) streamAbortRef.current.abort()
       if (currentExecutionId) {
-        try {
-          await apiClient.cancelWorkflowExecution(currentExecutionId.toString())
-          console.log('✅ Backend execution cancelled successfully')
-        } catch (apiError) {
-          console.error('❌ Failed to cancel backend execution:', apiError)
-          // Log the error but continue with UI update
-        }
+        try { await apiClient.cancelWorkflowExecution(currentExecutionId.toString()) } catch (apiError) { console.error('Failed to cancel:', apiError) }
       }
-
-      // Step 3: Update UI state
       setIsExecuting(false)
-
-      // Step 4: Add a log entry about the pause
-      setLogs(prev => [...prev, {
-        id: `pause-${Date.now()}`,
-        timestamp: new Date(),
-        stage: currentStage,
-        type: 'info',
-        message: '⏸️ Execution paused by user'
-      }])
-
+      setLogs(prev => [...prev, { id: `pause-${Date.now()}`, timestamp: new Date(), stage: currentStage, type: 'info', message: '⏸️ Execution paused by user' }])
     } catch (error) {
-      console.error('❌ Error during pause execution:', error)
-      // Still update UI state even if something failed
+      console.error('Error during pause:', error)
       setIsExecuting(false)
     }
   }
 
   const handleStopExecution = async () => {
     try {
-      // Step 1: Abort the client-side stream
-      if (streamAbortRef.current) {
-        streamAbortRef.current.abort()
-        console.log('✅ Client-side stream aborted')
-      }
-
-      // Step 2: Call backend cancel API if we have an execution ID
+      if (streamAbortRef.current) streamAbortRef.current.abort()
       if (currentExecutionId) {
-        try {
-          await apiClient.cancelWorkflowExecution(currentExecutionId.toString())
-          console.log('✅ Backend execution stopped successfully')
-        } catch (apiError) {
-          console.error('❌ Failed to stop backend execution:', apiError)
-          // Log the error but continue with UI update
-        }
+        try { await apiClient.cancelWorkflowExecution(currentExecutionId.toString()) } catch (apiError) { console.error('Failed to stop:', apiError) }
       }
-
-      // Step 3: Update UI state
       setIsExecuting(false)
-
-      // Step 4: Add a log entry about the stop
-      setLogs(prev => [...prev, {
-        id: `stop-${Date.now()}`,
-        timestamp: new Date(),
-        stage: currentStage,
-        type: 'task_error',
-        message: '🛑 Execution stopped by user'
-      }])
-
+      setLogs(prev => [...prev, { id: `stop-${Date.now()}`, timestamp: new Date(), stage: currentStage, type: 'task_error', message: '🛑 Execution stopped by user' }])
     } catch (error) {
-      console.error('❌ Error during stop execution:', error)
-      // Still update UI state even if something failed
+      console.error('Error during stop:', error)
       setIsExecuting(false)
     }
   }
 
-  const handleStageClick = (stage: number) => { if (completedStages.includes(stage) || stage === currentStage) setSelectedStageFilter(selectedStageFilter === stage ? null : stage) }
+  const handleStageClick = (stage: number) => {
+    if (completedStages.includes(stage) || stage === currentStage) {
+      setSelectedStageFilter(selectedStageFilter === stage ? null : stage)
+    }
+  }
 
   if (!executionData) {
     return (
@@ -1297,6 +919,8 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
       </div>
     )
   }
+
+  const showSelfLearning = currentStage >= 6 || completedStages.includes(6)
 
   return (
     <div className={cn("h-screen flex flex-col theater-bg", isFullscreen && "fixed inset-0 z-50")}>
@@ -1330,20 +954,42 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
         </div>
       </div>
 
-      {/* Stage Pipeline */}
+      {/* Stage Pipeline - using new TheaterStageProgress component */}
       <div className="px-6 py-4">
-        <StagePipeline currentStage={currentStage} completedStages={completedStages} onStageClick={handleStageClick} />
+        <TheaterStageProgress currentStage={currentStage} onStageClick={handleStageClick} />
       </div>
 
-      <div className="px-6 pb-4">
-        <StageDetailPanel
-          stage={selectedStageFilter || currentStage}
-          subtasks={subtasksForInsights}
-          execution={execution}
-          collapsed={isStagePanelCollapsed}
-          onToggle={() => setIsStagePanelCollapsed(prev => !prev)}
-        />
-      </div>
+      {/* Step Execution Timeline - visible when we have step data */}
+      {stepExecutions.length > 0 && (
+        <div className="px-6 pb-4">
+          <div className="glass-panel rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold">Step Execution Timeline</h3>
+              <Badge variant="outline" className="text-[10px] h-5 ml-auto">
+                {stepExecutions.filter(s => s.status === 'success').length}/{stepExecutions.length} completed
+              </Badge>
+            </div>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto theater-scrollbar pr-1">
+              {stepExecutions.map((step, index) => (
+                <TheaterStepExecution key={step.step_id} step={step} index={index} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Self-Learning Panel - visible after Learn stage (stage 6+) */}
+      {showSelfLearning && (learningData || qualityData || memoryData) && (
+        <div className="px-6 pb-4">
+          <TheaterSelfLearningPanel
+            learningData={learningData}
+            qualityData={qualityData}
+            memoryData={memoryData}
+            defaultOpen={false}
+          />
+        </div>
+      )}
 
       {/* Main Content: Log (75%) + Sidebar (25%) */}
       <div className="flex-1 flex gap-4 px-6 pb-6 min-h-0">
@@ -1411,4 +1057,3 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     </div>
   )
 }
-
