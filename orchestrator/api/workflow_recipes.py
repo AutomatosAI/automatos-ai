@@ -609,6 +609,228 @@ async def execute_recipe(
 
 
 # ===================================================================
+# SELF-LEARNING ENDPOINTS (Learn, Quality, Suggestions, Executions)
+# ===================================================================
+
+@router.post("/{recipe_id}/learn")
+async def analyze_execution_learning(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger learning analysis on a completed recipe execution (Stage 6).
+
+    Body:
+    - execution_id: The execution_id to analyze (required)
+
+    Returns patterns, suggestions, and performance_metrics.
+    """
+    try:
+        execution_id = body.get('execution_id')
+        if not execution_id:
+            raise HTTPException(status_code=400, detail="execution_id is required")
+
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Validate execution belongs to this recipe
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        from core.services.recipe_learning_service import RecipeLearningService
+        service = RecipeLearningService(db=db)
+        result = service.analyze_execution(execution_id)
+
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error analyzing execution: {str(e)}")
+
+
+@router.post("/{recipe_id}/assess-quality")
+async def assess_execution_quality(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger quality assessment on a recipe execution (Stage 7).
+
+    Body:
+    - execution_id: The execution_id to assess (required)
+    - learnings: Optional learnings dict from /learn endpoint for reliability scoring
+
+    Returns quality_score, breakdown, grade, and bottlenecks.
+    """
+    try:
+        execution_id = body.get('execution_id')
+        if not execution_id:
+            raise HTTPException(status_code=400, detail="execution_id is required")
+
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Validate execution belongs to this recipe
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        learnings = body.get('learnings')
+
+        from core.services.recipe_quality_service import RecipeQualityService
+        service = RecipeQualityService(db=db)
+        result = service.assess_quality(execution_id, learnings=learnings)
+
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error assessing quality: {str(e)}")
+
+
+@router.get("/{recipe_id}/suggestions")
+async def get_recipe_suggestions(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Get improvement suggestions from the recipe's learning_data.
+
+    Returns latest suggestions, patterns, and performance metrics
+    extracted from previous learning analyses.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        learning_data = recipe.learning_data or {}
+
+        return {
+            "recipe_id": recipe_id,
+            "quality_score": recipe.quality_score,
+            "suggestions": learning_data.get("latest_suggestions", []),
+            "patterns": learning_data.get("latest_patterns", []),
+            "performance_metrics": learning_data.get("latest_performance"),
+            "last_analyzed_at": learning_data.get("last_analyzed_at"),
+            "analysis_count": len(learning_data.get("analyses", [])),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting suggestions for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting suggestions: {str(e)}")
+
+
+@router.get("/{recipe_id}/executions")
+async def list_recipe_executions(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    status: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """
+    List executions for a recipe with optional status filter.
+
+    Query Parameters:
+    - status: Filter by execution status (pending, running, completed, failed, cancelled)
+    - skip: Pagination offset
+    - limit: Pagination limit (1-100, default 20)
+
+    Returns list of executions with quality scores.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        query = db.query(RecipeExecution).filter(
+            RecipeExecution.recipe_id == recipe.id
+        )
+
+        if status:
+            query = query.filter(RecipeExecution.status == status)
+
+        total = query.count()
+
+        executions = query.order_by(
+            RecipeExecution.started_at.desc()
+        ).offset(skip).limit(limit).all()
+
+        return {
+            "items": [ex.to_dict() for ex in executions],
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "recipe_id": recipe_id,
+            "recipe_quality_score": recipe.quality_score,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing executions for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing executions: {str(e)}")
+
+
+# ===================================================================
 # MARKETPLACE ENDPOINTS
 # ===================================================================
 
