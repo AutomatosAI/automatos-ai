@@ -19,8 +19,46 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
+from core.models.core import Agent
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+
+
+def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[list]:
+    """Populate agent details for each step in the steps array."""
+    if not steps:
+        return steps
+
+    # Collect unique agent_ids
+    agent_ids = list({step.get('agent_id') for step in steps if step.get('agent_id')})
+    if not agent_ids:
+        return steps
+
+    # Batch-fetch agents
+    agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+    agent_map = {agent.id: agent for agent in agents}
+
+    enriched = []
+    for step in steps:
+        step_copy = dict(step)
+        agent_id = step_copy.get('agent_id')
+        if agent_id and agent_id in agent_map:
+            agent = agent_map[agent_id]
+            model_cfg = agent.model_config or {}
+            tool_count = len(agent.skills) if agent.skills else 0
+            step_copy['agent'] = {
+                'id': agent.id,
+                'name': agent.name,
+                'model': model_cfg.get('model_id', 'unknown'),
+                'provider': model_cfg.get('provider', 'unknown'),
+                'tool_count': tool_count,
+                'status': agent.status,
+            }
+        else:
+            step_copy['agent'] = None
+        enriched.append(step_copy)
+
+    return enriched
 
 
 @router.get("")
@@ -104,7 +142,8 @@ async def get_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get a single workflow recipe by its template_id"""
+    """Get a single workflow recipe by its template_id.
+    Returns recipe data with agent details populated for each step in the steps array."""
     try:
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
@@ -115,7 +154,10 @@ async def get_workflow_recipe(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        return recipe.to_dict()
+        result = recipe.to_dict()
+        # Enrich steps with agent details
+        result['steps'] = _enrich_steps_with_agents(recipe.steps, db)
+        return result
 
     except HTTPException:
         raise
@@ -138,13 +180,13 @@ async def create_workflow_recipe(
     - name: Display name
     - description: Description of what the recipe does
     - template_definition: JSON structure with steps, agents, config
+    - steps: Array of step definitions (required, each step needs step_id, order, agent_id, prompt_template)
 
     Optional fields:
     - tags: Array of tags
-    - steps: Array of step definitions for 9-stage workflow
     - inputs: Input schema
     - outputs: Output schema
-    - execution_config: Runtime behavior config
+    - execution_config: Runtime behavior config (defaults provided if omitted)
     - schedule_config: Scheduling configuration
     - recommended_agents: Array of agent type names
     - required_tools: Array of tool names
@@ -153,7 +195,7 @@ async def create_workflow_recipe(
     """
     try:
         # Validate required fields
-        required_fields = ['template_id', 'name', 'description', 'template_definition']
+        required_fields = ['template_id', 'name', 'description', 'template_definition', 'steps']
 
         for field in required_fields:
             if field not in recipe_data:
@@ -171,7 +213,18 @@ async def create_workflow_recipe(
                 detail=f"Recipe with ID '{recipe_data['template_id']}' already exists"
             )
 
-        # Create recipe
+        # Apply execution_config defaults if not provided
+        execution_config = recipe_data.get('execution_config') or {
+            'mode': 'sequential',
+            'max_retries': 1,
+            'retry_delay': 5,
+            'per_step_timeout': 300,
+            'total_timeout': 1800,
+            'quality_threshold': 0.7,
+            'auto_learn': True,
+        }
+
+        # Create recipe (validation happens after assignment)
         recipe = WorkflowRecipe(
             workspace_id=ctx.workspace_id,
             template_id=recipe_data['template_id'],
@@ -179,10 +232,10 @@ async def create_workflow_recipe(
             description=recipe_data['description'],
             template_definition=recipe_data['template_definition'],
             tags=recipe_data.get('tags', []),
-            steps=recipe_data.get('steps'),
+            steps=recipe_data['steps'],
             inputs=recipe_data.get('inputs'),
             outputs=recipe_data.get('outputs'),
-            execution_config=recipe_data.get('execution_config'),
+            execution_config=execution_config,
             schedule_config=recipe_data.get('schedule_config'),
             recommended_agents=recipe_data.get('recommended_agents', []),
             required_tools=recipe_data.get('required_tools', []),
@@ -194,6 +247,36 @@ async def create_workflow_recipe(
             version=recipe_data.get('version', '1.0'),
             created_by=recipe_data.get('created_by', ctx.user.email if ctx.user else "anonymous")
         )
+
+        # Validate steps structure
+        is_valid, error = recipe.validate_steps()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+        # Validate execution_config structure
+        is_valid, error = recipe.validate_execution_config()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+        # Validate schedule_config structure
+        is_valid, error = recipe.validate_schedule_config()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+
+        # Validate agent_id references exist in workspace
+        agent_ids = [step.get('agent_id') for step in recipe.steps if step.get('agent_id')]
+        if agent_ids:
+            existing_agents = db.query(Agent.id).filter(
+                Agent.id.in_(agent_ids),
+                Agent.workspace_id == ctx.workspace_id
+            ).all()
+            existing_ids = {a.id for a in existing_agents}
+            missing = [aid for aid in agent_ids if aid not in existing_ids]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Agent IDs not found in workspace: {missing}"
+                )
 
         db.add(recipe)
         db.commit()
@@ -254,6 +337,39 @@ async def update_workflow_recipe(
         for field in updatable_fields:
             if field in recipe_data:
                 setattr(recipe, field, recipe_data[field])
+
+        # Validate steps if updated
+        if 'steps' in recipe_data:
+            is_valid, error = recipe.validate_steps()
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+            # Validate agent_id references exist in workspace
+            agent_ids = [step.get('agent_id') for step in (recipe.steps or []) if step.get('agent_id')]
+            if agent_ids:
+                existing_agents = db.query(Agent.id).filter(
+                    Agent.id.in_(agent_ids),
+                    Agent.workspace_id == ctx.workspace_id
+                ).all()
+                existing_ids = {a.id for a in existing_agents}
+                missing = [aid for aid in agent_ids if aid not in existing_ids]
+                if missing:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Agent IDs not found in workspace: {missing}"
+                    )
+
+        # Validate execution_config if updated
+        if 'execution_config' in recipe_data:
+            is_valid, error = recipe.validate_execution_config()
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+        # Validate schedule_config if updated
+        if 'schedule_config' in recipe_data:
+            is_valid, error = recipe.validate_schedule_config()
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
 
         recipe.updated_at = datetime.now()
         db.commit()
