@@ -16,7 +16,8 @@ import {
   Eye,
   Clock,
   Star,
-  Share2
+  Share2,
+  Loader2
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -50,6 +51,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
+  const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
   const [recipeForm, setRecipeForm] = useState<any>({
     recipe_id: '',
     name: '',
@@ -158,6 +160,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   }
 
   const handleShareToMarketplace = async (recipe: any) => {
+    setSharingRecipeId(recipe.template_id || recipe.id?.toString())
     try {
       const result = await submitToMarketplaceMutation.mutateAsync({
         recipe_id: recipe.template_id,
@@ -178,12 +181,15 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
           variant: 'default'
         })
       }
+      refetch()
     } catch (error: any) {
       toast({
         title: 'Submission Failed',
         description: error?.message || 'Failed to submit recipe to marketplace',
         variant: 'destructive'
       })
+    } finally {
+      setSharingRecipeId(null)
     }
   }
 
@@ -358,7 +364,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
 
                   {/* Action Buttons */}
                   <div className="flex gap-2">
-                    <Button 
+                    <Button
                       className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                       size="sm"
                       onClick={() => handleUseRecipe(recipe)}
@@ -366,8 +372,8 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                       <Plus className="w-3 h-3 mr-2" />
                       Use
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => handleViewClick(recipe)}
                     >
@@ -375,15 +381,30 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                     </Button>
                     {!recipe.is_system && (
                       <>
-                        <Button 
-                          variant="outline" 
+                        {!recipe.is_marketplace_item && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleShareToMarketplace(recipe)}
+                            disabled={sharingRecipeId === (recipe.template_id || recipe.id?.toString())}
+                            title="Share to Marketplace"
+                          >
+                            {sharingRecipeId === (recipe.template_id || recipe.id?.toString()) ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Share2 className="w-3 h-3" />
+                            )}
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => handleEditClick(recipe)}
                         >
                           <Edit className="w-3 h-3" />
                         </Button>
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => handleDeleteClick(recipe)}
                           className="text-red-400 hover:text-red-300"
@@ -564,13 +585,16 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setShowViewModal(false)
                       handleShareToMarketplace(selectedRecipe)
                     }}
                     disabled={submitToMarketplaceMutation.isPending}
                   >
-                    <Share2 className="w-4 h-4 mr-2" />
-                    Share to Marketplace
+                    {submitToMarketplaceMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Share2 className="w-4 h-4 mr-2" />
+                    )}
+                    {submitToMarketplaceMutation.isPending ? 'Sharing...' : 'Share to Marketplace'}
                   </Button>
                 )}
                 <Button
