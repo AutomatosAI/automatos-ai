@@ -25,6 +25,9 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - Agent app assignments at `core/models/composio_cache.py` — `AgentAppAssignment` links `agent_id` to `app_name`
 - Chat endpoint uses `stream_response_with_agent(agent_id=...)` for all agent-resolved requests — legacy `stream_response_aisdk` path removed
 - Routing metadata exposed via `x-routing-*` response headers on chat streaming responses
+- Background async dispatch: use `asyncio.create_task()` for fire-and-forget execution (pattern from `api/workflows.py`)
+- `get_db_session()` is a sync `@contextmanager` — use `with`, not `async with`; auto-commits on exit
+- Webhook ingestors selected by trigger_name prefix (e.g. `JIRA_` → `JiraTriggerIngestor`)
 
 ---
 
@@ -192,4 +195,32 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Exception handling wraps the entire router call so a router failure never blocks chat — it gracefully falls back to `get_default_agent_id()`
   - Routing metadata is exposed via `x-routing-*` response headers for frontend consumption (US-014 will use these)
   - `ChatbotIngestor.ingest()` uses keyword-only args — pass `agent_id=None` explicitly when no override
+---
+
+## 2026-02-01 - US-008
+- **What was implemented:** Replaced the TODO in `api/composio.py` handle_webhook endpoint with full routing dispatch logic
+- **Changes:**
+  - Added imports for `asyncio`, `get_db_session`, `UnroutedEvent`, `RoutingCache`, `UniversalRouter`, `JiraTriggerIngestor`
+  - Added module-level `_routing_cache = RoutingCache()` singleton (same pattern as chat.py)
+  - Webhook handler now: determines ingestor by trigger_name prefix (JIRA_ → JiraTriggerIngestor)
+  - Creates RequestEnvelope via appropriate ingestor
+  - Calls `UniversalRouter.route(envelope)` to get RoutingDecision
+  - If `route_type == 'agent'`: dispatches via `asyncio.create_task(_dispatch_agent(...))` using `AgentFactory.execute_with_prompt()`
+  - If `route_type == 'workflow'`: dispatches via `asyncio.create_task(_dispatch_workflow(...))` creating `WorkflowExecution` then calling `execute_workflow_with_progress()`
+  - If no route found: stored as unrouted event by the router, returns 200 with `status=unrouted`
+  - For unsupported trigger types (non-JIRA_): stores `UnroutedEvent` directly and returns early
+  - Returns 200 immediately with routing decision summary (async dispatch in background)
+  - Added `_dispatch_agent()` and `_dispatch_workflow()` async helper functions
+- **Files changed:**
+  - `orchestrator/api/composio.py` (modified — webhook routing dispatch)
+  - `scripts/ralph/prd.json` (US-008 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `get_db_session()` is a sync `@contextmanager` (not async) — use `with` not `async with`
+  - `get_db_session()` auto-commits on exit, but explicit `db.commit()` within the block is fine for cases needing `db.refresh()`
+  - `WorkflowExecution.agent_id` is nullable — workflow execution pipeline selects agents dynamically via 9-stage orchestrator
+  - Background dispatch uses `asyncio.create_task()` (same pattern as `api/workflows.py` line 995)
+  - Lazy imports in dispatch helpers (`from modules.agents.factory...`) avoid circular imports and loading heavy modules at startup
+  - `UnroutedEvent.content` should be truncated ([:2000]) for safety since webhook payloads can be large
+  - The router already stores unrouted events internally when all tiers fail, so the webhook handler only needs to handle the "no ingestor" case
 ---
