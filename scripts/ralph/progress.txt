@@ -29,6 +29,7 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - `get_db_session()` is a sync `@contextmanager` — use `with`, not `async with`; auto-commits on exit
 - Webhook ingestors selected by trigger_name prefix (e.g. `JIRA_` → `JiraTriggerIngestor`)
 - Config centralization: `orchestrator/config.py` is the canonical place for `os.getenv()` — use `from config import config` in other modules
+- Management scripts: add `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` at top, use `SessionLocal()` for DB sessions (not `get_db`), use `DEFAULT_TENANT_ID` for single-tenant mode
 
 ---
 
@@ -267,4 +268,38 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Soft-delete pattern: set `is_active=False` rather than hard-deleting rows — consistent with RoutingRule and other models
   - The RoutingCache is a module-level singleton — each API module (chat.py, composio.py, routing.py) creates its own instance; a shared singleton across modules would need a factory or import from a common module
   - Corrections endpoint records in DB but cannot directly update cache without original content — the cache will self-correct via re-routing + user re-correction flow
+---
+
+## 2026-02-01 - US-011
+- **What was implemented:** Created Jira trigger subscription setup — both a management script and an API endpoint
+- **Script:** `orchestrator/scripts/setup_jira_trigger.py`
+  - Reads `COMPOSIO_API_KEY`/`COMPOSIO_KEY` from env or `.env` file
+  - Calls Composio SDK `subscribe_to_trigger()` to register `JIRA_NEW_ISSUE_TRIGGER`
+  - Creates `TriggerSubscription` record in database linking trigger to configurable `agent_id`/`workflow_id`
+  - CLI args: `--project` (default PILOT), `--agent-id`, `--workflow-id`
+  - Prints trigger ID, subscription details, and next steps for webhook URL configuration
+  - Uses `DEFAULT_TENANT_ID` for single-tenant deployments, `EntityManager.get_or_create_entity()` for entity resolution
+- **API endpoint:** `POST /api/routing/triggers/setup`
+  - Added to `orchestrator/api/routing.py` alongside existing routing endpoints
+  - `TriggerSetupRequest` schema: `trigger_name`, `project_key`, `agent_id`, `workflow_id` (all with defaults)
+  - Auth required via `get_request_context_hybrid`
+  - Uses workspace from `RequestContext` (multi-tenant capable)
+  - Calls Composio SDK, persists `TriggerSubscription`, returns subscription details with next steps
+  - Lazy imports for `get_composio_client` and `EntityManager` to avoid circular imports at module load
+- **Webhook URL documentation:** Both script output and API response include next steps:
+  1. Verify webhook URL in Composio dashboard (https://app.composio.dev → Project Settings → Webhooks)
+  2. Set webhook URL to `{BACKEND_URL}/api/composio/webhook`
+  3. (Optional) Set `COMPOSIO_WEBHOOK_SECRET` in .env for signature verification
+- **Files changed:**
+  - `orchestrator/scripts/setup_jira_trigger.py` (new)
+  - `orchestrator/api/routing.py` (modified — added TriggerSetupRequest schema and POST /api/routing/triggers/setup endpoint)
+  - `scripts/ralph/prd.json` (US-011 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Existing `api/composio.py` already has `POST /api/composio/triggers/subscribe` which does the same thing — the new `/api/routing/triggers/setup` provides an alternative entry point from the routing admin API surface
+  - Management scripts use `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` to add orchestrator root to path
+  - `SessionLocal()` (from `core.database.database`) is the direct session factory for scripts — endpoints use `Depends(get_db)` instead
+  - `DEFAULT_TENANT_ID` (`UUID("00000000-...")`) is used in scripts for single-tenant mode; API endpoints use `ctx.workspace_id` from auth context
+  - `ComposioClient.subscribe_to_trigger()` returns `{"id": str, "trigger_name": str, "status": str}`
+  - The `trigger_config` (e.g. `{project_key: "PILOT"}`) is passed to the Composio SDK at the SDK level, not as a separate parameter — the trigger_name itself identifies the trigger type
 ---

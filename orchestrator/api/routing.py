@@ -1,13 +1,15 @@
 """
-Routing API endpoints (PRD-50: US-010).
+Routing API endpoints (PRD-50: US-010, US-011).
 
 Admin endpoints for managing routing rules, viewing decisions,
-recording corrections, and inspecting cache statistics.
+recording corrections, inspecting cache statistics, and setting up
+trigger subscriptions.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional
 from uuid import UUID
 
@@ -18,6 +20,7 @@ from sqlalchemy.orm import Session
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
+from core.models.composio import TriggerSubscription
 from core.models.routing import (
     RoutingDecisionRecord,
     RoutingRule,
@@ -80,6 +83,25 @@ class DecisionResponse(BaseModel):
 class CorrectionRequest(BaseModel):
     request_id: UUID
     correct_agent_id: int
+
+
+class TriggerSetupRequest(BaseModel):
+    trigger_name: str = Field(
+        default="JIRA_NEW_ISSUE_TRIGGER",
+        description="Composio trigger name to subscribe to",
+    )
+    project_key: str = Field(
+        default="PILOT",
+        description="Jira project key to monitor",
+    )
+    agent_id: Optional[int] = Field(
+        default=None,
+        description="Agent ID to route triggered events to (optional)",
+    )
+    workflow_id: Optional[int] = Field(
+        default=None,
+        description="Workflow ID to route triggered events to (optional)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -331,4 +353,90 @@ async def get_cache_stats(
         return _routing_cache.stats()
     except Exception as e:
         logger.error("Error getting cache stats: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/routing/triggers/setup
+# ---------------------------------------------------------------------------
+
+
+@router.post("/triggers/setup")
+async def setup_trigger(
+    body: TriggerSetupRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Set up a Jira trigger subscription via Composio.
+
+    This is the API-based alternative to the ``scripts/setup_jira_trigger.py``
+    management script.  It:
+
+    1. Calls Composio SDK to subscribe to the given trigger.
+    2. Creates a ``TriggerSubscription`` record in the database linking the
+       trigger to an optional ``agent_id`` or ``workflow_id``.
+    3. Returns the subscription details.
+
+    **Webhook URL configuration:**
+    After setup, ensure the callback URL is registered in your Composio
+    dashboard (https://app.composio.dev → Project Settings → Webhooks).
+    """
+    try:
+        from core.composio.client import get_composio_client
+        from core.composio.entity_manager import EntityManager
+
+        # Resolve entity for the workspace
+        entity_manager = EntityManager(db)
+        entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+        entity_id = entity["composio_entity_id"]
+        entity_pk = entity["id"]
+
+        # Build callback URL
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        callback_url = f"{backend_url}/api/composio/webhook"
+
+        # Subscribe via Composio SDK
+        client = get_composio_client()
+        result = client.subscribe_to_trigger(
+            entity_id=entity_id,
+            trigger_name=body.trigger_name,
+            callback_url=callback_url,
+        )
+
+        composio_subscription_id = result.get("id", "")
+
+        # Persist subscription in database
+        subscription = TriggerSubscription(
+            entity_id=entity_pk,
+            trigger_name=body.trigger_name,
+            callback_url=callback_url,
+            composio_subscription_id=str(composio_subscription_id),
+            agent_id=body.agent_id,
+            workflow_id=body.workflow_id,
+            is_active=True,
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(subscription)
+
+        return {
+            "status": "subscribed",
+            "subscription_id": subscription.id,
+            "trigger_name": body.trigger_name,
+            "project_key": body.project_key,
+            "composio_subscription_id": composio_subscription_id,
+            "callback_url": callback_url,
+            "agent_id": body.agent_id,
+            "workflow_id": body.workflow_id,
+            "next_steps": (
+                "Verify webhook URL in Composio dashboard: "
+                "https://app.composio.dev → Project Settings → Webhooks. "
+                f"Set webhook URL to: {callback_url}"
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error setting up trigger: %s", e)
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
