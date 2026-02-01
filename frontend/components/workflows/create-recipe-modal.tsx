@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { JsonSchemaEditor } from './json-schema-editor'
+import { RecipeStepBuilder } from './recipe-step-builder'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -99,7 +100,10 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
       case 'basic':
         return values.name.trim().length >= 3 && inputsValid && outputsValid
       case 'steps':
-        return values.steps.length > 0
+        return (
+          values.steps.length > 0 &&
+          values.steps.every((s) => s.agent_id)
+        )
       case 'execution':
         return true
       case 'schedule':
@@ -257,7 +261,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                       </motion.div>
                     </TabsContent>
 
-                    {/* Step 2: Workflow Steps & Agents (placeholder for US-013) */}
+                    {/* Step 2: Workflow Steps & Agents */}
                     <TabsContent value="steps">
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -266,13 +270,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                         className="space-y-4"
                       >
                         <div className="glass-card rounded-2xl p-6">
-                          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Workflow Steps</h3>
-                          <p className="text-sm text-muted-foreground">
-                            Configure workflow steps with agent pre-assignment. At least one step is required.
-                          </p>
-                          <div className="mt-4 p-8 border border-dashed border-border/50 rounded-2xl text-center text-muted-foreground text-sm">
-                            Step builder will be implemented in US-013
-                          </div>
+                          <RecipeStepBuilder />
                         </div>
                       </motion.div>
                     </TabsContent>
