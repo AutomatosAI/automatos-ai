@@ -28,6 +28,7 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - Background async dispatch: use `asyncio.create_task()` for fire-and-forget execution (pattern from `api/workflows.py`)
 - `get_db_session()` is a sync `@contextmanager` — use `with`, not `async with`; auto-commits on exit
 - Webhook ingestors selected by trigger_name prefix (e.g. `JIRA_` → `JiraTriggerIngestor`)
+- Config centralization: `orchestrator/config.py` is the canonical place for `os.getenv()` — use `from config import config` in other modules
 
 ---
 
@@ -223,4 +224,23 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Lazy imports in dispatch helpers (`from modules.agents.factory...`) avoid circular imports and loading heavy modules at startup
   - `UnroutedEvent.content` should be truncated ([:2000]) for safety since webhook payloads can be large
   - The router already stores unrouted events internally when all tiers fail, so the webhook handler only needs to handle the "no ingestor" case
+---
+
+## 2026-02-01 - US-009
+- **What was implemented:** Added routing configuration variables to the centralized config module and .env.example
+- **Changes:**
+  - Added `COMPOSIO_WEBHOOK_SECRET` (str, from env, no default)
+  - Added `ROUTING_CACHE_TTL_HOURS` (int, default 24)
+  - Added `ROUTING_LLM_CONFIDENCE_THRESHOLD` (float, default 0.5)
+  - All three placed in new "ROUTING" section in `Config` class
+  - Added corresponding entries to `.env.example` with documentation
+- **Files changed:**
+  - `orchestrator/config.py` (modified — added routing config section)
+  - `orchestrator/.env.example` (modified — added routing env vars)
+  - `scripts/ralph/prd.json` (US-009 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `config.py` is the ONLY place where `os.getenv()` should be called — other modules (cache.py, engine.py, composio.py) currently call `os.getenv()` directly; they should migrate to `from config import config` in a future cleanup
+  - Config class uses class-level attributes (not `__init__`) with type annotations — new config vars follow this pattern
+  - `.env.example` serves as documentation for deployment — include sensible defaults for non-secret values
 ---
