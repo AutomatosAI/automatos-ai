@@ -62,7 +62,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Tier 3 (LLM classification) added in next story"
     },
     {

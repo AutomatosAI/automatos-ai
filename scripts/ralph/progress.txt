@@ -14,6 +14,10 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - Workspace isolation: most models include `workspace_id` FK to workspaces table
 - Routing cache lives at `core/routing/cache.py` — use `RoutingCache` singleton for all routing cache operations
 - Use `model_copy()` (Pydantic v2) when storing/returning models to avoid shared mutable state
+- Routing engine lives at `core/routing/engine.py` — `UniversalRouter(db, cache)` is the single entry point for all routing
+- `TriggerSubscription` links to `ComposioEntity.id`, not workspace_id directly — resolve workspace via `ComposioEntity`
+- `IntentClassifier` categories: EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, STORAGE, PROJECT_MANAGEMENT, ANALYTICS, AI, MEMORY
+- DB sessions use `Depends(get_db)` in FastAPI endpoints — yields `Session` from `sqlalchemy.orm`
 
 ---
 
@@ -58,4 +62,29 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - `model_copy()` (Pydantic v2) used to avoid shared mutable references in cache entries
   - Cache key uses SHA-256 of normalized content + source, prefixed by workspace_id for O(n) workspace clear
   - Smoke tests run inline with `python3 -c` — good pattern for validating without a test framework
+---
+
+## 2026-02-01 - US-003
+- **What was implemented:** Built core routing engine in `orchestrator/core/routing/engine.py`
+- **Features:**
+  - `UniversalRouter` class with `async route(envelope)` method
+  - Constructor takes `db: Session` and optional `RoutingCache` instance
+  - Tier 0: Override routing — if `override_agent_id` or `override_workflow_id` set, returns immediately with confidence=1.0
+  - Tier 1: Cache lookup via `RoutingCache.get()` — returns cached decision if hit
+  - Tier 2a: Source pattern matching against `routing_rules` table (ordered by priority desc)
+  - Tier 2b: `TriggerSubscription` lookup for `jira_trigger` source — resolves workspace via `ComposioEntity`
+  - Tier 2c: `IntentClassifier` keyword matching — classifies content then matches category against rule `intent_keywords`
+  - Returns `None` when no tier matches (caller handles LLM fallback)
+  - Every routing decision logged to `routing_decisions` table via `RoutingDecisionRecord`
+  - Helper `_envelope_hash()` for compact logging/deduplication
+- **Files changed:**
+  - `orchestrator/core/routing/engine.py` (new)
+  - `scripts/ralph/prd.json` (US-003 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `IntentClassifier.classify()` returns `IntentClassification` with `.category` (e.g. "EMAIL", "PROJECT_MANAGEMENT") and `.confidence` — use category to match against `RoutingRule.intent_keywords`
+  - `TriggerSubscription` is linked to entities, not workspaces directly — resolve via `ComposioEntity.workspace_id`
+  - Database env not available locally — use `py_compile` + AST analysis for validation instead of runtime import tests
+  - `RoutingRule.source_pattern` stores the channel source value string (e.g. "chatbot", "jira_trigger") — null/empty means match any
+  - Routing rules are ordered by `priority desc` — higher priority rules evaluated first
 ---
