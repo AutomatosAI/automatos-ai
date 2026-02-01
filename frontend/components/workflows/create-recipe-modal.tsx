@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { JsonSchemaEditor } from './json-schema-editor'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -60,6 +61,8 @@ interface CreateRecipeModalProps {
 
 export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalProps) {
   const [currentStep, setCurrentStep] = React.useState(0)
+  const [inputsValid, setInputsValid] = React.useState(true)
+  const [outputsValid, setOutputsValid] = React.useState(true)
 
   const methods = useForm<RecipeFormValues>({
     defaultValues: {
@@ -94,7 +97,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
     const values = methods.getValues()
     switch (currentStepId) {
       case 'basic':
-        return values.name.trim().length >= 3
+        return values.name.trim().length >= 3 && inputsValid && outputsValid
       case 'steps':
         return values.steps.length > 0
       case 'execution':
@@ -104,11 +107,13 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
       default:
         return false
     }
-  }, [currentStepId, methods])
+  }, [currentStepId, methods, inputsValid, outputsValid])
 
   // Re-render on form changes to update canGoNext
   const watchedName = methods.watch('name')
   const watchedSteps = methods.watch('steps')
+  const watchedInputs = methods.watch('inputs')
+  const watchedOutputs = methods.watch('outputs')
 
   const handleNext = () => {
     if (currentStep < STEPS.length - 1) {
@@ -232,24 +237,22 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                         <div className="glass-card rounded-2xl p-6 space-y-4">
                           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Input / Output Schemas</h3>
                           <p className="text-xs text-muted-foreground">Define the expected input and output formats as JSON schemas. These will be used for validation during execution.</p>
-                          <div>
-                            <Label htmlFor="recipe-inputs">Input Schema (JSON)</Label>
-                            <Textarea
-                              id="recipe-inputs"
-                              {...methods.register('inputs')}
-                              placeholder='{"order_id": {"type": "string", "required": true}}'
-                              className="bg-secondary/50 rounded-2xl font-mono text-xs min-h-[100px]"
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="recipe-outputs">Output Schema (JSON)</Label>
-                            <Textarea
-                              id="recipe-outputs"
-                              {...methods.register('outputs')}
-                              placeholder='{"report": {"type": "string"}, "score": {"type": "number"}}'
-                              className="bg-secondary/50 rounded-2xl font-mono text-xs min-h-[100px]"
-                            />
-                          </div>
+                          <JsonSchemaEditor
+                            label="Input Schema (JSON)"
+                            value={watchedInputs}
+                            onChange={(val) => methods.setValue('inputs', val)}
+                            onValidation={(valid) => setInputsValid(valid)}
+                            placeholder='{"order_id": {"type": "string", "required": true}}'
+                            minHeight="120px"
+                          />
+                          <JsonSchemaEditor
+                            label="Output Schema (JSON)"
+                            value={watchedOutputs}
+                            onChange={(val) => methods.setValue('outputs', val)}
+                            onValidation={(valid) => setOutputsValid(valid)}
+                            placeholder='{"report": {"type": "string"}, "score": {"type": "number"}}'
+                            minHeight="120px"
+                          />
                         </div>
                       </motion.div>
                     </TabsContent>
