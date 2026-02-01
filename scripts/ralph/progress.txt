@@ -140,3 +140,28 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Message text extracted via `ChatMessageRequest.parts[0].text` or `.content` fallback — ingestor receives pre-extracted text
   - Ingestors use keyword-only args (`*` in signature) to enforce named parameters and improve readability
 ---
+
+## 2026-02-01 - US-006
+- **What was implemented:** Created Jira trigger ingestor for normalising Jira webhook events into RequestEnvelope
+- **Files created:**
+  - `orchestrator/core/routing/ingestors/jira_trigger.py` — `JiraTriggerIngestor` with `ingest(trigger_name, entity_id, event_data, db)`
+- **JiraTriggerIngestor mapping:**
+  - `source` = `ChannelSource.JIRA_TRIGGER`
+  - `content` = `[{issue_key}] {summary}\n\n{description}`
+  - Extracts from event_data: issue_key (or key), summary, description, issue_type (or issuetype), priority, project (or project_key), reporter
+  - Reporter handled as dict (emailAddress/displayName) or flat string
+  - `metadata` dict populated with all extracted Jira fields plus trigger_name
+  - `RequestUser` from reporter email/name with auth_type="system"
+  - `workspace_id` resolved via `ComposioEntity.composio_entity_id` lookup in DB
+  - Falls back to nil UUID if entity not found
+- **Files changed:**
+  - `orchestrator/core/routing/ingestors/jira_trigger.py` (new)
+  - `scripts/ralph/prd.json` (US-006 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Webhook payload structure: `trigger_name` (str), `entity_id` (str = composio_entity_id), `event_data` (dict with Jira fields)
+  - `ComposioEntity.composio_entity_id` is the string key linking webhook entity_id to workspace_id
+  - Jira event_data field names vary — handle both camelCase and snake_case variants (e.g. `issue_key`/`key`, `issue_type`/`issuetype`)
+  - Reporter may be a nested dict with `emailAddress`/`displayName` keys or a flat string — handle both
+  - System-originated requests (webhooks) use `auth_type="system"` since there is no authenticated user
+---
