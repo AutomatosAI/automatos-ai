@@ -34,6 +34,9 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - `ComposioToolExecutor.execute()` returns `{"success": bool, "data": Any, "error": str}` — use admin pattern: `agent_id=0, skip_validation=True` for system-initiated actions
 - `CodeGraphService.search_symbols(project_name, query, limit, workspace_id)` — `workspace_id` must be a string; results under `"results"` key
 - Jira field values (issuetype, priority, project, reporter) are nested dicts — extract with `obj.get("name")` or `obj.get("key")`
+- Recipe registry at `modules/workflows/recipes/__init__.py` — `register_recipe(name, cls, workflow_id)` + `get_recipe(recipe_name=..., workflow_id=...)` for dispatch lookup
+- GitHub repo for automated recipes: `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` env vars (added to config.py)
+- Webhook `_dispatch_workflow()` checks recipe registry first; falls back to standard 9-stage pipeline if no recipe matches
 
 ---
 
@@ -339,4 +342,41 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - `CodeGraphService` search results use key `"results"` (not `"symbols"`)
   - LLM prompt for code triage works well with Jira wiki markup format since the output goes directly to a Jira comment
   - Lazy imports (`from core.composio... import ...` inside methods) follow existing pattern to avoid circular imports and heavy module loading at import time
+---
+
+## 2026-02-01 - US-013
+- **What was implemented:** Extended JiraBugTriageRecipe with Steps 4-6 (Clone & Fix, Open PR, Update Jira) and created a recipe registry for dispatch
+- **Steps added:**
+  - Step 4 — `_step_clone_and_fix(ticket, fix_plan, symbols)`: Creates `fix/{issue_key}` branch via `GITHUB_CREATE_BRANCH`, generates concrete file changes via LLM, applies each via `GITHUB_CREATE_OR_UPDATE_FILE`
+  - `_generate_file_changes(ticket, fix_plan, symbols)`: Asks LLM to produce JSON array of `{file_path, content, commit_message}` changes
+  - `_parse_file_changes(text)`: Parses LLM response, strips markdown fences, validates structure
+  - Step 5 — `_step_open_pr(ticket, branch_name, fix_plan)`: Creates PR via `GITHUB_CREATE_PULL_REQUEST` with Jira ticket reference in title and fix plan in body
+  - Step 6 — `_step_update_jira(issue_key, pr_url, pr_number)`: Transitions ticket via `JIRA_UPDATE_ISSUE` (non-fatal if workflow doesn't support transition), posts PR link as Jira comment with panel markup
+  - `_resolve_repo()`: Reads `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` from env
+- **Recipe registry** created at `modules/workflows/recipes/__init__.py`:
+  - `register_recipe(name, recipe_class, workflow_id)` — stores by name and optional workflow_id
+  - `get_recipe(recipe_name=..., workflow_id=...)` — lookup by either key
+  - `JiraBugTriageRecipe` registered as `"jira_bug_triage"` at module load
+- **Webhook dispatch** updated in `api/composio.py`:
+  - `_dispatch_workflow()` now checks recipe registry first via `get_recipe(workflow_id=...)`
+  - If recipe found, executes directly with full `RequestEnvelope`; otherwise falls back to standard 9-stage pipeline
+  - Function signature changed to accept `envelope` instead of separate `envelope_content`/`envelope_metadata`
+- **Config** updated:
+  - Added `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` to `config.py` ROUTING section
+  - Added corresponding entries to `.env.example`
+- **TriageResult** extended with `branch_name`, `pr_url`, `pr_number` fields
+- **Files changed:**
+  - `orchestrator/modules/workflows/recipes/jira_bug_triage.py` (modified — Steps 4-6 + helpers)
+  - `orchestrator/modules/workflows/recipes/__init__.py` (rewritten — recipe registry)
+  - `orchestrator/api/composio.py` (modified — recipe-aware dispatch)
+  - `orchestrator/config.py` (modified — GitHub repo env vars)
+  - `orchestrator/.env.example` (modified — GitHub repo env vars)
+  - `scripts/ralph/prd.json` (US-013 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - GitHub actions (GITHUB_CREATE_BRANCH, GITHUB_CREATE_OR_UPDATE_FILE, GITHUB_CREATE_PULL_REQUEST) must be pre-synced in `composio_actions_cache` table — they are not auto-discovered at runtime
+  - `JIRA_UPDATE_ISSUE` status transition may fail if the target status isn't available in the Jira project workflow — treat as non-fatal
+  - LLM-generated file changes should be parsed defensively: strip markdown fences, try regex extraction as fallback, validate each item has required fields
+  - Recipe registry uses eager registration at module load (`_register_builtins()`) — future recipes just need to be added there
+  - The `_dispatch_workflow` function now needs the full `RequestEnvelope` for recipe execution — callers must pass the envelope object, not just content/metadata strings
 ---

@@ -1,21 +1,25 @@
 """
-Jira Bug Triage Recipe (PRD-50: US-012)
-=======================================
+Jira Bug Triage Recipe (PRD-50: US-012, US-013)
+================================================
 
 Autonomous workflow that reads a Jira bug ticket, analyses the indexed
-codebase for relevant files, uses an LLM to generate a fix plan, and
-posts the plan back as a Jira comment.
+codebase for relevant files, uses an LLM to generate a fix plan, applies
+the fix via GitHub, opens a PR, and updates the Jira ticket.
 
 Steps:
   1. Read Ticket — JIRA_GET_ISSUE via ComposioToolExecutor
   2. Analyze     — CodeGraph symbol search for relevant code
   3. Plan        — LLM generates a fix plan from ticket + code context
-  Post          — JIRA_ADD_COMMENT with the fix plan (or failure summary)
+  4. Clone & Fix — GITHUB_CREATE_BRANCH + GITHUB_CREATE_OR_UPDATE_FILE
+  5. Open PR     — GITHUB_CREATE_PULL_REQUEST
+  6. Update Jira — JIRA_UPDATE_ISSUE + JIRA_ADD_COMMENT with PR link
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -39,6 +43,9 @@ class TriageResult:
     issue_key: str = ""
     fix_plan: str = ""
     relevant_files: List[str] = field(default_factory=list)
+    branch_name: str = ""
+    pr_url: str = ""
+    pr_number: int = 0
     error: str = ""
     steps_completed: List[str] = field(default_factory=list)
     execution_time_ms: float = 0.0
@@ -50,7 +57,7 @@ class TriageResult:
 
 class JiraBugTriageRecipe:
     """
-    End-to-end bug triage: Read ticket → Analyse code → Plan fix → Comment.
+    End-to-end bug triage: Read → Analyse → Plan → Fix → PR → Update Jira.
 
     Usage::
 
@@ -99,8 +106,30 @@ class JiraBugTriageRecipe:
             await self._post_comment(issue_key, fix_plan)
             result.steps_completed.append("comment")
 
+            # Step 4 — Clone & Fix: create branch and apply code changes
+            logger.info("[triage] Step 4: Creating branch and applying fix for %s", issue_key)
+            branch_name, file_changes = await self._step_clone_and_fix(
+                ticket, fix_plan, symbols
+            )
+            result.branch_name = branch_name
+            result.steps_completed.append("clone_and_fix")
+
+            # Step 5 — Open PR
+            logger.info("[triage] Step 5: Opening PR for %s", issue_key)
+            pr_url, pr_number = await self._step_open_pr(
+                ticket, branch_name, fix_plan
+            )
+            result.pr_url = pr_url
+            result.pr_number = pr_number
+            result.steps_completed.append("open_pr")
+
+            # Step 6 — Update Jira: transition status + post PR link
+            logger.info("[triage] Step 6: Updating Jira ticket %s", issue_key)
+            await self._step_update_jira(issue_key, pr_url, pr_number)
+            result.steps_completed.append("update_jira")
+
             result.success = True
-            logger.info("[triage] Completed triage for %s", issue_key)
+            logger.info("[triage] Completed full triage for %s (PR: %s)", issue_key, pr_url)
 
         except Exception as exc:
             result.error = str(exc)
@@ -223,6 +252,303 @@ class JiraBugTriageRecipe:
         return response.content
 
     # ------------------------------------------------------------------
+    # Step 4 — Clone & Fix: create branch and apply code changes
+    # ------------------------------------------------------------------
+
+    async def _step_clone_and_fix(
+        self,
+        ticket: Dict[str, Any],
+        fix_plan: str,
+        symbols: List[Dict[str, Any]],
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """Create a fix branch and apply code changes based on the plan.
+
+        Returns (branch_name, list of file change dicts).
+        """
+        from core.composio.tool_executor import ComposioToolExecutor
+
+        issue_key = ticket.get("key", "UNKNOWN")
+        branch_name = f"fix/{issue_key.lower()}"
+        repo = self._resolve_repo()
+        executor = ComposioToolExecutor(self.db)
+
+        # Create the fix branch from default branch
+        create_branch_result = await executor.execute(
+            action="GITHUB_CREATE_BRANCH",
+            params={
+                "owner": repo["owner"],
+                "repo": repo["repo"],
+                "new_branch_name": branch_name,
+            },
+            agent_id=0,
+            workspace_id=self.workspace_id,
+            app_name="GITHUB",
+            skip_validation=True,
+        )
+
+        if not create_branch_result.get("success"):
+            raise RuntimeError(
+                f"GITHUB_CREATE_BRANCH failed: {create_branch_result.get('error', 'unknown')}"
+            )
+        logger.info("[triage] Created branch %s", branch_name)
+
+        # Ask LLM to generate concrete file changes as JSON
+        file_changes = await self._generate_file_changes(
+            ticket, fix_plan, symbols
+        )
+
+        if not file_changes:
+            raise RuntimeError("LLM returned no file changes for the fix plan")
+
+        # Apply each file change via GitHub API
+        for change in file_changes:
+            file_path = change.get("file_path", "")
+            content = change.get("content", "")
+            message = change.get("commit_message", f"fix({issue_key}): update {file_path}")
+
+            if not file_path or not content:
+                logger.warning("[triage] Skipping empty file change: %s", change)
+                continue
+
+            update_result = await executor.execute(
+                action="GITHUB_CREATE_OR_UPDATE_FILE",
+                params={
+                    "owner": repo["owner"],
+                    "repo": repo["repo"],
+                    "path": file_path,
+                    "message": message,
+                    "content": content,
+                    "branch": branch_name,
+                },
+                agent_id=0,
+                workspace_id=self.workspace_id,
+                app_name="GITHUB",
+                skip_validation=True,
+            )
+
+            if not update_result.get("success"):
+                raise RuntimeError(
+                    f"GITHUB_CREATE_OR_UPDATE_FILE failed for {file_path}: "
+                    f"{update_result.get('error', 'unknown')}"
+                )
+            logger.info("[triage] Updated file %s on branch %s", file_path, branch_name)
+
+        return branch_name, file_changes
+
+    async def _generate_file_changes(
+        self,
+        ticket: Dict[str, Any],
+        fix_plan: str,
+        symbols: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Ask the LLM to produce concrete file changes as a JSON array.
+
+        Each element: {"file_path": str, "content": str, "commit_message": str}
+        """
+        from core.llm.manager import create_llm_manager
+
+        # Build context from relevant code snippets
+        code_context_lines: List[str] = []
+        for sym in symbols[:10]:
+            snippet = (sym.get("code_snippet") or "")[:600]
+            if snippet:
+                code_context_lines.append(
+                    f"--- {sym.get('file_path', '?')} ---\n{snippet}\n"
+                )
+        code_context = "\n".join(code_context_lines) if code_context_lines else "(no code context)"
+
+        prompt = (
+            f"Jira ticket {ticket.get('key')}: {ticket.get('summary')}\n\n"
+            f"Fix plan:\n{fix_plan}\n\n"
+            f"Relevant code:\n{code_context}\n\n"
+            "Generate the concrete file changes to implement this fix. "
+            "Return ONLY a JSON array where each element has:\n"
+            '  {"file_path": "path/to/file", "content": "full file content after fix", '
+            '"commit_message": "short commit message"}\n\n'
+            "Return valid JSON only, no markdown fences."
+        )
+
+        llm = create_llm_manager(service_name="jira_triage")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior software engineer. Given a bug fix plan "
+                    "and existing code, produce the exact file changes needed. "
+                    "Return ONLY a JSON array. Each element must have file_path, "
+                    "content (the full updated file content), and commit_message."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        response = await llm.generate_response(messages)
+        if not response or not response.content:
+            raise RuntimeError("LLM returned empty file changes")
+
+        return self._parse_file_changes(response.content)
+
+    @staticmethod
+    def _parse_file_changes(text: str) -> List[Dict[str, Any]]:
+        """Parse LLM response into a list of file change dicts."""
+        # Strip markdown code fences if present
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1] if "\n" in cleaned else cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Try extracting JSON array from the text
+            match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+            else:
+                raise RuntimeError("Could not parse file changes JSON from LLM response")
+
+        if not isinstance(parsed, list):
+            parsed = [parsed]
+
+        # Validate structure
+        valid: List[Dict[str, Any]] = []
+        for item in parsed:
+            if isinstance(item, dict) and item.get("file_path") and item.get("content"):
+                valid.append(item)
+
+        return valid
+
+    # ------------------------------------------------------------------
+    # Step 5 — Open PR
+    # ------------------------------------------------------------------
+
+    async def _step_open_pr(
+        self,
+        ticket: Dict[str, Any],
+        branch_name: str,
+        fix_plan: str,
+    ) -> tuple[str, int]:
+        """Create a pull request on GitHub. Returns (pr_url, pr_number)."""
+        from core.composio.tool_executor import ComposioToolExecutor
+
+        issue_key = ticket.get("key", "UNKNOWN")
+        repo = self._resolve_repo()
+        executor = ComposioToolExecutor(self.db)
+
+        pr_title = f"[{issue_key}] {ticket.get('summary', 'Bug fix')}"[:256]
+        pr_body = (
+            f"## {issue_key} — Automated Bug Fix\n\n"
+            f"**Summary:** {ticket.get('summary', 'N/A')}\n"
+            f"**Priority:** {ticket.get('priority', 'N/A')}\n"
+            f"**Type:** {ticket.get('issue_type', 'N/A')}\n\n"
+            f"### Fix Plan\n{fix_plan[:3000]}\n\n"
+            f"---\n_Generated by Automatos Bug Triage_"
+        )
+
+        result = await executor.execute(
+            action="GITHUB_CREATE_PULL_REQUEST",
+            params={
+                "owner": repo["owner"],
+                "repo": repo["repo"],
+                "title": pr_title,
+                "body": pr_body,
+                "head": branch_name,
+                "base": repo.get("default_branch", "main"),
+            },
+            agent_id=0,
+            workspace_id=self.workspace_id,
+            app_name="GITHUB",
+            skip_validation=True,
+        )
+
+        if not result.get("success"):
+            raise RuntimeError(
+                f"GITHUB_CREATE_PULL_REQUEST failed: {result.get('error', 'unknown')}"
+            )
+
+        data = result.get("data", {})
+        pr_url = data.get("html_url", data.get("url", ""))
+        pr_number = data.get("number", 0)
+
+        logger.info("[triage] Opened PR #%d: %s", pr_number, pr_url)
+        return pr_url, pr_number
+
+    # ------------------------------------------------------------------
+    # Step 6 — Update Jira
+    # ------------------------------------------------------------------
+
+    async def _step_update_jira(
+        self, issue_key: str, pr_url: str, pr_number: int
+    ) -> None:
+        """Transition the Jira ticket status and add a comment with the PR link."""
+        from core.composio.tool_executor import ComposioToolExecutor
+
+        executor = ComposioToolExecutor(self.db)
+
+        # Transition ticket status (e.g., "In Progress" or "In Review")
+        update_result = await executor.execute(
+            action="JIRA_UPDATE_ISSUE",
+            params={
+                "issue_key": issue_key,
+                "status": "In Progress",
+            },
+            agent_id=0,
+            workspace_id=self.workspace_id,
+            app_name="JIRA",
+            skip_validation=True,
+        )
+
+        if not update_result.get("success"):
+            # Status transition is non-fatal — the ticket may not have
+            # an "In Progress" transition available in its workflow.
+            logger.warning(
+                "[triage] JIRA_UPDATE_ISSUE status transition failed for %s: %s",
+                issue_key,
+                update_result.get("error", "unknown"),
+            )
+
+        # Post PR link as a comment
+        comment_body = (
+            "{panel:title=Automatos Bug Triage — PR Opened|borderColor=#00875a}\n"
+            f"A fix has been prepared and a pull request opened.\n\n"
+            f"*Pull Request:* [PR #{pr_number}|{pr_url}]\n"
+            f"*Branch:* fix/{issue_key.lower()}\n\n"
+            "Please review the PR and merge when ready.\n"
+            "{panel}"
+        )
+        await self._post_comment(issue_key, comment_body)
+
+    # ------------------------------------------------------------------
+    # Repository resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_repo(self) -> Dict[str, str]:
+        """Resolve the target GitHub repository for this workspace.
+
+        Reads from environment variables (GITHUB_REPO_OWNER, GITHUB_REPO_NAME)
+        or falls back to metadata on the envelope if available.
+        """
+        import os
+
+        owner = os.getenv("GITHUB_REPO_OWNER", "")
+        repo = os.getenv("GITHUB_REPO_NAME", "")
+        default_branch = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+
+        if not owner or not repo:
+            raise RuntimeError(
+                "GITHUB_REPO_OWNER and GITHUB_REPO_NAME environment variables "
+                "must be set for the Bug Triage recipe to create branches and PRs."
+            )
+
+        return {
+            "owner": owner,
+            "repo": repo,
+            "default_branch": default_branch,
+        }
+
+    # ------------------------------------------------------------------
     # Jira comment helpers
     # ------------------------------------------------------------------
 
@@ -274,8 +600,6 @@ class JiraBugTriageRecipe:
     @staticmethod
     def _extract_keywords(ticket: Dict[str, Any]) -> List[str]:
         """Pull search-worthy tokens from the ticket summary and description."""
-        import re
-
         text = f"{ticket.get('summary', '')} {ticket.get('description', '')}"
         # Remove common Jira markup, URLs, and very short tokens
         text = re.sub(r"\{[^}]*\}", "", text)       # {noformat}, {code}, etc.

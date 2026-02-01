@@ -574,8 +574,7 @@ async def handle_webhook(
         asyncio.create_task(
             _dispatch_workflow(
                 workflow_id=decision.workflow_id,
-                envelope_content=envelope.content,
-                envelope_metadata=envelope.metadata,
+                envelope=envelope,
             )
         )
 
@@ -621,11 +620,31 @@ async def _dispatch_agent(
 
 async def _dispatch_workflow(
     workflow_id: int,
-    envelope_content: str,
-    envelope_metadata: Dict[str, Any],
+    envelope: "RequestEnvelope",
 ) -> None:
-    """Execute a workflow in the background for a webhook-triggered request."""
+    """Execute a workflow in the background for a webhook-triggered request.
+
+    If a recipe is registered for *workflow_id* in the recipe registry,
+    the recipe is executed directly.  Otherwise, falls back to the
+    standard 9-stage workflow pipeline.
+    """
     try:
+        from modules.workflows.recipes import get_recipe
+
+        recipe_cls = get_recipe(workflow_id=workflow_id)
+        if recipe_cls is not None:
+            # Recipe-based dispatch
+            with get_db_session() as db:
+                recipe = recipe_cls()
+                result = await recipe.execute(envelope, db, envelope.workspace_id)
+                logger.info(
+                    "[webhook] Recipe for workflow %d completed: success=%s",
+                    workflow_id,
+                    result.success if hasattr(result, "success") else "unknown",
+                )
+            return
+
+        # Standard workflow dispatch (no matching recipe)
         from api.workflows import execute_workflow_with_progress
         from core.models.core import WorkflowExecution, ExecutionStatus
 
@@ -633,8 +652,8 @@ async def _dispatch_workflow(
             execution = WorkflowExecution(
                 workflow_id=workflow_id,
                 input_data={
-                    "content": envelope_content,
-                    "metadata": envelope_metadata,
+                    "content": envelope.content,
+                    "metadata": envelope.metadata,
                 },
                 status=ExecutionStatus.PENDING.value,
             )
@@ -645,10 +664,12 @@ async def _dispatch_workflow(
 
         await execute_workflow_with_progress(execution_id, {})
         logger.info(
-            f"[webhook] Workflow {workflow_id} execution {execution_id} completed"
+            "[webhook] Workflow %d execution %d completed",
+            workflow_id,
+            execution_id,
         )
     except Exception:
-        logger.exception(f"[webhook] Workflow {workflow_id} dispatch failed")
+        logger.exception("[webhook] Workflow %d dispatch failed", workflow_id)
 
 
 # =============================================================================
