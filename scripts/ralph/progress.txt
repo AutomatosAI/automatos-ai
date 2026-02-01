@@ -18,6 +18,9 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - `TriggerSubscription` links to `ComposioEntity.id`, not workspace_id directly — resolve workspace via `ComposioEntity`
 - `IntentClassifier` categories: EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, STORAGE, PROJECT_MANAGEMENT, ANALYTICS, AI, MEMORY
 - DB sessions use `Depends(get_db)` in FastAPI endpoints — yields `Session` from `sqlalchemy.orm`
+- LLM calls: use `create_llm_manager(service_name="orchestrator")` then `await manager.generate_response(messages)` — returns `LLMResponse` with `.content`, `.tool_calls`, `.usage`
+- Agent model at `core/models/core.py` — filter by `workspace_id` + `status == "active"` for workspace agents
+- Agent app assignments at `core/models/composio_cache.py` — `AgentAppAssignment` links `agent_id` to `app_name`
 
 ---
 
@@ -87,4 +90,28 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Database env not available locally — use `py_compile` + AST analysis for validation instead of runtime import tests
   - `RoutingRule.source_pattern` stores the channel source value string (e.g. "chatbot", "jira_trigger") — null/empty means match any
   - Routing rules are ordered by `priority desc` — higher priority rules evaluated first
+---
+
+## 2026-02-01 - US-004
+- **What was implemented:** Added Tier 3 LLM classification to the routing engine in `orchestrator/core/routing/engine.py`
+- **Features:**
+  - `_classify_with_llm(envelope)` async method — queries workspace agents, builds lightweight prompt, calls LLM, parses response
+  - `_build_agent_descriptions(agents)` — builds agent info dicts including assigned app names from `AgentAppAssignment`
+  - `_build_classification_prompt(content, descriptions)` — creates structured prompt asking LLM to return `{"agent_id": int, "confidence": float}`
+  - `_parse_llm_routing_response(text, agents)` — parses JSON from LLM, validates agent_id against workspace agents, clamps confidence to [0, 1]
+  - If confidence < threshold (default 0.5 via `ROUTING_LLM_CONFIDENCE_THRESHOLD` env var), returns `route_type='orchestrate'`
+  - LLM results cached via `RoutingCache.put()` for future Tier 1 hits (both high and low confidence)
+  - `_store_unrouted_event(envelope, reason)` — persists to `unrouted_events` table when all tiers fail
+  - `route()` updated: after Tier 2c returns None, calls Tier 3 LLM; if LLM also fails, stores unrouted event
+- **Files changed:**
+  - `orchestrator/core/routing/engine.py` (modified — added Tier 3 + unrouted event storage)
+  - `scripts/ralph/prd.json` (US-004 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `create_llm_manager(service_name="orchestrator")` is the standard factory for LLM access — no need to handle credentials manually
+  - `LLMResponse.content` contains the text response; parse JSON from it for structured outputs
+  - LLM may wrap JSON in markdown code fences (```json ... ```) — strip them before parsing
+  - `Agent.status == "active"` is the standard filter for workspace agents that are operational
+  - `AgentAppAssignment.is_active` filter ensures only current app assignments are included
+  - Confidence threshold is configurable via `ROUTING_LLM_CONFIDENCE_THRESHOLD` env var (US-009 will add to config.py)
 ---
