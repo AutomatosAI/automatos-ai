@@ -46,7 +46,7 @@ export function MarketplaceHomepage() {
 
   async function fetchStats() {
     try {
-      const items = await apiClient.get('/api/marketplace/items?limit=1000')
+      const items = await apiClient.get('/api/marketplace/items?limit=100')
       const categories = new Set(items.map((i: MarketplaceItem) => i.category).filter(Boolean))
       const totalInstalls = items.reduce((sum: number, i: MarketplaceItem) => sum + i.install_count, 0)
       const featuredCount = items.filter((i: MarketplaceItem) => i.is_featured).length
@@ -133,26 +133,15 @@ export function MarketplaceHomepage() {
         </Card>
       </div>
 
-      {/* Search Bar and Tabs on Same Line */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="relative w-full sm:w-96">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            type="text"
-            placeholder="Search marketplace..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
-          />
-        </div>
-
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1">
+      {/* Tabs and Search Bar - Full Width */}
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between w-full">
+        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
           <TabsList className="bg-secondary border border-secondary">
             <TabsTrigger
               value="tools"
               className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
             >
-              Tools
+              Applications
             </TabsTrigger>
             <TabsTrigger
               value="agents"
@@ -174,6 +163,17 @@ export function MarketplaceHomepage() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+
+        <div className="relative w-full sm:flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+          <Input
+            type="text"
+            placeholder="Search marketplace..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50 w-full"
+          />
+        </div>
       </div>
 
       {/* Tab Content */}

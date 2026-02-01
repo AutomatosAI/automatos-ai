@@ -106,12 +106,28 @@ CREATE TABLE IF NOT EXISTS agents (
     validity FLOAT,
     discriminatory_power FLOAT,
     model_config JSONB DEFAULT '{"provider": "openai", "model_id": "gpt-4", "temperature": 0.7}'::jsonb,
-    model_usage_stats JSONB DEFAULT '{"total_tokens": 0, "total_cost": 0.0}'::jsonb
+    model_usage_stats JSONB DEFAULT '{"total_tokens": 0, "total_cost": 0.0}'::jsonb,
+
+    -- Marketplace fields (PRD-48: Single-table architecture)
+    owner_type VARCHAR(20) DEFAULT 'workspace' CHECK (owner_type IN ('workspace', 'marketplace')),
+    owner_id VARCHAR(255),
+    cloned_from_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    original_creator_id INTEGER REFERENCES users(id),
+    install_count INTEGER DEFAULT 0,
+    is_featured BOOLEAN DEFAULT FALSE,
+    is_approved BOOLEAN DEFAULT FALSE,
+    marketplace_category VARCHAR(100),
+    marketplace_icon VARCHAR(500),
+    version VARCHAR(50) DEFAULT '1.0.0'
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_agents_type ON agents(agent_type);
 CREATE INDEX IF NOT EXISTS idx_agents_model_config ON agents USING GIN (model_config);
+CREATE INDEX IF NOT EXISTS idx_agents_owner_type ON agents(owner_type, is_approved);
+CREATE INDEX IF NOT EXISTS idx_agents_marketplace_featured ON agents(is_featured, install_count DESC) WHERE owner_type = 'marketplace';
+CREATE INDEX IF NOT EXISTS idx_agents_marketplace_category ON agents(marketplace_category) WHERE owner_type = 'marketplace';
+CREATE INDEX IF NOT EXISTS idx_agents_cloned_from ON agents(cloned_from_id);
 
 -- Skills table
 CREATE TABLE IF NOT EXISTS skills (

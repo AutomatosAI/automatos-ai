@@ -215,12 +215,17 @@ async def list_connections(
     if not entity:
         return []
     
-    connections = entity_manager.get_entity_connections(entity["id"])
+    all_connections = entity_manager.get_entity_connections(entity["id"])
+
+    # Filter to only include connections that have been initiated (active or pending OAuth)
+    # Exclude 'added' status - those are just in workspace but not connected yet
+    connections = [c for c in all_connections if c.get("status") in ("active", "pending")]
+
     result = []
-    
+
     for conn in connections:
         status = conn["status"]
-        
+
         # For pending connections, check Composio API for actual status
         if status == "pending":
             composio_status = client.get_connection_status(
@@ -336,24 +341,34 @@ async def disconnect_app(
     db: Session = Depends(get_db)
 ):
     """
-    Disconnect an app from the workspace.
+    Disconnect OAuth for an app (keeps app in workspace with status='added').
+    This allows the app to stay in the workspace but disconnects the OAuth authorization.
+    Use remove-from-workspace endpoint to completely remove the app.
     """
     client = get_composio_client()
     entity_manager = EntityManager(db)
-    
+
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
         raise HTTPException(status_code=404, detail="No connections found")
-    
-    # Remove from Composio
+
+    # Disconnect from Composio (revoke OAuth)
     try:
         client.disconnect_app(entity["composio_entity_id"], app_name.upper())
+        logger.info(f"Disconnected {app_name} OAuth from Composio")
     except Exception as e:
         logger.warning(f"Failed to disconnect from Composio (may already be disconnected): {e}")
-    
-    # Remove from database
-    entity_manager.remove_connection(entity["id"], app_name.upper())
-    
+
+    # Update status to 'added' instead of removing - keeps app in workspace but disconnected
+    entity_manager.update_connection_status(
+        entity_id=entity["id"],
+        app_name=app_name.upper(),
+        status="added",
+        connection_id=None
+    )
+
+    logger.info(f"[DISCONNECT] {app_name} OAuth disconnected but kept in workspace")
+
     return {"status": "disconnected", "app_name": app_name.upper()}
 
 

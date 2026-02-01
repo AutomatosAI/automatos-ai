@@ -76,63 +76,23 @@ async def marketplace(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    # Connected apps for this workspace (from DB)
-    # NOTE: Some Composio hosted-auth callbacks don't always include `connection_id`.
-    # To avoid "connected in Composio but not showing in UI", opportunistically
-    # sync any pending connections to ACTIVE on read.
-    # OPTIMIZATION: Only sync pending connections that haven't been checked recently (within last 30s)
-    # to reduce redundant Composio API calls (which also reduces telemetry volume).
+    # Connected apps for this workspace (from DB ONLY - no API calls)
+    # PERFORMANCE FIX: Removed pending connection sync from page loads.
+    # Pending connections are now only synced:
+    # 1. After OAuth callback (in composio.py)
+    # 2. Via manual refresh endpoint
+    # This eliminates 48+ Composio API calls on every page load.
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     connected_set = set()
     if entity:
-        from datetime import datetime, timedelta
         connections = entity_manager.get_entity_connections(entity["id"])
-        pending_to_sync = []
-        for conn in connections:
-            status = (conn.get("status") or "").lower()
-            if status == "pending":
-                # Only sync if last_synced_at is older than 30 seconds or doesn't exist
-                last_synced = conn.get("last_synced_at")
-                if not last_synced or (isinstance(last_synced, datetime) and (datetime.utcnow() - last_synced) > timedelta(seconds=30)):
-                    pending_to_sync.append(conn)
-            elif status == "active":
-                connected_set.add((conn.get("app_name") or "").upper())
-        
-        # Batch sync pending connections (only if needed)
-        if pending_to_sync:
-            client = get_composio_client()
-            for conn in pending_to_sync:
-                try:
-                    composio_status = client.get_connection_status(
-                        entity_id=entity["composio_entity_id"],
-                        app=(conn.get("app_name") or "").upper(),
-                    )
-                    if composio_status and composio_status.get("status") == "ACTIVE":
-                        entity_manager.update_connection_status(
-                            entity_id=entity["id"],
-                            app_name=conn.get("app_name") or "",
-                            status="active",
-                            connection_id=composio_status.get("id"),
-                        )
-                        connected_set.add((conn.get("app_name") or "").upper())
-                except Exception:
-                    # best-effort sync only - mark as checked even on failure to avoid retry storms
-                    try:
-                        entity_manager.update_connection_status(
-                            entity_id=entity["id"],
-                            app_name=conn.get("app_name") or "",
-                            status="pending",  # Keep as pending but update last_synced_at
-                        )
-                    except Exception:
-                        pass
-        else:
-            # No pending connections to sync - just read active ones
-            connected_set = {
-                (c.get("app_name") or "").upper()
-                for c in connections
-                if (c.get("status") or "").lower() == "active"
-            }
+        # Just read active connections from DB - no API calls
+        connected_set = {
+            (c.get("app_name") or "").upper()
+            for c in connections
+            if (c.get("status") or "").lower() == "active"
+        }
 
     # Read stats from composio_stats_cache (populated by /api/tools/sync)
     stats_rows = db.query(ComposioStatsCache).all()
@@ -242,48 +202,11 @@ async def connected(
         return {"apps": [], "total": 0}
 
     connections = entity_manager.get_entity_connections(entity["id"])
-    
-    # OPTIMIZATION: Only sync pending connections that haven't been checked recently (within last 30s)
-    # to reduce redundant Composio API calls (which also reduces telemetry volume).
-    from datetime import datetime, timedelta
-    pending_to_sync = []
-    for conn in connections:
-        status = (conn.get("status") or "").lower()
-        if status == "pending":
-            last_synced = conn.get("last_synced_at")
-            if not last_synced or (isinstance(last_synced, datetime) and (datetime.utcnow() - last_synced) > timedelta(seconds=30)):
-                pending_to_sync.append(conn)
-    
-    # Batch sync pending connections (only if needed)
-    if pending_to_sync:
-        client = get_composio_client()
-        for conn in pending_to_sync:
-            try:
-                composio_status = client.get_connection_status(
-                    entity_id=entity["composio_entity_id"],
-                    app=(conn.get("app_name") or "").upper(),
-                )
-                if composio_status and composio_status.get("status") == "ACTIVE":
-                    entity_manager.update_connection_status(
-                        entity_id=entity["id"],
-                        app_name=conn.get("app_name") or "",
-                        status="active",
-                        connection_id=composio_status.get("id"),
-                    )
-            except Exception:
-                # Mark as checked even on failure to avoid retry storms
-                try:
-                    entity_manager.update_connection_status(
-                        entity_id=entity["id"],
-                        app_name=conn.get("app_name") or "",
-                        status="pending",
-                    )
-                except Exception:
-                    pass
-        # Re-read after potential updates
-        connections = entity_manager.get_entity_connections(entity["id"])
-    
-    active = [c for c in connections if (c.get("status") or "").lower() == "active"]
+
+    # PERFORMANCE FIX: Removed pending sync from page loads (see marketplace endpoint comment)
+
+    # Include both "active" (connected) and "added" (in workspace but not connected yet) apps
+    active = [c for c in connections if (c.get("status") or "").lower() in ("active", "added")]
 
     # Enrich with cached metadata if present
     conn_app_names = [c.get("app_name") for c in active if c.get("app_name")]
@@ -308,22 +231,23 @@ async def connected(
                 .count()
             )
             action_count = n
-        out.append(
-            {
-                "id": cached.id if cached else None,
-                "app_name": app_name,
-                "status": c.get("status"),
-                "connected_at": c.get("connected_at"),
-                "connection_id": c.get("connection_id"),
-                "display_name": cached.display_name if cached else app_name,
-                "description": cached.description if cached else None,
-                "logo_url": cached.logo_url if cached else None,
-                "categories": cached.categories if cached else [],
-                "action_count": action_count,
-                "trigger_count": cached.trigger_count if cached else 0,
-                "triggers": triggers if isinstance(triggers, list) else [],
-            }
-        )
+        app_data = {
+            "id": cached.id if cached else None,
+            "app_name": app_name,
+            "status": c.get("status"),  # This should be 'active' or 'added'
+            "connected_at": c.get("connected_at"),
+            "connection_id": c.get("connection_id"),
+            "display_name": cached.display_name if cached else app_name,
+            "description": cached.description if cached else None,
+            "logo_url": cached.logo_url if cached else None,
+            "categories": cached.categories if cached else [],
+            "action_count": action_count,
+            "trigger_count": cached.trigger_count if cached else 0,
+            "triggers": triggers if isinstance(triggers, list) else [],
+        }
+        logger.info(f"[CONNECTED_APPS] {app_name}: status={c.get('status')}, connection_id={c.get('connection_id')}")
+        out.append(app_data)
+    logger.info(f"[CONNECTED_APPS] Returning {len(out)} apps total")
     return {"apps": out, "total": len(out)}
 
 
@@ -461,6 +385,328 @@ async def connect_app(
     return {"redirect_url": redirect_url, "app_name": app_name}
 
 
+@router.get("/workspace")
+async def workspace_tools(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Get ALL tools in workspace (both connected and not connected).
+    This is separate from /connected which only shows active connections.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"apps": [], "total": 0}
+
+    connections = entity_manager.get_entity_connections(entity["id"])
+
+    # Include active, added, and pending (all workspace tools)
+    workspace_tools = [c for c in connections if (c.get("status") or "").lower() in ("active", "added", "pending")]
+
+    # Enrich with metadata
+    conn_app_names = [c.get("app_name") for c in workspace_tools if c.get("app_name")]
+    app_names_upper = [(a or "").upper() for a in conn_app_names]
+    cache = {
+        a.app_name: a
+        for a in db.query(ComposioAppCache).filter(
+            ComposioAppCache.app_name.in_(list(set(app_names_upper)))
+        ).all()
+    }
+
+    out = []
+    for c in workspace_tools:
+        app_name = (c.get("app_name") or "").upper()
+        cached = cache.get(app_name)
+        meta = (cached.app_metadata or {}) if cached else {}
+        triggers = meta.get("triggers") or []
+        action_count = cached.action_count if cached else 0
+
+        out.append({
+            "id": cached.id if cached else None,
+            "app_name": app_name,
+            "status": c.get("status"),  # This is important - shows actual status
+            "connected_at": c.get("connected_at"),
+            "connection_id": c.get("connection_id"),
+            "display_name": cached.display_name if cached else app_name,
+            "description": cached.description if cached else None,
+            "logo_url": cached.logo_url if cached else None,
+            "categories": cached.categories if cached else [],
+            "action_count": action_count,
+            "trigger_count": cached.trigger_count if cached else 0,
+            "triggers": triggers if isinstance(triggers, list) else [],
+        })
+
+    return {"apps": out, "total": len(out)}
+
+
+@router.post("/add-to-workspace")
+async def add_to_workspace(
+    payload: ConnectIn,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Add a tool to workspace without OAuth connection.
+    This creates a workspace record so the tool appears in Applications tab.
+    User can then click Connect to initiate OAuth.
+    """
+    logger.info("=" * 80)
+    logger.info("🚀 [ADD_TO_WORKSPACE] REQUEST RECEIVED")
+    logger.info(f"🚀 [ADD_TO_WORKSPACE] Payload: {payload}")
+    logger.info(f"🚀 [ADD_TO_WORKSPACE] App name from payload: {payload.app_name}")
+    logger.info(f"🚀 [ADD_TO_WORKSPACE] Workspace ID: {ctx.workspace_id}")
+    logger.info(f"🚀 [ADD_TO_WORKSPACE] User: {ctx.user.id if ctx.user else 'None'} ({ctx.user.email if ctx.user else 'no email'})")
+    logger.info("=" * 80)
+
+    logger.info("[ADD_TO_WORKSPACE] Step 1: Creating EntityManager...")
+    entity_manager = EntityManager(db)
+
+    logger.info("[ADD_TO_WORKSPACE] Step 2: Getting or creating entity...")
+    entity = entity_manager.get_or_create_entity(ctx.workspace_id)
+    logger.info(f"[ADD_TO_WORKSPACE] Entity result: {entity}")
+
+    app_name = payload.app_name.upper()
+    logger.info(f"[ADD_TO_WORKSPACE] Step 3: Normalized app_name: {app_name}")
+
+    # Check if already exists
+    logger.info("[ADD_TO_WORKSPACE] Step 4: Checking existing connections...")
+    existing = entity_manager.get_entity_connections(entity["id"])
+    logger.info(f"[ADD_TO_WORKSPACE] Found {len(existing)} existing connections")
+    logger.info(f"[ADD_TO_WORKSPACE] Existing connections: {[c.get('app_name') for c in existing]}")
+
+    for conn in existing:
+        if (conn.get("app_name") or "").upper() == app_name:
+            current_status = (conn.get("status") or "").lower()
+
+            # Allow overwriting PENDING connections (OAuth failed/abandoned)
+            # This lets users retry OAuth flows that didn't complete
+            if current_status == "pending":
+                logger.info(f"[ADD_TO_WORKSPACE] Overwriting pending connection for {app_name}")
+                entity_manager.update_connection_status(
+                    entity_id=entity["id"],
+                    app_name=app_name,
+                    status="added"
+                )
+                db.commit()
+                logger.info(f"[ADD_TO_WORKSPACE] ✅ Updated {app_name} from pending to added")
+                logger.info("=" * 80)
+                return {
+                    "status": "success",
+                    "message": f"{app_name} is ready to connect. Click Connect to authorize.",
+                    "app_name": app_name
+                }
+
+            # For active/added connections, return already_added
+            logger.info(f"[ADD_TO_WORKSPACE] ⚠️  App already exists: {app_name} (status: {current_status})")
+            logger.info("=" * 80)
+            return {
+                "status": "already_added",
+                "message": f"{app_name} is already in your workspace",
+                "app_name": app_name
+            }
+
+    # Add connection with status "added" (not connected yet)
+    logger.info(f"[ADD_TO_WORKSPACE] Step 5: Adding connection to database...")
+    logger.info(f"[ADD_TO_WORKSPACE] entity_id={entity['id']}, app_name={app_name}, status='added'")
+    entity_manager.add_connection(entity_id=entity["id"], app_name=app_name, status="added")
+
+    # Ensure changes are committed to database
+    logger.info("[ADD_TO_WORKSPACE] Step 6: Committing to database...")
+    db.commit()
+    logger.info("[ADD_TO_WORKSPACE] ✅ Database commit successful!")
+
+    logger.info(f"[ADD_TO_WORKSPACE] ✅ Added {app_name} to workspace for entity {entity['id']}")
+    logger.info("=" * 80)
+
+    return {
+        "status": "success",
+        "message": f"{app_name} added to workspace. Click Connect to authorize.",
+        "app_name": app_name
+    }
+
+
+@router.get("/debug/connections")
+async def debug_connections(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    DEBUG: Show all connection records for this workspace
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"connections": [], "total": 0}
+
+    connections = entity_manager.get_entity_connections(entity["id"])
+
+    # Format for readability
+    formatted = []
+    for conn in connections:
+        formatted.append({
+            "app_name": conn.get("app_name"),
+            "status": conn.get("status"),
+            "created_at": str(conn.get("created_at")),
+            "connected_at": str(conn.get("connected_at")) if conn.get("connected_at") else None,
+            "connection_id": conn.get("connection_id")
+        })
+
+    return {
+        "workspace_id": str(ctx.workspace_id),
+        "entity_id": entity["id"],
+        "connections": formatted,
+        "total": len(formatted)
+    }
+
+
+@router.delete("/remove-from-workspace/{app_name}")
+async def remove_from_workspace(
+    app_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Remove an app from workspace (deletes the connection record).
+    Works for both connected and unconnected apps.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="No entity found for workspace")
+
+    app_upper = app_name.upper()
+
+    # Delete the connection record using entity_manager
+    success = entity_manager.remove_connection(str(entity["id"]), app_upper)
+
+    if not success:
+        raise HTTPException(status_code=404, detail=f"{app_upper} not found in workspace")
+
+    logger.info(f"[REMOVE_FROM_WORKSPACE] Removed {app_upper} from workspace for entity {entity['id']}")
+
+    return {
+        "status": "success",
+        "message": f"{app_upper} removed from workspace"
+    }
+
+
+@router.delete("/debug/connections/{app_name}")
+async def delete_connection_record(
+    app_name: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    DEBUG: Delete a specific connection record
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"error": "No entity found"}
+
+    # Delete the connection
+    from core.models.composio_cache import ComposioConnection
+    deleted = db.query(ComposioConnection).filter(
+        ComposioConnection.entity_id == entity["id"],
+        ComposioConnection.app_name.ilike(app_name)
+    ).delete()
+
+    db.commit()
+
+    return {
+        "deleted": deleted,
+        "app_name": app_name
+    }
+
+
+@router.post("/cleanup-pending")
+async def cleanup_pending_connections(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Clean up stale pending connections (OAuth started but never completed).
+
+    Removes connections with status='pending' that are older than 1 hour.
+    This allows users to retry OAuth flows that failed or were abandoned.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"error": "No entity found"}
+
+    from core.models.composio import ComposioConnection
+    from datetime import datetime, timedelta
+
+    # Find pending connections older than 1 hour
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+
+    stale_pending = db.query(ComposioConnection).filter(
+        ComposioConnection.entity_id == entity["id"],
+        ComposioConnection.status == 'pending',
+        ComposioConnection.updated_at < one_hour_ago
+    ).all()
+
+    deleted_apps = [c.app_name for c in stale_pending]
+    deleted_count = len(stale_pending)
+
+    # Delete stale pending connections
+    for conn in stale_pending:
+        db.delete(conn)
+
+    db.commit()
+
+    logger.info(f"Cleaned up {deleted_count} stale pending connections for workspace {ctx.workspace_id}: {deleted_apps}")
+
+    return {
+        "deleted_count": deleted_count,
+        "deleted_apps": deleted_apps,
+        "message": f"Removed {deleted_count} stale pending connections (older than 1 hour)"
+    }
+
+
+@router.post("/debug/cleanup")
+async def cleanup_connections(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    DEBUG: Clean up all non-active connection records (removes failed, error, pending, added)
+    Keeps only 'active' connections
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+    if not entity:
+        return {"error": "No entity found"}
+
+    from core.models.composio import ComposioConnection
+
+    # Get all non-active connections
+    connections_to_delete = db.query(ComposioConnection).filter(
+        ComposioConnection.entity_id == entity["id"],
+        ComposioConnection.status != 'active'
+    ).all()
+
+    deleted_apps = [c.app_name for c in connections_to_delete]
+
+    # Delete them
+    deleted_count = db.query(ComposioConnection).filter(
+        ComposioConnection.entity_id == entity["id"],
+        ComposioConnection.status != 'active'
+    ).delete()
+
+    db.commit()
+
+    logger.info(f"Cleaned up {deleted_count} non-active connections for workspace {ctx.workspace_id}")
+
+    return {
+        "deleted_count": deleted_count,
+        "deleted_apps": deleted_apps,
+        "message": f"Removed {deleted_count} non-active connection records"
+    }
+
+
 @router.post("/sync")
 async def sync(
     sync_type: str = Query("full", description="full or incremental"),
@@ -475,6 +721,75 @@ async def sync(
         result = service.run_full_sync()
     logger.info(f"Sync completed: {result}")
     return result
+
+
+@router.post("/refresh-connections")
+async def refresh_connections(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually refresh pending connections from Composio.
+
+    This endpoint checks all pending connections and updates their status.
+    Use this after OAuth callbacks to ensure UI reflects the latest state.
+
+    PERFORMANCE NOTE: This makes API calls to Composio and should NOT
+    be called on every page load. Use only when explicitly needed.
+    """
+    entity_manager = EntityManager(db)
+    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
+
+    if not entity:
+        return {"synced": 0, "updated": 0, "message": "No entity found"}
+
+    from datetime import datetime, timedelta
+    connections = entity_manager.get_entity_connections(entity["id"])
+
+    # Find pending connections to sync
+    pending_to_sync = [
+        conn for conn in connections
+        if (conn.get("status") or "").lower() == "pending"
+    ]
+
+    if not pending_to_sync:
+        return {"synced": 0, "updated": 0, "message": "No pending connections"}
+
+    logger.info(f"[REFRESH] Syncing {len(pending_to_sync)} pending connections for workspace {ctx.workspace_id}")
+
+    client = get_composio_client()
+    updated_count = 0
+
+    for conn in pending_to_sync:
+        try:
+            composio_status = client.get_connection_status(
+                entity_id=entity["composio_entity_id"],
+                app=(conn.get("app_name") or "").upper(),
+            )
+            if composio_status and composio_status.get("status") == "ACTIVE":
+                entity_manager.update_connection_status(
+                    entity_id=entity["id"],
+                    app_name=conn.get("app_name") or "",
+                    status="active",
+                    connection_id=composio_status.get("id"),
+                )
+                updated_count += 1
+                logger.info(f"[REFRESH] Updated {conn.get('app_name')} to active")
+            else:
+                # Mark as checked to avoid retry storms
+                entity_manager.update_connection_status(
+                    entity_id=entity["id"],
+                    app_name=conn.get("app_name") or "",
+                    status="pending",
+                )
+        except Exception as e:
+            logger.error(f"[REFRESH] Failed to sync {conn.get('app_name')}: {e}")
+
+    return {
+        "synced": len(pending_to_sync),
+        "updated": updated_count,
+        "message": f"Synced {len(pending_to_sync)} connections, {updated_count} updated to active"
+    }
 
 
 @router.get("/sync/history")

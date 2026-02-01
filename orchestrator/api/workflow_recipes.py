@@ -50,7 +50,10 @@ async def list_workflow_recipes(
     - sort_by: Sort field (popularity, created_at, use_count, average_rating, name)
     """
     try:
-        query = db.query(WorkflowRecipe).filter(WorkflowRecipe.workspace_id == ctx.workspace_id)
+        query = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id
+        )
 
         # Apply filters
         if category:
@@ -113,6 +116,7 @@ async def get_workflow_recipe(
     """Get a single workflow recipe by its template_id"""
     try:
         recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
@@ -211,7 +215,7 @@ async def create_workflow_recipe(
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
-            created_by=recipe_data.get('created_by', ctx.user_email or f"user-{ctx.user_id}")
+            created_by=recipe_data.get('created_by', ctx.user.email if ctx.user else "anonymous")
         )
 
         db.add(recipe)
@@ -246,6 +250,7 @@ async def update_workflow_recipe(
     """
     try:
         recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
@@ -302,6 +307,7 @@ async def delete_workflow_recipe(
     """
     try:
         recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
@@ -345,6 +351,7 @@ async def record_recipe_usage(
     """
     try:
         recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.template_id == recipe_id
         ).first()
@@ -383,6 +390,7 @@ async def list_recipe_categories(
             WorkflowRecipe.category,
             func.count(WorkflowRecipe.id).label('count')
         ).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.is_public == True
         ).group_by(
@@ -410,6 +418,7 @@ async def list_featured_recipes(
     """Get featured workflow recipes"""
     try:
         recipes = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.is_featured == True,
             WorkflowRecipe.is_public == True
@@ -425,3 +434,300 @@ async def list_featured_recipes(
     except Exception as e:
         logger.error(f"Error listing featured recipes: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing featured recipes: {str(e)}")
+
+
+# ===================================================================
+# MARKETPLACE ENDPOINTS
+# ===================================================================
+
+@router.post("/submit")
+async def submit_recipe_to_marketplace(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    recipe_data: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit a workspace recipe to the marketplace for approval.
+    Trusted users (5+ approved items) auto-publish; others go to approval queue.
+
+    Required fields:
+    - recipe_id: ID of the workspace recipe to submit (template_id)
+    - category: Optional marketplace category (uses recipe category if not provided)
+    - icon: Optional marketplace icon URL
+    """
+    try:
+        recipe_id = recipe_data.get('recipe_id')
+        if not recipe_id:
+            raise HTTPException(status_code=400, detail="recipe_id is required")
+
+        # Get workspace recipe
+        workspace_recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.template_id == recipe_id,
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.owner_type == 'workspace'
+        ).first()
+
+        if not workspace_recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found in workspace")
+
+        # Look up database user ID
+        from core.models.core import User as UserModel
+        user_id_int = None
+        if ctx.user and ctx.user.id:
+            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+            if not user and ctx.user.email:
+                user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
+            if user:
+                user_id_int = user.id
+
+        # Check if user is trusted (5+ approved marketplace items - agents OR recipes)
+        from core.models.core import Agent
+        approved_agent_count = db.query(Agent).filter(
+            Agent.original_creator_id == user_id_int,
+            Agent.owner_type == 'marketplace',
+            Agent.is_approved == True
+        ).count() if user_id_int else 0
+
+        approved_recipe_count = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.original_creator_id == user_id_int,
+            WorkflowRecipe.owner_type == 'marketplace',
+            WorkflowRecipe.is_approved == True
+        ).count() if user_id_int else 0
+
+        total_approved = approved_agent_count + approved_recipe_count
+        is_trusted = total_approved >= 5
+
+        logger.info(f"User approval status - User ID: {user_id_int}, Approved items: {total_approved}, Is trusted: {is_trusted}")
+
+        # Check if recipe already exists in marketplace
+        existing = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.name == workspace_recipe.name,
+            WorkflowRecipe.owner_type == 'marketplace'
+        ).first()
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A marketplace recipe with name '{workspace_recipe.name}' already exists"
+            )
+
+        # Clone to marketplace
+        marketplace_recipe = WorkflowRecipe(
+            template_id=f"marketplace-{workspace_recipe.template_id}-{datetime.now().timestamp()}",
+            name=workspace_recipe.name,
+            description=workspace_recipe.description,
+            category=workspace_recipe.category,
+            recipe_type=workspace_recipe.recipe_type,
+            template_definition=workspace_recipe.template_definition,
+            tags=workspace_recipe.tags,
+            difficulty=workspace_recipe.difficulty,
+            recommended_agents=workspace_recipe.recommended_agents,
+            estimated_time=workspace_recipe.estimated_time,
+            required_tools=workspace_recipe.required_tools,
+            icon=workspace_recipe.icon,
+            preview_image=workspace_recipe.preview_image,
+            documentation_url=workspace_recipe.documentation_url,
+            version=workspace_recipe.version or '1.0',
+
+            # Marketplace ownership
+            owner_type='marketplace',
+            owner_id='marketplace',
+            workspace_id=None,
+
+            # Creator tracking
+            original_creator_id=user_id_int,
+            created_by_user_id=user_id_int,
+            cloned_from_id=workspace_recipe.id,
+
+            # Approval
+            is_approved=is_trusted,
+            marketplace_category=recipe_data.get('category') or workspace_recipe.category,
+            marketplace_icon=recipe_data.get('icon') or workspace_recipe.icon,
+
+            # Visibility
+            is_public=True,
+            is_featured=False,
+            is_system=False,
+
+            # Stats
+            install_count=0,
+            use_count=0,
+
+            created_by=(ctx.user.email if ctx.user and ctx.user.email else "system")
+        )
+
+        db.add(marketplace_recipe)
+        db.commit()
+        db.refresh(marketplace_recipe)
+
+        logger.info(f"Marketplace recipe created - ID: {marketplace_recipe.id}, Name: {marketplace_recipe.name}, Approved: {marketplace_recipe.is_approved}")
+
+        message = "Recipe published to marketplace successfully" if is_trusted else "Recipe submitted for marketplace approval"
+
+        return {
+            "success": True,
+            "message": message,
+            "item_id": marketplace_recipe.id,
+            "auto_approved": is_trusted
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting recipe to marketplace: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error submitting recipe: {str(e)}")
+
+
+@router.post("/install/{recipe_id}")
+async def install_recipe_from_marketplace(
+    recipe_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Install a marketplace recipe to the user's workspace.
+    Automatically clones the recipe and handles name collisions.
+    Optionally auto-clones referenced agents if available in marketplace.
+    """
+    try:
+        # Get the marketplace recipe
+        marketplace_recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.id == recipe_id,
+            WorkflowRecipe.owner_type == 'marketplace',
+            WorkflowRecipe.is_approved == True
+        ).first()
+
+        if not marketplace_recipe:
+            raise HTTPException(status_code=404, detail="Marketplace recipe not found")
+
+        cloned_items = []
+        warnings = []
+
+        # Look up database user ID
+        from core.models.core import User as UserModel
+        user_id_int = None
+        if ctx.user and ctx.user.id:
+            user = db.query(UserModel).filter(UserModel.clerk_user_id == ctx.user.id).first()
+            if not user and ctx.user.email:
+                user = db.query(UserModel).filter(UserModel.email == ctx.user.email).first()
+            if user:
+                user_id_int = user.id
+
+        # Check if recipe name already exists in workspace
+        name_exists = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.name == marketplace_recipe.name,
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.owner_type == 'workspace'
+        ).first() is not None
+
+        recipe_name = f"{marketplace_recipe.name} (Copy)" if name_exists else marketplace_recipe.name
+
+        # Generate unique template_id
+        base_template_id = marketplace_recipe.template_id.replace('marketplace-', '')
+        template_id = base_template_id
+        counter = 1
+        while db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.template_id == template_id,
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.owner_type == 'workspace'
+        ).first():
+            template_id = f"{base_template_id}-{counter}"
+            counter += 1
+
+        # Clone recipe to workspace
+        cloned_recipe = WorkflowRecipe(
+            template_id=template_id,
+            name=recipe_name,
+            description=marketplace_recipe.description,
+            category=marketplace_recipe.category,
+            recipe_type=marketplace_recipe.recipe_type,
+            template_definition=marketplace_recipe.template_definition,
+            tags=marketplace_recipe.tags,
+            difficulty=marketplace_recipe.difficulty,
+            recommended_agents=marketplace_recipe.recommended_agents,
+            estimated_time=marketplace_recipe.estimated_time,
+            required_tools=marketplace_recipe.required_tools,
+            icon=marketplace_recipe.icon,
+            preview_image=marketplace_recipe.preview_image,
+            documentation_url=marketplace_recipe.documentation_url,
+            version=marketplace_recipe.version,
+
+            # Ownership swap
+            owner_type='workspace',
+            owner_id=str(ctx.workspace_id),
+            workspace_id=ctx.workspace_id,
+            created_by_user_id=user_id_int,
+
+            # Tracking
+            cloned_from_id=marketplace_recipe.id,
+            original_creator_id=marketplace_recipe.original_creator_id,
+
+            # Visibility
+            is_public=True,
+            is_featured=False,
+            is_system=False,
+            is_approved=True,
+
+            # Stats
+            install_count=0,
+            use_count=0,
+
+            created_by=(ctx.user.email if ctx.user and ctx.user.email else "system")
+        )
+
+        db.add(cloned_recipe)
+        db.flush()
+
+        cloned_items.append({
+            "type": "recipe",
+            "name": recipe_name,
+            "id": cloned_recipe.id,
+            "template_id": cloned_recipe.template_id
+        })
+
+        # TODO: Auto-clone referenced agents if available in marketplace
+        # This would require parsing template_definition and checking for agent references
+
+        # Increment marketplace recipe install count
+        marketplace_recipe.install_count += 1
+
+        # Record installation in marketplace_installs
+        from sqlalchemy import text
+        install_query = text("""
+            INSERT INTO marketplace_installs (user_id, marketplace_recipe_id, cloned_recipe_id, version, installed_at)
+            VALUES (:user_id, :marketplace_recipe_id, :cloned_recipe_id, :version, NOW())
+            ON CONFLICT DO NOTHING
+        """)
+
+        try:
+            db.execute(install_query, {
+                "user_id": user_id_int,
+                "marketplace_recipe_id": marketplace_recipe.id,
+                "cloned_recipe_id": cloned_recipe.id,
+                "version": marketplace_recipe.version
+            })
+        except Exception as e:
+            # If marketplace_installs table doesn't have recipe columns yet, log warning
+            logger.warning(f"Could not record recipe install in marketplace_installs: {e}")
+            warnings.append("Install tracking not available for recipes yet")
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"{marketplace_recipe.name} installed successfully",
+            "cloned_items": cloned_items,
+            "warnings": warnings
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error installing marketplace recipe {recipe_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error installing recipe: {str(e)}")

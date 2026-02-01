@@ -100,9 +100,24 @@ class Agent(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     is_shared = Column(Boolean, default=True)  # True = visible to workspace, False = private to creator
 
-    # PRD-37: Workspace isolation
-    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
-    
+    # PRD-37: Workspace isolation (nullable for marketplace agents)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
+    # Marketplace fields (PRD-48: Single-table architecture)
+    owner_type = Column(String(20), nullable=False, default='workspace', server_default='workspace')
+    owner_id = Column(String(255), nullable=True)
+
+    cloned_from_id = Column(Integer, ForeignKey('agents.id', ondelete='SET NULL'), nullable=True)
+    original_creator_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+
+    install_count = Column(Integer, default=0, server_default='0')
+    is_featured = Column(Boolean, default=False, server_default='false')
+    is_approved = Column(Boolean, default=False, server_default='false')
+
+    marketplace_category = Column(String(100), nullable=True)
+    marketplace_icon = Column(String(500), nullable=True)
+    version = Column(String(50), default='1.0.0', server_default='1.0.0')
+
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
     emergence_score = Column(Float, nullable=True)  # Emergence metric
@@ -140,6 +155,15 @@ class Agent(Base):
     workflows = relationship("Workflow", secondary=workflow_agents, back_populates="agents")
     executions = relationship("WorkflowExecution", back_populates="agent")
     # Tool/app assignments are managed via `AgentAppAssignment` (Composio cache model).
+
+    # Marketplace relationships
+    cloned_from = relationship("Agent", remote_side=[id], foreign_keys=[cloned_from_id], backref="clones")
+    original_creator = relationship("User", foreign_keys=[original_creator_id])
+
+    @property
+    def is_marketplace_item(self) -> bool:
+        """Check if this agent is a marketplace item."""
+        return self.owner_type == 'marketplace'
 
 class Skill(Base):
     __tablename__ = 'skills'
@@ -476,6 +500,7 @@ class AgentCreate(BaseModel):
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    agent_type: Optional[str] = None  # Allow updating agent type/category
     status: Optional[AgentStatus] = None
     configuration: Optional[Dict[str, Any]] = None
     skill_ids: Optional[List[int]] = None
@@ -1002,54 +1027,83 @@ class WorkflowTemplate(Base):
     """
     Workflow templates that users can use to quickly create workflows.
     Templates include pre-configured steps, agents, and settings.
+
+    Uses single-table architecture: both workspace and marketplace recipes
+    are stored here, distinguished by owner_type.
     """
-    __tablename__ = 'workflow_templates'
-    
+    __tablename__ = 'workflow_recipes'  # Renamed from workflow_templates
+
     # Primary identification
     id = Column(Integer, primary_key=True)
     template_id = Column(String(100), unique=True, nullable=False, index=True)  # e.g., "ai-code-review"
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
-    
+
+    # Ownership and workspace isolation (single-table architecture)
+    workspace_id = Column(UUID, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
+    owner_type = Column(String(20), nullable=False, default='workspace', index=True)  # 'workspace' or 'marketplace'
+    owner_id = Column(String(255))  # workspace_id for workspace recipes, 'marketplace' for marketplace
+
+    # Cloning and attribution
+    cloned_from_id = Column(Integer, ForeignKey('workflow_recipes.id', ondelete='SET NULL'), nullable=True)
+    original_creator_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
     # Categorization
     category = Column(String(100), nullable=False, index=True)  # Development, Data Processing, etc.
     tags = Column(JSONB, default=list)  # ["code-review", "security", "automation"]
     difficulty = Column(String(50), default='intermediate')  # beginner, intermediate, advanced
-    
+    recipe_type = Column(String(20), default='complex', nullable=False)  # 'simple' or 'complex'
+
     # Template definition
     template_definition = Column(JSONB, nullable=False)  # Full workflow structure
     # Contains: { steps: [], agents: [], config: {}, variables: [] }
-    
+
     # Recommended configuration
     recommended_agents = Column(JSONB, default=list)  # Agent types that work well with this template
     estimated_time = Column(String(50))  # "5-10 minutes"
     required_tools = Column(JSONB, default=list)  # Tools that must be installed
-    
+
     # Usage and popularity
     use_count = Column(Integer, default=0)  # How many workflows created from this template
     success_rate = Column(Float, default=0.0)  # Average success rate of workflows using this template
     popularity = Column(Integer, default=0)  # Popularity score (0-100)
     average_rating = Column(Float, default=0.0)  # User ratings (0-5)
-    
+    install_count = Column(Integer, default=0)  # Marketplace install counter
+
     # Visibility and access
     is_public = Column(Boolean, default=True)  # Public templates visible to all users
     is_featured = Column(Boolean, default=False)  # Featured on templates page
     is_system = Column(Boolean, default=False)  # System templates (can't be deleted)
-    
+    is_approved = Column(Boolean, default=False)  # Approval status for marketplace items
+
     # Metadata
     icon = Column(String(50))  # Emoji or icon identifier
     preview_image = Column(String(500))  # URL to preview image
     documentation_url = Column(String(500))  # Link to detailed documentation
-    
+    marketplace_category = Column(String(100))  # Marketplace-specific category
+    marketplace_icon = Column(String(500))  # Icon URL for marketplace
+
     # Versioning
     version = Column(String(50), default='1.0')
     changelog = Column(JSONB, default=list)  # Version history
-    
+
     # Timestamps and ownership
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     created_by = Column(String(255), nullable=False)
     last_used_at = Column(DateTime)
+
+    # Relationships
+    workspace = relationship('Workspace', foreign_keys=[workspace_id])
+    cloned_from = relationship('WorkflowTemplate', remote_side=[id], foreign_keys=[cloned_from_id])
+    original_creator = relationship('User', foreign_keys=[original_creator_id])
+    created_by_user = relationship('User', foreign_keys=[created_by_user_id])
+
+    @property
+    def is_marketplace_item(self):
+        """Check if this is a marketplace recipe"""
+        return self.owner_type == 'marketplace'
     
     def to_dict(self):
         """Convert template to dictionary for API responses"""
@@ -1058,9 +1112,16 @@ class WorkflowTemplate(Base):
             'template_id': self.template_id,
             'name': self.name,
             'description': self.description,
+            'workspace_id': str(self.workspace_id) if self.workspace_id else None,
+            'owner_type': self.owner_type,
+            'owner_id': self.owner_id,
+            'cloned_from_id': self.cloned_from_id,
+            'original_creator_id': self.original_creator_id,
+            'created_by_user_id': self.created_by_user_id,
             'category': self.category,
             'tags': self.tags or [],
             'difficulty': self.difficulty,
+            'recipe_type': self.recipe_type,
             'template_definition': self.template_definition or {},
             'recommended_agents': self.recommended_agents or [],
             'estimated_time': self.estimated_time,
@@ -1069,12 +1130,17 @@ class WorkflowTemplate(Base):
             'success_rate': self.success_rate,
             'popularity': self.popularity,
             'average_rating': self.average_rating,
+            'install_count': self.install_count,
             'is_public': self.is_public,
             'is_featured': self.is_featured,
             'is_system': self.is_system,
+            'is_approved': self.is_approved,
+            'is_marketplace_item': self.is_marketplace_item,
             'icon': self.icon,
             'preview_image': self.preview_image,
             'documentation_url': self.documentation_url,
+            'marketplace_category': self.marketplace_category,
+            'marketplace_icon': self.marketplace_icon,
             'version': self.version,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

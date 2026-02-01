@@ -104,12 +104,39 @@ export function useDeleteRecipe() {
 // Record recipe usage mutation
 export function useRecordRecipeUsage() {
   const queryClient = useQueryClient()
-  
+
   return useMutation({
     mutationFn: (recipeId: string) => apiClient.recordRecipeUsage(recipeId),
     onSuccess: (_, recipeId) => {
       // Invalidate the specific recipe to refresh use_count
       queryClient.invalidateQueries({ queryKey: recipeKeys.detail(recipeId) })
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+    },
+  })
+}
+
+// Submit recipe to marketplace
+export function useSubmitRecipeToMarketplace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: { recipe_id: string; category?: string; icon?: string }) =>
+      apiClient.submitRecipeToMarketplace(params),
+    onSuccess: () => {
+      // Invalidate marketplace items to show the new recipe
+      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+    },
+  })
+}
+
+// Install recipe from marketplace
+export function useInstallRecipeFromMarketplace() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (recipeId: number) => apiClient.installRecipeFromMarketplace(recipeId),
+    onSuccess: () => {
+      // Invalidate workspace recipes to show the newly installed recipe
       queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
     },
   })

@@ -3,15 +3,15 @@
 import * as React from 'react'
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Bot, 
-  Calendar, 
-  Activity, 
-  Settings, 
-  CheckCircle, 
-  AlertTriangle, 
-  Clock, 
+import {
+  X,
+  Bot,
+  Calendar,
+  Activity,
+  Settings,
+  CheckCircle,
+  AlertTriangle,
+  Clock,
   Zap,
   Database,
   Eye,
@@ -22,7 +22,8 @@ import {
   RefreshCw,
   TrendingUp,
   Users,
-  Brain
+  Brain,
+  Share2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +31,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useAgent, useAgentStats, useAgentLogs, useAgentPerformance, useAgentSkills } from '@/hooks/use-agent-api'
+import { useSubmitToMarketplace } from '@/hooks/use-marketplace-api'
 
 interface AgentDetailsModalProps {
   agentId: number | null
@@ -103,15 +115,16 @@ const agentTypeIcons: Record<string, string> = {
   custom: '🤖'
 }
 
-export function AgentDetailsModal({ 
-  agentId, 
-  open, 
-  onClose, 
+export function AgentDetailsModal({
+  agentId,
+  open,
+  onClose,
   onEdit,
   onToggleStatus,
-  onDelete 
+  onDelete
 }: AgentDetailsModalProps) {
   const [activeTab, setActiveTab] = useState('overview')
+  const [showShareDialog, setShowShareDialog] = useState(false)
 
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
@@ -119,11 +132,14 @@ export function AgentDetailsModal({
   const { data: agentLogs } = useAgentLogs(agentId?.toString() || '')
   // Note: Skills should be included in agent data, but fallback to separate API call if needed
   const { data: agentSkills } = useAgentSkills(agentId?.toString() || '')
-  
+
   // Use skills from agent data if available, otherwise use separate API call
   const skills = agent?.skills || agentSkills || []
 
   const error = agentError?.message || null
+
+  // Marketplace submission
+  const { mutate: submitToMarketplace, isPending: isSubmitting } = useSubmitToMarketplace()
 
 
   const formatDate = (dateString?: string) => {
@@ -155,6 +171,27 @@ export function AgentDetailsModal({
       onDelete(agent.id)
       onClose()
     }
+  }
+
+  const handleShare = () => {
+    setShowShareDialog(true)
+  }
+
+  const confirmShare = () => {
+    if (!agent) return
+
+    submitToMarketplace({
+      item_type: 'agent',
+      category: agent.agent_type,
+      metadata: {
+        agent_id: agent.id,
+        icon: agentTypeIcons[agent.agent_type] || '🤖'
+      }
+    }, {
+      onSuccess: () => {
+        setShowShareDialog(false)
+      }
+    })
   }
 
   if (!open || !agentId) return null
@@ -190,8 +227,8 @@ export function AgentDetailsModal({
             <div className="flex items-center space-x-2">
               {agent && (
                 <>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={handleEdit}
                     className="hover:border-blue-500/50"
@@ -199,8 +236,18 @@ export function AgentDetailsModal({
                     <Edit className="w-4 h-4 mr-2" />
                     Edit
                   </Button>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleShare}
+                    disabled={isSubmitting}
+                    className="hover:border-orange-500/50 text-orange-400"
+                  >
+                    <Share2 className="w-4 h-4 mr-2" />
+                    {isSubmitting ? 'Sharing...' : 'Share to Marketplace'}
+                  </Button>
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={handleToggleStatus}
                     className={agent.status === 'active' ? "hover:border-yellow-500/50" : "hover:border-green-500/50"}
@@ -217,8 +264,8 @@ export function AgentDetailsModal({
                       </>
                     )}
                   </Button>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
                     onClick={handleDelete}
                     className="hover:border-red-500/50 text-red-400"
@@ -582,6 +629,48 @@ export function AgentDetailsModal({
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Share to Marketplace Confirmation Dialog */}
+      <AlertDialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+        <AlertDialogContent className="glass-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center space-x-2">
+              <Share2 className="w-5 h-5 text-orange-400" />
+              <span>Share Agent to Marketplace</span>
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Are you sure you want to share <strong className="text-foreground">{agent?.name}</strong> to the marketplace?
+              </p>
+              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-sm">
+                <p className="text-orange-400 font-semibold mb-1">📝 What happens next:</p>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• Your agent will be cloned to the marketplace</li>
+                  <li>• Other users can browse and install it</li>
+                  <li>• Your original agent stays in your workspace</li>
+                  <li>• You'll be credited as the creator</li>
+                </ul>
+              </div>
+              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-sm">
+                <p className="text-orange-400 font-semibold mb-1">⚡ Approval Status:</p>
+                <p className="text-muted-foreground">
+                  Trusted creators (5+ approved items) get instant approval. New contributors go through a quick review process.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmShare}
+              disabled={isSubmitting}
+              className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
+            >
+              {isSubmitting ? 'Sharing...' : 'Share to Marketplace'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AnimatePresence>
   )
 }

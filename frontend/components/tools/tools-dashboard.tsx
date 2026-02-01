@@ -158,8 +158,10 @@ export function ToolsDashboard() {
     search: debouncedSearch || undefined,
     category: categoryParam
   })
+  // Fetch connected tools for the Applications tab (with search support)
   const { data: enabledToolsData, isLoading: enabledToolsLoading, error: enabledToolsError } = useTools({
     status: 'active',
+    search: debouncedSearch || undefined,
     limit: 1000
   })
   const { data: statsData, error: statsError } = useToolsStats()
@@ -248,20 +250,27 @@ export function ToolsDashboard() {
 
   // Listen for popup messages
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
       if (event.data?.type === 'COMPOSIO_CONNECTED') {
         console.log('✅ Connection successful message received!', event.data)
         setConnectingTool(null)
-        // Trigger a refetch of tools to update status
-        // We can treat this as "connected" optimistically too if needed
-        // But invalidating query is safer
-        // queryClient.invalidateQueries(['tools']) (need queryClient access or just wait for poll)
-        window.location.reload() // Brute force refresh for now to ensure state sync, or use queryClient if available
+
+        // Invalidate and refetch ALL tools queries to update connection status immediately
+        console.log('[AUTO-REFRESH] Invalidating and refetching tools queries...')
+        await queryClient.invalidateQueries({ queryKey: ['tools'] })
+        await queryClient.refetchQueries({ queryKey: ['tools'] })
+        await queryClient.invalidateQueries({ queryKey: ['composio', 'connections'] })
+        console.log('[AUTO-REFRESH] Queries refetched successfully')
+
+        toast({
+          title: 'Connected!',
+          description: `${event.data.app_name || 'App'} is now connected and ready to use.`,
+        })
       }
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [])
+  }, [queryClient, toast])
 
 
   // Convert raw tools to match Tool interface for UI compatibility
@@ -349,33 +358,21 @@ export function ToolsDashboard() {
   }, [tools, selectedCategory, searchQuery, sortBy])
 
   const getToolStats = () => {
-    // Use real stats from API if available and has the expected structure
-    if (statsData && typeof statsData === 'object' && 'total_tools' in statsData) {
-      console.log('Stats API data:', statsData)
-      return {
-        connectedApps: (statsData as any).connected_apps ?? (statsData as any).active_tools ?? 0,
-        categories: (Array.isArray(categoriesData) && categoriesData.length > 0)
-          ? categoriesData.length
-          : (statsData as any).categories ?? 0,
-        appsAvailable: (statsData as any).apps_available ?? (statsData as any).total_tools ?? 0,
-        totalTools: (statsData as any).tools_available ?? 0
-      }
-    }
-
-    console.log('Stats API not available, using fallback. Tools on page:', tools.length)
-
-    // Fallback: Use pagination total for overall count, but this won't give accurate enabled count
-    // The enabled count will be wrong unless we fetch all tools
-    const connectedApps = tools.filter(tool => tool?.isInstalled)?.length || 0
-    const categories = (categoriesData && Array.isArray(categoriesData)) ? categoriesData.length : 0
-    const appsAvailable = paginationData.total || tools?.length || 0
-    const totalTools = tools.reduce((acc, tool: any) => acc + (tool?.metadata?.action_count || 0), 0)
+    // Calculate from enabled tools data (workspace apps)
+    const connectedApps = enabledTools.filter(tool => tool?.isInstalled).length
+    const workspaceApps = enabledTools.length
+    const toolsAvailable = enabledTools
+      .filter(tool => tool?.isInstalled)
+      .reduce((acc, tool: any) => acc + (tool?.metadata?.action_count || 0), 0)
+    const triggersAvailable = enabledTools
+      .filter(tool => tool?.isInstalled)
+      .reduce((acc, tool: any) => acc + (tool?.metadata?.trigger_count || 0), 0)
 
     return {
-      connectedApps, // This will be inaccurate - only counts current page
-      categories,
-      appsAvailable,
-      totalTools
+      connectedApps,
+      workspaceApps,
+      toolsAvailable,
+      triggersAvailable
     }
   }
 
@@ -518,12 +515,16 @@ export function ToolsDashboard() {
         popup.location.href = redirectUrlResult.redirect_url
 
         // Poll for popup close check
-        const checkClosed = setInterval(() => {
+        const checkClosed = setInterval(async () => {
           if (popup?.closed) {
             clearInterval(checkClosed)
             setConnectingTool(null)
-            // Refresh connections after popup closes
-            window.location.reload()
+            // Invalidate and refetch ALL tools queries to update connection status immediately
+            console.log('[AUTO-REFRESH] Popup closed, invalidating queries...')
+            await queryClient.invalidateQueries({ queryKey: ['tools'] })
+            await queryClient.refetchQueries({ queryKey: ['tools'], type: 'active' })
+            await queryClient.invalidateQueries({ queryKey: ['composio', 'connections'] })
+            console.log('[AUTO-REFRESH] Queries refreshed after popup close')
           }
         }, 1000)
       } else {
@@ -585,6 +586,35 @@ export function ToolsDashboard() {
     }
   }
 
+  const handleRemoveFromWorkspace = async (tool: Tool) => {
+    setLoading(true)
+    try {
+      const appName = tool.name
+      console.log(`Removing ${appName} from workspace`)
+
+      await apiClient.delete(`/api/tools/remove-from-workspace/${appName}`)
+
+      // Close modal and refresh tools list
+      setDetailsModalOpen(false)
+      queryClient.invalidateQueries({ queryKey: ['tools'] })
+      queryClient.refetchQueries({ queryKey: ['tools'] })
+
+      toast({
+        title: 'Removed from Workspace',
+        description: `${appName} has been removed from your workspace.`,
+      })
+    } catch (error) {
+      console.error('Failed to remove from workspace:', error)
+      toast({
+        title: 'Error',
+        description: `Failed to remove ${tool.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const stats = getToolStats()
 
   return (
@@ -627,29 +657,29 @@ export function ToolsDashboard() {
           {
             label: 'Connected Apps',
             value: stats.connectedApps.toString(),
-            change: 'Connected',
+            change: 'Active',
             icon: CheckCircle,
             color: 'text-green-400'
           },
           {
-            label: 'Categories',
-            value: stats.categories.toString(),
-            change: 'Available',
-            icon: Tag,
+            label: 'In Workspace',
+            value: stats.workspaceApps.toString(),
+            change: 'Total apps',
+            icon: Grid3X3,
             color: 'text-blue-400'
           },
           {
-            label: 'Apps Available',
-            value: stats.appsAvailable.toString(),
-            change: 'In marketplace',
-            icon: Grid3X3,
+            label: 'Tools Available',
+            value: stats.toolsAvailable.toString(),
+            change: 'Actions',
+            icon: Wrench,
             color: 'text-purple-400'
           },
           {
-            label: 'Total Tools',
-            value: stats.totalTools.toString(),
-            change: 'Across apps',
-            icon: TrendingUp,
+            label: 'Triggers',
+            value: stats.triggersAvailable.toString(),
+            change: 'Available',
+            icon: Zap,
             color: 'text-orange-400'
           }
         ].map((stat, index) => (
@@ -696,13 +726,13 @@ export function ToolsDashboard() {
               <TabsList className="bg-secondary/50">
                 <TabsTrigger value="enabled" className="flex items-center gap-1.5 px-3">
                   <CheckCircle className="w-4 h-4" />
-                  <span>Connected ({enabledToolsCount})</span>
+                  <span>Applications ({enabledToolsCount})</span>
                 </TabsTrigger>
               </TabsList>
 
-              {/* Sort Dropdown */}
+              {/* Sort Dropdown - Pill shaped */}
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-32 h-9 bg-secondary/50">
+                <SelectTrigger className="w-32 h-9 bg-secondary/50 rounded-full border-border/40 hover:border-primary/50 transition-colors">
                   <SelectValue placeholder="Sort" />
                 </SelectTrigger>
                 <SelectContent>
@@ -752,12 +782,10 @@ export function ToolsDashboard() {
           <TabsContent value="enabled" className="space-y-6">
             {/* Enabled Tools Management */}
             <div className="space-y-4">
-              <h3 className="text-xl font-semibold">Connected Tools</h3>
+              <h3 className="text-xl font-semibold">Applications</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <AnimatePresence>
-                  {enabledTools
-                    .filter(tool => tool?.isInstalled)
-                    .map((tool, index) => (
+                  {enabledTools.map((tool, index) => (
                       <ToolCard
                         key={tool?.id}
                         tool={tool}
@@ -852,6 +880,7 @@ export function ToolsDashboard() {
         tool={selectedTool}
         onInstall={() => selectedTool && handleToolConnect(selectedTool)}
         onUninstall={() => selectedTool && handleToolDelete(selectedTool)}
+        onRemoveFromWorkspace={() => selectedTool && handleRemoveFromWorkspace(selectedTool)}
         onConfigure={() => {
           setDetailsModalOpen(false)
           handleToolConfigure(selectedTool)
@@ -996,7 +1025,11 @@ function ToolCard({
       exit={{ opacity: 0, y: 20 }}
       transition={{ delay: index * 0.1 }}
     >
-      <Card className={`bg-secondary/30 border-border/30 hover:border-orange-500/30 transition-all duration-200 group hover:shadow-lg ${isConnected ? 'border-green-500/30 bg-green-500/5' : ''}`}>
+      <Card className={`bg-secondary/30 border-border/30 transition-all duration-200 group ${
+        isConnected
+          ? 'border-green-500/30 bg-green-500/5 hover:border-green-500/50 hover:shadow-lg hover:shadow-green-500/20'
+          : 'hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20'
+      }`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center space-x-3">
@@ -1077,7 +1110,7 @@ function ToolCard({
                 size="sm"
                 variant="secondary"
                 className="w-24 bg-secondary/50 hover:bg-secondary border border-white/10"
-                onClick={onUninstall} // Mapped to Manage
+                onClick={onUninstall}
               >
                 <Settings className="w-3 h-3 mr-2" />
                 Manage
@@ -1086,7 +1119,7 @@ function ToolCard({
               <Button
                 size="sm"
                 className="w-24 bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
-                onClick={onInstall} // Mapped to Connect
+                onClick={onInstall}
                 style={{ height: '32px' }}
               >
                 Connect

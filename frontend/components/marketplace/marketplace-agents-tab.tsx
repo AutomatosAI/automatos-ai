@@ -1,15 +1,18 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Search, Bot, Loader2, Download, Zap, Wrench } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { useState } from 'react'
+import {
+  Loader2, Download, Bot, Check, Trash2, Zap,
+  UserCircle, Headphones, Terminal, Share2, Calculator, ShoppingBag, PenTool, Users, BarChart3, Wrench
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { useToast } from '@/hooks/use-toast'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-marketplace-api'
+import { MarketplaceItemModal } from './marketplace-item-modal'
+import { useUser } from '@clerk/nextjs'
+import { toast } from 'sonner'
 import { apiClient } from '@/lib/api-client'
 
 // Agent categories matching US-006
@@ -27,6 +30,25 @@ const AGENT_CATEGORIES = [
   { id: 'Custom', name: 'Custom' },
 ]
 
+// Category to icon mapping - SIMPLE clean icons only!
+const getCategoryIcon = (category: string) => {
+  const iconMap: Record<string, any> = {
+    'Personal Assistant': UserCircle,
+    'Customer Support': Headphones,
+    'DevOps': Terminal,
+    'Social Media': Share2,
+    'Accounting': Calculator,
+    'E-commerce': ShoppingBag,
+    'Content Creation': PenTool,
+    'HR': Users,
+    'Data Analysis': BarChart3,
+    'Custom': Bot,  // Simple bot, no jellyfish!
+    'specialized': Bot,
+    'general': Wrench,
+  }
+  return iconMap[category] || Bot  // Default to simple Bot
+}
+
 interface MarketplaceAgent {
   id: number
   name: string
@@ -34,6 +56,8 @@ interface MarketplaceAgent {
   creator_name: string
   category: string
   install_count: number
+  is_approved?: boolean
+  is_featured?: boolean
   icon?: string
   metadata: {
     agent_type?: string
@@ -50,56 +74,62 @@ interface MarketplaceAgentsTabProps {
 }
 
 export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps) {
-  const { toast } = useToast()
-  const queryClient = useQueryClient()
+  const { user } = useUser()
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const [selectedAgent, setSelectedAgent] = useState<MarketplaceAgent | null>(null)
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
+  const [approvingId, setApprovingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
-  // Fetch marketplace agents
-  const { data: agents = [], isLoading } = useQuery({
-    queryKey: ['marketplaceAgents', selectedCategory, searchQuery],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        type: 'agent',
-        ...(selectedCategory !== 'all' && { category: selectedCategory }),
-        ...(searchQuery && { search: searchQuery }),
-      })
-      return apiClient.get(`/api/marketplace/items?${params}`)
-    },
+  // Check if user is admin (you can adjust this check based on your admin logic)
+  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
+
+  // Fetch marketplace agents using our marketplace hook
+  const { data: agents = [], isLoading, refetch } = useMarketplaceItems({
+    type: 'agent',
+    category: selectedCategory !== 'all' ? selectedCategory : undefined,
+    search: searchQuery || undefined,
+    limit: 100
   })
 
-  // Install agent mutation
-  const installMutation = useMutation({
-    mutationFn: async (agentId: number) => {
-      return apiClient.post(`/api/marketplace/items/${agentId}/install`)
-    },
-    onSuccess: (data, agentId) => {
-      const agent = agents.find((a: MarketplaceAgent) => a.id === agentId)
-      toast({
-        title: 'Agent Installed',
-        description: `${agent?.name} installed successfully!`,
-      })
-      queryClient.invalidateQueries({ queryKey: ['agents'] })
-      setIsDetailModalOpen(false)
-    },
-    onError: (error: any) => {
-      toast({
-        title: 'Installation Failed',
-        description: error.message || 'Failed to install agent',
-        variant: 'destructive',
-      })
-    },
-  })
+  // Install agent mutation using our marketplace hook
+  const installMutation = useInstallMarketplaceItem()
 
   const handleAgentClick = (agent: MarketplaceAgent) => {
-    setSelectedAgent(agent)
-    setIsDetailModalOpen(true)
+    setSelectedAgentId(agent.id)
   }
 
-  const handleInstall = () => {
-    if (selectedAgent) {
-      installMutation.mutate(selectedAgent.id)
+  const handleApprove = async (e: React.MouseEvent, agentId: number) => {
+    e.stopPropagation()
+    setApprovingId(agentId)
+    try {
+      await apiClient.post(`/api/marketplace/items/${agentId}/approve`)
+      toast.success('Agent approved and published to marketplace!')
+      refetch()
+    } catch (error: any) {
+      toast.error('Failed to approve agent', {
+        description: error?.message || 'An error occurred'
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent, agentId: number) => {
+    e.stopPropagation()
+    if (!confirm('Are you sure you want to delete this marketplace agent?')) {
+      return
+    }
+    setDeletingId(agentId)
+    try {
+      await apiClient.delete(`/api/marketplace/items/${agentId}`)
+      toast.success('Agent removed from marketplace')
+      refetch()
+    } catch (error: any) {
+      toast.error('Failed to delete agent', {
+        description: error?.message || 'An error occurred'
+      })
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -147,24 +177,59 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
           {agents.map((agent: MarketplaceAgent) => (
             <Card
               key={agent.id}
-              className="glass-card card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleAgentClick(agent)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-12 h-12 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center shrink-0">
-                      <Bot className="w-6 h-6 text-orange-400" />
-                    </div>
+                    {(() => {
+                      const IconComponent = getCategoryIcon(agent.category)
+                      return <IconComponent className="w-10 h-10 text-orange-400 shrink-0" />
+                    })()}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-white line-clamp-1">
-                        {agent.name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-white line-clamp-1">
+                          {agent.name}
+                        </h3>
+                        {isAdmin && !agent.is_approved && (
+                          <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400">
+                            Pending
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">
                         by {agent.creator_name}
                       </p>
                     </div>
                   </div>
+                  {/* Admin Controls */}
+                  {isAdmin && (
+                    <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                      {!agent.is_approved && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-green-500/30 text-green-400 hover:bg-green-500/10"
+                          onClick={(e) => handleApprove(e, agent.id)}
+                          disabled={approvingId === agent.id}
+                        >
+                          <Check className="w-3 h-3 mr-1" />
+                          {approvingId === agent.id ? 'Approving...' : 'Approve'}
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                        onClick={(e) => handleDelete(e, agent.id)}
+                        disabled={deletingId === agent.id}
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        {deletingId === agent.id ? 'Deleting...' : 'Delete'}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </CardHeader>
 
@@ -174,38 +239,37 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 </p>
 
                 {/* Category badge */}
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs border-gray-700 text-gray-400">
+                <div className="flex flex-col gap-2">
+                  <Badge variant="outline" className="text-xs border-gray-700 text-gray-400 w-fit">
                     {agent.category}
                   </Badge>
                   {agent.metadata.model_id && (
-                    <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30">
+                    <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 w-fit">
                       <Zap className="w-3 h-3 mr-1" />
                       {agent.metadata.model_id.split('/').pop()?.substring(0, 15)}
                     </Badge>
                   )}
                 </div>
 
-                {/* Tools icons (max 4) */}
+                {/* Tools Preview - matching agent roster */}
                 {agent.metadata.tool_names && agent.metadata.tool_names.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-gray-500" />
-                    <div className="flex items-center gap-1">
-                      {agent.metadata.tool_names.slice(0, 4).map((toolName, idx) => (
-                        <div key={idx} className="w-6 h-6 rounded bg-white/5 flex items-center justify-center">
-                          <ToolLogo
-                            name={toolName}
-                            logo={agent.metadata.tool_icons?.[idx]}
-                            size={16}
-                          />
-                        </div>
-                      ))}
-                      {agent.metadata.tool_names.length > 4 && (
-                        <span className="text-xs text-gray-500 ml-1">
-                          +{agent.metadata.tool_names.length - 4}
-                        </span>
-                      )}
-                    </div>
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-white/5">
+                    {agent.metadata.tool_names.slice(0, 5).map((toolName, idx) => (
+                      <div key={idx} title={toolName}>
+                        <ToolLogo
+                          name={toolName}
+                          logo={agent.metadata.tool_icons?.[idx]}
+                          size={24}
+                          showBackground={true}
+                          className="bg-secondary/30 border border-white/5"
+                        />
+                      </div>
+                    ))}
+                    {agent.metadata.tool_names.length > 5 && (
+                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-white/5 text-[10px] text-muted-foreground">
+                        +{agent.metadata.tool_names.length - 5}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -216,14 +280,14 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   </span>
                   <Button
                     size="sm"
-                    className="bg-orange-500 hover:bg-orange-600 text-white"
+                    className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
                     onClick={(e) => {
                       e.stopPropagation()
                       handleAgentClick(agent)
                     }}
                   >
                     <Download className="w-3 h-3 mr-1" />
-                    Install
+                    Add to Workspace
                   </Button>
                 </div>
               </CardContent>
@@ -233,118 +297,12 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
       )}
 
       {/* Detail Modal */}
-      <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
-        <DialogContent className="bg-[#1a1a1a] border-gray-800 text-white max-w-2xl">
-          {selectedAgent && (
-            <>
-              <DialogHeader>
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-14 h-14 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
-                    <Bot className="w-8 h-8 text-orange-400" />
-                  </div>
-                  <div>
-                    <DialogTitle className="text-xl text-white">{selectedAgent.name}</DialogTitle>
-                    <DialogDescription className="text-gray-400">
-                      by {selectedAgent.creator_name} • {formatInstallCount(selectedAgent.install_count)} installs
-                    </DialogDescription>
-                  </div>
-                </div>
-              </DialogHeader>
-
-              <div className="space-y-4 mt-4">
-                {/* Description */}
-                <div>
-                  <h4 className="text-sm font-medium text-gray-300 mb-2">Description</h4>
-                  <p className="text-sm text-gray-400">{selectedAgent.description}</p>
-                </div>
-
-                {/* Category and Model */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-300 mb-2">Category</h4>
-                    <Badge variant="outline" className="border-gray-700 text-gray-300">
-                      {selectedAgent.category}
-                    </Badge>
-                  </div>
-                  {selectedAgent.metadata.model_id && (
-                    <div>
-                      <h4 className="text-sm font-medium text-gray-300 mb-2">LLM Model</h4>
-                      <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/30">
-                        <Zap className="w-3 h-3 mr-1" />
-                        {selectedAgent.metadata.model_id}
-                      </Badge>
-                    </div>
-                  )}
-                </div>
-
-                {/* Assigned Tools */}
-                {selectedAgent.metadata.tool_names && selectedAgent.metadata.tool_names.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-300 mb-2">Assigned Tools</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedAgent.metadata.tool_names.map((toolName, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700"
-                        >
-                          <ToolLogo
-                            name={toolName}
-                            logo={selectedAgent.metadata.tool_icons?.[idx]}
-                            size={20}
-                          />
-                          <span className="text-sm text-gray-300">{toolName}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Assigned Skills */}
-                {selectedAgent.metadata.skills && selectedAgent.metadata.skills.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-300 mb-2">Assigned Skills</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedAgent.metadata.skills.map((skill, idx) => (
-                        <Badge key={idx} variant="outline" className="border-gray-700 text-gray-300">
-                          {skill}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Install Button */}
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-800">
-                  <Button
-                    variant="outline"
-                    onClick={() => setIsDetailModalOpen(false)}
-                    className="border-gray-700 text-gray-300 hover:bg-gray-800"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={handleInstall}
-                    disabled={installMutation.isPending}
-                    className="bg-orange-500 hover:bg-orange-600 text-white"
-                  >
-                    {installMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Installing...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4 mr-2" />
-                        Install Agent
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      {selectedAgentId && (
+        <MarketplaceItemModal
+          itemId={selectedAgentId}
+          onClose={() => setSelectedAgentId(null)}
+        />
+      )}
     </div>
   )
 }

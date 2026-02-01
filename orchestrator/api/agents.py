@@ -608,6 +608,18 @@ async def update_agent(agent_id: int, agent_update: AgentUpdate, ctx: RequestCon
                 config.pop("tags", None)
                 agent.configuration = config
 
+        # Update agent_type if provided
+        if agent_update.agent_type is not None:
+            agent.agent_type = agent_update.agent_type
+
+        # Update configuration if provided
+        if agent_update.configuration is not None:
+            # Merge with existing configuration
+            if agent.configuration:
+                agent.configuration = {**agent.configuration, **agent_update.configuration}
+            else:
+                agent.configuration = agent_update.configuration
+
         # Handle tool updates (NEW: agent_app_assignments)
         if agent_update.tool_ids is not None:
             desired_apps = _resolve_tool_ids_to_app_names(db, ctx, agent_update.tool_ids)

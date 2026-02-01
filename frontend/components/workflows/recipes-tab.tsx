@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { 
+import {
   Plus,
   GitBranch,
   Users,
@@ -15,7 +15,8 @@ import {
   Filter,
   Eye,
   Clock,
-  Star
+  Star,
+  Share2
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -25,13 +26,15 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { 
-  useWorkflowRecipes, 
-  useCreateRecipe, 
-  useUpdateRecipe, 
+import {
+  useWorkflowRecipes,
+  useCreateRecipe,
+  useUpdateRecipe,
   useDeleteRecipe,
-  useRecordRecipeUsage 
+  useRecordRecipeUsage,
+  useSubmitRecipeToMarketplace
 } from '@/hooks/use-recipe-api'
+import { useToast } from '@/hooks/use-toast'
 
 interface RecipesTabProps {
   onUseRecipe: (recipe: any) => void
@@ -80,6 +83,8 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
   const recordUsageMutation = useRecordRecipeUsage()
+  const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
+  const { toast } = useToast()
 
   const recipes = recipesData?.items || []
 
@@ -165,6 +170,36 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const handleDeleteClick = (recipe: any) => {
     setSelectedRecipe(recipe)
     setShowDeleteDialog(true)
+  }
+
+  const handleShareToMarketplace = async (recipe: any) => {
+    try {
+      const result = await submitToMarketplaceMutation.mutateAsync({
+        recipe_id: recipe.template_id,
+        category: recipe.category,
+        icon: recipe.icon
+      })
+
+      if (result.auto_approved) {
+        toast({
+          title: 'Published to Marketplace',
+          description: 'Your recipe is now live in the marketplace!',
+          variant: 'default'
+        })
+      } else {
+        toast({
+          title: 'Submitted for Approval',
+          description: 'Your recipe has been submitted and is awaiting approval.',
+          variant: 'default'
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Submission Failed',
+        description: error?.message || 'Failed to submit recipe to marketplace',
+        variant: 'destructive'
+      })
+    }
   }
 
   const resetForm = () => {
@@ -542,7 +577,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t border-secondary">
-                <Button 
+                <Button
                   className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                   onClick={() => {
                     setShowViewModal(false)
@@ -552,7 +587,20 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                   <Plus className="w-4 h-4 mr-2" />
                   Use This Recipe
                 </Button>
-                <Button 
+                {!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowViewModal(false)
+                      handleShareToMarketplace(selectedRecipe)
+                    }}
+                    disabled={submitToMarketplaceMutation.isPending}
+                  >
+                    <Share2 className="w-4 h-4 mr-2" />
+                    Share to Marketplace
+                  </Button>
+                )}
+                <Button
                   variant="outline"
                   onClick={() => setShowViewModal(false)}
                 >

@@ -21,7 +21,8 @@ import {
   Activity,
   HardDrive,
   Globe,
-  X
+  X,
+  Trash2
 } from 'lucide-react'
 
 interface ToolDetailsModalProps {
@@ -31,6 +32,7 @@ interface ToolDetailsModalProps {
   onInstall?: () => void
   onConfigure?: () => void
   onUninstall?: () => void
+  onRemoveFromWorkspace?: () => void
   loading?: boolean
   initialTab?: 'features' | 'triggers'
 }
@@ -66,6 +68,7 @@ export function ToolDetailsModal({
   onInstall,
   onConfigure,
   onUninstall,
+  onRemoveFromWorkspace,
   loading = false,
   initialTab
 }: ToolDetailsModalProps) {
@@ -175,9 +178,33 @@ export function ToolDetailsModal({
                     </p>
                   </div>
                 </CardTitle>
-                <Button variant="ghost" size="icon" onClick={onClose}>
-                  <X className="w-5 h-5" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  {/* Save button - only show if connected and on features tab */}
+                  {tool.isInstalled && activeTab === 'features' && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const enabledList = actions.filter(a => a.enabled).map(a => a.name)
+                          await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
+                            actions: enabledList
+                          })
+                          toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
+                          onClose() // Close modal after successful save
+                        } catch (e: any) {
+                          console.error("Save failed:", e)
+                          toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
+                        }
+                      }}
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      Save Changes
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon" onClick={onClose}>
+                    <X className="w-5 h-5" />
+                  </Button>
+                </div>
               </CardHeader>
 
               <CardContent className="flex-1 overflow-y-auto pt-4 space-y-6">
@@ -307,65 +334,47 @@ export function ToolDetailsModal({
               </CardContent>
 
               <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
-                <div className="flex gap-3">
-                  {tool.isInstalled ? (
-                    <>
-                      {/* Show Save button if on features tab */}
-                      {activeTab === 'features' ? (
-                        <Button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              console.log("DEBUG: Save clicked")
-                              const enabledList = actions.filter(a => a.enabled).map(a => a.name)
-                              console.log("DEBUG: Saving actions:", enabledList)
-
-                              // Visual confirmation for user debugging
-                              // alert(`DEBUG: Attempting to save ${enabledList.length} actions for tool ${tool.id}`)
-
-                              await (apiClient as any).post(`/api/tools/${tool.name}/actions`, {
-                                actions: enabledList
-                              })
-
-                              toast({ title: "Settings Saved", description: `${enabledList.length} features enabled.` })
-                            } catch (e: any) {
-                              console.error("Save failed:", e)
-                              alert(`DEBUG ERROR: ${e.message || JSON.stringify(e)}`)
-                              toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
-                            }
-                          }}
-                          className="flex-1 bg-green-600 hover:bg-green-700 text-white cursor-pointer"
-                        >
-                          Save Changes
-                        </Button>
-                      ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex gap-3">
+                    {tool.isInstalled ? (
+                      <>
+                        {/* Disconnect OAuth button - only for connected apps */}
                         <Button
                           variant="outline"
-                          className="flex-1 hover:border-blue-500/50"
-                          onClick={() => setActiveTab('features')}
+                          onClick={async () => {
+                            if (onUninstall) {
+                              await onUninstall()
+                              onClose() // Close modal after disconnect
+                            }
+                          }}
+                          className="flex-1 hover:border-red-500/50 text-red-400"
+                          disabled={loading}
                         >
-                          <Settings className="w-4 h-4 mr-2" />
-                          Manage Features
+                          Disconnect OAuth
                         </Button>
-                      )}
-
+                      </>
+                    ) : (
                       <Button
-                        variant="outline"
-                        onClick={onUninstall}
-                        className="hover:border-red-500/50 text-red-400"
+                        onClick={onInstall}
                         disabled={loading}
+                        className="flex-1 bg-brand-primary hover:bg-brand-primary/90"
                       >
-                        Disconnect
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Connect with Composio
                       </Button>
-                    </>
-                  ) : (
+                    )}
+                  </div>
+
+                  {/* Remove from Workspace - show for ALL workspace apps (connected or not) */}
+                  {onRemoveFromWorkspace && (
                     <Button
-                      onClick={onInstall}
+                      variant="outline"
+                      onClick={onRemoveFromWorkspace}
+                      className="w-full hover:border-red-500/50 text-red-400"
                       disabled={loading}
-                      className="flex-1 bg-brand-primary hover:bg-brand-primary/90"
                     >
-                      <ExternalLink className="w-4 h-4 mr-2" />
-                      Connect with Composio
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Remove from Workspace
                     </Button>
                   )}
                 </div>

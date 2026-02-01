@@ -1,3 +1,7 @@
+  
+  
+  
+  
   4. Remote Workbench                                                                                                                                                                                                                                            
   - For large results, process in sandbox instead of sending full data to LLM          Explain how this work work for us?                                                                                                                                      
                                                                                                                                                                                                                                                                  
