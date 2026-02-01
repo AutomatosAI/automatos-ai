@@ -17,6 +17,8 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - Routing engine lives at `core/routing/engine.py` — `UniversalRouter(db, cache)` is the single entry point for all routing
 - `TriggerSubscription` links to `ComposioEntity.id`, not workspace_id directly — resolve workspace via `ComposioEntity`
 - `IntentClassifier` categories: EMAIL, CALENDAR, CODE, COMMUNICATION, KNOWLEDGE, DATABASE, STORAGE, PROJECT_MANAGEMENT, ANALYTICS, AI, MEMORY
+- Ingestors live at `core/routing/ingestors/` — each channel gets its own file inheriting `BaseIngestor`
+- `RequestContext.user` is a `UserContext` dataclass (not a dict) — access fields via `.id`, `.email`, `.clerk_user_id`, `.role`
 - DB sessions use `Depends(get_db)` in FastAPI endpoints — yields `Session` from `sqlalchemy.orm`
 - LLM calls: use `create_llm_manager(service_name="orchestrator")` then `await manager.generate_response(messages)` — returns `LLMResponse` with `.content`, `.tool_calls`, `.usage`
 - Agent model at `core/models/core.py` — filter by `workspace_id` + `status == "active"` for workspace agents
@@ -114,4 +116,27 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - `Agent.status == "active"` is the standard filter for workspace agents that are operational
   - `AgentAppAssignment.is_active` filter ensures only current app assignments are included
   - Confidence threshold is configurable via `ROUTING_LLM_CONFIDENCE_THRESHOLD` env var (US-009 will add to config.py)
+---
+
+## 2026-02-01 - US-005
+- **What was implemented:** Created base ingestor interface and chatbot ingestor for normalising chat requests into RequestEnvelope
+- **Files created:**
+  - `orchestrator/core/routing/ingestors/__init__.py` (empty)
+  - `orchestrator/core/routing/ingestors/base.py` — `BaseIngestor` ABC with abstract `ingest(**kwargs) -> RequestEnvelope`
+  - `orchestrator/core/routing/ingestors/chatbot.py` — `ChatbotIngestor` with `ingest(message, agent_id, session_id, request_context)`
+- **ChatbotIngestor mapping:**
+  - `source` = `ChannelSource.CHATBOT`
+  - `content` = message text
+  - `RequestUser` populated from `RequestContext.user` (id, email, clerk_user_id, auth_type)
+  - `workspace_id` from `RequestContext.workspace_id`
+  - `override_agent_id` = agent_id when provided, None otherwise (router decides)
+  - `conversation_id` = UUID(session_id) when valid UUID, None otherwise
+  - `raw_payload` preserves original message, agent_id, session_id for debugging
+- **Learnings for future iterations:**
+  - `RequestContext` (at `core/auth/dependencies.py`) has `.workspace_id` (UUID) and `.user` (UserContext with `.id`, `.email`, `.clerk_user_id`, `.role`)
+  - `RequestContext.auth_type` is "clerk" | "api_key" | "anonymous" — maps directly to `RequestUser.auth_type`
+  - Chat endpoint uses `request.id` as session/chat ID (not a separate session_id param) — it may not be a valid UUID (could be string)
+  - `ChatRequest.agentId` is the user's manual agent selection — when present, it becomes `override_agent_id` in the envelope
+  - Message text extracted via `ChatMessageRequest.parts[0].text` or `.content` fallback — ingestor receives pre-extracted text
+  - Ingestors use keyword-only args (`*` in signature) to enforce named parameters and improve readability
 ---
