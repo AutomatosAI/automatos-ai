@@ -1050,10 +1050,7 @@ class WorkflowTemplate(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     # Categorization
-    category = Column(String(100), nullable=False, index=True)  # Development, Data Processing, etc.
     tags = Column(JSONB, default=list)  # ["code-review", "security", "automation"]
-    difficulty = Column(String(50), default='intermediate')  # beginner, intermediate, advanced
-    recipe_type = Column(String(20), default='complex', nullable=False)  # 'simple' or 'complex'
 
     # Template definition
     template_definition = Column(JSONB, nullable=False)  # Full workflow structure
@@ -1072,7 +1069,6 @@ class WorkflowTemplate(Base):
 
     # Recommended configuration
     recommended_agents = Column(JSONB, default=list)  # Agent types that work well with this template
-    estimated_time = Column(String(50))  # "5-10 minutes"
     required_tools = Column(JSONB, default=list)  # Tools that must be installed
 
     # Usage and popularity
@@ -1089,7 +1085,6 @@ class WorkflowTemplate(Base):
     is_approved = Column(Boolean, default=False)  # Approval status for marketplace items
 
     # Metadata
-    icon = Column(String(50))  # Emoji or icon identifier
     preview_image = Column(String(500))  # URL to preview image
     documentation_url = Column(String(500))  # Link to detailed documentation
     marketplace_category = Column(String(100))  # Marketplace-specific category
@@ -1129,13 +1124,16 @@ class WorkflowTemplate(Base):
             'cloned_from_id': self.cloned_from_id,
             'original_creator_id': self.original_creator_id,
             'created_by_user_id': self.created_by_user_id,
-            'category': self.category,
             'tags': self.tags or [],
-            'difficulty': self.difficulty,
-            'recipe_type': self.recipe_type,
             'template_definition': self.template_definition or {},
+            'steps': self.steps,
+            'inputs': self.inputs,
+            'outputs': self.outputs,
+            'execution_config': self.execution_config,
+            'schedule_config': self.schedule_config,
+            'quality_score': self.quality_score,
+            'learning_data': self.learning_data,
             'recommended_agents': self.recommended_agents or [],
-            'estimated_time': self.estimated_time,
             'required_tools': self.required_tools or [],
             'use_count': self.use_count,
             'success_rate': self.success_rate,
@@ -1147,7 +1145,6 @@ class WorkflowTemplate(Base):
             'is_system': self.is_system,
             'is_approved': self.is_approved,
             'is_marketplace_item': self.is_marketplace_item,
-            'icon': self.icon,
             'preview_image': self.preview_image,
             'documentation_url': self.documentation_url,
             'marketplace_category': self.marketplace_category,

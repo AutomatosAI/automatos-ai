@@ -26,8 +26,6 @@ from core.auth.dependencies import RequestContext
 @router.get("")
 async def list_workflow_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    category: Optional[str] = None,
-    difficulty: Optional[str] = None,
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
     search: Optional[str] = None,
@@ -40,8 +38,6 @@ async def list_workflow_recipes(
     List workflow recipes with filtering and pagination.
 
     Query Parameters:
-    - category: Filter by category (e.g., "Support", "Data Processing")
-    - difficulty: Filter by difficulty (beginner, intermediate, advanced)
     - is_featured: Show only featured recipes
     - is_public: Show only public recipes (default: true)
     - search: Search in name and description
@@ -56,11 +52,6 @@ async def list_workflow_recipes(
         )
 
         # Apply filters
-        if category:
-            query = query.filter(WorkflowRecipe.category == category)
-
-        if difficulty:
-            query = query.filter(WorkflowRecipe.difficulty == difficulty)
 
         if is_featured is not None:
             query = query.filter(WorkflowRecipe.is_featured == is_featured)
@@ -140,44 +131,29 @@ async def create_workflow_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new workflow recipe (simple or complex).
+    Create a new workflow recipe.
 
     Required fields:
     - template_id: Unique identifier (e.g., "my-custom-recipe")
     - name: Display name
     - description: Description of what the recipe does
-    - category: Category (e.g., "Development", "Data Processing")
-    - recipe_type: 'simple' or 'complex' (default: 'complex')
-
-    For simple recipes (recipe_type='simple'):
-    - agent_id: ID of agent to run the recipe
-    - prompt: Prompt text for the agent
-    - inputs: Array of {name, type, required, default}
-    - schedule: Optional cron string
-
-    For complex recipes (recipe_type='complex'):
     - template_definition: JSON structure with steps, agents, config
 
     Optional fields:
     - tags: Array of tags
-    - difficulty: beginner, intermediate, advanced (default: intermediate)
+    - steps: Array of step definitions for 9-stage workflow
+    - inputs: Input schema
+    - outputs: Output schema
+    - execution_config: Runtime behavior config
+    - schedule_config: Scheduling configuration
     - recommended_agents: Array of agent type names
-    - estimated_time: e.g., "5-10 minutes"
     - required_tools: Array of tool names
     - is_public: Boolean (default: true)
     - is_featured: Boolean (default: false)
-    - icon: Emoji or icon identifier
     """
     try:
         # Validate required fields
-        recipe_type = recipe_data.get('recipe_type', 'complex')
-        required_fields = ['template_id', 'name', 'description', 'category']
-
-        # Add type-specific required fields
-        if recipe_type == 'simple':
-            required_fields.extend(['agent_id', 'prompt'])
-        else:  # complex
-            required_fields.append('template_definition')
+        required_fields = ['template_id', 'name', 'description', 'template_definition']
 
         for field in required_fields:
             if field not in recipe_data:
@@ -201,17 +177,18 @@ async def create_workflow_recipe(
             template_id=recipe_data['template_id'],
             name=recipe_data['name'],
             description=recipe_data['description'],
-            category=recipe_data['category'],
             template_definition=recipe_data['template_definition'],
             tags=recipe_data.get('tags', []),
-            difficulty=recipe_data.get('difficulty', 'intermediate'),
+            steps=recipe_data.get('steps'),
+            inputs=recipe_data.get('inputs'),
+            outputs=recipe_data.get('outputs'),
+            execution_config=recipe_data.get('execution_config'),
+            schedule_config=recipe_data.get('schedule_config'),
             recommended_agents=recipe_data.get('recommended_agents', []),
-            estimated_time=recipe_data.get('estimated_time'),
             required_tools=recipe_data.get('required_tools', []),
             is_public=recipe_data.get('is_public', True),
             is_featured=recipe_data.get('is_featured', False),
             is_system=False,  # User-created recipes are never system recipes
-            icon=recipe_data.get('icon'),
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
@@ -266,9 +243,11 @@ async def update_workflow_recipe(
 
         # Update fields if provided
         updatable_fields = [
-            'name', 'description', 'category', 'tags', 'difficulty',
-            'template_definition', 'recommended_agents', 'estimated_time',
-            'required_tools', 'is_public', 'is_featured', 'icon',
+            'name', 'description', 'tags',
+            'template_definition', 'steps', 'inputs', 'outputs',
+            'execution_config', 'schedule_config',
+            'recommended_agents', 'required_tools',
+            'is_public', 'is_featured',
             'preview_image', 'documentation_url', 'version', 'changelog'
         ]
 
@@ -382,25 +361,25 @@ async def list_recipe_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get list of all recipe categories with counts"""
+    """Get list of all unique tags used across workspace recipes"""
     try:
-        from sqlalchemy import func
-
-        categories = db.query(
-            WorkflowRecipe.category,
-            func.count(WorkflowRecipe.id).label('count')
-        ).filter(
+        recipes = db.query(WorkflowRecipe.tags).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.is_public == True
-        ).group_by(
-            WorkflowRecipe.category
         ).all()
+
+        # Aggregate tags across all recipes
+        tag_counts: dict = {}
+        for (tags,) in recipes:
+            if tags:
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
         return {
             "categories": [
-                {"name": cat[0], "count": cat[1]}
-                for cat in categories
+                {"name": name, "count": count}
+                for name, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
             ]
         }
 
@@ -516,15 +495,15 @@ async def submit_recipe_to_marketplace(
             template_id=f"marketplace-{workspace_recipe.template_id}-{datetime.now().timestamp()}",
             name=workspace_recipe.name,
             description=workspace_recipe.description,
-            category=workspace_recipe.category,
-            recipe_type=workspace_recipe.recipe_type,
             template_definition=workspace_recipe.template_definition,
             tags=workspace_recipe.tags,
-            difficulty=workspace_recipe.difficulty,
+            steps=workspace_recipe.steps,
+            inputs=workspace_recipe.inputs,
+            outputs=workspace_recipe.outputs,
+            execution_config=workspace_recipe.execution_config,
+            schedule_config=workspace_recipe.schedule_config,
             recommended_agents=workspace_recipe.recommended_agents,
-            estimated_time=workspace_recipe.estimated_time,
             required_tools=workspace_recipe.required_tools,
-            icon=workspace_recipe.icon,
             preview_image=workspace_recipe.preview_image,
             documentation_url=workspace_recipe.documentation_url,
             version=workspace_recipe.version or '1.0',
@@ -541,8 +520,8 @@ async def submit_recipe_to_marketplace(
 
             # Approval
             is_approved=is_trusted,
-            marketplace_category=recipe_data.get('category') or workspace_recipe.category,
-            marketplace_icon=recipe_data.get('icon') or workspace_recipe.icon,
+            marketplace_category=recipe_data.get('category') or (workspace_recipe.tags[0] if workspace_recipe.tags else 'General'),
+            marketplace_icon=recipe_data.get('icon') or workspace_recipe.marketplace_icon,
 
             # Visibility
             is_public=True,
@@ -642,15 +621,15 @@ async def install_recipe_from_marketplace(
             template_id=template_id,
             name=recipe_name,
             description=marketplace_recipe.description,
-            category=marketplace_recipe.category,
-            recipe_type=marketplace_recipe.recipe_type,
             template_definition=marketplace_recipe.template_definition,
             tags=marketplace_recipe.tags,
-            difficulty=marketplace_recipe.difficulty,
+            steps=marketplace_recipe.steps,
+            inputs=marketplace_recipe.inputs,
+            outputs=marketplace_recipe.outputs,
+            execution_config=marketplace_recipe.execution_config,
+            schedule_config=marketplace_recipe.schedule_config,
             recommended_agents=marketplace_recipe.recommended_agents,
-            estimated_time=marketplace_recipe.estimated_time,
             required_tools=marketplace_recipe.required_tools,
-            icon=marketplace_recipe.icon,
             preview_image=marketplace_recipe.preview_image,
             documentation_url=marketplace_recipe.documentation_url,
             version=marketplace_recipe.version,
