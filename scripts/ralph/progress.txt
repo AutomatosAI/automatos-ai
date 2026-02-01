@@ -23,6 +23,8 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - LLM calls: use `create_llm_manager(service_name="orchestrator")` then `await manager.generate_response(messages)` — returns `LLMResponse` with `.content`, `.tool_calls`, `.usage`
 - Agent model at `core/models/core.py` — filter by `workspace_id` + `status == "active"` for workspace agents
 - Agent app assignments at `core/models/composio_cache.py` — `AgentAppAssignment` links `agent_id` to `app_name`
+- Chat endpoint uses `stream_response_with_agent(agent_id=...)` for all agent-resolved requests — legacy `stream_response_aisdk` path removed
+- Routing metadata exposed via `x-routing-*` response headers on chat streaming responses
 
 ---
 
@@ -164,4 +166,30 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - Jira event_data field names vary — handle both camelCase and snake_case variants (e.g. `issue_key`/`key`, `issue_type`/`issuetype`)
   - Reporter may be a nested dict with `emailAddress`/`displayName` keys or a flat string — handle both
   - System-originated requests (webhooks) use `auth_type="system"` since there is no authenticated user
+---
+
+## 2026-02-01 - US-007
+- **What was implemented:** Integrated the universal router into the chat endpoint so that when no `agentId` is provided, the router auto-selects the best agent
+- **Changes:**
+  - Added imports for `RoutingCache`, `UniversalRouter`, `ChatbotIngestor` to `api/chat.py`
+  - Added module-level `_routing_cache = RoutingCache()` singleton for shared cache across requests
+  - When `request.agentId` is set: skip routing entirely, use directly (user override preserved)
+  - When `request.agentId` is NOT set: create `RequestEnvelope` via `ChatbotIngestor`, call `UniversalRouter.route(envelope)`
+  - If router returns `route_type='agent'` with valid `agent_id`: use that agent
+  - If router returns None or non-agent route: fall back to `get_default_agent_id()` as safety net
+  - Added routing metadata to response headers (`x-routing-agent-id`, `x-routing-confidence`, `x-routing-type`, `x-routing-reasoning`)
+  - Unified all paths to use `stream_response_with_agent()` instead of split between `stream_response_with_agent`/`stream_response_aisdk`
+  - Removed unused `get_chat_tools` import (was only used in the removed legacy `stream_response_aisdk` path)
+- **Files changed:**
+  - `orchestrator/api/chat.py` (modified — router integration)
+  - `scripts/ralph/prd.json` (US-007 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - `stream_response_with_agent()` accepts `agent_id` and activates the agent via `AgentFactory` — works for any agent, not just manually selected ones
+  - `stream_response_aisdk()` was the pre-routing legacy path using basic model selection — no longer needed with router
+  - The `RoutingCache` should be shared (module-level singleton) across requests for cache hits to work across chat calls
+  - Router is async (`await router.route(envelope)`) — the `stream_chat` endpoint is already `async def` so this works naturally
+  - Exception handling wraps the entire router call so a router failure never blocks chat — it gracefully falls back to `get_default_agent_id()`
+  - Routing metadata is exposed via `x-routing-*` response headers for frontend consumption (US-014 will use these)
+  - `ChatbotIngestor.ingest()` uses keyword-only args — pass `agent_id=None` explicitly when no override
 ---

@@ -16,11 +16,17 @@ from sqlalchemy import text, func
 from pydantic import BaseModel
 
 from core.database.database import get_db
-from consumers.chatbot import ChatService, StreamingChatService, get_chat_tools
+from consumers.chatbot import ChatService, StreamingChatService
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+from core.routing.cache import RoutingCache
+from core.routing.engine import UniversalRouter
+from core.routing.ingestors.chatbot import ChatbotIngestor
 
 logger = logging.getLogger(__name__)
+
+# Shared routing cache (singleton across chat requests)
+_routing_cache = RoutingCache()
 
 # Standard API key auth (matches all other APIs)
 # For chat endpoint, API key is optional if not set in env (user-facing feature)
@@ -250,46 +256,70 @@ async def stream_chat(
     # DEBUG: Log incoming request
     logger.info(f"Chat request - agentId: {request.agentId}, model: {request.selectedChatModel}")
 
-    effective_agent_id = request.agentId or get_default_agent_id(db, ctx.workspace_id)
-    if not request.agentId:
-        logger.info(f"[chat] agentId not provided; using default agent_id={effective_agent_id} for workspace={ctx.workspace_id}")
-    
-    # PRD: Unified Agent-Chat System
-    # Use agent-based streaming if agentId is provided
+    # --- PRD-50: Universal Router Integration ---
+    # Extract message text for the ingestor
+    message_text = ""
+    if parts:
+        message_text = (parts[0].text or "") if parts[0].type == "text" else ""
+
+    routing_decision = None
+
     if request.agentId:
-        logger.info(f"Using agent-based streaming with agent_id={request.agentId}")
-        return StreamingResponse(
-            streaming_service.stream_response_with_agent(
-                chat_id=chat_id,
-                messages=message_history,
-                agent_id=request.agentId,
-                user_id=user_id
-            ),
-            media_type="text/plain; charset=utf-8",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-                "x-vercel-ai-data-stream": "v1"
-            }
-        )
-    
-    # Legacy: Stream response using AI SDK Data Stream format with model selection
+        # User explicitly selected an agent — skip routing, use directly
+        effective_agent_id = request.agentId
+        logger.info(f"[chat] User override: agent_id={effective_agent_id}")
+    else:
+        # No agent selected — use universal router to auto-select
+        try:
+            ingestor = ChatbotIngestor()
+            envelope = ingestor.ingest(
+                message=message_text,
+                agent_id=None,  # no override — let router decide
+                session_id=chat_id,
+                request_context=ctx,
+            )
+            universal_router = UniversalRouter(db, cache=_routing_cache)
+            routing_decision = await universal_router.route(envelope)
+        except Exception:
+            logger.exception("[chat] Router failed — falling back to default agent")
+            routing_decision = None
+
+        if routing_decision is not None and routing_decision.route_type == "agent" and routing_decision.agent_id is not None:
+            effective_agent_id = routing_decision.agent_id
+            logger.info(
+                f"[chat] Router selected agent_id={effective_agent_id} "
+                f"(confidence={routing_decision.confidence:.2f}, reasoning={routing_decision.reasoning})"
+            )
+        else:
+            # Router returned None or non-agent route — fall back to default
+            effective_agent_id = get_default_agent_id(db, ctx.workspace_id)
+            logger.info(f"[chat] Router returned no agent route; using default agent_id={effective_agent_id} for workspace={ctx.workspace_id}")
+
+    # Build response headers (include routing metadata when available)
+    response_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "x-vercel-ai-data-stream": "v1",
+    }
+    if routing_decision is not None:
+        response_headers["x-routing-agent-id"] = str(routing_decision.agent_id or "")
+        response_headers["x-routing-confidence"] = f"{routing_decision.confidence:.2f}"
+        response_headers["x-routing-type"] = routing_decision.route_type
+        response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200]
+
+    # PRD: Unified Agent-Chat System
+    # Use agent-based streaming for all resolved agents
+    logger.info(f"Using agent-based streaming with agent_id={effective_agent_id}")
     return StreamingResponse(
-        streaming_service.stream_response_aisdk(
+        streaming_service.stream_response_with_agent(
             chat_id=chat_id,
             messages=message_history,
-            tools=get_chat_tools(agent_id=effective_agent_id, workspace_id=ctx.workspace_id),
-            selected_model=request.selectedChatModel,
-            agent_id=effective_agent_id
+            agent_id=effective_agent_id,
+            user_id=user_id
         ),
         media_type="text/plain; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "x-vercel-ai-data-stream": "v1"
-        }
+        headers=response_headers,
     )
 
 
