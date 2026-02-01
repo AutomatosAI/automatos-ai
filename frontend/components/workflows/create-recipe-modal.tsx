@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { JsonSchemaEditor } from './json-schema-editor'
 import { RecipeStepBuilder } from './recipe-step-builder'
+import { RecipeExecutionConfig } from './recipe-execution-config'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -275,7 +276,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                       </motion.div>
                     </TabsContent>
 
-                    {/* Step 3: Execution Settings (placeholder for US-014) */}
+                    {/* Step 3: Execution Settings */}
                     <TabsContent value="execution">
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -283,15 +284,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                         transition={{ duration: 0.3 }}
                         className="space-y-4"
                       >
-                        <div className="glass-card rounded-2xl p-6">
-                          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Execution Configuration</h3>
-                          <p className="text-sm text-muted-foreground">
-                            Configure execution behavior including mode, retries, timeouts, and quality thresholds.
-                          </p>
-                          <div className="mt-4 p-8 border border-dashed border-border/50 rounded-2xl text-center text-muted-foreground text-sm">
-                            Execution config form will be implemented in US-014
-                          </div>
-                        </div>
+                        <RecipeExecutionConfig />
                       </motion.div>
                     </TabsContent>
 
