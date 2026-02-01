@@ -37,6 +37,10 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - Recipe registry at `modules/workflows/recipes/__init__.py` — `register_recipe(name, cls, workflow_id)` + `get_recipe(recipe_name=..., workflow_id=...)` for dispatch lookup
 - GitHub repo for automated recipes: `GITHUB_REPO_OWNER`, `GITHUB_REPO_NAME`, `GITHUB_DEFAULT_BRANCH` env vars (added to config.py)
 - Webhook `_dispatch_workflow()` checks recipe registry first; falls back to standard 9-stage pipeline if no recipe matches
+- Next.js edge proxy at `app/api/chat/route.ts` does NOT auto-forward backend response headers — must explicitly list headers to forward
+- Routing metadata convention: `x-routing-*` headers (agent-id, confidence, type, reasoning, request-id) set by backend, forwarded by proxy, read by client hook
+- Frontend `ChatMessage.routingInfo` carries routing decision data — set once from response headers before streaming begins
+- Agent name resolution: cache in `useRef` to avoid re-renders; fallback display is `Agent #id` if API call fails
 
 ---
 
@@ -379,4 +383,35 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - LLM-generated file changes should be parsed defensively: strip markdown fences, try regex extraction as fallback, validate each item has required fields
   - Recipe registry uses eager registration at module load (`_register_builtins()`) — future recipes just need to be added there
   - The `_dispatch_workflow` function now needs the full `RequestEnvelope` for recipe execution — callers must pass the envelope object, not just content/metadata strings
+---
+
+## 2026-02-01 - US-014
+- **What was implemented:** Updated chatbot UI for auto-routing indicator — shows which agent was auto-selected and allows user correction
+- **Changes:**
+  - **Agent selector** (`components/chatbot/agent-selector.tsx`): Renamed "Auto (Model Selection)" to "Auto" with description "Router picks the best agent for each message"
+  - **Chat proxy** (`app/api/chat/route.ts`): Forwards `x-routing-*` headers from backend through to client (agent-id, confidence, type, reasoning, request-id)
+  - **Types** (`types/chat.ts`): Added `RoutingInfo` interface (requestId, agentId, agentName, confidence, routeType, reasoning) and extended `ChatMessage` with `routingInfo` field
+  - **Chat hook** (`lib/chat/hooks.ts`): Extracts routing headers from response before streaming, attaches `routingInfo` to assistant message, fires `onRoutingDecision` callback
+  - **Message display** (`components/chatbot/message.tsx`): Renders routing indicator pill below assistant messages showing "Routed to: {Agent Name}" with confidence percentage
+  - **Chat component** (`components/chatbot/chat.tsx`): Resolves agent names from IDs via API with cache, records routing corrections via `POST /api/routing/corrections` when user changes agent after auto-route
+  - **Backend** (`orchestrator/api/chat.py`): Added `x-routing-request-id` header containing the envelope UUID for correction API linkage
+- **Files changed:**
+  - `frontend/app/api/chat/route.ts` (modified — forward routing headers)
+  - `frontend/components/chatbot/agent-selector.tsx` (modified — "Auto" label and description)
+  - `frontend/components/chatbot/chat.tsx` (modified — agent name resolution, correction API, handleAgentChange)
+  - `frontend/components/chatbot/message.tsx` (modified — routing indicator pill)
+  - `frontend/lib/chat/hooks.ts` (modified — capture routing headers, onRoutingDecision callback)
+  - `frontend/types/chat.ts` (modified — RoutingInfo type, ChatMessage extension)
+  - `orchestrator/api/chat.py` (modified — x-routing-request-id header)
+  - `scripts/ralph/prd.json` (US-014 passes: true)
+  - `scripts/ralph/progress.txt` (appended)
+- **Learnings for future iterations:**
+  - Backend response headers are NOT auto-forwarded by the Next.js edge proxy — must explicitly forward desired headers
+  - Routing metadata uses `x-routing-*` header convention set by the backend StreamingResponse
+  - Agent name resolution requires async API call (`/api/agents/{id}`) since routing headers only include agent_id, not name
+  - Agent name cache (`useRef<Record<number, string>>`) persists across renders without causing re-renders
+  - Correction API (`POST /api/routing/corrections`) expects `request_id` (UUID from RequestEnvelope.id) + `correct_agent_id`
+  - The `selectedAgentId === null` state maps to "Auto" mode — no `agentId` sent in request body, backend router decides
+  - Frontend `node_modules` not installed locally — typecheck done via py_compile (backend) and manual review (frontend)
+  - Manual browser verification needed as no dev-browser tool was available
 ---

@@ -11,7 +11,7 @@ import { MultimodalInput } from './multimodal-input'
 import { ArtifactViewer } from './artifact-viewer'
 import { generateTitle } from '@/lib/utils'
 import { updateChatTitle } from '@/lib/chat/api'
-import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult } from '@/types'
+import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult, RoutingInfo } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { useUser } from '@clerk/nextjs'
@@ -67,6 +67,10 @@ export function Chat({
   const [visibilityType, setVisibilityType] = useState<VisibilityType>(initialVisibilityType)
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
+
+  // PRD-50: Agent name cache for routing indicators + last routing decision for corrections
+  const agentNameCache = useRef<Record<number, string>>({})
+  const lastRoutingDecision = useRef<{ requestId?: string; agentId?: number } | null>(null)
 
   // PRD-40/41: Dynamic Tool Suggestions state
   const [activeTool, setActiveTool] = useState<string | null>(null)
@@ -298,9 +302,63 @@ export function Chat({
     onChatIdUpdate: (newChatId) => {
       setActiveChatId(newChatId)
     },
+    onRoutingDecision: (info: RoutingInfo) => {
+      // Store for correction API
+      lastRoutingDecision.current = { agentId: info.agentId }
+
+      // Resolve agent name asynchronously if not cached
+      if (!info.agentName && info.agentId && !agentNameCache.current[info.agentId]) {
+        apiClient.request(`/api/agents/${info.agentId}`)
+          .then((agent: any) => {
+            const name = agent?.name || `Agent #${info.agentId}`
+            agentNameCache.current[info.agentId] = name
+            // Update all messages with this agent's routing info to include name
+            setMessages(prev =>
+              prev.map(m =>
+                m.routingInfo?.agentId === info.agentId && !m.routingInfo.agentName
+                  ? { ...m, routingInfo: { ...m.routingInfo, agentName: name } }
+                  : m
+              )
+            )
+          })
+          .catch(() => {
+            // Silently fail — indicator will show "Agent #id" instead
+          })
+      } else if (agentNameCache.current[info.agentId]) {
+        // Already cached — update immediately
+        setMessages(prev =>
+          prev.map(m =>
+            m.routingInfo?.agentId === info.agentId && !m.routingInfo.agentName
+              ? { ...m, routingInfo: { ...m.routingInfo, agentName: agentNameCache.current[info.agentId] } }
+              : m
+          )
+        )
+      }
+    },
   })
 
   const regenerate = () => reload()
+
+  // PRD-50: Handle agent change — fire correction API when overriding auto-routed agent
+  const handleAgentChange = useCallback((newAgentId: number | null) => {
+    const prev = lastRoutingDecision.current
+    setSelectedAgentId(newAgentId)
+
+    // If user selects a specific agent after an auto-route, record the correction
+    if (newAgentId && prev?.agentId && newAgentId !== prev.agentId) {
+      // Find the most recent message with a routing request ID
+      const routedMessage = [...messages].reverse().find(m => m.routingInfo?.requestId)
+      const requestId = routedMessage?.routingInfo?.requestId
+      if (requestId) {
+        apiClient.post('/api/routing/corrections', {
+          request_id: requestId,
+          correct_agent_id: newAgentId,
+        }).catch((err) => {
+          console.warn('[Routing] Failed to record correction:', err)
+        })
+      }
+    }
+  }, [messages])
 
   // Track scroll - ensure listener is always attached to the current container
   useEffect(() => {
@@ -660,7 +718,7 @@ export function Chat({
                     selectedModelId={currentModelId}
                     onModelChange={setCurrentModelId}
                     selectedAgentId={selectedAgentId}
-                    onAgentChange={setSelectedAgentId}
+                    onAgentChange={handleAgentChange}
                     selectedVisibilityType={visibilityType}
                     usage={usage}
                     onToolIconClick={handleToolIconClick}
@@ -731,7 +789,7 @@ export function Chat({
                       selectedModelId={currentModelId}
                       onModelChange={setCurrentModelId}
                       selectedAgentId={selectedAgentId}
-                      onAgentChange={setSelectedAgentId}
+                      onAgentChange={handleAgentChange}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
                       onToolIconClick={handleToolIconClick}
@@ -852,7 +910,7 @@ export function Chat({
                       selectedModelId={currentModelId}
                       onModelChange={setCurrentModelId}
                       selectedAgentId={selectedAgentId}
-                      onAgentChange={setSelectedAgentId}
+                      onAgentChange={handleAgentChange}
                       selectedVisibilityType={visibilityType}
                       usage={usage}
                       onToolIconClick={handleToolIconClick}
@@ -966,7 +1024,7 @@ export function Chat({
                   selectedModelId={currentModelId}
                   onModelChange={setCurrentModelId}
                   selectedAgentId={selectedAgentId}
-                  onAgentChange={setSelectedAgentId}
+                  onAgentChange={handleAgentChange}
                   selectedVisibilityType={visibilityType}
                   usage={usage}
                   onToolIconClick={handleToolIconClick}

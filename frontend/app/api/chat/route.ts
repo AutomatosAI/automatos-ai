@@ -49,16 +49,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Forward routing headers from backend for frontend consumption
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'x-vercel-ai-data-stream': 'v1',
+    }
+    const routingHeaderNames = ['x-routing-agent-id', 'x-routing-confidence', 'x-routing-type', 'x-routing-reasoning', 'x-routing-request-id']
+    for (const name of routingHeaderNames) {
+      const value = backendResponse.headers.get(name)
+      if (value) responseHeaders[name] = value
+    }
+
     // Stream the response through
     return new Response(backendResponse.body, {
       status: 200,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-        'x-vercel-ai-data-stream': 'v1',
-      },
+      headers: responseHeaders,
     })
   } catch (error: any) {
     console.error('Chat proxy error:', error)

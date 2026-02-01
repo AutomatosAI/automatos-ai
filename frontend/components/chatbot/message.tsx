@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight, Wrench, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { User, ThumbsUp, ThumbsDown, Copy, RotateCw, Code, FileText, Database, ChevronRight, Wrench, CheckCircle2, XCircle, Loader2, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { voteMessage } from '@/lib/chat/api'
@@ -282,6 +282,21 @@ export function Message({
     )
   }
 
+  const renderRoutingIndicator = () => {
+    if (message.role !== 'assistant' || !message.routingInfo) return null
+    const { agentName, agentId, confidence } = message.routingInfo
+    const displayName = agentName || `Agent #${agentId}`
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs bg-orange-500/10 border border-orange-500/20 text-orange-300/90">
+        <Zap className="w-3 h-3" />
+        <span>Routed to: <span className="font-medium">{displayName}</span></span>
+        {confidence > 0 && confidence < 1 && (
+          <span className="text-orange-300/60 ml-1">{(confidence * 100).toFixed(0)}%</span>
+        )}
+      </div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -317,6 +332,9 @@ export function Message({
 
             {/* Tool calls (lifecycle transparency) */}
             {renderToolCalls()}
+
+            {/* Routing indicator (auto-routed messages) */}
+            {renderRoutingIndicator()}
 
             {/* Metadata */}
             {message.metadata && message.role === 'assistant' && (

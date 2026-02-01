@@ -121,7 +121,7 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
                 <>
                   <Bot className="w-3 h-3 text-orange-400" />
                   <span className="truncate max-w-[160px]">
-                    Auto (Model)
+                    Auto
                   </span>
                 </>
               )}
@@ -141,9 +141,9 @@ export function AgentSelector({ selectedAgentId, onAgentChange, onAgentData }: A
         >
           <div className="flex items-start justify-between w-full">
             <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm">�� Auto (Model Selection)</div>
+              <div className="font-medium text-sm">Auto</div>
               <div className="text-xs text-muted-foreground truncate">
-                Use model selector (legacy mode)
+                Router picks the best agent for each message
               </div>
             </div>
             {!selectedAgentId && (

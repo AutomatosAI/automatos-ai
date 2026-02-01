@@ -263,6 +263,7 @@ async def stream_chat(
         message_text = (parts[0].text or "") if parts[0].type == "text" else ""
 
     routing_decision = None
+    routing_request_id = None
 
     if request.agentId:
         # User explicitly selected an agent — skip routing, use directly
@@ -278,6 +279,7 @@ async def stream_chat(
                 session_id=chat_id,
                 request_context=ctx,
             )
+            routing_request_id = str(envelope.id)
             universal_router = UniversalRouter(db, cache=_routing_cache)
             routing_decision = await universal_router.route(envelope)
         except Exception:
@@ -307,6 +309,8 @@ async def stream_chat(
         response_headers["x-routing-confidence"] = f"{routing_decision.confidence:.2f}"
         response_headers["x-routing-type"] = routing_decision.route_type
         response_headers["x-routing-reasoning"] = routing_decision.reasoning[:200]
+        if routing_request_id:
+            response_headers["x-routing-request-id"] = routing_request_id
 
     # PRD: Unified Agent-Chat System
     # Use agent-based streaming for all resolved agents

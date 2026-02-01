@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { useAuth } from '@clerk/nextjs'
-import type { ChatMessage, AppUsage, ToolCall } from '@/types'
+import type { ChatMessage, AppUsage, ToolCall, RoutingInfo } from '@/types'
 import { toast } from 'sonner'
 
 export function useChat({
@@ -12,6 +12,7 @@ export function useChat({
   selectedAgentId,
   onData,
   onChatIdUpdate,
+  onRoutingDecision,
 }: {
   id: string
   initialMessages?: ChatMessage[]
@@ -19,6 +20,7 @@ export function useChat({
   selectedAgentId?: number | null
   onData?: (data: any) => void
   onChatIdUpdate?: (chatId: string) => void
+  onRoutingDecision?: (info: RoutingInfo) => void
 }) {
   const { getToken, isLoaded } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
@@ -126,6 +128,31 @@ export function useChat({
           setStatus('error')
           toast.error(`Chat request failed (${response.status})${errorText ? `: ${errorText}` : ''}`)
           return
+        }
+
+        // Extract routing decision from response headers (set by universal router)
+        const routingAgentId = response.headers.get('x-routing-agent-id')
+        const routingConfidence = response.headers.get('x-routing-confidence')
+        const routingType = response.headers.get('x-routing-type')
+        const routingReasoning = response.headers.get('x-routing-reasoning')
+        const routingRequestId = response.headers.get('x-routing-request-id')
+
+        let routingInfo: RoutingInfo | undefined
+        if (routingAgentId && routingType) {
+          routingInfo = {
+            requestId: routingRequestId || undefined,
+            agentId: parseInt(routingAgentId, 10),
+            confidence: routingConfidence ? parseFloat(routingConfidence) : 0,
+            routeType: routingType,
+            reasoning: routingReasoning || '',
+          }
+          // Attach routing info to the assistant message immediately
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === assistantMessageId ? { ...m, routingInfo } : m
+            )
+          )
+          if (onRoutingDecision) onRoutingDecision(routingInfo)
         }
 
         const reader = response.body?.getReader()
@@ -323,7 +350,7 @@ export function useChat({
         setIsLoading(false)
       }
     },
-    [chatId, isLoading, selectedModelId, onData, onChatIdUpdate]
+    [chatId, isLoading, selectedModelId, onData, onChatIdUpdate, onRoutingDecision]
   )
 
   return {
