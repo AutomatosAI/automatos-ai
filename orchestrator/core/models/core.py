@@ -1066,6 +1066,10 @@ class WorkflowTemplate(Base):
     execution_config = Column(JSONB, nullable=True)  # Runtime behavior: { mode, max_retries, timeout_per_step, quality_threshold }
     schedule_config = Column(JSONB, nullable=True)  # Scheduling: { type: "manual"|"cron"|"trigger", cron_expression, trigger_config }
 
+    # Self-learning fields (Learn-Quality-Memory stages)
+    quality_score = Column(Float, nullable=True)  # Average quality from Stage 7 assessments (0.0 - 1.0)
+    learning_data = Column(JSONB, nullable=True)  # Patterns, suggestions, performance metrics from Stage 6
+
     # Recommended configuration
     recommended_agents = Column(JSONB, default=list)  # Agent types that work well with this template
     estimated_time = Column(String(50))  # "5-10 minutes"
