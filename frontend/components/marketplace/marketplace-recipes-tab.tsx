@@ -1,13 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Download } from 'lucide-react'
+import { FileText, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
+import { useInstallRecipeFromMarketplace } from '@/hooks/use-recipe-api'
 
 interface MarketplaceRecipesTabProps {
   searchQuery: string
@@ -15,8 +16,10 @@ interface MarketplaceRecipesTabProps {
 
 export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProps) {
   const [selectedType, setSelectedType] = useState('all')
+  const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const installMutation = useInstallRecipeFromMarketplace()
 
   const { data: recipes = [], isLoading } = useQuery({
     queryKey: ['marketplaceRecipes', selectedType, searchQuery],
@@ -30,18 +33,18 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     },
   })
 
-  const installMutation = useMutation({
-    mutationFn: async (recipeId: number) => {
-      return apiClient.post(`/api/workflow-recipes/install/${recipeId}`)
-    },
-    onSuccess: (data) => {
+  const handleInstall = async (recipeId: number) => {
+    setInstallingRecipeId(recipeId)
+    try {
+      const data = await installMutation.mutateAsync(recipeId)
+
       toast({
         title: 'Recipe Installed',
         description: data.message || 'Recipe installed successfully',
         variant: 'default'
       })
 
-      // Show warnings if any
+      // Show warnings for missing dependencies (e.g., agents not found in marketplace)
       if (data.warnings && data.warnings.length > 0) {
         data.warnings.forEach((warning: string) => {
           toast({
@@ -52,20 +55,17 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
         })
       }
 
-      // Invalidate workspace recipes query to show new recipe
-      queryClient.invalidateQueries({ queryKey: ['workflowRecipes'] })
-    },
-    onError: (error: any) => {
+      // Also invalidate marketplace queries for updated install counts
+      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+    } catch (error: any) {
       toast({
         title: 'Installation Failed',
         description: error?.message || 'Failed to install recipe',
         variant: 'destructive'
       })
+    } finally {
+      setInstallingRecipeId(null)
     }
-  })
-
-  const handleInstall = (recipeId: number) => {
-    installMutation.mutate(recipeId)
   }
 
   return (
@@ -159,10 +159,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     size="sm"
                     variant="outline"
                     onClick={() => handleInstall(recipe.id)}
-                    disabled={installMutation.isPending}
+                    disabled={installingRecipeId === recipe.id}
                   >
-                    <Download className="w-3 h-3 mr-1" />
-                    {installMutation.isPending ? 'Installing...' : 'Install'}
+                    {installingRecipeId === recipe.id ? (
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                    ) : (
+                      <Download className="w-3 h-3 mr-1" />
+                    )}
+                    {installingRecipeId === recipe.id ? 'Installing...' : 'Install'}
                   </Button>
                 </div>
               </CardContent>
