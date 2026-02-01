@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { JsonSchemaEditor } from './json-schema-editor'
 import { RecipeStepBuilder } from './recipe-step-builder'
 import { RecipeExecutionConfig } from './recipe-execution-config'
+import { RecipeScheduleConfig } from './recipe-schedule-config'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -288,7 +289,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                       </motion.div>
                     </TabsContent>
 
-                    {/* Step 4: Scheduling & Triggers (placeholder for US-015) */}
+                    {/* Step 4: Scheduling & Triggers */}
                     <TabsContent value="schedule">
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -296,15 +297,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                         transition={{ duration: 0.3 }}
                         className="space-y-4"
                       >
-                        <div className="glass-card rounded-2xl p-6">
-                          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Scheduling & Triggers</h3>
-                          <p className="text-sm text-muted-foreground">
-                            Configure how your recipe is triggered: manually, on a schedule, or via webhook.
-                          </p>
-                          <div className="mt-4 p-8 border border-dashed border-border/50 rounded-2xl text-center text-muted-foreground text-sm">
-                            Schedule config form will be implemented in US-015
-                          </div>
-                        </div>
+                        <RecipeScheduleConfig />
                       </motion.div>
                     </TabsContent>
                   </Tabs>
