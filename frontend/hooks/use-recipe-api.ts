@@ -10,6 +10,8 @@ export const recipeKeys = {
   detail: (id: string) => [...recipeKeys.details(), id] as const,
   featured: () => [...recipeKeys.all, 'featured'] as const,
   categories: () => [...recipeKeys.all, 'categories'] as const,
+  suggestions: (id: string) => [...recipeKeys.all, 'suggestions', id] as const,
+  executions: (id: string, params?: any) => [...recipeKeys.all, 'executions', id, params] as const,
 }
 
 // List recipes with filtering
@@ -139,6 +141,26 @@ export function useInstallRecipeFromMarketplace() {
       // Invalidate workspace recipes to show the newly installed recipe
       queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
     },
+  })
+}
+
+// Get recipe suggestions from learning_data
+export function useRecipeSuggestions(recipeId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.suggestions(recipeId || ''),
+    queryFn: () => apiClient.getRecipeSuggestions(recipeId!),
+    enabled: !!recipeId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  })
+}
+
+// Get recipe executions list
+export function useRecipeExecutions(recipeId: string | undefined, params?: { status?: string; skip?: number; limit?: number }) {
+  return useQuery({
+    queryKey: recipeKeys.executions(recipeId || '', params),
+    queryFn: () => apiClient.getRecipeExecutions(recipeId!, params),
+    enabled: !!recipeId,
+    staleTime: 1 * 60 * 1000, // 1 minute
   })
 }
 

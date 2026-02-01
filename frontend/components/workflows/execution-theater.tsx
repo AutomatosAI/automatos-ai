@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
@@ -18,7 +18,8 @@ import {
   MessageSquare,
   FileText,
   Sparkles,
-  Activity
+  Activity,
+  Lightbulb
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,6 +28,8 @@ import { apiClient } from '@/lib/api-client'
 import { WorkflowStreamViewer } from './workflow-stream-viewer'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { toast } from '@/hooks/use-toast'
+import { ToastAction } from '@/components/ui/toast'
 
 // New theater sub-components
 import { TheaterStageProgress } from './theater/theater-stage-progress'
@@ -37,6 +40,7 @@ import {
   type QualityData,
   type MemoryData,
 } from './theater/theater-self-learning-panel'
+import { RecipeSuggestionsPanel, type SuggestionsData } from './recipe-suggestions-panel'
 
 interface ExecutionTheaterProps {
   workflowId: number
@@ -479,6 +483,12 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
   const [qualityData, setQualityData] = useState<QualityData | null>(null)
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null)
 
+  // Suggestions notification state
+  const [showSuggestionsPanel, setShowSuggestionsPanel] = useState(false)
+  const [suggestionsData, setSuggestionsData] = useState<any>(null)
+  const executionCompleteCountRef = useRef(0)
+  const prevIsExecutingRef = useRef(false)
+
   const logsEndRef = useRef<HTMLDivElement>(null)
   const execution = executionData?.execution
   const lastExecutionIdRef = useRef<number | null>(null)
@@ -825,6 +835,49 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
     return () => clearInterval(pollInterval)
   }, [isExecuting, currentExecutionId, loadExecutionById])
 
+  // Detect execution completion and check for suggestions
+  useEffect(() => {
+    if (prevIsExecutingRef.current && !isExecuting && completedStages.includes(9)) {
+      executionCompleteCountRef.current += 1
+
+      // Fetch suggestions from the recipe's learning data
+      const recipeId = executionData?.template_id || executionData?.recipe_id
+      if (recipeId) {
+        apiClient.getRecipeSuggestions(recipeId).then((data: any) => {
+          if (data?.suggestions?.length > 0) {
+            setSuggestionsData(data)
+
+            // Check if quality is below threshold (default 0.7) for 3+ consecutive low-quality executions
+            const qualityThreshold = executionData?.execution_config?.quality_threshold ?? 0.7
+            const isLowQuality = data.quality_score !== null && data.quality_score < qualityThreshold
+            const consecutiveLow = executionCompleteCountRef.current >= 3 || (data.analysis_count >= 3 && isLowQuality)
+
+            if (isLowQuality || data.suggestions.length > 0) {
+              const highPriority = data.suggestions.filter((s: any) => s.priority === 'high')
+              toast({
+                title: `${executionData.name || 'Recipe'} has improvement suggestions`,
+                description: highPriority.length > 0
+                  ? `${highPriority.length} high-priority suggestion${highPriority.length !== 1 ? 's' : ''} found`
+                  : `${data.suggestions.length} suggestion${data.suggestions.length !== 1 ? 's' : ''} based on execution analysis`,
+                action: React.createElement(
+                  ToastAction,
+                  {
+                    altText: 'Review suggestions',
+                    onClick: () => setShowSuggestionsPanel(true),
+                  },
+                  'Review'
+                ),
+              })
+            }
+          }
+        }).catch((err: any) => {
+          console.error('Error fetching suggestions:', err)
+        })
+      }
+    }
+    prevIsExecutingRef.current = isExecuting
+  }, [isExecuting, completedStages, executionData])
+
   useEffect(() => {
     const loadWorkflow = async () => {
       try {
@@ -990,6 +1043,57 @@ export function ExecutionTheater({ workflowId, onBack, autoStart = false }: Exec
           />
         </div>
       )}
+
+      {/* Suggestions Panel - shown when user clicks "Review" on notification toast */}
+      <AnimatePresence>
+        {showSuggestionsPanel && suggestionsData && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="px-6 pb-4 overflow-hidden"
+          >
+            <div className="glass-panel rounded-2xl p-4 border border-orange-400/20">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-orange-400" />
+                  <h3 className="text-sm font-semibold">Improvement Suggestions</h3>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSuggestionsPanel(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground h-7"
+                >
+                  Dismiss
+                </Button>
+              </div>
+              <RecipeSuggestionsPanel
+                data={suggestionsData}
+                recipeName={executionData?.name}
+                onApplyPromptRewrite={(suggestion) => {
+                  toast({
+                    title: 'Prompt Rewrite',
+                    description: `Edit recipe step ${suggestion.target_step !== undefined ? suggestion.target_step + 1 : ''} with suggested prompt improvement`,
+                  })
+                }}
+                onApplyModelUpgrade={(suggestion) => {
+                  toast({
+                    title: 'Model Upgrade Suggested',
+                    description: suggestion.description,
+                  })
+                }}
+                onApplyToolAddition={(suggestion) => {
+                  toast({
+                    title: 'Tool Addition Suggested',
+                    description: suggestion.description,
+                  })
+                }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content: Log (75%) + Sidebar (25%) */}
       <div className="flex-1 flex gap-4 px-6 pb-6 min-h-0">

@@ -17,7 +17,8 @@ import {
   Clock,
   Star,
   Share2,
-  Loader2
+  Loader2,
+  Lightbulb
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -32,10 +33,12 @@ import {
   useUpdateRecipe,
   useDeleteRecipe,
   useRecordRecipeUsage,
-  useSubmitRecipeToMarketplace
+  useSubmitRecipeToMarketplace,
+  useRecipeSuggestions
 } from '@/hooks/use-recipe-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
+import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
 
 interface RecipesTabProps {
   onUseRecipe: (recipe: any) => void
@@ -52,6 +55,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
   const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
+  const [viewTab, setViewTab] = useState<'details' | 'suggestions'>('details')
   const [recipeForm, setRecipeForm] = useState<any>({
     recipe_id: '',
     name: '',
@@ -86,6 +90,11 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const recordUsageMutation = useRecordRecipeUsage()
   const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
   const { toast } = useToast()
+
+  // Fetch suggestions for the selected recipe when viewing
+  const { data: selectedRecipeSuggestions } = useRecipeSuggestions(
+    showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  )
 
   const recipes = recipesData?.items || []
 
@@ -130,8 +139,9 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     }
   }
 
-  const handleViewClick = (recipe: any) => {
+  const handleViewClick = (recipe: any, tab: 'details' | 'suggestions' = 'details') => {
     setSelectedRecipe(recipe)
+    setViewTab(tab)
     setShowViewModal(true)
   }
 
@@ -327,6 +337,19 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                             System
                           </Badge>
                         )}
+                        {recipe.learning_data?.latest_suggestions?.length > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs bg-orange-500/10 text-orange-400 border-orange-500/20 cursor-pointer hover:bg-orange-500/20 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleViewClick(recipe, 'suggestions')
+                            }}
+                          >
+                            <Lightbulb className="w-3 h-3 mr-1" />
+                            {recipe.learning_data.latest_suggestions.length} suggestion{recipe.learning_data.latest_suggestions.length !== 1 ? 's' : ''}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -461,113 +484,185 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
           
           {selectedRecipe && (
             <div className="space-y-6">
-              {/* Badges */}
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="text-xs">{selectedRecipe.category}</Badge>
-                <Badge variant="outline" className="text-xs capitalize">{selectedRecipe.difficulty}</Badge>
-                {selectedRecipe.is_system && (
-                  <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
-                    System Recipe
-                  </Badge>
-                )}
-                {selectedRecipe.is_featured && (
-                  <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
-                    <Star className="w-3 h-3 mr-1" />
-                    Featured
-                  </Badge>
-                )}
-              </div>
-
-              {/* Description */}
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Description</h3>
-                <p className="text-sm text-muted-foreground">{selectedRecipe.description}</p>
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-4 p-4 bg-secondary/30 rounded-lg">
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Used</div>
-                  <div className="text-lg font-semibold">{selectedRecipe.use_count} times</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
-                  <div className="text-lg font-semibold">{selectedRecipe.success_rate || 0}%</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">
-                    <Clock className="w-3 h-3 inline mr-1" />
-                    Duration
-                  </div>
-                  <div className="text-lg font-semibold">{selectedRecipe.estimated_time || 'N/A'}</div>
-                </div>
-              </div>
-
-              {/* Recommended Agents */}
-              {selectedRecipe.recommended_agents && selectedRecipe.recommended_agents.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2 flex items-center">
-                    <Users className="w-4 h-4 mr-2" />
-                    Recommended Agents ({selectedRecipe.recommended_agents.length})
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedRecipe.recommended_agents.map((agent: string, idx: number) => (
-                      <Badge key={idx} variant="outline">{agent}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Tags */}
-              {selectedRecipe.tags && selectedRecipe.tags.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2">Tags</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedRecipe.tags.map((tag: string, idx: number) => (
-                      <Badge key={idx} variant="secondary" className="text-xs">#{tag}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recipe Definition */}
-              {selectedRecipe.recipe_definition && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2 flex items-center">
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Workflow Steps
-                  </h3>
-                  {selectedRecipe.recipe_definition.steps && selectedRecipe.recipe_definition.steps.length > 0 ? (
-                    <div className="space-y-2">
-                      {selectedRecipe.recipe_definition.steps.map((step: any, idx: number) => (
-                        <div key={idx} className="flex items-start p-3 bg-secondary/30 rounded-lg">
-                          <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-semibold mr-3 flex-shrink-0">
-                            {idx + 1}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium text-sm">{step.name || step}</div>
-                            {step.type && <div className="text-xs text-muted-foreground mt-1">Type: {step.type}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No steps defined</p>
+              {/* Tab Navigation */}
+              <div className="flex gap-1 p-1 bg-secondary/30 rounded-lg">
+                <button
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    viewTab === 'details'
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setViewTab('details')}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Details
+                </button>
+                <button
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    viewTab === 'suggestions'
+                      ? 'bg-background text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setViewTab('suggestions')}
+                >
+                  <Lightbulb className="w-3.5 h-3.5" />
+                  Suggestions
+                  {selectedRecipeSuggestions?.suggestions?.length > 0 && (
+                    <Badge variant="outline" className="text-[10px] h-4 bg-orange-500/10 text-orange-400 border-orange-500/20">
+                      {selectedRecipeSuggestions.suggestions.length}
+                    </Badge>
                   )}
-                </div>
+                </button>
+              </div>
+
+              {/* Details Tab */}
+              {viewTab === 'details' && (
+                <>
+                  {/* Badges */}
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className="text-xs">{selectedRecipe.category}</Badge>
+                    <Badge variant="outline" className="text-xs capitalize">{selectedRecipe.difficulty}</Badge>
+                    {selectedRecipe.is_system && (
+                      <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
+                        System Recipe
+                      </Badge>
+                    )}
+                    {selectedRecipe.is_featured && (
+                      <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
+                        <Star className="w-3 h-3 mr-1" />
+                        Featured
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2">Description</h3>
+                    <p className="text-sm text-muted-foreground">{selectedRecipe.description}</p>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-4 p-4 bg-secondary/30 rounded-lg">
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Used</div>
+                      <div className="text-lg font-semibold">{selectedRecipe.use_count} times</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
+                      <div className="text-lg font-semibold">{selectedRecipe.success_rate || 0}%</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        <Clock className="w-3 h-3 inline mr-1" />
+                        Duration
+                      </div>
+                      <div className="text-lg font-semibold">{selectedRecipe.estimated_time || 'N/A'}</div>
+                    </div>
+                  </div>
+
+                  {/* Recommended Agents */}
+                  {selectedRecipe.recommended_agents && selectedRecipe.recommended_agents.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-2 flex items-center">
+                        <Users className="w-4 h-4 mr-2" />
+                        Recommended Agents ({selectedRecipe.recommended_agents.length})
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedRecipe.recommended_agents.map((agent: string, idx: number) => (
+                          <Badge key={idx} variant="outline">{agent}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {selectedRecipe.tags && selectedRecipe.tags.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-2">Tags</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedRecipe.tags.map((tag: string, idx: number) => (
+                          <Badge key={idx} variant="secondary" className="text-xs">#{tag}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recipe Definition */}
+                  {selectedRecipe.recipe_definition && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-2 flex items-center">
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Workflow Steps
+                      </h3>
+                      {selectedRecipe.recipe_definition.steps && selectedRecipe.recipe_definition.steps.length > 0 ? (
+                        <div className="space-y-2">
+                          {selectedRecipe.recipe_definition.steps.map((step: any, idx: number) => (
+                            <div key={idx} className="flex items-start p-3 bg-secondary/30 rounded-lg">
+                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-semibold mr-3 flex-shrink-0">
+                                {idx + 1}
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-medium text-sm">{step.name || step}</div>
+                                {step.type && <div className="text-xs text-muted-foreground mt-1">Type: {step.type}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No steps defined</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Metadata */}
+                  <div className="pt-4 border-t border-secondary text-xs text-muted-foreground space-y-1">
+                    <div>Created by: {selectedRecipe.created_by}</div>
+                    <div>Version: {selectedRecipe.version}</div>
+                    {selectedRecipe.created_at && (
+                      <div>Created: {new Date(selectedRecipe.created_at).toLocaleDateString()}</div>
+                    )}
+                    {selectedRecipe.last_used_at && (
+                      <div>Last used: {new Date(selectedRecipe.last_used_at).toLocaleDateString()}</div>
+                    )}
+                  </div>
+                </>
               )}
 
-              {/* Metadata */}
-              <div className="pt-4 border-t border-secondary text-xs text-muted-foreground space-y-1">
-                <div>Created by: {selectedRecipe.created_by}</div>
-                <div>Version: {selectedRecipe.version}</div>
-                {selectedRecipe.created_at && (
-                  <div>Created: {new Date(selectedRecipe.created_at).toLocaleDateString()}</div>
-                )}
-                {selectedRecipe.last_used_at && (
-                  <div>Last used: {new Date(selectedRecipe.last_used_at).toLocaleDateString()}</div>
-                )}
-              </div>
+              {/* Suggestions Tab */}
+              {viewTab === 'suggestions' && (
+                <RecipeSuggestionsPanel
+                  data={selectedRecipeSuggestions || {
+                    recipe_id: selectedRecipe.template_id || selectedRecipe.recipe_id || '',
+                    quality_score: selectedRecipe.quality_score ?? null,
+                    suggestions: selectedRecipe.learning_data?.latest_suggestions || [],
+                    patterns: selectedRecipe.learning_data?.latest_patterns || [],
+                    performance_metrics: selectedRecipe.learning_data?.latest_performance || null,
+                    last_analyzed_at: selectedRecipe.learning_data?.last_analyzed_at || null,
+                    analysis_count: selectedRecipe.learning_data?.analyses?.length || 0,
+                  }}
+                  recipeName={selectedRecipe.name}
+                  onApplyPromptRewrite={(suggestion) => {
+                    setShowViewModal(false)
+                    handleEditClick(selectedRecipe)
+                    toast({
+                      title: 'Prompt Rewrite Suggestion',
+                      description: `Edit step ${suggestion.target_step !== undefined ? suggestion.target_step + 1 : ''} prompt: ${suggestion.description}`,
+                    })
+                  }}
+                  onApplyModelUpgrade={(suggestion) => {
+                    toast({
+                      title: 'Model Upgrade Suggested',
+                      description: suggestion.description,
+                    })
+                  }}
+                  onApplyToolAddition={(suggestion) => {
+                    toast({
+                      title: 'Tool Addition Suggested',
+                      description: suggestion.description,
+                    })
+                  }}
+                />
+              )}
 
               {/* Action Buttons */}
               <div className="flex gap-3 pt-4 border-t border-secondary">

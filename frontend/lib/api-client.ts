@@ -1348,6 +1348,19 @@ class ApiClient {
     })
   }
 
+  async getRecipeSuggestions(recipeId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/suggestions`)
+  }
+
+  async getRecipeExecutions(recipeId: string, params?: { status?: string; skip?: number; limit?: number }) {
+    const queryParams = new URLSearchParams()
+    if (params?.status) queryParams.append('status', params.status)
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString())
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString())
+    const query = queryParams.toString()
+    return this.request(`/api/workflow-recipes/${recipeId}/executions${query ? '?' + query : ''}`)
+  }
+
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
 
   /** Index a GitHub repository */
