@@ -12,6 +12,8 @@ Started: Sun Feb  1 18:17:29 WET 2026
 - JSON/flexible columns use `JSONB` from `sqlalchemy.dialects.postgresql`
 - UUID columns use `PGUUID(as_uuid=True)` from `sqlalchemy.dialects.postgresql`
 - Workspace isolation: most models include `workspace_id` FK to workspaces table
+- Routing cache lives at `core/routing/cache.py` — use `RoutingCache` singleton for all routing cache operations
+- Use `model_copy()` (Pydantic v2) when storing/returning models to avoid shared mutable state
 
 ---
 
@@ -34,4 +36,26 @@ Started: Sun Feb  1 18:17:29 WET 2026
   - No mypy/pyright installed — use `py_compile` for syntax validation and runtime import checks
   - `TriggerSubscription` model already exists in `core/models/composio.py` — routing engine can reference it directly
   - `ComposioEntity` table links `entity_id` to `workspace_id` — needed for Jira trigger workspace resolution
+---
+
+## 2026-02-01 - US-002
+- **What was implemented:** Built routing cache with TTL and workspace scoping in `orchestrator/core/routing/cache.py`
+- **Features:**
+  - `RoutingCache` class with in-memory dict store keyed by `(workspace_id, sha256(normalized_content + source))`
+  - Configurable TTL via `ROUTING_CACHE_TTL_HOURS` env var (default 24 hours)
+  - `get()` — returns cached RoutingDecision with `cached=True`, or None (with lazy eviction)
+  - `put()` — stores decision with monotonic timestamp
+  - `record_correction()` — tracks corrections per agent_id; auto-updates cached entry after 2+ identical corrections
+  - `clear(workspace_id)` — removes all cache entries for a workspace
+  - `stats()` — returns size, hits, misses, hit_rate, top_routes (top 10 by agent_id)
+  - Content normalization: lowercase + strip whitespace for consistent hashing
+- **Files changed:**
+  - `orchestrator/core/routing/__init__.py` (new, empty)
+  - `orchestrator/core/routing/cache.py` (new)
+  - `scripts/ralph/prd.json` (US-002 passes: true)
+- **Learnings for future iterations:**
+  - Use `time.monotonic()` for TTL tracking (immune to system clock changes)
+  - `model_copy()` (Pydantic v2) used to avoid shared mutable references in cache entries
+  - Cache key uses SHA-256 of normalized content + source, prefixed by workspace_id for O(n) workspace clear
+  - Smoke tests run inline with `python3 -c` — good pattern for validating without a test framework
 ---
