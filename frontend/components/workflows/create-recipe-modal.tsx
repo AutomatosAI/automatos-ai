@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, ChefHat, Settings, Cpu, Calendar, ChevronLeft, ChevronRight, Save } from 'lucide-react'
+import { X, ChefHat, Settings, Cpu, Calendar, ChevronLeft, ChevronRight, Save, Loader2 } from 'lucide-react'
 import { useForm, FormProvider } from 'react-hook-form'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +15,7 @@ import { RecipeStepBuilder } from './recipe-step-builder'
 import { RecipeExecutionConfig } from './recipe-execution-config'
 import { RecipeScheduleConfig } from './recipe-schedule-config'
 import { RecipePreviewPanel } from './recipe-preview-panel'
+import { useRecipeForm } from '@/hooks/use-recipe-form'
 
 const STEPS = [
   { id: 'basic', label: 'Basic Configuration', icon: ChefHat },
@@ -67,6 +68,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
   const [currentStep, setCurrentStep] = React.useState(0)
   const [inputsValid, setInputsValid] = React.useState(true)
   const [outputsValid, setOutputsValid] = React.useState(true)
+  const { isSubmitting, submitRecipe } = useRecipeForm()
 
   const methods = useForm<RecipeFormValues>({
     defaultValues: {
@@ -134,9 +136,12 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
     }
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const data = methods.getValues()
-    onSave?.(data)
+    await submitRecipe(data, () => {
+      onSave?.(data)
+      handleClose()
+    })
   }
 
   const handleClose = () => {
@@ -338,13 +343,18 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
                               </Button>
                             </motion.div>
                           ) : (
-                            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                            <motion.div whileHover={{ scale: isSubmitting ? 1 : 1.05 }} whileTap={{ scale: isSubmitting ? 1 : 0.95 }}>
                               <Button
                                 onClick={handleSave}
+                                disabled={isSubmitting}
                                 className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                               >
-                                <Save className="w-4 h-4 mr-2" />
-                                Save Recipe
+                                {isSubmitting ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Save className="w-4 h-4 mr-2" />
+                                )}
+                                {isSubmitting ? 'Saving...' : 'Save Recipe'}
                               </Button>
                             </motion.div>
                           )}
