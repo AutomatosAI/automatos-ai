@@ -99,6 +99,12 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
 
   const currentStepId = STEPS[currentStep].id
 
+  // Watch form values to trigger re-renders
+  const watchedName = methods.watch('name')
+  const watchedSteps = methods.watch('steps')
+  const watchedInputs = methods.watch('inputs')
+  const watchedOutputs = methods.watch('outputs')
+
   const canGoNext = React.useMemo(() => {
     const values = methods.getValues()
     switch (currentStepId) {
@@ -116,13 +122,7 @@ export function CreateRecipeModal({ open, onClose, onSave }: CreateRecipeModalPr
       default:
         return false
     }
-  }, [currentStepId, methods, inputsValid, outputsValid])
-
-  // Re-render on form changes to update canGoNext
-  const watchedName = methods.watch('name')
-  const watchedSteps = methods.watch('steps')
-  const watchedInputs = methods.watch('inputs')
-  const watchedOutputs = methods.watch('outputs')
+  }, [currentStepId, methods, inputsValid, outputsValid, watchedName, watchedSteps, watchedInputs, watchedOutputs])
 
   const handleNext = () => {
     if (currentStep < STEPS.length - 1) {
