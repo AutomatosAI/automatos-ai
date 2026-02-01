@@ -1110,7 +1110,80 @@ class WorkflowTemplate(Base):
     def is_marketplace_item(self):
         """Check if this is a marketplace recipe"""
         return self.owner_type == 'marketplace'
-    
+
+    def validate_steps(self):
+        """Validate steps array structure"""
+        if not self.steps:
+            return True, None
+
+        if not isinstance(self.steps, list):
+            return False, "steps must be an array"
+
+        for idx, step in enumerate(self.steps):
+            if not isinstance(step, dict):
+                return False, f"Step {idx} must be an object"
+
+            required_fields = ['step_id', 'order', 'agent_id', 'prompt_template']
+            for field in required_fields:
+                if field not in step:
+                    return False, f"Step {idx} missing required field: {field}"
+
+        return True, None
+
+    def validate_execution_config(self):
+        """Validate execution_config structure"""
+        if not self.execution_config:
+            return True, None
+
+        if not isinstance(self.execution_config, dict):
+            return False, "execution_config must be an object"
+
+        # Validate mode
+        if 'mode' in self.execution_config:
+            if self.execution_config['mode'] not in ['sequential', 'parallel']:
+                return False, "mode must be 'sequential' or 'parallel'"
+
+        # Validate numeric fields
+        numeric_fields = ['max_retries', 'retry_delay', 'per_step_timeout', 'total_timeout', 'parallel_limit']
+        for field in numeric_fields:
+            if field in self.execution_config:
+                if not isinstance(self.execution_config[field], (int, float)) or self.execution_config[field] < 0:
+                    return False, f"{field} must be a non-negative number"
+
+        # Validate quality_threshold
+        if 'quality_threshold' in self.execution_config:
+            threshold = self.execution_config['quality_threshold']
+            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 1:
+                return False, "quality_threshold must be between 0 and 1"
+
+        return True, None
+
+    def validate_schedule_config(self):
+        """Validate schedule_config structure"""
+        if not self.schedule_config:
+            return True, None
+
+        if not isinstance(self.schedule_config, dict):
+            return False, "schedule_config must be an object"
+
+        # Validate type
+        if 'type' not in self.schedule_config:
+            return False, "schedule_config must have 'type' field"
+
+        schedule_type = self.schedule_config['type']
+        if schedule_type not in ['manual', 'cron', 'trigger']:
+            return False, "type must be 'manual', 'cron', or 'trigger'"
+
+        # Validate cron expression if type is cron
+        if schedule_type == 'cron' and 'cron_expression' not in self.schedule_config:
+            return False, "cron type requires cron_expression field"
+
+        # Validate trigger config if type is trigger
+        if schedule_type == 'trigger' and 'trigger_config' not in self.schedule_config:
+            return False, "trigger type requires trigger_config field"
+
+        return True, None
+
     def to_dict(self):
         """Convert template to dictionary for API responses"""
         return {
