@@ -28,13 +28,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   useWorkflowRecipes,
-  useCreateRecipe,
   useUpdateRecipe,
   useDeleteRecipe,
   useRecordRecipeUsage,
   useSubmitRecipeToMarketplace
 } from '@/hooks/use-recipe-api'
 import { useToast } from '@/hooks/use-toast'
+import { CreateRecipeModal } from './create-recipe-modal'
 
 interface RecipesTabProps {
   onUseRecipe: (recipe: any) => void
@@ -79,7 +79,6 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     limit: 100
   })
 
-  const createMutation = useCreateRecipe()
   const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
   const recordUsageMutation = useRecordRecipeUsage()
@@ -87,20 +86,6 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const { toast } = useToast()
 
   const recipes = recipesData?.items || []
-
-  const handleCreateRecipe = async () => {
-    try {
-      await createMutation.mutateAsync({
-        ...recipeForm,
-        created_by: 'user'
-      })
-      setShowCreateModal(false)
-      resetForm()
-      refetch()
-    } catch (error) {
-      console.error('Error creating recipe:', error)
-    }
-  }
 
   const handleUpdateRecipe = async () => {
     if (!selectedRecipe) return
@@ -287,13 +272,15 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
           </Select>
         </div>
 
-        <Button 
-          onClick={() => setShowCreateModal(true)}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Recipe
-        </Button>
+        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+          <Button
+            onClick={() => setShowCreateModal(true)}
+            className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Create Recipe
+          </Button>
+        </motion.div>
       </div>
 
       {/* Recipes Grid */}
@@ -413,29 +400,15 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
         </div>
       )}
 
-      {/* Create Recipe Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Create Workflow Recipe</DialogTitle>
-            <DialogDescription>
-              Create a reusable recipe that others can use to quickly start workflows
-            </DialogDescription>
-          </DialogHeader>
-          
-          <RecipeForm
-            form={recipeForm}
-            onChange={setRecipeForm}
-            onSubmit={handleCreateRecipe}
-            onCancel={() => {
-              setShowCreateModal(false)
-              resetForm()
-            }}
-            isLoading={createMutation.isPending}
-            submitLabel="Create Recipe"
-          />
-        </DialogContent>
-      </Dialog>
+      {/* Create Recipe Modal (new 4-step wizard) */}
+      <CreateRecipeModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSave={() => {
+          setShowCreateModal(false)
+          refetch()
+        }}
+      />
 
       {/* View Recipe Modal */}
       <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
