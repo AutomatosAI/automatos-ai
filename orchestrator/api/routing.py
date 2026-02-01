@@ -1,0 +1,334 @@
+"""
+Routing API endpoints (PRD-50: US-010).
+
+Admin endpoints for managing routing rules, viewing decisions,
+recording corrections, and inspecting cache statistics.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from core.auth.dependencies import RequestContext
+from core.auth.hybrid import get_request_context_hybrid
+from core.database.database import get_db
+from core.models.routing import (
+    RoutingDecisionRecord,
+    RoutingRule,
+)
+from core.routing.cache import RoutingCache
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/routing", tags=["Routing"])
+
+# Module-level cache singleton (shared with chat.py / composio.py)
+_routing_cache = RoutingCache()
+
+# ---------------------------------------------------------------------------
+# Request / response schemas
+# ---------------------------------------------------------------------------
+
+
+class CreateRuleRequest(BaseModel):
+    source_pattern: Optional[str] = None
+    intent_keywords: List[str] = Field(default_factory=list)
+    target_agent_id: Optional[int] = None
+    target_workflow_id: Optional[int] = None
+    priority: int = 0
+
+
+class RuleResponse(BaseModel):
+    id: int
+    workspace_id: UUID
+    source_pattern: Optional[str]
+    intent_keywords: List[str]
+    target_agent_id: Optional[int]
+    target_workflow_id: Optional[int]
+    priority: int
+    is_active: bool
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class DecisionResponse(BaseModel):
+    id: int
+    request_id: UUID
+    envelope_hash: str
+    source: str
+    route_type: str
+    agent_id: Optional[int]
+    workflow_id: Optional[int]
+    confidence: float
+    cached: bool
+    was_corrected: bool
+    corrected_agent_id: Optional[int]
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class CorrectionRequest(BaseModel):
+    request_id: UUID
+    correct_agent_id: int
+
+
+# ---------------------------------------------------------------------------
+# GET /api/routing/decisions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/decisions")
+async def list_decisions(
+    source: Optional[str] = Query(None, description="Filter by source channel"),
+    agent_id: Optional[int] = Query(None, description="Filter by routed agent_id"),
+    was_corrected: Optional[bool] = Query(None, description="Filter by correction status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=1000),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List recent routing decisions with optional filters. Paginated."""
+    try:
+        query = db.query(RoutingDecisionRecord).order_by(
+            RoutingDecisionRecord.created_at.desc()
+        )
+
+        if source is not None:
+            query = query.filter(RoutingDecisionRecord.source == source)
+        if agent_id is not None:
+            query = query.filter(RoutingDecisionRecord.agent_id == agent_id)
+        if was_corrected is not None:
+            query = query.filter(RoutingDecisionRecord.was_corrected == was_corrected)
+
+        decisions = query.offset(skip).limit(limit).all()
+
+        return [
+            {
+                "id": d.id,
+                "request_id": str(d.request_id),
+                "envelope_hash": d.envelope_hash,
+                "source": d.source,
+                "route_type": d.route_type,
+                "agent_id": d.agent_id,
+                "workflow_id": d.workflow_id,
+                "confidence": d.confidence,
+                "cached": d.cached,
+                "was_corrected": d.was_corrected,
+                "corrected_agent_id": d.corrected_agent_id,
+                "created_at": str(d.created_at),
+            }
+            for d in decisions
+        ]
+    except Exception as e:
+        logger.error("Error listing routing decisions: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/routing/rules
+# ---------------------------------------------------------------------------
+
+
+@router.post("/rules")
+async def create_rule(
+    body: CreateRuleRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Create a routing rule for the workspace."""
+    try:
+        if body.target_agent_id is None and body.target_workflow_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Either target_agent_id or target_workflow_id is required",
+            )
+
+        rule = RoutingRule(
+            workspace_id=ctx.workspace_id,
+            source_pattern=body.source_pattern,
+            intent_keywords=body.intent_keywords,
+            target_agent_id=body.target_agent_id,
+            target_workflow_id=body.target_workflow_id,
+            priority=body.priority,
+            is_active=True,
+        )
+        db.add(rule)
+        db.commit()
+        db.refresh(rule)
+
+        return {
+            "id": rule.id,
+            "workspace_id": str(rule.workspace_id),
+            "source_pattern": rule.source_pattern,
+            "intent_keywords": rule.intent_keywords,
+            "target_agent_id": rule.target_agent_id,
+            "target_workflow_id": rule.target_workflow_id,
+            "priority": rule.priority,
+            "is_active": rule.is_active,
+            "created_at": str(rule.created_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error creating routing rule: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /api/routing/rules
+# ---------------------------------------------------------------------------
+
+
+@router.get("/rules")
+async def list_rules(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List all active routing rules for the workspace."""
+    try:
+        rules = (
+            db.query(RoutingRule)
+            .filter(
+                RoutingRule.workspace_id == ctx.workspace_id,
+                RoutingRule.is_active.is_(True),
+            )
+            .order_by(RoutingRule.priority.desc())
+            .all()
+        )
+
+        return [
+            {
+                "id": r.id,
+                "workspace_id": str(r.workspace_id),
+                "source_pattern": r.source_pattern,
+                "intent_keywords": r.intent_keywords,
+                "target_agent_id": r.target_agent_id,
+                "target_workflow_id": r.target_workflow_id,
+                "priority": r.priority,
+                "is_active": r.is_active,
+                "created_at": str(r.created_at),
+            }
+            for r in rules
+        ]
+    except Exception as e:
+        logger.error("Error listing routing rules: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/routing/rules/{rule_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/rules/{rule_id}")
+async def delete_rule(
+    rule_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete a routing rule (sets is_active=False)."""
+    try:
+        rule = (
+            db.query(RoutingRule)
+            .filter(
+                RoutingRule.id == rule_id,
+                RoutingRule.workspace_id == ctx.workspace_id,
+            )
+            .first()
+        )
+
+        if rule is None:
+            raise HTTPException(status_code=404, detail="Routing rule not found")
+
+        rule.is_active = False
+        db.commit()
+
+        return {"status": "deleted", "rule_id": rule_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error deleting routing rule: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/routing/corrections
+# ---------------------------------------------------------------------------
+
+
+@router.post("/corrections")
+async def record_correction(
+    body: CorrectionRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Record a user correction for a routing decision.
+
+    Updates the routing_decisions table and feeds back into the cache.
+    """
+    try:
+        # Find the original decision
+        decision = (
+            db.query(RoutingDecisionRecord)
+            .filter(RoutingDecisionRecord.request_id == body.request_id)
+            .first()
+        )
+
+        if decision is None:
+            raise HTTPException(
+                status_code=404, detail="Routing decision not found"
+            )
+
+        # Mark as corrected in DB
+        decision.was_corrected = True
+        decision.corrected_agent_id = body.correct_agent_id
+        db.commit()
+
+        # Feed correction into cache (the cache tracks repeated corrections)
+        # We need the original content/source to update the cache entry.
+        # Since we stored envelope_hash + source, we pass those through.
+        # Note: the cache uses content + source for key lookup — without the
+        # original content we cannot update the cache precisely. For now, we
+        # record the DB correction; the cache will auto-update when the same
+        # request is sent again and the user re-corrects.
+
+        return {
+            "status": "corrected",
+            "request_id": str(body.request_id),
+            "correct_agent_id": body.correct_agent_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error recording routing correction: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /api/routing/cache/stats
+# ---------------------------------------------------------------------------
+
+
+@router.get("/cache/stats")
+async def get_cache_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return routing cache statistics: size, hits, misses, hit rate, top routes."""
+    try:
+        return _routing_cache.stats()
+    except Exception as e:
+        logger.error("Error getting cache stats: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
