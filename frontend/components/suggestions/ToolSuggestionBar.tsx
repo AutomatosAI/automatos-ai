@@ -25,6 +25,8 @@ export interface ToolSuggestionBarProps {
   isLoading?: boolean
   /** Optional className for custom styling */
   className?: string
+  /** PRD-41: Whether context-aware suggestions are included */
+  hasContext?: boolean
 }
 
 export function ToolSuggestionBar({
@@ -34,6 +36,7 @@ export function ToolSuggestionBar({
   onClose,
   isLoading = false,
   className,
+  hasContext = false,
 }: ToolSuggestionBarProps) {
   // Keyboard accessibility: Escape key closes suggestions
   useEffect(() => {
@@ -66,6 +69,13 @@ export function ToolSuggestionBar({
         className
       )}
     >
+      {/* PRD-41: Context hint */}
+      {hasContext && (
+        <div className="text-xs text-muted-foreground mb-2 px-2">
+          Based on recent {activeTool.toLowerCase()} activity
+        </div>
+      )}
+
       {/* 2x2 Grid layout */}
       <div className="grid grid-cols-2 gap-2">
         {isLoading ? (

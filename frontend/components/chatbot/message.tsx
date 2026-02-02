@@ -244,9 +244,12 @@ export function Message({
     const toolCalls = message.toolCalls || []
     if (toolCalls.length === 0) return null
 
+    // Filter out composio_execute - users don't need to see internal Composio execution
+    const filteredToolCalls = toolCalls.filter(tc => tc.toolName !== 'composio_execute')
+
     // Only show running tools - hide completed ones for cleaner UX
-    const runningTools = toolCalls.filter(tc => tc.state === 'running')
-    const errorTools = toolCalls.filter(tc => tc.state === 'error')
+    const runningTools = filteredToolCalls.filter(tc => tc.state === 'running')
+    const errorTools = filteredToolCalls.filter(tc => tc.state === 'error')
 
     // If nothing is running and no errors, don't show anything
     if (runningTools.length === 0 && errorTools.length === 0) return null

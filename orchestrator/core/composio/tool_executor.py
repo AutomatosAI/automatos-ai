@@ -14,7 +14,7 @@ This executor:
 import logging
 from typing import Dict, Any, Optional, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import re
 from difflib import SequenceMatcher
@@ -342,71 +342,28 @@ class ComposioToolExecutor:
                     if examples:
                         examples_clause = f" Examples of mapped actions: {examples}"
 
-                # Auto-recovery (generic, no hardcoded mappings):
-                # If the requested action isn't mapped, but we can confidently pick a SAFE mapped action
-                # of the same "kind" (read vs write), do it inside this single tool call to avoid
-                # user-visible fail+retry (and avoid duplicate UI steps).
+                # DISABLED: Auto-mapper was using display names from broken sync
+                # Just use the raw action name from LLM and let Composio validate it
                 auto_mapped_from: Optional[str] = None
                 auto_selected_action: Optional[str] = None
-                if scored:
-                    best_overlap, best_ratio, best_name, _best_desc = scored[0]
-                    best_tokens = _tokenize(best_name)
-                    best_kind = "read" if (best_tokens & read_verbs) else ("write" if (best_tokens & write_verbs) else "unknown")
-                    kind_matches = (req_kind == "unknown") or (best_kind == req_kind)
 
-                    # Confidence gates:
-                    # - token overlap 2+ is usually very strong once we split underscores
-                    # - for write actions, require stronger overlap to avoid unintended side-effects
-                    strong = (best_overlap >= 2) or (best_overlap >= 1 and best_ratio >= 0.90)
-                    if kind_matches and strong and (best_kind != "write" or best_overlap >= 2):
-                        try:
-                            mapped = (
-                                self.db.query(ComposioActionCache)
-                                .filter(
-                                    ComposioActionCache.app_name == app_name,
-                                    func.lower(ComposioActionCache.action_name) == best_name.lower(),
-                                )
-                                .first()
-                            )
-                            if mapped:
-                                auto_mapped_from = raw_action
-                                auto_selected_action = str(mapped.action_name or best_name)
-                        except Exception:
-                            mapped = None
-
-                if auto_selected_action:
-                    # If we matched on slug, normalize to canonical action_name
-                    action_upper = str(auto_selected_action).upper()
-                    logger.info(
-                        f"Auto-mapped Composio action for app={app_name}: '{auto_mapped_from}' -> '{action_upper}'"
-                    )
+                # Skip auto-mapping entirely - use raw action name
+                if False:  # Disabled
+                    pass
                 else:
-                    return {
-                        "success": False,
-                        "error": (
-                            f"Action '{raw_action}' is not mapped in composio_actions_cache for {app_name}. "
-                            + (
-                                "The cache appears empty for this app. Run the cache sync."
-                                if total_for_app == 0
-                                else (
-                                    "Use one of the suggested safe actions instead."
-                                    if suggestions
-                                    else "No safe suggestions found in cache; run the cache sync."
-                                )
-                            )
-                            + examples_clause
-                        ),
-                        "error_type": "composio_action_not_mapped",
-                        "data": {
-                            "app_name": app_name,
-                            "requested_action": raw_action,
-                            "suggested_actions": suggestions,
-                        },
-                        "execution_time_ms": int((time.time() - start_time) * 1000),
-                    }
+                    # Cache miss - proceed with execution anyway (agnostic mode)
+                    # Composio API will validate; if invalid, it will fail there
+                    logger.warning(
+                        f"Action '{raw_action}' not in cache for {app_name} "
+                        f"({total_for_app} actions cached). Attempting direct execution via Composio API."
+                    )
+                    if suggestions:
+                        logger.info(f"Cache has these alternatives: {suggestions}")
 
-            # If we matched on slug, normalize to canonical action_name
-            action_upper = str(mapped.action_name or action_upper).upper()
+                    # Use the raw action name - let Composio decide if it's valid
+                    action_upper = raw_action.upper()
+
+            # Action name is already set above (no more auto-mapping)
         except Exception as exc:
             return {
                 "success": False,
@@ -458,6 +415,21 @@ class ComposioToolExecutor:
 
             execution_time = int((time.time() - start_time) * 1000)
 
+            # PRD-41: Extract entities and store in Redis for context-aware suggestions
+            # Only extract if execution was successful
+            if result.get("success", False) and result.get("data"):
+                try:
+                    self._extract_and_store_entities(
+                        app_name=app_name,
+                        action_name=action_upper,
+                        tool_result=result.get("data", {}),
+                        workspace_id=workspace_id,
+                        agent_id=agent_id
+                    )
+                except Exception as extract_error:
+                    # Log but don't fail the execution
+                    logger.warning(f"Failed to extract/store entities for {app_name}: {extract_error}")
+
             return {
                 "success": result.get("success", False),
                 "data": result.get("data"),
@@ -466,7 +438,7 @@ class ComposioToolExecutor:
                 "action": action_upper,
                 "entity_id": composio_entity_id
             }
-            
+
         except Exception as e:
             error_msg = str(e)
             error_type = None
@@ -593,3 +565,75 @@ class ComposioToolExecutor:
             ):
                 count += 1
         return count
+
+    def _extract_and_store_entities(
+        self,
+        app_name: str,
+        action_name: str,
+        tool_result: Dict[str, Any],
+        workspace_id: UUID,
+        agent_id: int
+    ) -> None:
+        """
+        Extract entities from tool result and store in Redis (PRD-41: US-005, US-006).
+
+        This enables context-aware suggestions by remembering what tools showed
+        the user (e.g., "urgent email from Sarah", "PR #123").
+
+        Context is stored with 10-minute TTL for ephemeral, short-lived suggestions.
+
+        Args:
+            app_name: Composio app name (e.g., "GMAIL")
+            action_name: Action that was executed
+            tool_result: Response data from tool execution
+            workspace_id: Workspace UUID (used as Redis key component)
+            agent_id: Agent ID (stored in context metadata)
+        """
+        from core.composio.entity_extractors import get_extractor
+        import json
+
+        # Get appropriate extractor for this app (always returns an extractor)
+        extractor = get_extractor(app_name)
+
+        # Extract entities
+        entities = extractor.extract(tool_result)
+        if not entities or not any(entities.values()):
+            logger.debug(f"No entities extracted from {app_name} result")
+            return
+
+        # Store in Redis with 10-minute TTL (PRD-41: Context-aware suggestions)
+        try:
+            from core.redis.client import get_redis_client
+
+            redis_client = get_redis_client()
+            if not redis_client:
+                logger.warning("Redis client not available, skipping context storage")
+                return
+
+            # Get actual Redis connection
+            redis_conn = redis_client.get_redis()
+
+            # Create context data with timestamp
+            context_data = {
+                "tool": app_name,
+                "action": action_name,
+                "entities": entities,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "agent_id": agent_id
+            }
+
+            # Redis key: tool_context:{workspace_id}:{tool_name}
+            redis_key = f"tool_context:{workspace_id}:{app_name}"
+
+            # Store with 10-minute TTL (600 seconds)
+            redis_conn.setex(
+                redis_key,
+                600,  # 10 minutes
+                json.dumps(context_data)
+            )
+            redis_conn.close()
+
+            logger.info(f"✅ Stored tool context in Redis: {app_name} for workspace {workspace_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to store tool context in Redis: {e}")

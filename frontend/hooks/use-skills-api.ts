@@ -18,8 +18,20 @@ import {
   SkillSourceType,
   SkillSourceStatus
 } from '@/types/skills';
+import { apiClient } from '@/lib/api-client';
 
-const API_BASE = '/api/v1/skills';
+function getSkillsApiBase(): string {
+  const base = apiClient.getBaseUrl();
+  return base ? `${base}/api/v1/skills` : '/api/v1/skills';
+}
+
+async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response> {
+  const auth = await apiClient.getAuthHeaders();
+  return fetch(url, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...auth, ...(init?.headers as Record<string, string>) }
+  });
+}
 
 export function useSkillsApi() {
   const { toast } = useToast();
@@ -35,15 +47,23 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/sources/git`, {
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/sources/git`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to import Git repository');
+        let detail = 'Failed to import Git repository';
+        const text = await response.text();
+        if (text) {
+          try {
+            const errorData = JSON.parse(text);
+            detail = errorData.detail || (typeof errorData.error === 'string' ? errorData.error : detail);
+          } catch (_) {
+            detail = text.slice(0, 200);
+          }
+        }
+        throw new Error(detail);
       }
 
       const result = await response.json();
@@ -83,7 +103,7 @@ export function useSkillsApi() {
       if (sourceType) params.append('source_type', sourceType);
       if (status) params.append('status', status);
 
-      const response = await fetch(`${API_BASE}/sources?${params}`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/sources?${params}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch skill sources');
@@ -109,7 +129,7 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/sources/${sourceId}`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/sources/${sourceId}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch skill source');
@@ -130,7 +150,7 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/sources/${sourceId}/update`, {
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/sources/${sourceId}/update`, {
         method: 'POST'
       });
 
@@ -169,8 +189,8 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(
-        `${API_BASE}/sources/${sourceId}/rollback?commit_sha=${commitSha}`,
+      const response = await fetchWithAuth(
+        `${getSkillsApiBase()}/sources/${sourceId}/rollback?commit_sha=${commitSha}`,
         { method: 'POST' }
       );
 
@@ -207,8 +227,8 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(
-        `${API_BASE}/sources/${sourceId}?deactivate_skills=${deactivateSkills}`,
+      const response = await fetchWithAuth(
+        `${getSkillsApiBase()}/sources/${sourceId}?deactivate_skills=${deactivateSkills}`,
         { method: 'DELETE' }
       );
 
@@ -260,7 +280,7 @@ export function useSkillsApi() {
       if (params?.limit) queryParams.append('limit', params.limit.toString());
       if (params?.offset) queryParams.append('offset', params.offset.toString());
 
-      const response = await fetch(`${API_BASE}?${queryParams}`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}?${queryParams}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch skills');
@@ -286,7 +306,7 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/${skillId}`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/${skillId}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch skill details');
@@ -314,7 +334,7 @@ export function useSkillsApi() {
       const params = new URLSearchParams({ level: level.toString() });
       if (resourcePath) params.append('resource_path', resourcePath);
 
-      const response = await fetch(`${API_BASE}/${skillId}/content?${params}`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/${skillId}/content?${params}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch skill content');
@@ -335,7 +355,7 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/${skillId}`, {
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/${skillId}`, {
         method: 'DELETE'
       });
 
@@ -372,7 +392,7 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/agents/${agentId}/skills`);
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/agents/${agentId}/skills`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch agent skills');
@@ -397,11 +417,10 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(
-        `${API_BASE}/agents/${agentId}/skills?replace=${replace}`,
+      const response = await fetchWithAuth(
+        `${getSkillsApiBase()}/agents/${agentId}/skills?replace=${replace}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(skillIds)
         }
       );
@@ -440,8 +459,8 @@ export function useSkillsApi() {
     
     try {
       const queryParams = skillIds.map(id => `skill_ids=${id}`).join('&');
-      const response = await fetch(
-        `${API_BASE}/agents/${agentId}/skills?${queryParams}`,
+      const response = await fetchWithAuth(
+        `${getSkillsApiBase()}/agents/${agentId}/skills?${queryParams}`,
         { method: 'DELETE' }
       );
 
@@ -482,9 +501,8 @@ export function useSkillsApi() {
     setError(null);
     
     try {
-      const response = await fetch(`${API_BASE}/recommend`, {
+      const response = await fetchWithAuth(`${getSkillsApiBase()}/recommend`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           task_description: taskDescription,
           task_type: taskType,
