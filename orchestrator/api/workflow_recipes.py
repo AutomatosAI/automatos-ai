@@ -551,6 +551,8 @@ async def execute_recipe(
     - input_data: Dict matching the recipe's inputs schema
     """
     try:
+        logger.info(f"[execute_recipe] Starting for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
+
         # Fetch recipe and validate ownership
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
@@ -559,18 +561,21 @@ async def execute_recipe(
         ).first()
 
         if not recipe:
+            logger.warning(f"[execute_recipe] Recipe not found: {recipe_id}")
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        input_data = body.get('input_data')
+        logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
 
-        # Validate input_data against recipe's inputs schema if both exist
-        if recipe.inputs and input_data is not None:
+        input_data = body.get('input_data') or {}
+
+        # Fill in defaults for missing required inputs (don't block execution)
+        if recipe.inputs:
             for param_name, param_def in recipe.inputs.items():
-                if isinstance(param_def, dict) and param_def.get('required') and param_name not in input_data:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Missing required input: {param_name}"
-                    )
+                if isinstance(param_def, dict) and param_name not in input_data:
+                    default = param_def.get('default', '')
+                    input_data[param_name] = default
+                    if param_def.get('required'):
+                        logger.info(f"[execute_recipe] Auto-filled missing required input '{param_name}' with default")
 
         # Build workflow_definition from recipe steps (RECIPE mode)
         recipe_steps = recipe.steps or []
@@ -685,10 +690,11 @@ async def execute_recipe(
             "message": "Recipe execution started",
         }
 
-    except HTTPException:
+    except HTTPException as he:
+        logger.warning(f"[execute_recipe] HTTPException: status={he.status_code}, detail={he.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error executing recipe {recipe_id}: {e}")
+        logger.error(f"[execute_recipe] Unhandled error: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error executing recipe: {str(e)}")
 
