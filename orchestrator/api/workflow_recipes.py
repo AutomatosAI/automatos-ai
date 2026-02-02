@@ -578,7 +578,17 @@ async def execute_recipe(
                         logger.info(f"[execute_recipe] Auto-filled missing required input '{param_name}' with default")
 
         # Build workflow_definition from recipe steps (RECIPE mode)
-        recipe_steps = recipe.steps or []
+        # Enrich steps with 'description' field from prompt_template so the
+        # execution manager can display meaningful step names instead of "Unknown"
+        recipe_steps = []
+        for step in (recipe.steps or []):
+            enriched = dict(step)
+            if 'description' not in enriched and enriched.get('prompt_template'):
+                enriched['description'] = enriched['prompt_template']
+            if 'name' not in enriched and enriched.get('prompt_template'):
+                enriched['name'] = enriched['prompt_template'][:80]
+            recipe_steps.append(enriched)
+
         workflow_definition = {
             "steps": recipe_steps,
             "config": recipe.execution_config or {},
