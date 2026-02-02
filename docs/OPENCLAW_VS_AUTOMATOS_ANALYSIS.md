@@ -521,6 +521,107 @@ The good news: **Automatos already has the harder stuff built** -- multi-agent o
 
 ---
 
+---
+
+## Part 9: Update -- PRD-49/50 Universal Orchestrator Router (ralph/universal-orchestrator-router)
+
+**After the initial analysis, the `ralph/universal-orchestrator-router` branch was discovered with PRD-49 (Pilot Helper Widget) and PRD-50 (Universal Orchestrator Router). This section evaluates the new implementation against the OpenClaw comparison findings.**
+
+### What PRD-50 Builds
+
+A **4-tier routing engine** that sits before the existing 9-stage orchestrator pipeline. Every incoming request -- chatbot message, Jira webhook, future Slack/WhatsApp -- gets normalized into a `RequestEnvelope` and routed to the right agent or workflow.
+
+```
+Input Channels              Universal Router                    Execution Layer
+──────────────              ────────────────                    ───────────────
+Chatbot UI ────┐                                               ┌─ Agent (direct)
+Jira Trigger ──┤──► Ingest ──► RequestEnvelope ──► Route ─────┤─ Recipe/Workflow
+Slack* ────────┤            Tier 0: Override (0ms, free)       └─ Full Orchestration
+WhatsApp* ─────┘            Tier 1: Cache (<5ms, free)
+                            Tier 2: Rules (<10ms, free)
+                            Tier 3: LLM (200-500ms, ~$0.001)
+```
+
+### Implementation Status (14 User Stories)
+
+| US | What | Status | Files |
+|----|-------|--------|-------|
+| US-001 | RequestEnvelope + RoutingDecision models | Done | `core/models/routing.py` |
+| US-002 | Routing cache (Redis-backed, TTL, workspace-scoped) | Done | `core/routing/cache.py` (278 lines) |
+| US-003 | Routing engine (4 tiers) | Done | `core/routing/engine.py` (571 lines) |
+| US-004 | Chatbot ingestor (ChatRequest -> RequestEnvelope) | Done | `core/routing/ingestors/chatbot.py` |
+| US-005 | Jira trigger ingestor | Done | `core/routing/ingestors/jira_trigger.py` |
+| US-006 | Webhook -> router dispatch (fills the TODO at composio.py:509) | Done | `api/composio.py` (+166 lines) |
+| US-007 | Chat endpoint integration (auto-routing replaces manual dropdown) | Done | `api/chat.py` (+74/-46 lines) |
+| US-008 | Jira trigger subscription setup | Done | `scripts/setup_jira_trigger.py` |
+| US-009 | Routing config + env vars | Done | `config.py`, `.env.example` |
+| US-010 | Routing API (decisions, rules, corrections, cache stats) | Done | `api/routing.py` (439 lines) |
+| US-011 | Jira Bug Triage recipe - Read + Analyze steps | Done | `modules/workflows/recipes/jira_bug_triage.py` |
+| US-012 | Jira Bug Triage recipe - Fix, PR, Update steps | Done | (same file, 691 lines total) |
+| US-013 | Jira trigger subscription setup script | Done | `scripts/setup_jira_trigger.py` |
+| US-014 | Chatbot UI auto-routing indicator | Done | `frontend/components/chatbot/chat.tsx`, `message.tsx` |
+
+**Total: 5,291 lines added across 35 files.**
+
+### What This Means for the OpenClaw Comparison
+
+PRD-50 directly addresses **5 of the 12 improvements** identified in the original analysis:
+
+| Original Recommendation | PRD-50 Coverage | Status |
+|-------------------------|----------------|--------|
+| 1. Messaging channel support | **Base ingestor interface built.** `BaseIngestor` abstract class + `ChatbotIngestor` + `JiraTriggerIngestor` ready. Adding Slack/Telegram/WhatsApp ingestors is now a matter of implementing the interface. | Partially addressed (Phase 2) |
+| 2. Proactive agent behavior (Heartbeat) | **Jira trigger is the first proactive trigger.** Composio webhook fires -> router dispatches -> agent acts autonomously. The pattern works for any event source. | Addressed (pattern established) |
+| 4. Dynamic skill loading | **Router selects the right pre-configured agent** with its assigned tools, avoiding the "160k methods" problem. One lightweight LLM call for routing, not full orchestration. | Addressed |
+| 6. Skills/Plugin marketplace | **Recipes are the skill equivalent.** `JiraBugTriageRecipe` is the first recipe -- a packaged workflow with steps. The `modules/workflows/recipes/` directory is the recipe registry. | Foundation laid |
+| 7. Webhook/trigger-driven activation | **Fully implemented.** Composio webhook -> JiraTriggerIngestor -> UniversalRouter -> JiraBugTriageRecipe. The TODO at composio.py:509 is replaced with 166 lines of dispatch logic. | Fully addressed |
+
+### Revised Gap Analysis (Post PRD-50)
+
+What Automatos still needs vs OpenClaw:
+
+| Gap | Severity | Notes |
+|-----|----------|-------|
+| **Native channel adapters** (Slack, Telegram, WhatsApp as input) | High | Ingestor interface is ready. Need `SlackIngestor`, `TelegramIngestor`, `WhatsAppIngestor` implementations. Phase 2 of PRD-50. |
+| **SOUL.md personality files** | Medium | SmartChatOrchestrator has `personality.py` but it's code-based, not user-editable markdown. |
+| **Daily session summaries** | Medium | `smart_memory.py` stores exchanges but doesn't write daily logs for temporal awareness. |
+| **Voice interface** | Low | Not in any PRD. Web Speech API would be a frontend-only addition. |
+| **Onboarding wizard** | Medium | Docker Compose + env files vs OpenClaw's `openclaw onboard`. |
+| **Community skills ecosystem** | Medium | `ralph/community-marketplace` branch has marketplace foundation but no "install a recipe" flow yet. |
+
+### The Jira Bug Triage Recipe -- This Is the Demo
+
+The `JiraBugTriageRecipe` (691 lines) implements an end-to-end autonomous workflow:
+
+```
+Jira ticket created ("Login page crashes on Safari")
+  → Composio webhook fires
+  → JiraTriggerIngestor normalizes to RequestEnvelope
+  → UniversalRouter Tier 2b matches TriggerSubscription
+  → JiraBugTriageRecipe.execute()
+    Step 1: JIRA_GET_ISSUE (read full ticket)
+    Step 2: CodeGraph symbol search (find relevant files)
+    Step 3: LLM generates fix plan (posted as Jira comment)
+    Step 4: GITHUB_CREATE_BRANCH (fix/PILOT-42) + apply changes
+    Step 5: GITHUB_CREATE_PULL_REQUEST (references ticket)
+    Step 6: JIRA_UPDATE_ISSUE (move to "In Review") + PR link comment
+  → If any step fails: post failure summary, halt cleanly
+```
+
+**This is the "wow demo" the original analysis called for.** OpenClaw's demo is "I texted my AI and it booked my flight." Automatos' demo is "A Jira bug ticket was filed and 3 minutes later there's a PR with the fix, the ticket is in review, and no human touched it."
+
+### Revised Assessment
+
+PRD-50 is a significant architectural advancement. The `UniversalRouter` + `RequestEnvelope` pattern transforms Automatos from "a chatbot with tools" into "an event-driven agent platform." The key insight -- normalizing all inputs to a standard envelope then routing through tiered evaluation -- is exactly the pattern OpenClaw uses with its Gateway + Channel Adapters, but with more sophisticated routing (OpenClaw uses a single agent, no routing needed).
+
+**The remaining gap is distribution, not architecture.** The ingestor interface is defined. The router works. The recipe pattern is established. What's needed now:
+
+1. **Ship the Slack/Telegram ingestors** (Phase 2 of PRD-50) -- this is what puts Automatos on people's phones
+2. **Record the Jira demo video** -- ticket filed, PR opens automatically, ticket moves to review
+3. **Publish the marketplace** (ralph/community-marketplace branch) -- let people share recipes
+4. **Simplify onboarding** -- `docker-compose up` is fine for devs, but a web wizard would lower the barrier
+
+---
+
 ## Sources
 
 - [OpenClaw GitHub Repository](https://github.com/openclaw/openclaw)
