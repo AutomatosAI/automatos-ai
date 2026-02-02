@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
 import { useInstallRecipeFromMarketplace } from '@/hooks/use-recipe-api'
+import { ViewRecipeModal } from '@/components/workflows/view-recipe-modal'
 
 interface MarketplaceRecipesTabProps {
   searchQuery: string
@@ -17,6 +18,8 @@ interface MarketplaceRecipesTabProps {
 export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProps) {
   const [selectedType, setSelectedType] = useState('all')
   const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
+  const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
+  const [showViewModal, setShowViewModal] = useState(false)
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const installMutation = useInstallRecipeFromMarketplace()
@@ -33,14 +36,20 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     },
   })
 
-  const handleInstall = async (recipeId: number) => {
+  const handleViewRecipe = (recipe: any) => {
+    setSelectedRecipe(recipe)
+    setShowViewModal(true)
+  }
+
+  const handleInstall = async (e: React.MouseEvent, recipeId: number) => {
+    e.stopPropagation()
     setInstallingRecipeId(recipeId)
     try {
       const data = await installMutation.mutateAsync(recipeId)
 
       toast({
-        title: 'Recipe Installed',
-        description: data.message || 'Recipe installed successfully',
+        title: 'Recipe Added to Workspace',
+        description: data.message || 'Recipe added successfully',
         variant: 'default'
       })
 
@@ -60,7 +69,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     } catch (error: any) {
       toast({
         title: 'Installation Failed',
-        description: error?.message || 'Failed to install recipe',
+        description: error?.message || 'Failed to add recipe to workspace',
         variant: 'destructive'
       })
     } finally {
@@ -123,25 +132,31 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {recipes.map((recipe: any) => (
-            <Card key={recipe.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
+            <Card
+              key={recipe.id}
+              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
+              onClick={() => handleViewRecipe(recipe)}
+            >
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
                     <FileText className="w-5 h-5 text-blue-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold line-clamp-1">{recipe.name}</h3>
-                    <p className="text-xs text-muted-foreground">by {recipe.creator_name}</p>
+                    <h3 className="font-semibold line-clamp-1 text-white">{recipe.name}</h3>
+                    <p className="text-xs text-gray-500">by {recipe.creator_name}</p>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground line-clamp-2">{recipe.description}</p>
+                <p className="text-sm text-gray-400 line-clamp-2">{recipe.description}</p>
 
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    {recipe.category || 'Workflow'}
-                  </Badge>
+                  {recipe.category && (
+                    <Badge variant="outline" className="text-xs border-gray-700 text-gray-400">
+                      {recipe.category}
+                    </Badge>
+                  )}
                   {recipe.metadata?.recipe_type && (
                     <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30">
                       {recipe.metadata.recipe_type}
@@ -149,16 +164,16 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-secondary">
-                  <span className="text-xs text-muted-foreground">
+                <div className="flex items-center justify-between pt-2 border-t border-gray-800">
+                  <span className="text-xs text-gray-500">
                     {recipe.install_count >= 1000
                       ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
                       : `${recipe.install_count} installs`}
                   </span>
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => handleInstall(recipe.id)}
+                    className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
+                    onClick={(e) => handleInstall(e, recipe.id)}
                     disabled={installingRecipeId === recipe.id}
                   >
                     {installingRecipeId === recipe.id ? (
@@ -166,7 +181,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     ) : (
                       <Download className="w-3 h-3 mr-1" />
                     )}
-                    {installingRecipeId === recipe.id ? 'Installing...' : 'Install'}
+                    {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
                   </Button>
                 </div>
               </CardContent>
@@ -174,6 +189,21 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           ))}
         </div>
       )}
+
+      {/* View Recipe Modal */}
+      <ViewRecipeModal
+        open={showViewModal}
+        onClose={() => {
+          setShowViewModal(false)
+          setSelectedRecipe(null)
+        }}
+        recipe={selectedRecipe}
+        onExecute={(e) => {
+          if (selectedRecipe) {
+            handleInstall(e as any, selectedRecipe.id)
+          }
+        }}
+      />
     </div>
   )
 }

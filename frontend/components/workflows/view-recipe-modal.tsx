@@ -182,7 +182,7 @@ export function ViewRecipeModal({
                         Input Schema
                       </h3>
                       <pre className="text-xs bg-background/50 rounded p-2 overflow-x-auto">
-                        {JSON.stringify(JSON.parse(recipe.inputs || '{}'), null, 2)}
+                        {JSON.stringify(typeof recipe.inputs === 'string' ? JSON.parse(recipe.inputs) : recipe.inputs, null, 2)}
                       </pre>
                     </div>
                   )}
@@ -193,7 +193,7 @@ export function ViewRecipeModal({
                         Output Schema
                       </h3>
                       <pre className="text-xs bg-background/50 rounded p-2 overflow-x-auto">
-                        {JSON.stringify(JSON.parse(recipe.outputs || '{}'), null, 2)}
+                        {JSON.stringify(typeof recipe.outputs === 'string' ? JSON.parse(recipe.outputs) : recipe.outputs, null, 2)}
                       </pre>
                     </div>
                   )}
