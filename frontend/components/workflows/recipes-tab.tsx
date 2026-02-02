@@ -18,7 +18,8 @@ import {
   Star,
   Share2,
   Loader2,
-  Lightbulb
+  Lightbulb,
+  Play
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,7 @@ import {
   useWorkflowRecipes,
   useDeleteRecipe,
   useRecordRecipeUsage,
+  useExecuteRecipe,
   useSubmitRecipeToMarketplace,
   useRecipeSuggestions
 } from '@/hooks/use-recipe-api'
@@ -40,10 +42,11 @@ import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
 
 interface RecipesTabProps {
   onUseRecipe: (recipe: any) => void
+  onExecuteRecipe?: (workflowId: number) => void
   onOpenCreateModal?: () => void
 }
 
-export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) {
+export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: RecipesTabProps) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all')
@@ -52,6 +55,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
   const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
+  const [cookingRecipeId, setCookingRecipeId] = useState<string | null>(null)
   const [editRecipeData, setEditRecipeData] = useState<any>(null)
   const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
 
@@ -65,6 +69,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
 
   const deleteMutation = useDeleteRecipe()
   const recordUsageMutation = useRecordRecipeUsage()
+  const executeRecipeMutation = useExecuteRecipe()
   const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
   const { toast } = useToast()
 
@@ -79,7 +84,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const handleDeleteRecipe = async () => {
     if (!selectedRecipe) return
     try {
-      await deleteMutation.mutateAsync(selectedRecipe.recipe_id)
+      await deleteMutation.mutateAsync(selectedRecipe.template_id || selectedRecipe.id)
       setShowDeleteDialog(false)
       setSelectedRecipe(null)
       refetch()
@@ -91,13 +96,38 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const handleUseRecipe = async (recipe: any) => {
     try {
       // Record usage
-      await recordUsageMutation.mutateAsync(recipe.recipe_id)
+      await recordUsageMutation.mutateAsync(recipe.template_id || recipe.id)
       // Notify parent component with full recipe object
       onUseRecipe(recipe)
     } catch (error) {
       console.error('Error recording recipe usage:', error)
       // Still pass recipe even if recording fails
       onUseRecipe(recipe)
+    }
+  }
+
+  const handleCookRecipe = async (recipe: any) => {
+    const recipeId = recipe.template_id || recipe.id?.toString()
+    setCookingRecipeId(recipeId)
+    try {
+      const result = await executeRecipeMutation.mutateAsync({ recipeId })
+      toast({
+        title: 'Recipe Started',
+        description: `"${recipe.name}" is now cooking.`,
+        variant: 'default',
+      })
+      // Navigate to ExecutionKitchen via parent
+      if (onExecuteRecipe && result?.workflow_id) {
+        onExecuteRecipe(result.workflow_id)
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Execution Failed',
+        description: error?.message || 'Failed to start recipe execution',
+        variant: 'destructive',
+      })
+    } finally {
+      setCookingRecipeId(null)
     }
   }
 
@@ -345,10 +375,15 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
                     <Button
                       className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                       size="sm"
-                      onClick={() => handleUseRecipe(recipe)}
+                      onClick={() => handleCookRecipe(recipe)}
+                      disabled={cookingRecipeId === (recipe.template_id || recipe.id?.toString())}
                     >
-                      <Plus className="w-3 h-3 mr-2" />
-                      Use
+                      {cookingRecipeId === (recipe.template_id || recipe.id?.toString()) ? (
+                        <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                      ) : (
+                        <Play className="w-3 h-3 mr-2" />
+                      )}
+                      {cookingRecipeId === (recipe.template_id || recipe.id?.toString()) ? 'Starting...' : 'Cook'}
                     </Button>
                     <Button
                       variant="outline"
@@ -432,7 +467,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
         }}
         onExecute={() => {
           setShowViewModal(false)
-          handleUseRecipe(selectedRecipe)
+          handleCookRecipe(selectedRecipe)
         }}
         onShare={!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item
           ? () => handleShareToMarketplace(selectedRecipe)

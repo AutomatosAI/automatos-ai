@@ -20,7 +20,8 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
-from core.models.core import Agent, RecipeExecution
+from core.models import Workflow, WorkflowExecution, Agent, workflow_agents
+from core.models.core import RecipeExecution
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 
@@ -540,9 +541,11 @@ async def execute_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Execute a recipe with optional input data.
-    Creates an execution record with status='pending' and returns execution_id
-    immediately for async tracking.
+    Execute a recipe directly via the 9-stage workflow engine.
+
+    Creates a Workflow from recipe data, a WorkflowExecution record, and launches
+    execute_workflow_with_progress as an async task. Also creates a RecipeExecution
+    record for recipe-specific tracking.
 
     Body (optional):
     - input_data: Dict matching the recipe's inputs schema
@@ -569,35 +572,117 @@ async def execute_recipe(
                         detail=f"Missing required input: {param_name}"
                     )
 
-        # Create execution record
-        execution_id = f"exec-{uuid4().hex[:12]}"
-        execution = RecipeExecution(
-            execution_id=execution_id,
+        # Build workflow_definition from recipe steps (RECIPE mode)
+        recipe_steps = recipe.steps or []
+        workflow_definition = {
+            "steps": recipe_steps,
+            "config": recipe.execution_config or {},
+            "goal": recipe.description,
+            "category": "recipe",
+            "priority": "medium",
+            "version": recipe.version or "1.0",
+            "recipe_template_id": recipe.template_id,
+        }
+
+        # Create a Workflow from recipe data
+        timestamp = datetime.now().strftime("%H%M%S")
+        workflow = Workflow(
+            workspace_id=ctx.workspace_id,
+            name=f"{recipe.name} {timestamp}",
+            description=recipe.description,
+            workflow_definition=workflow_definition,
+            status='active',
+            created_by=ctx.user.email if ctx.user else 'system',
+        )
+        db.add(workflow)
+        db.flush()  # Get workflow.id without committing
+
+        # Associate agents from recipe steps to the Workflow
+        agent_ids_from_steps = list({
+            step.get('agent_id') for step in recipe_steps if step.get('agent_id')
+        })
+        if agent_ids_from_steps:
+            agent_objects = db.query(Agent).filter(
+                Agent.id.in_(agent_ids_from_steps),
+                Agent.workspace_id == ctx.workspace_id
+            ).all()
+            workflow.agents.extend(agent_objects)
+
+        # Pick first step's agent as default agent_id for WorkflowExecution (required field)
+        default_agent_id = None
+        if recipe_steps and recipe_steps[0].get('agent_id'):
+            default_agent_id = recipe_steps[0]['agent_id']
+        if not default_agent_id and agent_ids_from_steps:
+            default_agent_id = agent_ids_from_steps[0]
+        if not default_agent_id:
+            # Fallback: get any active agent in workspace
+            fallback_agent = db.query(Agent).filter(
+                Agent.workspace_id == ctx.workspace_id,
+                Agent.status == 'active'
+            ).first()
+            if fallback_agent:
+                default_agent_id = fallback_agent.id
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No active agents available to execute this recipe"
+                )
+
+        # Create WorkflowExecution record
+        workflow_execution = WorkflowExecution(
+            workflow_id=workflow.id,
+            agent_id=default_agent_id,
+            workspace_id=ctx.workspace_id,
+            input_data=input_data or {},
+            status='pending',
+        )
+        db.add(workflow_execution)
+        db.flush()
+
+        # Create RecipeExecution record for recipe-specific tracking
+        recipe_execution_id = f"exec-{uuid4().hex[:12]}"
+        recipe_execution = RecipeExecution(
+            execution_id=recipe_execution_id,
             recipe_id=recipe.id,
             workspace_id=ctx.workspace_id,
-            status='pending',
+            status='running',
             input_data=input_data,
             current_stage=1,
             current_step=0,
             triggered_by=ctx.user.email if ctx.user else 'anonymous',
+            execution_metadata={
+                'workflow_id': workflow.id,
+                'workflow_execution_id': workflow_execution.id,
+            },
         )
-
-        db.add(execution)
+        db.add(recipe_execution)
 
         # Update recipe usage stats
         recipe.use_count += 1
         recipe.last_used_at = datetime.now()
 
         db.commit()
-        db.refresh(execution)
+        db.refresh(workflow)
+        db.refresh(workflow_execution)
 
-        logger.info(f"Created recipe execution: {execution_id} for recipe {recipe_id}")
+        logger.info(
+            f"Recipe execution started: recipe={recipe_id}, "
+            f"workflow_id={workflow.id}, execution_id={workflow_execution.id}"
+        )
+
+        # Launch execute_workflow_with_progress as async task
+        import asyncio
+        from api.workflows import execute_workflow_with_progress
+        asyncio.create_task(
+            execute_workflow_with_progress(workflow_execution.id, {})
+        )
 
         return {
-            "execution_id": execution.execution_id,
-            "status": execution.status,
-            "recipe_id": recipe.template_id,
-            "message": "Execution created successfully"
+            "workflow_id": workflow.id,
+            "workflow_execution_id": workflow_execution.id,
+            "recipe_execution_id": recipe_execution.execution_id,
+            "status": "started",
+            "message": "Recipe execution started",
         }
 
     except HTTPException:

@@ -103,6 +103,19 @@ export function useDeleteRecipe() {
   })
 }
 
+// Execute recipe directly (creates workflow + launches execution)
+export function useExecuteRecipe() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ recipeId, inputData }: { recipeId: string; inputData?: Record<string, any> }) =>
+      apiClient.executeRecipe(recipeId, inputData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+    },
+  })
+}
+
 // Record recipe usage mutation
 export function useRecordRecipeUsage() {
   const queryClient = useQueryClient()

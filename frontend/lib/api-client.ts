@@ -1348,6 +1348,13 @@ class ApiClient {
     })
   }
 
+  async executeRecipe(recipeId: string, inputData?: Record<string, any>) {
+    return this.request(`/api/workflow-recipes/${recipeId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({ input_data: inputData || {} })
+    })
+  }
+
   async getRecipeSuggestions(recipeId: string) {
     return this.request(`/api/workflow-recipes/${recipeId}/suggestions`)
   }
