@@ -80,6 +80,9 @@ class LLMModel(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
+    # PRD-37: Workspace isolation (nullable for system-wide models)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
 # Database Models
 class Agent(Base):
     __tablename__ = 'agents'
@@ -180,7 +183,10 @@ class Skill(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
-    
+
+    # PRD-37: Workspace isolation for multi-tenant SaaS
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+
     # PRD-22: New fields for Git-backed skills
     prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)
     tools_schema = Column(JSONB, nullable=True)  # PRD-22: Executable tool definitions for agents
@@ -326,6 +332,9 @@ class Pattern(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
 
+    # PRD-37: Workspace isolation for multi-tenant SaaS
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+
 class Workflow(Base):
     __tablename__ = 'workflows'
     
@@ -366,6 +375,7 @@ class WorkflowExecution(Base):
     id = Column(Integer, primary_key=True)
     workflow_id = Column(Integer, ForeignKey('workflows.id'))
     agent_id = Column(Integer, ForeignKey('agents.id'))
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
     status = Column(String(50), default='pending')  # 'pending', 'running', 'completed', 'failed'
     input_data = Column(JSON)
     output_data = Column(JSON)
@@ -407,7 +417,7 @@ class Document(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     is_shared = Column(Boolean, default=True)
     
-    # PRD-37: Workspace isolation
+    # PRD-37: Workspace isolation for multi-tenant SaaS
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
 class SystemConfiguration(Base):

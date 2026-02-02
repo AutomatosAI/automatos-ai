@@ -42,7 +42,7 @@ import {
 } from './theater/theater-self-learning-panel'
 import { RecipeSuggestionsPanel, type SuggestionsData } from './recipe-suggestions-panel'
 
-interface ExecutionTheaterProps {
+interface ExecutionKitchenProps {
   workflowId: number
   onBack: () => void
   autoStart?: boolean
@@ -463,7 +463,7 @@ function buildMemoryData(execution: any): MemoryData | null {
 }
 
 // Main Component
-export function ExecutionTheater({ workflowId, onBack, autoStart = false }: ExecutionTheaterProps) {
+export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: ExecutionKitchenProps) {
   const [isExecuting, setIsExecuting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [executionData, setExecutionData] = useState<any>(null)

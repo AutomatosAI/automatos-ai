@@ -584,12 +584,12 @@ function ToolCard({
                     <Separator />
 
                     {/* Action Section - Add to Workspace Button */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
                         <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={onDetails}
-                            className="text-muted-foreground hover:text-white p-0 h-auto"
+                            className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
                         >
                             Details
                         </Button>
@@ -598,9 +598,8 @@ function ToolCard({
                             <Button
                                 size="sm"
                                 variant="secondary"
-                                className="bg-secondary/50 hover:bg-secondary border border-white/10"
+                                className="flex-1 bg-secondary/50 hover:bg-secondary border border-white/10"
                                 disabled
-                                style={{ height: '32px', minWidth: '140px' }}
                                 onClick={() => console.log('🔵 [BTN] Already added button clicked (disabled)')}
                             >
                                 <CheckCircle className="w-3 h-3 mr-1" />
@@ -609,7 +608,7 @@ function ToolCard({
                         ) : (
                             <Button
                                 size="sm"
-                                className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
+                                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
                                 onClick={(e) => {
                                     console.log('🟢 [BTN] Add to Workspace button clicked!', {
                                         app: app.name,
@@ -620,7 +619,6 @@ function ToolCard({
                                     onConnect()
                                 }}
                                 disabled={isConnecting}
-                                style={{ height: '32px', minWidth: '140px' }}
                             >
                                 {isConnecting ? (
                                     <>

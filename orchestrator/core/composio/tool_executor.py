@@ -405,8 +405,15 @@ class ComposioToolExecutor:
                         "execution_time_ms": int((time.time() - start_time) * 1000),
                     }
 
-            # If we matched on slug, normalize to canonical action_name
+            # Normalize to canonical action_name
             action_upper = str(mapped.action_name or action_upper).upper()
+
+            # If action_name is a display name (no app prefix), reconstruct proper API format
+            # e.g., "FETCH EMAILS" + app "GMAIL" → "GMAIL_FETCH_EMAILS"
+            if app_name and not action_upper.startswith(f"{app_name}_"):
+                reconstructed = f"{app_name}_{action_upper.replace(' ', '_')}"
+                logger.info(f"Reconstructed Composio action: '{action_upper}' -> '{reconstructed}'")
+                action_upper = reconstructed
         except Exception as exc:
             return {
                 "success": False,

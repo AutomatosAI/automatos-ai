@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight } from 'lucide-react'
+import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
@@ -138,90 +139,91 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
               onClick={() => handleViewRecipe(recipe)}
             >
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold line-clamp-1 text-white">{recipe.name}</h3>
-                    <p className="text-xs text-gray-500">by {recipe.creator_name}</p>
+                {/* Icon INLINE with Title - EXACTLY like Agent */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <ChefHat className="w-10 h-10 text-orange-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-white line-clamp-1">
+                          {recipe.name}
+                        </h3>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        by {recipe.creator_name || 'Unknown'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-gray-400 line-clamp-3">{recipe.description}</p>
 
-                {/* What This Recipe Does - The Shiny Part! */}
-                {recipe.steps && recipe.steps.length > 0 && (
-                  <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3 space-y-2">
-                    <div className="flex items-center gap-2 text-orange-400 text-xs font-semibold">
-                      <Zap className="w-3 h-3" />
-                      <span>This Recipe Will:</span>
-                    </div>
-                    <div className="space-y-1">
-                      {recipe.steps.slice(0, 2).map((step: any, idx: number) => (
-                        <div key={idx} className="flex items-start gap-2 text-xs text-gray-300">
-                          <ArrowRight className="w-3 h-3 mt-0.5 text-orange-400 shrink-0" />
-                          <span className="line-clamp-1">{step.prompt_template || `Step ${step.order}`}</span>
-                        </div>
-                      ))}
-                      {recipe.steps.length > 2 && (
-                        <div className="text-xs text-orange-400 pl-5">
-                          +{recipe.steps.length - 2} more automated steps
-                        </div>
-                      )}
-                    </div>
+              <CardContent className="space-y-3">
+                {/* Description */}
+                <p className="text-sm text-gray-400 line-clamp-2">
+                  {recipe.description || 'No description available'}
+                </p>
+
+                {/* Category badge */}
+                {recipe.marketplace_category && (
+                  <div className="flex flex-col gap-2">
+                    <Badge variant="outline" className="text-xs border-gray-700 text-gray-400 w-fit">
+                      {recipe.marketplace_category}
+                    </Badge>
                   </div>
                 )}
 
-                {/* Key Stats */}
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-800">
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500">Steps</div>
-                    <div className="text-sm font-semibold text-white">{recipe.steps?.length || 0}</div>
+                {/* Stats Row */}
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <div className="flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{recipe.steps?.length || 0} Steps</span>
                   </div>
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500">Agents</div>
-                    <div className="text-sm font-semibold text-white flex items-center justify-center gap-1">
-                      <Bot className="w-3 h-3 text-orange-400" />
-                      {recipe.steps ? new Set(recipe.steps.map((s: any) => s.agent_id)).size : 0}
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500">Quality</div>
-                    <div className="text-sm font-semibold flex items-center justify-center gap-1">
-                      {recipe.quality_score ? (
-                        <>
-                          <CheckCircle className="w-3 h-3 text-green-400" />
-                          <span className="text-green-400">{(recipe.quality_score * 100).toFixed(0)}%</span>
-                        </>
-                      ) : (
-                        <span className="text-gray-500">N/A</span>
-                      )}
-                    </div>
+                  <div className="flex items-center gap-1">
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>{recipe.steps ? new Set(recipe.steps.map((s: any) => s.agent_id)).size : 0} Agents</span>
                   </div>
                 </div>
 
-                {/* Install Count & Button */}
-                <div className="flex items-center justify-between pt-2 border-t border-gray-800">
-                  <span className="text-xs text-gray-500 flex items-center gap-1">
-                    <Download className="w-3 h-3" />
-                    {recipe.install_count >= 1000
-                      ? `${(recipe.install_count / 1000).toFixed(1)}k people use this`
-                      : `${recipe.install_count} people use this`}
-                  </span>
+                {/* Install count */}
+                <div className="text-xs text-gray-500 pb-2">
+                  {recipe.install_count >= 1000
+                    ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
+                    : `${recipe.install_count || 0} installs`}
+                </div>
+
+                {/* Action Buttons - EXACTLY like Agent */}
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleViewRecipe(recipe)
+                    }}
+                  >
+                    Details
+                  </Button>
                   <Button
                     size="sm"
-                    className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
-                    onClick={(e) => handleInstall(e, recipe.id)}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleInstall(e, recipe.id)
+                    }}
                     disabled={installingRecipeId === recipe.id}
                   >
                     {installingRecipeId === recipe.id ? (
-                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      <>
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Adding...
+                      </>
                     ) : (
-                      <Download className="w-3 h-3 mr-1" />
+                      <>
+                        <Download className="w-3 h-3 mr-1" />
+                        Add to Workspace
+                      </>
                     )}
-                    {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
                   </Button>
                 </div>
               </CardContent>

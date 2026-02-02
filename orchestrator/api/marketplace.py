@@ -50,6 +50,14 @@ class MarketplaceItemOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Recipe-specific fields
+    owner_type: Optional[str] = None
+    steps: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    inputs: Optional[Dict[str, Any]] = None
+    outputs: Optional[Dict[str, Any]] = None
+    execution_config: Optional[Dict[str, Any]] = None
+    schedule_config: Optional[Dict[str, Any]] = None
+
     class Config:
         from_attributes = True
 
@@ -239,6 +247,12 @@ async def list_items(
                     is_featured=recipe.is_featured,
                     is_approved=recipe.is_approved,
                     version=recipe.version,
+                    owner_type=recipe.owner_type,
+                    steps=recipe.steps or [],
+                    inputs=recipe.inputs,
+                    outputs=recipe.outputs,
+                    execution_config=recipe.execution_config,
+                    schedule_config=recipe.schedule_config,
                     metadata={
                         'required_tools': recipe.required_tools or [],
                         'recommended_agents': recipe.recommended_agents or [],
