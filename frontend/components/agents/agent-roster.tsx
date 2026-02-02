@@ -15,7 +15,20 @@ import {
   Clock,
   AlertCircle,
   Bot,
-  Trash2
+  Trash2,
+  UserCircle,
+  Headphones,
+  Terminal,
+  Share2,
+  Calculator,
+  ShoppingBag,
+  PenTool,
+  Users,
+  BarChart3,
+  Wrench,
+  Shield,
+  Zap,
+  Cloud
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -32,14 +45,80 @@ import { AgentStatusControlModal } from './agent-status-control-modal'
 import { AgentConfirmDeleteModal } from './agent-confirm-delete-modal'
 import { ToolLogo } from '@/components/ui/tool-logo'
 
-// Agent type icons mapping
-const agentTypeIcons: Record<string, string> = {
-  code_architect: '🏗️',
-  security_expert: '🛡️',
-  performance_optimizer: '⚡',
-  data_analyst: '📊',
-  infrastructure_manager: '☁️',
-  custom: '🤖'
+// Agent type/category icons mapping - SIMPLE clean icons only!
+const getAgentIcon = (agentType: string, category?: string) => {
+  // First try category (marketplace agents)
+  const categoryMap: Record<string, any> = {
+    'Personal Assistant': UserCircle,
+    'Customer Support': Headphones,
+    'DevOps': Terminal,
+    'Social Media': Share2,
+    'Accounting': Calculator,
+    'E-commerce': ShoppingBag,
+    'Content Creation': PenTool,
+    'HR': Users,
+    'Data Analysis': BarChart3,
+    'Custom': Bot,
+    'specialized': Bot,
+    'general': Wrench,
+  }
+
+  // Then try agent_type (workspace agents)
+  const typeMap: Record<string, any> = {
+    code_architect: Terminal,  // Changed from Code jellyfish!
+    security_expert: Shield,
+    performance_optimizer: Zap,
+    data_analyst: BarChart3,
+    infrastructure_manager: Cloud,
+    custom: Bot,  // Simple bot icon
+    devops: Terminal,
+    support: Headphones,
+    assistant: UserCircle,
+  }
+
+  if (category && categoryMap[category]) {
+    return categoryMap[category]
+  }
+
+  return typeMap[agentType] || Bot  // Default to Bot, not jellyfish!
+}
+
+// Get color for each agent type/category
+const getAgentIconColor = (agentType: string, category?: string) => {
+  // Category-based colors (matching create-agent-modal)
+  const categoryColorMap: Record<string, string> = {
+    'Personal Assistant': 'text-blue-500',
+    'Customer Support': 'text-green-500',
+    'DevOps': 'text-purple-500',
+    'Social Media': 'text-pink-500',
+    'Accounting': 'text-amber-500',
+    'E-commerce': 'text-cyan-500',
+    'Content Creation': 'text-indigo-500',
+    'HR': 'text-teal-500',
+    'Data Analysis': 'text-rose-500',
+    'Custom': 'text-orange-500'
+  }
+
+  // Agent type-based colors
+  const typeColorMap: Record<string, string> = {
+    code_architect: 'text-purple-500',
+    security_expert: 'text-red-500',
+    performance_optimizer: 'text-yellow-500',
+    data_analyst: 'text-rose-500',
+    infrastructure_manager: 'text-cyan-500',
+    custom: 'text-orange-500',
+    devops: 'text-purple-500',
+    support: 'text-green-500',
+    assistant: 'text-blue-500',
+  }
+
+  // Try category first
+  if (category && categoryColorMap[category]) {
+    return categoryColorMap[category]
+  }
+
+  // Then try agent type
+  return typeColorMap[agentType] || 'text-orange-500'
 }
 
 // Real agent data from API - no more mock data
@@ -202,28 +281,12 @@ export function AgentRoster({
 
   return (
     <div className="space-y-6">
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search agents by name, type, or skills..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm?.(e.target.value)}
-            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
-          />
-        </div>
-        <Button variant="outline" className="shrink-0">
-          <Filter className="w-4 h-4 mr-2" />
-          Filters
-        </Button>
-      </div>
-
       {/* Agent Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {filteredAgents.map((agent, index) => {
           const StatusIcon = statusIcons[agent.status || 'active'] || CheckCircle
-          const agentIcon = agentTypeIcons[agent.agent_type || 'custom'] || '🤖'
+          const AgentIcon = getAgentIcon(agent.agent_type || 'custom', (agent as any).marketplace_category)
+          const iconColor = getAgentIconColor(agent.agent_type || 'custom', (agent as any).marketplace_category)
 
           return (
             <motion.div
@@ -236,9 +299,7 @@ export function AgentRoster({
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center text-lg">
-                    {agentIcon}
-                  </div>
+                  <AgentIcon className={`w-10 h-10 ${iconColor} shrink-0`} />
                   <div>
                     <h3 className="font-semibold">{agent.name || 'Unknown Agent'}</h3>
                     <p className="text-xs text-muted-foreground">{agent.agent_type ? agent.agent_type.replace('_', ' ') : 'Unknown Type'}</p>

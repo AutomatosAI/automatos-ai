@@ -6,13 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
   Bot,
-  Code,
-  Shield,
-  Zap,
-  Database,
-  FileText,
-  BarChart,
-  Settings
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
@@ -39,56 +32,7 @@ interface CreateAgentModalProps {
   onSuccess: () => void
 }
 
-const agentTypes = [
-  {
-    type: 'code_architect',
-    name: 'Code Architect',
-    description: 'Specialized in code analysis, architecture design, and best practices',
-    icon: Code,
-    color: 'text-blue-400',
-    skills: ['code_analysis', 'architecture_design', 'best_practices', 'refactoring']
-  },
-  {
-    type: 'security_expert',
-    name: 'Security Expert',
-    description: 'Focused on security analysis, vulnerability detection, and compliance',
-    icon: Shield,
-    color: 'text-red-400',
-    skills: ['vulnerability_scanning', 'threat_modeling', 'compliance_check', 'security_audit']
-  },
-  {
-    type: 'performance_optimizer',
-    name: 'Performance Optimizer',
-    description: 'Optimizes system performance, identifies bottlenecks, and improves efficiency',
-    icon: Zap,
-    color: 'text-yellow-400',
-    skills: ['performance_analysis', 'bottleneck_detection', 'optimization', 'profiling']
-  },
-  {
-    type: 'data_analyst',
-    name: 'Data Analyst',
-    description: 'Processes data, generates insights, and creates analytical reports',
-    icon: BarChart,
-    color: 'text-purple-400',
-    skills: ['data_processing', 'pattern_recognition', 'report_generation', 'visualization']
-  },
-  {
-    type: 'infrastructure_manager',
-    name: 'Infrastructure Manager',
-    description: 'Manages deployment, scaling, and infrastructure operations',
-    icon: Database,
-    color: 'text-green-400',
-    skills: ['deployment', 'scaling', 'monitoring', 'resource_management']
-  },
-  {
-    type: 'custom',
-    name: 'Custom Agent',
-    description: 'Create a custom agent with specific skills and capabilities',
-    icon: Settings,
-    color: 'text-orange-400',
-    skills: []
-  }
-]
+import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP } from '@/lib/agent-constants'
 
 // Skills will be loaded dynamically from the API
 
@@ -96,15 +40,14 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const [step, setStep] = useState(1)
   const [agentData, setAgentData] = useState({
     name: '',
-    type: '',
+    category: '',  // Changed from 'type' to 'category'
     description: '',
     tags: '',
     skills: [] as string[],
     tools: [] as number[],
     specializations: [] as string[],
-    maxConcurrentTasks: 3,
-    priority: 'medium',  // Backend expects: low, medium, high, critical
-    autoStart: true
+    // Marketplace field - just the toggle
+    shareToMarketplace: false
   })
 
   // PRD-15: Model configuration state
@@ -152,11 +95,13 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const handleCreate = async () => {
     console.log('🔥 CREATE AGENT CLICKED', { agentData, modelConfig })
 
-    if (!agentData.name || !agentData.type) {
-      console.error('❌ Validation failed:', { name: agentData.name, type: agentData.type })
+    if (!agentData.name || !agentData.category) {
+      console.error('❌ Validation failed:', { name: agentData.name, category: agentData.category })
       toast.error('Please provide agent name and type')
       return
     }
+
+    // No additional validation needed - uses same fields as main agent
 
     console.log('✅ Validation passed, creating agent...')
     try {
@@ -166,15 +111,16 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         .map(tag => tag.trim())
         .filter(Boolean)
 
+      // Convert category name to database agent_type value
+      const dbAgentType = CATEGORY_TO_DB_MAP[agentData.category] || 'custom'
+
       const agentPayload = {
         name: agentData.name,
-        agent_type: agentData.type,
+        agent_type: dbAgentType,
+        marketplace_category: agentData.category, // Preserve original UI category for round-trip
         description: agentData.description || '',
         skill_ids: agentData.skills, // Backend expects skill_ids array
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)
-        priority_level: agentData.priority || 'medium', // Backend expects priority_level
-        max_concurrent_tasks: agentData.maxConcurrentTasks || 3, // Backend expects snake_case
-        auto_start: agentData.autoStart !== undefined ? agentData.autoStart : true, // Backend expects snake_case
         tags,
         configuration: {
           specializations: agentData.specializations || [],
@@ -209,6 +155,44 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
       toast.success(`Agent "${agentData.name}" created successfully!`)
 
+      // Submit to marketplace if enabled - uses same fields as main agent
+      if (agentData.shareToMarketplace && newAgent?.id) {
+        try {
+          const marketplacePayload = {
+            type: 'agent',
+            name: agentData.name,
+            description: agentData.description,
+            creator_name: 'You', // Backend will set actual username
+            category: agentData.category,
+            tags: tags,  // Use same tags as main agent
+            metadata: {
+              agent_id: newAgent.id,
+              agent_type: agentData.category,
+              skills: agentData.skills,
+              tools: agentData.tools
+            }
+          }
+
+          console.log('Submitting agent to marketplace:', marketplacePayload)
+          const response = await fetch('/api/marketplace/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(marketplacePayload)
+          })
+
+          if (response.ok) {
+            toast.success('Agent submitted to marketplace for approval!')
+          } else {
+            const error = await response.json()
+            console.error('Marketplace submission failed:', error)
+            toast.error('Agent created but marketplace submission failed')
+          }
+        } catch (error) {
+          console.error('Marketplace submission error:', error)
+          toast.error('Agent created but marketplace submission failed')
+        }
+      }
+
       // Notify parent component and close modal
       onSuccess()
       onClose()
@@ -216,16 +200,13 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       // Reset form
       setAgentData({
         name: '',
-        type: '',
+        category: '',
         description: '',
-        tags: '',
         tags: '',
         skills: [],
         tools: [],
         specializations: [],
-        maxConcurrentTasks: 3,
-        priority: 'medium',
-        autoStart: true
+        shareToMarketplace: false
       })
       setModelConfig({
         provider: 'openai',
@@ -246,8 +227,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       toast.error('Failed: ' + errorMsg)
     }
   }
-
-  const selectedType = agentTypes.find(type => type.type === agentData.type)
 
   return (
     <AnimatePresence>
@@ -283,89 +262,75 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
               <CardContent className="pr-2">
                 <Tabs value={`step-${step}`} className="space-y-6">
-                  <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
+                  <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
-                      1. Agent Type
+                      1. Configuration
                     </TabsTrigger>
                     <TabsTrigger value="step-2" disabled={step < 2}>
-                      2. Config
+                      2. Model
                     </TabsTrigger>
                     <TabsTrigger value="step-3" disabled={step < 3}>
-                      3. Model
+                      3. Tools
                     </TabsTrigger>
                     <TabsTrigger value="step-4" disabled={step < 4}>
-                      4. Tools
-                    </TabsTrigger>
-                    <TabsTrigger value="step-5" disabled={step < 5}>
-                      5. Skills
+                      4. Skills
                     </TabsTrigger>
                   </TabsList>
 
-                  {/* Step 1: Agent Type Selection */}
+                  {/* Step 1: Configuration */}
                   <TabsContent value="step-1" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Choose Agent Type</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Select the type of agent that best fits your needs
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {agentTypes.map(type => (
-                        <motion.div
-                          key={type.type}
-                          className={`p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 ${agentData.type === type.type
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border/50 hover:border-primary/30 hover:bg-secondary/20'
-                            }`}
-                          onClick={() => setAgentData(prev => ({ ...prev, type: type.type }))}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          <div className="flex items-center space-x-3 mb-3">
-                            <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                              <type.icon className={`w-5 h-5 ${type.color}`} />
-                            </div>
-                            <div>
-                              <h4 className="font-semibold">{type.name}</h4>
-                              <p className="text-xs text-muted-foreground">{type.type}</p>
-                            </div>
-                          </div>
-                          <p className="text-sm text-muted-foreground mb-3">
-                            {type.description}
-                          </p>
-                          {type.skills.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {type.skills.slice(0, 3).map(skill => (
-                                <Badge key={skill} variant="outline" className="text-xs">
-                                  {skill.replace('_', ' ')}
-                                </Badge>
-                              ))}
-                              {type.skills.length > 3 && (
-                                <Badge variant="outline" className="text-xs">
-                                  +{type.skills.length - 3} more
-                                </Badge>
-                              )}
-                            </div>
-                          )}
-                        </motion.div>
-                      ))}
-                    </div>
-                  </TabsContent>
-
-                  {/* Step 2: Configuration */}
-                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Agent Configuration</h3>
                       <p className="text-muted-foreground mb-6">
-                        Configure your agent's basic information and behavior
+                        Configure your agent's basic information
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-4">
                         <div>
-                          <Label htmlFor="agent-name">Agent Name</Label>
+                          <Label htmlFor="agent-category">Category <span className="text-red-500">*</span></Label>
+                          <Select
+                            value={agentData.category}
+                            onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
+                          >
+                            <SelectTrigger id="agent-category" className="bg-secondary/50">
+                              {agentData.category ? (
+                                <div className="flex items-center gap-2">
+                                  {(() => {
+                                    const selected = AGENT_CATEGORIES.find(c => c.id === agentData.category)
+                                    if (!selected) return <SelectValue placeholder="Select category..." />
+                                    const Icon = selected.icon
+                                    return (
+                                      <>
+                                        <Icon className={`w-4 h-4 ${selected.color}`} />
+                                        <span>{selected.name}</span>
+                                      </>
+                                    )
+                                  })()}
+                                </div>
+                              ) : (
+                                <SelectValue placeholder="Select category..." />
+                              )}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {AGENT_CATEGORIES.map(cat => {
+                                const Icon = cat.icon
+                                return (
+                                  <SelectItem key={cat.id} value={cat.id}>
+                                    <div className="flex items-center gap-2">
+                                      <Icon className={`w-4 h-4 ${cat.color}`} />
+                                      <span>{cat.name}</span>
+                                    </div>
+                                  </SelectItem>
+                                )
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label htmlFor="agent-name">Agent Name <span className="text-red-500">*</span></Label>
                           <Input
                             id="agent-name"
                             placeholder="Enter agent name..."
@@ -396,93 +361,49 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             className="bg-secondary/50"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Lightweight keywords used for semantic matching (e.g., writing, pdf, research).
+                            Lightweight keywords that describe the agent's strengths.
                           </p>
                         </div>
                       </div>
 
                       <div className="space-y-4">
+                        {/* US-006: Marketplace Sharing */}
+                        <div className="flex items-center justify-between mb-4">
                         <div>
-                          <Label htmlFor="priority">Priority Level</Label>
-                          <Select
-                            value={agentData.priority}
-                            onValueChange={(value) => setAgentData(prev => ({ ...prev, priority: value }))}
-                          >
-                            <SelectTrigger className="bg-secondary/50">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="low">Low</SelectItem>
-                              <SelectItem value="medium">Medium</SelectItem>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="critical">Critical</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <Label htmlFor="share-marketplace" className="text-base font-medium">
+                            Share to <span className="text-orange-500">Marketplace</span>
+                          </Label>
+                          <p className="text-sm text-muted-foreground">
+                            Make this agent available for others to discover and install
+                          </p>
                         </div>
+                        <Switch
+                          id="share-marketplace"
+                          checked={agentData.shareToMarketplace}
+                          onCheckedChange={(checked) => setAgentData(prev => ({ ...prev, shareToMarketplace: checked }))}
+                        />
+                      </div>
 
-                        <div>
-                          <Label htmlFor="max-tasks">Max Concurrent Tasks</Label>
-                          <Input
-                            id="max-tasks"
-                            type="number"
-                            min="1"
-                            max="10"
-                            value={agentData.maxConcurrentTasks}
-                            onChange={(e) => setAgentData(prev => ({
-                              ...prev,
-                              maxConcurrentTasks: parseInt(e.target.value) || 3
-                            }))}
-                            className="bg-secondary/50"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <Label htmlFor="auto-start">Auto Start</Label>
-                            <p className="text-sm text-muted-foreground">
-                              Start the agent automatically after creation
+                      {agentData.shareToMarketplace && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-4"
+                        >
+                          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                            <p className="text-sm text-orange-200">
+                              <strong>Note:</strong> Your agent will be submitted to the approval queue using the same name, description, category, and tags. Trusted users' submissions are auto-published.
                             </p>
                           </div>
-                          <Switch
-                            id="auto-start"
-                            checked={agentData.autoStart}
-                            onCheckedChange={(checked) => setAgentData(prev => ({ ...prev, autoStart: checked }))}
-                          />
-                        </div>
+                        </motion.div>
+                      )}
                       </div>
                     </div>
-
-                    {selectedType && (
-                      <Card className="bg-secondary/20">
-                        <CardHeader>
-                          <CardTitle className="flex items-center space-x-2 text-base">
-                            <selectedType.icon className={`w-5 h-5 ${selectedType.color}`} />
-                            <span>{selectedType.name} Preview</span>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-sm text-muted-foreground mb-3">
-                            {selectedType.description}
-                          </p>
-                          {selectedType.skills.length > 0 && (
-                            <div>
-                              <p className="text-sm font-medium mb-2">Default Skills:</p>
-                              <div className="flex flex-wrap gap-1">
-                                {selectedType.skills.map(skill => (
-                                  <Badge key={skill} variant="secondary" className="text-xs">
-                                    {skill.replace('_', ' ')}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
                   </TabsContent>
 
-                  {/* Step 3: Model Configuration (PRD-15) */}
-                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  {/* Step 2: Model Configuration (PRD-15) */}
+                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -499,7 +420,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           handleModelConfigChange('provider', model.provider)
                         }
                       }}
-                      agentType={agentData.type}
+                      agentType={agentData.category}
                     />
 
                     <div className="space-y-4 pt-4 border-t">
@@ -604,8 +525,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     </div>
                   </TabsContent>
 
-                  {/* Step 4: Tool Selection */}
-                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  {/* Step 3: Tool Selection */}
+                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Select Tools</h3>
                       <p className="text-muted-foreground mb-6">
@@ -661,8 +582,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     )}
                   </TabsContent>
 
-                  {/* Step 5: Skills & Settings */}
-                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  {/* Step 4: Skills & Settings */}
+                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
                       <p className="text-muted-foreground mb-6">
@@ -735,7 +656,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   {step < 5 ? (
                     <Button
                       onClick={() => setStep(Math.min(5, step + 1))}
-                      disabled={step === 1 && !agentData.type}
+                      disabled={step === 1 && !agentData.category}
                       className="gradient-accent hover:opacity-90"
                     >
                       Next
@@ -743,7 +664,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
-                      disabled={!agentData.name || !agentData.type || (createAgentMutation as any).isLoading}
+                      disabled={!agentData.name || !agentData.category || (createAgentMutation as any).isLoading}
                       className="gradient-accent hover:opacity-90"
                     >
                       {(createAgentMutation as any).isLoading ? 'Creating...' : 'Create Agent'}

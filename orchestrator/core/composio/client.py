@@ -92,6 +92,9 @@ class ComposioClient:
         self._toolset = None
         self._action_count_cache: Dict[str, Any] = {}
         self._action_count_ttl_seconds = 600
+        # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls
+        self._auth_config_cache: Dict[str, Optional[str]] = {}
+        self._auth_config_cache_ttl = 3600  # 1 hour TTL
     
     @property
     def composio(self):
@@ -139,20 +142,32 @@ class ComposioClient:
     def _resolve_auth_config_id(self, app_slug: str) -> Optional[str]:
         """
         Find existing active Auth Config ID for an app slug.
+        PERFORMANCE: Cached for 1 hour to avoid repeated API calls.
         """
+        # Check cache first
+        cache_key = app_slug.lower()
+        if cache_key in self._auth_config_cache:
+            return self._auth_config_cache[cache_key]
+
         try:
-            # List all auth configs
+            # List all auth configs (expensive call)
+            logger.debug(f"Fetching auth_configs from Composio API for {app_slug}")
             response = self.composio.auth_configs.list()
             items = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-            
+
             for c in items:
                 # Check for matching toolkit slug and enabled status
                 # Safe access to nested attributes
                 c_slug = getattr(c.toolkit, 'slug', '') if hasattr(c, 'toolkit') else ''
                 c_status = getattr(c, 'status', 'ENABLED')
-                
+
                 if c_slug.lower() == app_slug.lower() and c_status == 'ENABLED':
+                    # Cache the result
+                    self._auth_config_cache[cache_key] = c.id
                     return c.id
+
+            # Cache None result too (to avoid retrying)
+            self._auth_config_cache[cache_key] = None
             return None
         except Exception as e:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")

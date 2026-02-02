@@ -69,6 +69,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'settings': false,         // ✅ Use real APIs - credentials system ready
   'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
+  'marketplace': false,      // ✅ Use real APIs - marketplace/composio endpoints working
 
   // Testing/Development
   'test': true,              // 🧪 Always use mocks for testing
@@ -801,11 +802,17 @@ class ApiClient {
 
     console.log('🔍 API Call:', { url, method: options.method || 'GET' })
 
-    // Get Clerk token if available
+    // Get Clerk token if available (with timeout to prevent hanging)
     let token: string | null = null
     if (this.getClerkToken) {
       try {
-        token = await this.getClerkToken()
+        // Add 2 second timeout to prevent hanging indefinitely
+        const tokenPromise = this.getClerkToken()
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+        token = await Promise.race([tokenPromise, timeoutPromise])
+        if (!token) {
+          console.warn('⚠️ Clerk token fetch timed out after 2s - proceeding without auth')
+        }
       } catch (error) {
         console.warn('⚠️ Failed to get Clerk token:', error)
       }
@@ -1079,6 +1086,59 @@ class ApiClient {
     return this.request(`/api/agents/${agentId}/performance`)
   }
 
+  // ===== MARKETPLACE ENDPOINTS =====
+  async getMarketplaceItems(filters?: {
+    type?: string
+    category?: string
+    search?: string
+    featured?: boolean
+    limit?: number
+    offset?: number
+  }) {
+    const params = new URLSearchParams()
+    if (filters?.type) params.append('type', filters.type)
+    if (filters?.category) params.append('category', filters.category)
+    if (filters?.search) params.append('search', filters.search)
+    if (filters?.featured !== undefined) params.append('featured', String(filters.featured))
+    if (filters?.limit) params.append('limit', String(filters.limit))
+    if (filters?.offset) params.append('offset', String(filters.offset))
+
+    const queryString = params.toString()
+    return this.request(`/api/marketplace/items${queryString ? `?${queryString}` : ''}`)
+  }
+
+  async getMarketplaceItem(itemId: number) {
+    return this.request(`/api/marketplace/items/${itemId}`)
+  }
+
+  async getFeaturedMarketplaceItems(limit: number = 8) {
+    return this.request(`/api/marketplace/featured?limit=${limit}`)
+  }
+
+  async installMarketplaceItem(itemId: number) {
+    return this.request(`/api/marketplace/items/${itemId}/install`, {
+      method: 'POST'
+    })
+  }
+
+  async submitToMarketplace(data: {
+    item_type: string
+    name?: string
+    description?: string
+    category?: string
+    tags?: string[]
+    metadata: any
+  }) {
+    return this.request('/api/marketplace/submit', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async checkMarketplaceUpdates() {
+    return this.request('/api/marketplace/updates')
+  }
+
   // ===== WORKFLOW ENDPOINTS =====
   async getWorkflows() {
     return this.request('/api/workflows')
@@ -1231,6 +1291,82 @@ class ApiClient {
 
   async getTemplateCategories() {
     return this.request('/api/workflow-templates/categories/list')
+  }
+
+  // ===== WORKFLOW RECIPES ENDPOINTS =====
+
+  async listWorkflowRecipes(params?: {
+    category?: string
+    difficulty?: string
+    is_featured?: boolean
+    is_public?: boolean
+    search?: string
+    skip?: number
+    limit?: number
+    sort_by?: string
+  }) {
+    const queryParams = new URLSearchParams()
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          queryParams.append(key, value.toString())
+        }
+      })
+    }
+    const query = queryParams.toString()
+    return this.request(`/api/workflow-recipes${query ? '?' + query : ''}`)
+  }
+
+  async getWorkflowRecipeById(recipeId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}`)
+  }
+
+  async createWorkflowRecipe(recipeData: any) {
+    return this.request('/api/workflow-recipes', {
+      method: 'POST',
+      body: JSON.stringify(recipeData)
+    })
+  }
+
+  async updateWorkflowRecipe(recipeId: string, recipeData: any) {
+    return this.request(`/api/workflow-recipes/${recipeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(recipeData)
+    })
+  }
+
+  async deleteWorkflowRecipe(recipeId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async recordRecipeUsage(recipeId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/use`, {
+      method: 'POST'
+    })
+  }
+
+  async getFeaturedRecipes(limit?: number) {
+    return this.request(`/api/workflow-recipes/featured/list${limit ? '?limit=' + limit : ''}`)
+  }
+
+  async getRecipeCategories() {
+    return this.request('/api/workflow-recipes/categories/list')
+  }
+
+  // Marketplace recipe endpoints
+  async submitRecipeToMarketplace(params: { recipe_id: string; category?: string; icon?: string }) {
+    return this.request('/api/workflow-recipes/submit', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    })
+  }
+
+  async installRecipeFromMarketplace(recipeId: number) {
+    return this.request(`/api/workflow-recipes/install/${recipeId}`, {
+      method: 'POST'
+    })
   }
 
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
@@ -1534,7 +1670,7 @@ class ApiClient {
     const skip = params?.skip ?? 0
     const limit = params?.limit ?? 20
 
-    // Connected tools (what the UI calls "active")
+    // Connected tools only (active connections)
     if (status === 'active') {
       const connected = (await this.request('/api/tools/connected')) as any
       const apps: any[] = connected?.apps || []
@@ -1546,14 +1682,15 @@ class ApiClient {
         return h === 0 ? -1 : -Math.abs(h)
       }
 
-      const normalized = apps.map((a: any) => ({
+      let normalized = apps.map((a: any) => ({
         id: a.id ?? stableId(String(a.app_name || '')),
         name: a.app_name,
         description: a.description || '',
+        display_name: a.display_name,  // Keep display_name for search
         integration_url: 'composio://',
         capabilities: {},
         credentials_schema: {},
-        status: 'active',
+        status: a.status || 'active',  // Use actual status from API (active/added/pending)
         enabled: true,
         provider: 'Composio',
         version: '1.0.0',
@@ -1569,6 +1706,16 @@ class ApiClient {
         },
         updated_at: null,
       }))
+
+      // Apply search filter if provided (same logic as backend)
+      if (search) {
+        const searchLower = search.toLowerCase()
+        normalized = normalized.filter((tool: any) =>
+          (tool.display_name || '').toLowerCase().includes(searchLower) ||
+          (tool.name || '').toLowerCase().includes(searchLower) ||
+          (tool.description || '').toLowerCase().includes(searchLower)
+        )
+      }
 
       const paged = normalized.slice(skip, skip + limit)
       const total = normalized.length
@@ -1645,6 +1792,11 @@ class ApiClient {
       .sort((a, b) => b.count - a.count) // Sort by count descending (most popular first)
       .slice(0, 15) // Take top 15 most popular categories
     return allCategories
+  }
+
+  async getWorkspaceTools() {
+    // All workspace tools (connected + not connected)
+    return this.request('/api/tools/workspace')
   }
 
   async getToolsStats() {

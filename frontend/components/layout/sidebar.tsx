@@ -18,7 +18,8 @@ import {
   PanelLeft,
   Wrench,
   Database,
-  Lightbulb
+  Lightbulb,
+  Store
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'
@@ -56,6 +57,13 @@ const navigationItems = [
     icon: Wrench,
     iconColor: 'text-yellow-400',
     description: 'Development and utility tools'
+  },
+  {
+    name: 'Community Marketplace',
+    href: '/marketplace',
+    icon: Store,
+    iconColor: 'text-orange-400',
+    description: 'Discover agents, recipes & tools'
   },
   {
     name: 'Knowledge Bases',

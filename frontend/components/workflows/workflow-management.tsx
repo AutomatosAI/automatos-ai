@@ -51,7 +51,7 @@ import { ActiveWorkflowsPanel } from './active-workflows-panel'
 import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
 import { MonitoringTab } from './monitoring-tab'
-import { TemplatesTab } from './templates-tab'
+import { RecipesTab } from './recipes-tab'
 import { ExecutionTheater } from './execution-theater'
 
 // Real data will be loaded from backend
@@ -562,7 +562,7 @@ export function WorkflowManagement() {
             </TabsTrigger>
             <TabsTrigger value="templates" className="flex items-center space-x-2">
               <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">Templates</span>
+              <span className="hidden sm:inline">Recipes</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="flex items-center space-x-2">
               <Clock className="w-4 h-4" />
@@ -603,11 +603,11 @@ export function WorkflowManagement() {
           </TabsContent>
 
           <TabsContent value="templates" className="space-y-6">
-            <TemplatesTab 
-              onUseTemplate={(templateId) => {
+            <RecipesTab
+              onUseRecipe={(recipeId) => {
                 setError(null) // Clear any previous errors
-                handleTemplateChange(templateId)
-                setShowCreateModal(true) // Open modal after populating template data
+                handleTemplateChange(recipeId)
+                setShowCreateModal(true) // Open modal after populating recipe data
               }}
               onOpenCreateModal={() => {
                 setError(null) // Clear any previous errors

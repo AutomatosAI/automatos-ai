@@ -76,19 +76,52 @@ export interface TriggerSubscription {
  */
 export function useAvailableApps(category?: string, opts?: { enabled?: boolean }) {
     const { isLoaded, isSignedIn } = useAuth()
-    return useQuery({
+
+    console.log('🔍 [useAvailableApps] Hook called:', {
+        category,
+        isLoaded,
+        isSignedIn,
+        enabled: opts?.enabled ?? true,
+        optsEnabled: opts?.enabled
+    })
+
+    const result = useQuery({
         queryKey: ['composio', 'apps', category],
         queryFn: async () => {
+            console.log('🚀 [useAvailableApps] queryFn executing - Fetching apps...', { category })
             const params = category ? `?category=${encodeURIComponent(category)}` : ''
-            const response = await apiClient.get(`/api/composio/apps${params}`)
-            return response.data as ComposioApp[]
+            console.log('🌐 [useAvailableApps] Calling API:', `/api/composio/apps${params}`)
+
+            try {
+                const response = await apiClient.get<ComposioApp[]>(`/api/composio/apps${params}`)
+                console.log('✅ [useAvailableApps] Response received!', {
+                    type: Array.isArray(response) ? 'array' : typeof response,
+                    count: response?.length,
+                    firstApp: response?.[0]?.name || 'N/A'
+                })
+                return response as ComposioApp[]
+            } catch (error) {
+                console.error('❌ [useAvailableApps] Error fetching apps:', error)
+                throw error
+            }
         },
         staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-        enabled: (opts?.enabled ?? true) && isLoaded && isSignedIn,
+        enabled: opts?.enabled ?? true,  // ← REMOVED Clerk dependency - apps list doesn't need auth
         retry: (failureCount, error) => shouldRetry(error) && failureCount < 1,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
     })
+
+    console.log('📊 [useAvailableApps] Query result:', {
+        status: result.status,
+        fetchStatus: result.fetchStatus,
+        isLoading: result.isLoading,
+        isFetching: result.isFetching,
+        dataLength: result.data?.length || 0,
+        error: result.error ? String(result.error) : null
+    })
+
+    return result
 }
 
 /**
@@ -121,8 +154,8 @@ export function useConnectedApps(opts?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ['composio', 'connections'],
         queryFn: async () => {
-            const response = await apiClient.get('/api/composio/connections')
-            return response.data as ComposioConnection[]
+            const response = await apiClient.get<ComposioConnection[]>('/api/composio/connections')
+            return response as ComposioConnection[]
         },
         staleTime: 30 * 1000,
         enabled: (opts?.enabled ?? true) && isLoaded && isSignedIn,

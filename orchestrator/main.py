@@ -36,6 +36,8 @@ from core.models import Base
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
+from api.workflow_recipes import router as workflow_recipes_router
+from api.marketplace import router as marketplace_router
 from api.documents import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
@@ -392,7 +394,9 @@ def require_api_key(x_api_key: str = Header(None)):
 app.include_router(agents_router)
 app.include_router(models_router)  # PRD-15: Model management
 app.include_router(workflows_router)
-app.include_router(workflow_templates_router)
+app.include_router(workflow_templates_router)  # Legacy - backward compatibility
+app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
+app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
