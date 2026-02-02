@@ -69,13 +69,11 @@ export function MainLayout({ children }: MainLayoutProps) {
         </main>
       </div>
       
-      {/* Chat Widget - Only show on non-chat pages */}
-      {!pathname.startsWith('/chat') && (
-        <ChatWidget 
-          position="bottom-right"
-          context={chatContext}
-        />
-      )}
+      {/* Pilot Helper Widget — shown on ALL pages (overlay, no navigation) */}
+      <ChatWidget
+        position="bottom-right"
+        context={chatContext}
+      />
     </div>
   )
 }

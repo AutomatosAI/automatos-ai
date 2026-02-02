@@ -154,6 +154,12 @@ class Config:
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
     
     # =============================================================================
+    # JIRA BUG REPORTS (Pilot Helper Widget)
+    # =============================================================================
+    JIRA_PROJECT_KEY: str = os.getenv("JIRA_PROJECT_KEY", "PILOT")
+    JIRA_BUG_REPORTS_ENABLED: bool = os.getenv("JIRA_BUG_REPORTS_ENABLED", "true").lower() == "true"
+
+    # =============================================================================
     # RAG / KNOWLEDGE SERVICES API
     # =============================================================================
     KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")

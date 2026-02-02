@@ -68,6 +68,11 @@ from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
+# Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
+try:
+    from api.bug_reports import router as bug_reports_router
+except ImportError:
+    bug_reports_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -447,6 +452,8 @@ app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
+if bug_reports_router is not None:
+    app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
