@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Download, Loader2 } from 'lucide-react'
+import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -149,26 +149,66 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm text-gray-400 line-clamp-2">{recipe.description}</p>
+                <p className="text-sm text-gray-400 line-clamp-3">{recipe.description}</p>
 
-                <div className="flex items-center gap-2">
-                  {recipe.category && (
-                    <Badge variant="outline" className="text-xs border-gray-700 text-gray-400">
-                      {recipe.category}
-                    </Badge>
-                  )}
-                  {recipe.metadata?.recipe_type && (
-                    <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30">
-                      {recipe.metadata.recipe_type}
-                    </Badge>
-                  )}
+                {/* What This Recipe Does - The Shiny Part! */}
+                {recipe.steps && recipe.steps.length > 0 && (
+                  <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-orange-400 text-xs font-semibold">
+                      <Zap className="w-3 h-3" />
+                      <span>This Recipe Will:</span>
+                    </div>
+                    <div className="space-y-1">
+                      {recipe.steps.slice(0, 2).map((step: any, idx: number) => (
+                        <div key={idx} className="flex items-start gap-2 text-xs text-gray-300">
+                          <ArrowRight className="w-3 h-3 mt-0.5 text-orange-400 shrink-0" />
+                          <span className="line-clamp-1">{step.prompt_template || `Step ${step.order}`}</span>
+                        </div>
+                      ))}
+                      {recipe.steps.length > 2 && (
+                        <div className="text-xs text-orange-400 pl-5">
+                          +{recipe.steps.length - 2} more automated steps
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Key Stats */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-800">
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">Steps</div>
+                    <div className="text-sm font-semibold text-white">{recipe.steps?.length || 0}</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">Agents</div>
+                    <div className="text-sm font-semibold text-white flex items-center justify-center gap-1">
+                      <Bot className="w-3 h-3 text-orange-400" />
+                      {recipe.steps ? new Set(recipe.steps.map((s: any) => s.agent_id)).size : 0}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xs text-gray-500">Quality</div>
+                    <div className="text-sm font-semibold flex items-center justify-center gap-1">
+                      {recipe.quality_score ? (
+                        <>
+                          <CheckCircle className="w-3 h-3 text-green-400" />
+                          <span className="text-green-400">{(recipe.quality_score * 100).toFixed(0)}%</span>
+                        </>
+                      ) : (
+                        <span className="text-gray-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
+                {/* Install Count & Button */}
                 <div className="flex items-center justify-between pt-2 border-t border-gray-800">
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-gray-500 flex items-center gap-1">
+                    <Download className="w-3 h-3" />
                     {recipe.install_count >= 1000
-                      ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
-                      : `${recipe.install_count} installs`}
+                      ? `${(recipe.install_count / 1000).toFixed(1)}k people use this`
+                      : `${recipe.install_count} people use this`}
                   </span>
                   <Button
                     size="sm"
@@ -181,7 +221,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     ) : (
                       <Download className="w-3 h-3 mr-1" />
                     )}
-                    {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
+                    {installingRecipeId === recipe.id ? 'Adding...' : 'Get It Now'}
                   </Button>
                 </div>
               </CardContent>
