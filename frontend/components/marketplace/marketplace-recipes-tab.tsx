@@ -221,7 +221,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     ) : (
                       <Download className="w-3 h-3 mr-1" />
                     )}
-                    {installingRecipeId === recipe.id ? 'Adding...' : 'Get It Now'}
+                    {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
                   </Button>
                 </div>
               </CardContent>
