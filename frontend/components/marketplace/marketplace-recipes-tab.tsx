@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { FileText, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -29,6 +29,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
       return apiClient.get(`/api/marketplace/items?${params}`)
     },
   })
+
+  // Apply client-side filter by selectedType so filter buttons actually work
+  const filteredRecipes = useMemo(() => {
+    if (selectedType === 'all') return recipes
+    return recipes.filter((r: any) =>
+      (r.metadata?.recipe_type || r.recipe_type || '').toLowerCase() === selectedType
+    )
+  }, [recipes, selectedType])
 
   const installMutation = useMutation({
     mutationFn: async (recipeId: number) => {
@@ -115,14 +123,14 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
             <div key={i} className="h-48 glass-card animate-pulse" />
           ))}
         </div>
-      ) : recipes.length === 0 ? (
+      ) : filteredRecipes.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No recipes found. Recipes will be available soon!</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {recipes.map((recipe: any) => (
+          {filteredRecipes.map((recipe: any) => (
             <Card key={recipe.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">

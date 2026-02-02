@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tools", tags=["Tools"])
 
+
+def _assert_workspace_admin(ctx: RequestContext) -> None:
+    """Raise 403 unless the user has admin or owner role."""
+    role = getattr(ctx.user, 'role', 'user') if ctx.user else 'user'
+    if role not in ('admin', 'owner'):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
 INTERNAL_APP_NAMES = {"RAG", "MEMORY", "NL2SQL", "CODEGRAPH"}
 
 
@@ -451,13 +458,7 @@ async def add_to_workspace(
     This creates a workspace record so the tool appears in Applications tab.
     User can then click Connect to initiate OAuth.
     """
-    logger.info("=" * 80)
-    logger.info("🚀 [ADD_TO_WORKSPACE] REQUEST RECEIVED")
-    logger.info(f"🚀 [ADD_TO_WORKSPACE] Payload: {payload}")
-    logger.info(f"🚀 [ADD_TO_WORKSPACE] App name from payload: {payload.app_name}")
-    logger.info(f"🚀 [ADD_TO_WORKSPACE] Workspace ID: {ctx.workspace_id}")
-    logger.info(f"🚀 [ADD_TO_WORKSPACE] User: {ctx.user.id if ctx.user else 'None'} ({ctx.user.email if ctx.user else 'no email'})")
-    logger.info("=" * 80)
+    logger.info(f"[ADD_TO_WORKSPACE] app={payload.app_name}, workspace={ctx.workspace_id}, user_id={ctx.user.id if ctx.user else 'None'}")
 
     logger.info("[ADD_TO_WORKSPACE] Step 1: Creating EntityManager...")
     entity_manager = EntityManager(db)
@@ -534,6 +535,7 @@ async def debug_connections(
     """
     DEBUG: Show all connection records for this workspace
     """
+    _assert_workspace_admin(ctx)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
@@ -570,6 +572,7 @@ async def remove_from_workspace(
     Remove an app from workspace (deletes the connection record).
     Works for both connected and unconnected apps.
     """
+    _assert_workspace_admin(ctx)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
@@ -600,6 +603,7 @@ async def delete_connection_record(
     """
     DEBUG: Delete a specific connection record
     """
+    _assert_workspace_admin(ctx)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
@@ -631,6 +635,7 @@ async def cleanup_pending_connections(
     Removes connections with status='pending' that are older than 1 hour.
     This allows users to retry OAuth flows that failed or were abandoned.
     """
+    _assert_workspace_admin(ctx)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:
@@ -675,6 +680,7 @@ async def cleanup_connections(
     DEBUG: Clean up all non-active connection records (removes failed, error, pending, added)
     Keeps only 'active' connections
     """
+    _assert_workspace_admin(ctx)
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     if not entity:

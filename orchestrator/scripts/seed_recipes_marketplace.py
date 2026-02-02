@@ -220,8 +220,15 @@ RECIPES = [
 ]
 
 
-def seed_recipes():
-    """Seed marketplace with workflow recipes"""
+def seed_recipes(force: bool = False):
+    """Seed marketplace with workflow recipes.
+
+    By default only deletes Automatos-owned seed recipes.
+    Pass force=True (or set SEED_FORCE=true env var) to delete ALL marketplace recipes.
+    """
+    import os
+    force = force or os.environ.get("SEED_FORCE", "").lower() in ("true", "1", "yes")
+
     print("🌱 Seeding workflow recipes...")
 
     engine = create_engine(get_database_url())
@@ -230,9 +237,13 @@ def seed_recipes():
         trans = db.begin()
 
         try:
-            # Clear existing recipes
-            db.execute(text("DELETE FROM marketplace_items WHERE type = 'recipe'"))
-            print("✓ Cleared existing recipes\n")
+            # Only delete Automatos-owned seed recipes unless force flag is set
+            if force:
+                db.execute(text("DELETE FROM marketplace_items WHERE type = 'recipe'"))
+                print("✓ Cleared ALL existing recipes (force mode)\n")
+            else:
+                db.execute(text("DELETE FROM marketplace_items WHERE type = 'recipe' AND creator_name = 'Automatos Team'"))
+                print("✓ Cleared Automatos-owned seed recipes\n")
 
             for recipe in RECIPES:
                 metadata_json = json.dumps(recipe.get("metadata", {}))

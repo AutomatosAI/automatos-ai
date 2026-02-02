@@ -18,15 +18,6 @@ import {
   Network,
   Clock,
   Wrench,
-  UserCircle,
-  Headphones,
-  Terminal,
-  Share2,
-  Calculator,
-  ShoppingBag,
-  PenTool,
-  Users,
-  BarChart3
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -92,45 +83,7 @@ interface AgentConfiguration {
   }>
 }
 
-// Marketplace categories with icons and colors (matching create-agent-modal)
-const AGENT_CATEGORIES = [
-  { id: 'Personal Assistant', name: 'Personal Assistant', icon: UserCircle, color: 'text-blue-500' },
-  { id: 'Customer Support', name: 'Customer Support', icon: Headphones, color: 'text-green-500' },
-  { id: 'DevOps', name: 'DevOps', icon: Terminal, color: 'text-purple-500' },
-  { id: 'Social Media', name: 'Social Media', icon: Share2, color: 'text-pink-500' },
-  { id: 'Accounting', name: 'Accounting', icon: Calculator, color: 'text-amber-500' },
-  { id: 'E-commerce', name: 'E-commerce', icon: ShoppingBag, color: 'text-cyan-500' },
-  { id: 'Content Creation', name: 'Content Creation', icon: PenTool, color: 'text-indigo-500' },
-  { id: 'HR', name: 'HR', icon: Users, color: 'text-teal-500' },
-  { id: 'Data Analysis', name: 'Data Analysis', icon: BarChart3, color: 'text-rose-500' },
-  { id: 'Custom', name: 'Custom', icon: Bot, color: 'text-orange-500' }
-]
-
-// Bidirectional mapping between UI category names and database agent_type values
-const CATEGORY_TO_DB_MAP: Record<string, string> = {
-  'Personal Assistant': 'assistant',
-  'Customer Support': 'support',
-  'DevOps': 'devops',
-  'Social Media': 'custom',
-  'Accounting': 'custom',
-  'E-commerce': 'custom',
-  'Content Creation': 'custom',
-  'HR': 'custom',
-  'Data Analysis': 'data_analyst',
-  'Custom': 'custom'
-}
-
-const DB_TO_CATEGORY_MAP: Record<string, string> = {
-  'assistant': 'Personal Assistant',
-  'support': 'Customer Support',
-  'devops': 'DevOps',
-  'data_analyst': 'Data Analysis',
-  'code_architect': 'DevOps',
-  'security_expert': 'Custom',
-  'performance_optimizer': 'Custom',
-  'infrastructure_manager': 'DevOps',
-  'custom': 'Custom'
-}
+import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP, DB_TO_CATEGORY_MAP } from '@/lib/agent-constants'
 
 export function AgentConfigurationModal({
   agentId,
@@ -143,6 +96,8 @@ export function AgentConfigurationModal({
 
   // Form state
   const [formData, setFormData] = useState<any>({})
+  // Track the original DB agent_type so we can preserve it on save
+  const [originalAgentType, setOriginalAgentType] = useState<string>('custom')
 
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
@@ -202,6 +157,7 @@ export function AgentConfigurationModal({
       // Initialize form data with real agent data
       const dbAgentType = (agent as any).agent_type || 'custom'
       const categoryName = DB_TO_CATEGORY_MAP[dbAgentType] || 'Custom'
+      setOriginalAgentType(dbAgentType)
 
       setFormData({
         name: (agent as any).name || '',
@@ -320,8 +276,16 @@ export function AgentConfigurationModal({
         .map((tag: string) => tag.trim())
         .filter((tag: string) => tag.length > 0)
 
-      // Convert category name to database agent_type value
-      const dbAgentType = CATEGORY_TO_DB_MAP[formData.agent_type] || 'custom'
+      // Convert category name to database agent_type value.
+      // If the user's selected category maps to 'Custom' and the original DB type
+      // was a specialized type (e.g. 'security_expert'), preserve the original.
+      const selectedCategory = formData.agent_type || 'Custom'
+      const mappedDbType = CATEGORY_TO_DB_MAP[selectedCategory] || 'custom'
+      const originalMapsToCategory = DB_TO_CATEGORY_MAP[originalAgentType] || 'Custom'
+      const dbAgentType =
+        (mappedDbType === 'custom' && originalMapsToCategory === selectedCategory)
+          ? originalAgentType
+          : mappedDbType
 
       const updatePayload = {
         name: formData.name,

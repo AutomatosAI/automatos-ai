@@ -126,12 +126,22 @@ def upgrade():
     )
 
     # Data migration: Set owner_id to workspace_id for existing workspace recipes
-    # First, set workspace_id to a default workspace if NULL
-    op.execute("""
-        UPDATE workflow_recipes
-        SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
-        WHERE workspace_id IS NULL AND owner_type = 'workspace'
-    """)
+    # Only assign NULL workspace_id to the default workspace if exactly one workspace exists.
+    # If there are 0 or 2+ workspaces, we cannot safely guess, so skip this step.
+    conn = op.get_bind()
+    workspace_count = conn.execute(sa.text("SELECT COUNT(*) FROM workspaces")).scalar()
+    if workspace_count == 1:
+        op.execute("""
+            UPDATE workflow_recipes
+            SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
+            WHERE workspace_id IS NULL AND owner_type = 'workspace'
+        """)
+    elif workspace_count > 1:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Skipping workspace_id backfill: found {workspace_count} workspaces. "
+            "Orphaned recipes with NULL workspace_id must be assigned manually."
+        )
 
     # Set owner_id to workspace_id for existing recipes
     op.execute("""

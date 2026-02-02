@@ -195,14 +195,17 @@ async def create_workflow_recipe(
                 detail=f"Recipe with ID '{recipe_data['template_id']}' already exists"
             )
 
-        # Create recipe
+        # Create recipe - template_definition only required for complex recipes
+        template_def = recipe_data.get('template_definition') if recipe_type != 'simple' else recipe_data.get('template_definition')
+
         recipe = WorkflowRecipe(
             workspace_id=ctx.workspace_id,
             template_id=recipe_data['template_id'],
             name=recipe_data['name'],
             description=recipe_data['description'],
             category=recipe_data['category'],
-            template_definition=recipe_data['template_definition'],
+            recipe_type=recipe_type,
+            template_definition=template_def,
             tags=recipe_data.get('tags', []),
             difficulty=recipe_data.get('difficulty', 'intermediate'),
             recommended_agents=recipe_data.get('recommended_agents', []),
@@ -694,7 +697,8 @@ async def install_recipe_from_marketplace(
         # Increment marketplace recipe install count
         marketplace_recipe.install_count += 1
 
-        # Record installation in marketplace_installs
+        # Record installation in marketplace_installs using a savepoint so
+        # failures don't roll back the main recipe install.
         from sqlalchemy import text
         install_query = text("""
             INSERT INTO marketplace_installs (user_id, marketplace_recipe_id, cloned_recipe_id, version, installed_at)
@@ -703,12 +707,13 @@ async def install_recipe_from_marketplace(
         """)
 
         try:
-            db.execute(install_query, {
-                "user_id": user_id_int,
-                "marketplace_recipe_id": marketplace_recipe.id,
-                "cloned_recipe_id": cloned_recipe.id,
-                "version": marketplace_recipe.version
-            })
+            with db.begin_nested():
+                db.execute(install_query, {
+                    "user_id": user_id_int,
+                    "marketplace_recipe_id": marketplace_recipe.id,
+                    "cloned_recipe_id": cloned_recipe.id,
+                    "version": marketplace_recipe.version
+                })
         except Exception as e:
             # If marketplace_installs table doesn't have recipe columns yet, log warning
             logger.warning(f"Could not record recipe install in marketplace_installs: {e}")

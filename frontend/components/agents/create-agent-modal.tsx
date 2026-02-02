@@ -6,15 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
   Bot,
-  UserCircle,
-  Headphones,
-  Terminal,
-  Share2,
-  Calculator,
-  ShoppingBag,
-  PenTool,
-  Users,
-  BarChart3
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
@@ -41,33 +32,7 @@ interface CreateAgentModalProps {
   onSuccess: () => void
 }
 
-// Marketplace categories with icons and colors
-const AGENT_CATEGORIES = [
-  { id: 'Personal Assistant', name: 'Personal Assistant', icon: UserCircle, color: 'text-blue-500' },
-  { id: 'Customer Support', name: 'Customer Support', icon: Headphones, color: 'text-green-500' },
-  { id: 'DevOps', name: 'DevOps', icon: Terminal, color: 'text-purple-500' },
-  { id: 'Social Media', name: 'Social Media', icon: Share2, color: 'text-pink-500' },
-  { id: 'Accounting', name: 'Accounting', icon: Calculator, color: 'text-amber-500' },
-  { id: 'E-commerce', name: 'E-commerce', icon: ShoppingBag, color: 'text-cyan-500' },
-  { id: 'Content Creation', name: 'Content Creation', icon: PenTool, color: 'text-indigo-500' },
-  { id: 'HR', name: 'HR', icon: Users, color: 'text-teal-500' },
-  { id: 'Data Analysis', name: 'Data Analysis', icon: BarChart3, color: 'text-rose-500' },
-  { id: 'Custom', name: 'Custom', icon: Bot, color: 'text-orange-500' }
-]
-
-// Category to database agent_type mapping
-const CATEGORY_TO_DB_MAP: Record<string, string> = {
-  'Personal Assistant': 'assistant',
-  'Customer Support': 'support',
-  'DevOps': 'devops',
-  'Social Media': 'custom',
-  'Accounting': 'custom',
-  'E-commerce': 'custom',
-  'Content Creation': 'custom',
-  'HR': 'custom',
-  'Data Analysis': 'data_analyst',
-  'Custom': 'custom'
-}
+import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP } from '@/lib/agent-constants'
 
 // Skills will be loaded dynamically from the API
 
@@ -152,6 +117,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       const agentPayload = {
         name: agentData.name,
         agent_type: dbAgentType,
+        marketplace_category: agentData.category, // Preserve original UI category for round-trip
         description: agentData.description || '',
         skill_ids: agentData.skills, // Backend expects skill_ids array
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)

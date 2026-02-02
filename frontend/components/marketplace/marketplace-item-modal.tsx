@@ -29,6 +29,7 @@ export function MarketplaceItemModal({
 }: MarketplaceItemModalProps) {
   const [item, setItem] = useState<MarketplaceItem | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [installing, setInstalling] = useState(false)
   const { toast } = useToast()
 
@@ -40,14 +41,17 @@ export function MarketplaceItemModal({
   }, [itemId])
 
   async function fetchItem() {
+    setError(null)
     try {
       const data = await apiClient.get(`/api/marketplace/items/${itemId}`)
       setItem(data)
-    } catch (error) {
-      console.error('Failed to fetch item details:', error)
+    } catch (err: any) {
+      const message = err?.message || 'Failed to load item details'
+      console.error('Failed to fetch item details:', err)
+      setError(message)
       toast({
         title: 'Error',
-        description: 'Failed to load item details',
+        description: message,
         variant: 'destructive'
       })
     } finally {
@@ -94,6 +98,21 @@ export function MarketplaceItemModal({
   const temperature = modelConfig.temperature || llmConfig.temperature
   const maxTokens = modelConfig.max_tokens || llmConfig.max_tokens
   const contextWindow = llmConfig.context_window
+
+  if (error) {
+    return (
+      <Dialog open={true} onOpenChange={onClose}>
+        <DialogContent className="glass-card border-border/50">
+          <div className="text-center py-8 space-y-4">
+            <p className="text-red-400">{error}</p>
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
 
   if (loading || !item) {
     return (

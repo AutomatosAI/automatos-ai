@@ -24,10 +24,13 @@ export function MarketplaceGrid({
   const [loading, setLoading] = useState(!items)
 
   useEffect(() => {
-    if (!items) {
+    if (items) {
+      setGridItems(items)
+      setLoading(false)
+    } else {
       fetchItems()
     }
-  }, [type, category, search])
+  }, [items, type, category, search])
 
   async function fetchItems() {
     setLoading(true)

@@ -17,10 +17,20 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
     return count.toString()
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onClick()
+    }
+  }
+
   return (
     <Card
-      className="cursor-pointer bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/10"
+      role="button"
+      tabIndex={0}
+      className="cursor-pointer bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/10 focus:outline-none focus:ring-2 focus:ring-orange-500/50"
       onClick={onClick}
+      onKeyDown={handleKeyDown}
     >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">

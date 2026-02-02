@@ -175,7 +175,7 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   const handleShareToMarketplace = async (recipe: any) => {
     try {
       const result = await submitToMarketplaceMutation.mutateAsync({
-        recipe_id: recipe.template_id,
+        recipe_id: recipe.recipe_id,
         category: recipe.category,
         icon: recipe.icon
       })

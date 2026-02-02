@@ -109,16 +109,16 @@ CREATE TABLE IF NOT EXISTS agents (
     model_usage_stats JSONB DEFAULT '{"total_tokens": 0, "total_cost": 0.0}'::jsonb,
 
     -- Marketplace fields (PRD-48: Single-table architecture)
-    owner_type VARCHAR(20) DEFAULT 'workspace' CHECK (owner_type IN ('workspace', 'marketplace')),
+    owner_type VARCHAR(20) NOT NULL DEFAULT 'workspace' CHECK (owner_type IN ('workspace', 'marketplace')),
     owner_id VARCHAR(255),
     cloned_from_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
     original_creator_id INTEGER REFERENCES users(id),
-    install_count INTEGER DEFAULT 0,
-    is_featured BOOLEAN DEFAULT FALSE,
-    is_approved BOOLEAN DEFAULT FALSE,
+    install_count INTEGER NOT NULL DEFAULT 0,
+    is_featured BOOLEAN NOT NULL DEFAULT FALSE,
+    is_approved BOOLEAN NOT NULL DEFAULT FALSE,
     marketplace_category VARCHAR(100),
     marketplace_icon VARCHAR(500),
-    version VARCHAR(50) DEFAULT '1.0.0'
+    version VARCHAR(50) NOT NULL DEFAULT '1.0.0'
 );
 
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
