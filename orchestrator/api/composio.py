@@ -30,16 +30,13 @@ from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.composio import AgentAppFeature, TriggerSubscription
 from core.models.routing import UnroutedEvent
-from core.routing.cache import RoutingCache
+from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.jira_trigger import JiraTriggerIngestor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/composio", tags=["Composio"])
-
-# Shared routing cache (singleton across webhook requests)
-_routing_cache = RoutingCache()
 
 
 # =============================================================================
@@ -545,7 +542,7 @@ async def handle_webhook(
         }
 
     # Route the envelope through the universal router
-    universal_router = UniversalRouter(db, cache=_routing_cache)
+    universal_router = UniversalRouter(db, cache=get_routing_cache())
     try:
         decision = await universal_router.route(envelope)
     except Exception:

@@ -1,25 +1,32 @@
 """
 Routing cache with TTL and workspace scoping (PRD-50: US-002).
 
-In-memory cache for routing decisions keyed by (workspace_id, hash(content + source)).
-Supports configurable TTL, lazy eviction, correction tracking, and cache statistics.
+Redis-backed cache for routing decisions keyed by (workspace_id, hash(content + source)).
+Uses the existing RedisClient infrastructure (core.redis.client) with key prefixes
+following the DatabaseCacheService pattern.
+
+Falls back gracefully to cache-miss behaviour when Redis is unavailable.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
-import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+import json
+import logging
+from typing import Dict, List, Optional
 from uuid import UUID
 
 from core.models.routing import ChannelSource, RoutingDecision
 
+logger = logging.getLogger(__name__)
 
-# Default TTL: 24 hours, configurable via env var
-_CACHE_TTL_HOURS = int(os.getenv("ROUTING_CACHE_TTL_HOURS", "24"))
-_CACHE_TTL_SECONDS = _CACHE_TTL_HOURS * 3600
+# Key prefixes (consistent with db:schema:, db:query:, etc.)
+_PREFIX_DECISION = "routing:decision:"
+_PREFIX_CORRECTION = "routing:corr:"
+_PREFIX_STATS = "routing:stats:"
+
+# Default TTL: 24 hours — overridden by config at init time
+_DEFAULT_TTL_SECONDS = 24 * 3600
 
 
 def _normalize_content(content: str) -> str:
@@ -27,31 +34,23 @@ def _normalize_content(content: str) -> str:
     return content.strip().lower()
 
 
-def _cache_key(workspace_id: UUID, content: str, source: ChannelSource) -> str:
-    """Build a deterministic cache key from workspace, content, and source."""
+def _content_hash(workspace_id: UUID, content: str, source: ChannelSource) -> str:
+    """Build a deterministic hash from workspace, content, and source."""
     normalized = _normalize_content(content) + "|" + source.value
-    content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    return f"{workspace_id}:{content_hash}"
-
-
-@dataclass
-class _CacheEntry:
-    """Internal cache entry with TTL tracking."""
-
-    decision: RoutingDecision
-    created_at: float
-    correction_counts: Dict[int, int] = field(default_factory=dict)
-    # Track how many times each agent_id has been suggested as correction
+    h = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{workspace_id}:{h}"
 
 
 class RoutingCache:
-    """In-memory routing decision cache with TTL and workspace scoping."""
+    """Redis-backed routing decision cache with TTL and workspace scoping.
+
+    Gracefully degrades — all public methods return None / no-op when Redis
+    is unavailable, so the router simply skips Tier 1.
+    """
 
     def __init__(self, ttl_seconds: Optional[int] = None) -> None:
-        self._store: Dict[str, _CacheEntry] = {}
-        self._ttl = ttl_seconds if ttl_seconds is not None else _CACHE_TTL_SECONDS
-        self._hits = 0
-        self._misses = 0
+        self._ttl = ttl_seconds or self._load_ttl()
+        self._redis = self._get_redis()
 
     # ------------------------------------------------------------------
     # Public API
@@ -60,27 +59,25 @@ class RoutingCache:
     def get(
         self, workspace_id: UUID, content: str, source: ChannelSource
     ) -> Optional[RoutingDecision]:
-        """Return a cached RoutingDecision or None.
-
-        Performs lazy eviction — expired entries are removed on access.
-        """
-        key = _cache_key(workspace_id, content, source)
-        entry = self._store.get(key)
-
-        if entry is None:
-            self._misses += 1
+        """Return a cached RoutingDecision or None."""
+        redis_conn = self._get_redis()
+        if redis_conn is None:
             return None
 
-        # Lazy eviction
-        if self._is_expired(entry):
-            del self._store[key]
-            self._misses += 1
-            return None
+        key = _PREFIX_DECISION + _content_hash(workspace_id, content, source)
+        try:
+            raw = redis_conn.get(key)
+            if raw is None:
+                self._incr_stat("misses")
+                return None
 
-        self._hits += 1
-        decision = entry.decision.model_copy()
-        decision.cached = True
-        return decision
+            self._incr_stat("hits")
+            decision = RoutingDecision.model_validate_json(raw)
+            decision.cached = True
+            return decision
+        except Exception as e:
+            logger.warning(f"Routing cache get failed: {e}")
+            return None
 
     def put(
         self,
@@ -90,11 +87,15 @@ class RoutingCache:
         decision: RoutingDecision,
     ) -> None:
         """Store a routing decision in the cache."""
-        key = _cache_key(workspace_id, content, source)
-        self._store[key] = _CacheEntry(
-            decision=decision.model_copy(),
-            created_at=time.monotonic(),
-        )
+        redis_conn = self._get_redis()
+        if redis_conn is None:
+            return
+
+        key = _PREFIX_DECISION + _content_hash(workspace_id, content, source)
+        try:
+            redis_conn.setex(key, self._ttl, decision.model_dump_json())
+        except Exception as e:
+            logger.warning(f"Routing cache put failed: {e}")
 
     def record_correction(
         self,
@@ -106,82 +107,172 @@ class RoutingCache:
         """Record a user correction.
 
         If the same correction is made 2+ times for the same key,
-        the cached entry is updated to reflect the corrected agent.
+        the cached decision is updated to reflect the corrected agent.
         """
-        key = _cache_key(workspace_id, content, source)
-        entry = self._store.get(key)
-
-        if entry is None:
+        redis_conn = self._get_redis()
+        if redis_conn is None:
             return
 
-        # Increment correction count for this agent_id
-        entry.correction_counts[correct_agent_id] = (
-            entry.correction_counts.get(correct_agent_id, 0) + 1
-        )
+        cache_hash = _content_hash(workspace_id, content, source)
+        correction_key = f"{_PREFIX_CORRECTION}{cache_hash}:{correct_agent_id}"
+        decision_key = _PREFIX_DECISION + cache_hash
 
-        # If corrected 2+ times with the same agent, update the cached decision
-        if entry.correction_counts[correct_agent_id] >= 2:
-            entry.decision = entry.decision.model_copy(
-                update={
-                    "agent_id": correct_agent_id,
-                    "route_type": "agent",
-                    "confidence": 1.0,
-                    "reasoning": "Corrected by user (2+ corrections)",
-                }
-            )
-            # Reset the timer so the corrected entry stays fresh
-            entry.created_at = time.monotonic()
+        try:
+            count = redis_conn.incr(correction_key)
+            # Expire correction counters with the same TTL as decisions
+            redis_conn.expire(correction_key, self._ttl)
 
-    def clear(self, workspace_id: UUID) -> None:
+            if count >= 2:
+                # Check if there's an existing cached decision to update
+                raw = redis_conn.get(decision_key)
+                if raw:
+                    decision = RoutingDecision.model_validate_json(raw)
+                    corrected = decision.model_copy(
+                        update={
+                            "agent_id": correct_agent_id,
+                            "route_type": "agent",
+                            "confidence": 1.0,
+                            "reasoning": "Corrected by user (2+ corrections)",
+                        }
+                    )
+                    redis_conn.setex(
+                        decision_key, self._ttl, corrected.model_dump_json()
+                    )
+                    logger.info(
+                        f"Routing cache updated via correction: "
+                        f"workspace={workspace_id} agent={correct_agent_id}"
+                    )
+        except Exception as e:
+            logger.warning(f"Routing cache record_correction failed: {e}")
+
+    def clear(self, workspace_id: UUID) -> int:
         """Clear all cached entries for a specific workspace."""
-        prefix = f"{workspace_id}:"
-        keys_to_remove = [k for k in self._store if k.startswith(prefix)]
-        for key in keys_to_remove:
-            del self._store[key]
+        redis_conn = self._get_redis()
+        if redis_conn is None:
+            return 0
+
+        try:
+            pattern = f"{_PREFIX_DECISION}{workspace_id}:*"
+            keys = list(redis_conn.scan_iter(pattern))
+
+            corr_pattern = f"{_PREFIX_CORRECTION}{workspace_id}:*"
+            keys.extend(redis_conn.scan_iter(corr_pattern))
+
+            if keys:
+                deleted = redis_conn.delete(*keys)
+                logger.info(
+                    f"Cleared {deleted} routing cache entries for workspace {workspace_id}"
+                )
+                return deleted
+            return 0
+        except Exception as e:
+            logger.warning(f"Routing cache clear failed: {e}")
+            return 0
 
     def stats(self) -> Dict:
-        """Return cache statistics.
+        """Return cache statistics: size, hits, misses, hit_rate, top_routes."""
+        redis_conn = self._get_redis()
+        if redis_conn is None:
+            return {"size": 0, "hits": 0, "misses": 0, "hit_rate": 0.0, "top_routes": []}
 
-        Returns dict with: size, hits, misses, hit_rate, top_routes.
-        """
-        # Evict expired entries first for accurate stats
-        self._evict_expired()
+        try:
+            hits = self._get_stat("hits")
+            misses = self._get_stat("misses")
+            total = hits + misses
+            hit_rate = round(hits / total, 4) if total > 0 else 0.0
 
-        total_requests = self._hits + self._misses
-        hit_rate = (self._hits / total_requests) if total_requests > 0 else 0.0
+            # Count cached decisions and group by agent_id for top routes
+            route_counts: Dict[Optional[int], int] = {}
+            size = 0
+            for key in redis_conn.scan_iter(f"{_PREFIX_DECISION}*"):
+                size += 1
+                raw = redis_conn.get(key)
+                if raw:
+                    try:
+                        decision = RoutingDecision.model_validate_json(raw)
+                        aid = decision.agent_id
+                        route_counts[aid] = route_counts.get(aid, 0) + 1
+                    except Exception:
+                        pass
 
-        # Compute top cached routes (agent_id -> count)
-        route_counts: Dict[Optional[int], int] = {}
-        for entry in self._store.values():
-            agent_id = entry.decision.agent_id
-            route_counts[agent_id] = route_counts.get(agent_id, 0) + 1
+            top_routes = sorted(
+                route_counts.items(), key=lambda x: x[1], reverse=True
+            )[:10]
 
-        top_routes = sorted(route_counts.items(), key=lambda x: x[1], reverse=True)[
-            :10
-        ]
-
-        return {
-            "size": len(self._store),
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": round(hit_rate, 4),
-            "top_routes": [
-                {"agent_id": agent_id, "count": count}
-                for agent_id, count in top_routes
-            ],
-        }
+            return {
+                "size": size,
+                "hits": hits,
+                "misses": misses,
+                "hit_rate": hit_rate,
+                "top_routes": [
+                    {"agent_id": agent_id, "count": count}
+                    for agent_id, count in top_routes
+                ],
+            }
+        except Exception as e:
+            logger.warning(f"Routing cache stats failed: {e}")
+            return {"size": 0, "hits": 0, "misses": 0, "hit_rate": 0.0, "top_routes": []}
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _is_expired(self, entry: _CacheEntry) -> bool:
-        return (time.monotonic() - entry.created_at) > self._ttl
+    @staticmethod
+    def _load_ttl() -> int:
+        """Load TTL from centralized config."""
+        try:
+            from config import config
+            return config.ROUTING_CACHE_TTL_HOURS * 3600
+        except Exception:
+            return _DEFAULT_TTL_SECONDS
 
-    def _evict_expired(self) -> None:
-        """Remove all expired entries from the store."""
-        expired_keys = [
-            k for k, v in self._store.items() if self._is_expired(v)
-        ]
-        for key in expired_keys:
-            del self._store[key]
+    @staticmethod
+    def _get_redis():
+        """Get a Redis connection via the centralized client. Returns None if unavailable."""
+        try:
+            from core.redis.client import get_redis_client
+            client = get_redis_client()
+            if client is None:
+                return None
+            return client.get_redis()
+        except Exception:
+            return None
+
+    def _incr_stat(self, name: str) -> None:
+        """Increment a routing stats counter in Redis."""
+        redis_conn = self._get_redis()
+        if redis_conn is None:
+            return
+        try:
+            redis_conn.incr(f"{_PREFIX_STATS}{name}")
+        except Exception:
+            pass  # Stats are non-critical
+
+    def _get_stat(self, name: str) -> int:
+        """Read a routing stats counter from Redis."""
+        redis_conn = self._get_redis()
+        if redis_conn is None:
+            return 0
+        try:
+            val = redis_conn.get(f"{_PREFIX_STATS}{name}")
+            return int(val) if val else 0
+        except Exception:
+            return 0
+
+
+# ---------------------------------------------------------------------------
+# Singleton
+# ---------------------------------------------------------------------------
+
+_routing_cache: Optional[RoutingCache] = None
+
+
+def get_routing_cache() -> RoutingCache:
+    """Get or create the singleton RoutingCache instance.
+
+    All consumers (chat.py, composio.py, routing.py) share this one instance.
+    """
+    global _routing_cache
+    if _routing_cache is None:
+        _routing_cache = RoutingCache()
+    return _routing_cache

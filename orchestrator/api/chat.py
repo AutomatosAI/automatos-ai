@@ -19,14 +19,11 @@ from core.database.database import get_db
 from consumers.chatbot import ChatService, StreamingChatService
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
-from core.routing.cache import RoutingCache
+from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
 from core.routing.ingestors.chatbot import ChatbotIngestor
 
 logger = logging.getLogger(__name__)
-
-# Shared routing cache (singleton across chat requests)
-_routing_cache = RoutingCache()
 
 # Standard API key auth (matches all other APIs)
 # For chat endpoint, API key is optional if not set in env (user-facing feature)
@@ -280,7 +277,7 @@ async def stream_chat(
                 request_context=ctx,
             )
             routing_request_id = str(envelope.id)
-            universal_router = UniversalRouter(db, cache=_routing_cache)
+            universal_router = UniversalRouter(db, cache=get_routing_cache())
             routing_decision = await universal_router.route(envelope)
         except Exception:
             logger.exception("[chat] Router failed — falling back to default agent")

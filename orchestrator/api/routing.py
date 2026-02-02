@@ -25,14 +25,11 @@ from core.models.routing import (
     RoutingDecisionRecord,
     RoutingRule,
 )
-from core.routing.cache import RoutingCache
+from core.routing.cache import get_routing_cache
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/routing", tags=["Routing"])
-
-# Module-level cache singleton (shared with chat.py / composio.py)
-_routing_cache = RoutingCache()
 
 # ---------------------------------------------------------------------------
 # Request / response schemas
@@ -350,7 +347,7 @@ async def get_cache_stats(
 ):
     """Return routing cache statistics: size, hits, misses, hit rate, top routes."""
     try:
-        return _routing_cache.stats()
+        return get_routing_cache().stats()
     except Exception as e:
         logger.error("Error getting cache stats: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
