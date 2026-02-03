@@ -56,9 +56,10 @@ async def execute_recipe_direct(
         db_url: Optional database URL (uses default SessionLocal if not provided)
     """
     # Create a fresh DB session for this async task
+    _engine = None  # Track custom engine for cleanup
     if db_url:
-        engine = create_engine(db_url)
-        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        _engine = create_engine(db_url)
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
         db = _SessionLocal()
     else:
         db = SessionLocal()
@@ -277,10 +278,14 @@ async def execute_recipe_direct(
         logger.error(f"[recipe_direct] Fatal error in execution {recipe_execution_id}: {e}", exc_info=True)
         try:
             await _fail_execution(db, recipe_execution_id, str(e))
-        except Exception:
-            pass
+        except Exception as err:
+            logger.exception(
+                f"[recipe_direct] _fail_execution itself failed for {recipe_execution_id}: {err}"
+            )
     finally:
         db.close()
+        if _engine is not None:
+            _engine.dispose()
 
 
 def _resolve_prompt(

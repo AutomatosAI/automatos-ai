@@ -187,6 +187,10 @@ export function WorkflowManagement() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [autoStartExecution, setAutoStartExecution] = useState(false)
 
+  // Recipe creation modal (triggered from top "Create Recipe" button)
+  const [recipeCreateOpen, setRecipeCreateOpen] = useState(false)
+  const [recipeSearchTerm, setRecipeSearchTerm] = useState('')
+
   // Recipe direct execution state
   const [recipeExecInfo, setRecipeExecInfo] = useState<{
     recipeExecutionId: string
@@ -537,12 +541,12 @@ export function WorkflowManagement() {
           </p>
         </div>
         
-        <Button 
+        <Button
           className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-          onClick={handleCreateWorkflow}
+          onClick={() => setRecipeCreateOpen(true)}
         >
           <Plus className="w-4 h-4 mr-2" />
-          Create Workflow
+          Create Recipe
         </Button>
       </motion.div>
 
@@ -587,20 +591,31 @@ export function WorkflowManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="templates" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid bg-secondary/50">
-            <TabsTrigger value="templates" className="flex items-center space-x-2">
-              <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">Recipes</span>
-            </TabsTrigger>
-            <TabsTrigger value="active" className="flex items-center space-x-2">
-              <Play className="w-4 h-4" />
-              <span className="hidden sm:inline">Cooking</span>
-            </TabsTrigger>
-            <TabsTrigger value="monitoring" className="flex items-center space-x-2">
-              <Activity className="w-4 h-4" />
-              <span className="hidden sm:inline">Monitoring</span>
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex items-center gap-4">
+            <TabsList className="bg-secondary/50 shrink-0">
+              <TabsTrigger value="templates" className="flex items-center space-x-2">
+                <GitBranch className="w-4 h-4" />
+                <span className="hidden sm:inline">Recipes</span>
+              </TabsTrigger>
+              <TabsTrigger value="active" className="flex items-center space-x-2">
+                <Play className="w-4 h-4" />
+                <span className="hidden sm:inline">Cooking</span>
+              </TabsTrigger>
+              <TabsTrigger value="monitoring" className="flex items-center space-x-2">
+                <Activity className="w-4 h-4" />
+                <span className="hidden sm:inline">Monitoring</span>
+              </TabsTrigger>
+            </TabsList>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="Search recipes..."
+                value={recipeSearchTerm}
+                onChange={(e) => setRecipeSearchTerm(e.target.value)}
+                className="pl-10 bg-secondary/50 border-secondary"
+              />
+            </div>
+          </div>
 
           <TabsContent value="active" className="space-y-6">
             {/* Loading State */}
@@ -632,27 +647,24 @@ export function WorkflowManagement() {
 
           <TabsContent value="templates" className="space-y-6">
             <RecipesTab
+              searchTerm={recipeSearchTerm}
+              externalCreateOpen={recipeCreateOpen}
+              onCreateModalClosed={() => setRecipeCreateOpen(false)}
               onUseRecipe={(recipeId) => {
-                setError(null) // Clear any previous errors
+                setError(null)
                 handleTemplateChange(recipeId)
-                setShowCreateModal(true) // Open modal after populating recipe data
+                setShowCreateModal(true)
               }}
               onExecuteRecipe={(workflowId: number, recipeExecution?: any) => {
                 if (recipeExecution) {
-                  // Direct recipe execution mode
                   setRecipeExecInfo(recipeExecution)
                   setSelectedWorkflowId(null)
                 } else {
-                  // Legacy workflow execution mode
                   setSelectedWorkflowId(workflowId)
                   setRecipeExecInfo(null)
                 }
-                setAutoStartExecution(false) // Execution already started on backend
+                setAutoStartExecution(false)
                 setShowExecutionKitchen(true)
-              }}
-              onOpenCreateModal={() => {
-                setError(null) // Clear any previous errors
-                setShowCreateModal(true)
               }}
             />
           </TabsContent>

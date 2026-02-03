@@ -567,6 +567,7 @@ export function ExecutionKitchen({
   const logsEndRef = useRef<HTMLDivElement>(null)
   const execution = executionData?.execution
   const lastExecutionIdRef = useRef<number | null>(null)
+  const handleStartExecutionRef = useRef<() => Promise<void>>()
 
   // Update step execution and self-learning data when execution changes
   const updateDerivedData = useCallback((exec: any) => {
@@ -916,9 +917,9 @@ export function ExecutionKitchen({
       executionCompleteCountRef.current += 1
 
       // Fetch suggestions from the recipe's learning data
-      const recipeId = executionData?.template_id || executionData?.recipe_id
-      if (recipeId) {
-        apiClient.getRecipeSuggestions(recipeId).then((data: any) => {
+      const execRecipeId = executionData?.template_id || executionData?.recipe_id
+      if (execRecipeId) {
+        apiClient.getRecipeSuggestions(execRecipeId).then((data: any) => {
           if (data?.suggestions?.length > 0) {
             setSuggestionsData(data)
 
@@ -974,8 +975,6 @@ export function ExecutionKitchen({
     loadWorkflow()
   }, [workflowId, generateLogsFromExecution, isRecipeMode])
 
-  useEffect(() => { if (autoStart && !hasAutoStarted && executionData) { setHasAutoStarted(true); setTimeout(handleStartExecution, 1000) } }, [autoStart, hasAutoStarted, executionData])
-
   const handleStartExecution = async () => {
     try {
       // Guard: check if there's already a running/pending execution for this workflow
@@ -1014,6 +1013,17 @@ export function ExecutionKitchen({
       setIsExecuting(false)
     }
   }
+
+  // Keep ref in sync so the auto-start effect always calls the latest version
+  handleStartExecutionRef.current = handleStartExecution
+
+  // Auto-start effect — uses ref to avoid stale closure over handleStartExecution
+  useEffect(() => {
+    if (autoStart && !hasAutoStarted && executionData) {
+      setHasAutoStarted(true)
+      setTimeout(() => handleStartExecutionRef.current?.(), 1000)
+    }
+  }, [autoStart, hasAutoStarted, executionData])
 
   const handlePauseExecution = async () => {
     try {

@@ -1093,6 +1093,11 @@ Available Shell Tools:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
             
+            # Preserve the original user prompt before any augmentation.
+            # This is used for Composio hint generation so action-instructions
+            # injected below don't skew intent matching.
+            original_user_prompt = prompt
+
             # Check if actions are needed and add capabilities
             action_executor = None
             if enable_actions and self._requires_actions(prompt):
@@ -1157,7 +1162,9 @@ To use actions, respond with JSON blocks like:
                 _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
 
                 # Build and inject Composio hints (app names + candidate actions + param hints)
-                hint_lines = self._build_composio_hints(agent_runtime.agent_id, prompt)
+                # NOTE: Uses original_user_prompt (not the possibly-augmented `prompt`)
+                # to avoid action-instruction injection skewing intent matching.
+                hint_lines = self._build_composio_hints(agent_runtime.agent_id, original_user_prompt)
                 if hint_lines:
                     # Insert after system prompt, before user messages
                     insert_at = 1 if messages and messages[0].get("role") == "system" else 0
@@ -2164,7 +2171,7 @@ To use actions, respond with JSON blocks like:
                         select(ComposioActionMetadata)
                         .where(ComposioActionMetadata.app_id.in_(allowed_apps_lower))
                         .where(ComposioActionMetadata.capabilities.overlap(required_caps))
-                        .where(ComposioActionMetadata.destructive == False)
+                        .where(ComposioActionMetadata.destructive.is_(False))
                     )
                     metadata_rows = self.db_session.execute(metadata_query).scalars().all()
 

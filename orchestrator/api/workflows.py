@@ -1643,8 +1643,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     try:
                         ctx = json.loads(workflow_ctx) if isinstance(workflow_ctx, str) else workflow_ctx
                         use_smart_selection = ctx.get("use_smart_selection", True)
-                    except:
-                        pass
+                    except (json.JSONDecodeError, TypeError, ValueError) as e:
+                        logger.error(f"Error parsing workflow context: {e}", exc_info=True)
 
                 # Check if tasks have specific agent requirements (HYBRID mode)
                 has_agent_requirements = any(
