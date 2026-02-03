@@ -152,6 +152,19 @@ async def execute_recipe_direct(
             # so the task description must be at the top — not buried under context.
             resolved_prompt = _resolve_prompt(prompt_template, input_data, previous_output, step_results)
 
+            # Recipe-step system prompt: instruct concise, actionable output
+            has_more_steps = idx < len(steps) - 1
+            recipe_system_hint = (
+                "You are executing a step in an automated recipe. "
+                "Be concise and action-oriented. "
+                "Summarize results clearly — do NOT dump raw API responses. "
+            )
+            if has_more_steps:
+                recipe_system_hint += (
+                    "Your output will be passed to the next step, "
+                    "so provide a clean, structured summary that another agent can act on."
+                )
+
             # Execute with retries
             attempt = 0
             success = False
@@ -166,7 +179,7 @@ async def execute_recipe_direct(
                     result = await factory.execute_with_prompt(
                         agent=agent_id,
                         prompt=resolved_prompt,
-                        system_prompt=None,  # Let agent use its default system prompt with skills
+                        system_prompt=recipe_system_hint,
                         context={"recipe_execution_id": recipe_execution_id, "step": step_order},
                         use_memory=False,  # Fresh execution, no memory carry
                         max_retries=1,  # Single attempt per retry cycle (we manage retries)
