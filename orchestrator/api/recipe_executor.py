@@ -25,7 +25,6 @@ from sqlalchemy.orm import sessionmaker
 from core.database.database import get_db, SessionLocal
 from core.models import Agent
 from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
-from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
 
 logger = logging.getLogger(__name__)
 
@@ -148,22 +147,10 @@ async def execute_recipe_direct(
                 "retries": 0,
             }
 
-            # Build the prompt: inject previous step results as context
+            # Build the prompt: task intent first, context below
+            # AgentFactory tokenizes the prompt to select Composio actions,
+            # so the task description must be at the top — not buried under context.
             resolved_prompt = _resolve_prompt(prompt_template, input_data, previous_output, step_results)
-
-            # Filter Composio actions for this step's intent
-            filtered_action_names = await _filter_actions_for_step(
-                db, agent_id, resolved_prompt, workspace_id
-            )
-
-            # Build a system prompt hint for filtered actions
-            action_hint = ""
-            if filtered_action_names:
-                action_hint = (
-                    f"\n\nFor this task, prefer these Composio actions: "
-                    f"{', '.join(filtered_action_names[:10])}. "
-                    f"Only use actions from this list unless absolutely necessary."
-                )
 
             # Execute with retries
             attempt = 0
@@ -178,7 +165,7 @@ async def execute_recipe_direct(
                 try:
                     result = await factory.execute_with_prompt(
                         agent=agent_id,
-                        prompt=resolved_prompt + action_hint,
+                        prompt=resolved_prompt,
                         system_prompt=None,  # Let agent use its default system prompt with skills
                         context={"recipe_execution_id": recipe_execution_id, "step": step_order},
                         use_memory=False,  # Fresh execution, no memory carry
@@ -296,6 +283,12 @@ def _resolve_prompt(
     """
     Resolve a step's prompt template with variable substitution.
 
+    IMPORTANT: The task instruction stays at the TOP of the prompt.
+    Context from previous steps is appended BELOW with a separator.
+    This is critical because AgentFactory tokenizes the prompt to select
+    Composio actions — the first tokens must describe the task intent,
+    not contain email/message content from prior steps.
+
     Supports:
     - {input.field_name} — from user input_data
     - {previous_output} — output from the previous step
@@ -308,12 +301,9 @@ def _resolve_prompt(
         for key, value in input_data.items():
             resolved = resolved.replace(f"{{input.{key}}}", str(value))
 
-    # Substitute {previous_output}
+    # Substitute {previous_output} inline if template references it
     if previous_output:
         resolved = resolved.replace("{previous_output}", previous_output)
-        # Also inject as context even if not explicitly referenced
-        if "{previous_output}" not in template and previous_output:
-            resolved = f"Context from previous step:\n{previous_output}\n\n{resolved}"
 
     # Substitute {step_N_output} for specific step references
     for sr in step_results:
@@ -322,113 +312,20 @@ def _resolve_prompt(
         if output:
             resolved = resolved.replace(f"{{step_{order}_output}}", output)
 
+    # If previous output exists and template didn't explicitly reference it,
+    # append context BELOW the task instruction (not above)
+    if previous_output and "{previous_output}" not in template:
+        # Truncate context to avoid blowing up token count
+        context_preview = previous_output[:2000]
+        if len(previous_output) > 2000:
+            context_preview += "\n... (truncated)"
+        resolved = (
+            f"{resolved}\n\n"
+            f"--- Context from previous step (use this data to complete the task above) ---\n"
+            f"{context_preview}"
+        )
+
     return resolved
-
-
-async def _filter_actions_for_step(
-    db: Session,
-    agent_id: int,
-    prompt: str,
-    workspace_id: UUID
-) -> List[str]:
-    """
-    Filter Composio actions for a step's intent.
-
-    Strategy:
-    1. Try ActionCapabilityFilter (uses classified metadata)
-    2. Fallback: keyword-based filtering from ComposioActionCache
-    3. Fallback: return empty list (agent gets all its default actions)
-    """
-    try:
-        # Get agent's assigned apps
-        assignments = db.query(AgentAppAssignment).filter(
-            AgentAppAssignment.agent_id == agent_id
-        ).all()
-        if not assignments:
-            return []
-
-        app_names = [a.app_name.upper() for a in assignments if a.app_name]
-        if not app_names:
-            return []
-
-        # Try ActionCapabilityFilter first
-        try:
-            from modules.tools.services.action_capability_filter import ActionCapabilityFilter
-            from modules.tools.capabilities.models import ComposioActionMetadata
-
-            # Check if metadata table has data
-            has_metadata = db.query(ComposioActionMetadata.action_id).limit(1).first()
-            if has_metadata:
-                acf = ActionCapabilityFilter(db)
-                result = await acf.get_actions_for_intent(
-                    intent=prompt,
-                    enabled_apps=app_names,
-                    include_destructive=False,
-                    max_actions=5
-                )
-                if result.actions:
-                    action_ids = [a.action_id for a in result.actions]
-                    logger.info(
-                        f"[recipe_direct] ActionCapabilityFilter returned {len(action_ids)} actions "
-                        f"for apps {app_names}: {action_ids}"
-                    )
-                    return action_ids
-        except ImportError:
-            logger.debug("[recipe_direct] ActionCapabilityFilter not available, using fallback")
-        except Exception as e:
-            logger.warning(f"[recipe_direct] ActionCapabilityFilter failed: {e}")
-
-        # Fallback: keyword-based filtering from ComposioActionCache
-        return _keyword_filter_actions(db, app_names, prompt)
-
-    except Exception as e:
-        logger.warning(f"[recipe_direct] Action filtering failed entirely: {e}")
-        return []
-
-
-def _keyword_filter_actions(db: Session, app_names: List[str], prompt: str) -> List[str]:
-    """
-    Fallback action filtering using keyword matching against ComposioActionCache.
-
-    Tokenizes the prompt and matches against action names in the cache.
-    """
-    import re
-    prompt_lower = prompt.lower()
-    tokens = [t for t in re.split(r'[^a-z0-9]+', prompt_lower) if len(t) > 2]
-
-    if not tokens:
-        return []
-
-    # Query actions for the assigned apps
-    actions = db.query(ComposioActionCache).filter(
-        ComposioActionCache.app_name.in_(app_names)
-    ).all()
-
-    if not actions:
-        return []
-
-    scored: List[tuple] = []
-    for action in actions:
-        action_name = (action.action_name or "").lower()
-        description = (action.description or "").lower()
-        # Score based on token matches in action name and description
-        score = 0
-        for token in tokens:
-            if token in action_name:
-                score += 3
-            if token in description:
-                score += 1
-        if score > 0:
-            scored.append((action.action_name, score))
-
-    # Sort by score descending, take top 5
-    scored.sort(key=lambda x: x[1], reverse=True)
-    filtered = [name for name, _ in scored[:5]]
-
-    if filtered:
-        logger.info(f"[recipe_direct] Keyword filter returned {len(filtered)} actions: {filtered}")
-
-    return filtered
 
 
 def _normalize_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:

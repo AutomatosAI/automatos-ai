@@ -510,7 +510,9 @@ export function ExecutionKitchen({
   const [recipeExecData, setRecipeExecData] = useState<any>(null)
   const [recipeStepResults, setRecipeStepResults] = useState<RecipeStepResult[]>([])
 
-  // Recipe execution polling
+  // Recipe execution polling — stops when status is completed/failed
+  const recipePollingRef = useRef<NodeJS.Timeout | null>(null)
+
   useEffect(() => {
     if (!isRecipeMode || !recipeId || !recipeExecId) return
 
@@ -518,9 +520,13 @@ export function ExecutionKitchen({
     setIsExecuting(true)
     setExecutionData({ name: 'Recipe Execution', description: 'Direct recipe execution' })
 
+    let stopped = false
+
     const poll = async () => {
+      if (stopped) return
       try {
         const data: any = await apiClient.getRecipeExecution(recipeId, recipeExecId!)
+        if (stopped) return
         setRecipeExecData(data)
         setRecipeStepResults(data.step_results || [])
         setExecutionData((prev: any) => ({
@@ -532,6 +538,11 @@ export function ExecutionKitchen({
 
         if (data.status === 'completed' || data.status === 'failed') {
           setIsExecuting(false)
+          // Stop polling — execution is done
+          if (recipePollingRef.current) {
+            clearInterval(recipePollingRef.current)
+            recipePollingRef.current = null
+          }
         }
       } catch (err) {
         console.error('Error polling recipe execution:', err)
@@ -542,11 +553,15 @@ export function ExecutionKitchen({
     poll()
 
     // Poll every 3s while running
-    const interval = setInterval(() => {
-      poll()
-    }, 3000)
+    recipePollingRef.current = setInterval(poll, 3000)
 
-    return () => clearInterval(interval)
+    return () => {
+      stopped = true
+      if (recipePollingRef.current) {
+        clearInterval(recipePollingRef.current)
+        recipePollingRef.current = null
+      }
+    }
   }, [isRecipeMode, recipeId, recipeExecId])
 
   const logsEndRef = useRef<HTMLDivElement>(null)
