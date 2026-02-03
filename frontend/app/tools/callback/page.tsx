@@ -16,13 +16,18 @@ export default function ComposioCallbackPage() {
 
         console.log('🔗 OAuth Callback:', { status, connectionId, connected })
 
-        // If we have enough info, notify the backend so it can mark the app as ACTIVE
-        // and the Tools UI can show it under "Connected tools".
-        if (connected && connectionId) {
+        // Notify the backend so it can mark the app as ACTIVE.
+        // Always call if we know the app name — connection_id is optional.
+        // The backend will sync with Composio API if connection_id is missing.
+        if (connected) {
             const appName = connected.toUpperCase()
             const normalizedStatus = (status || 'active').toLowerCase()
+            const params = new URLSearchParams({ status: normalizedStatus })
+            if (connectionId) {
+                params.set('connection_id', connectionId)
+            }
             apiClient
-                .post(`/api/composio/connect/${encodeURIComponent(appName)}/callback?connection_id=${encodeURIComponent(connectionId)}&status=${encodeURIComponent(normalizedStatus)}`)
+                .post(`/api/composio/connect/${encodeURIComponent(appName)}/callback?${params.toString()}`)
                 .catch((err) => {
                     console.warn('Failed to sync Composio connection to backend:', err)
                 })
