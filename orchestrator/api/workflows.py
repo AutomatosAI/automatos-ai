@@ -1908,9 +1908,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     # If context is a JSON string, parse it
                     if isinstance(workflow_ctx, str):
                         try:
-                            import json
                             workflow_ctx = json.loads(workflow_ctx)
-                        except:
+                        except Exception:
                             workflow_ctx = None
                     
                     # Only enhance subtasks that need context

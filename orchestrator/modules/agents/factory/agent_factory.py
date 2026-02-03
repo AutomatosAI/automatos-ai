@@ -1740,7 +1740,7 @@ To use actions, respond with JSON blocks like:
                     db.query(AgentAppAssignment)
                     .filter(
                         AgentAppAssignment.agent_id == agent.id,
-                        AgentAppAssignment.is_active == True,
+                        AgentAppAssignment.is_active.is_(True),
                         AgentAppAssignment.app_type == "EXTERNAL",
                     )
                     .all()
@@ -1951,10 +1951,16 @@ To use actions, respond with JSON blocks like:
                 
                 # PRD-17 Phase 3: Reuse agent's tool_executor (initialized once)
                 tool_executor = agent_runtime.tool_executor if agent_runtime else get_unified_tool_executor(self.db_session)
+                # Resolve workspace_id from agent_runtime if available
+                _ws_id = None
+                if agent_runtime and hasattr(agent_runtime, 'agent_id'):
+                    _db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
+                    _ws_id = getattr(_db_agent, 'workspace_id', None) if _db_agent else None
                 result = await tool_executor.execute_tool(
                     tool_name=action_type,
                     parameters=params,
-                    agent_id=0
+                    agent_id=agent_runtime.agent_id if agent_runtime else 0,
+                    workspace_id=_ws_id
                 )
                 
                 # Enhanced logging for research tools
@@ -2009,7 +2015,7 @@ To use actions, respond with JSON blocks like:
                 self.db_session.query(AgentAppAssignment)
                 .filter(
                     AgentAppAssignment.agent_id == agent_id,
-                    AgentAppAssignment.is_active == True,
+                    AgentAppAssignment.is_active.is_(True),
                     AgentAppAssignment.app_type == "EXTERNAL",
                 )
                 .all()
@@ -2068,7 +2074,7 @@ To use actions, respond with JSON blocks like:
                 self.db_session.query(AgentAppAssignment)
                 .filter(
                     AgentAppAssignment.agent_id == agent_id,
-                    AgentAppAssignment.is_active == True,
+                    AgentAppAssignment.is_active.is_(True),
                     AgentAppAssignment.app_type == "EXTERNAL",
                 )
                 .all()

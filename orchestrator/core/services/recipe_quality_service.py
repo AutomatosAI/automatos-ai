@@ -31,7 +31,8 @@ class RecipeQualityService:
         self.db = db
 
     def assess_quality(
-        self, execution_id: str, learnings: Optional[Dict[str, Any]] = None
+        self, execution_id: str, learnings: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Perform a 5-dimensional quality assessment of a recipe execution.
@@ -39,22 +40,29 @@ class RecipeQualityService:
         Args:
             execution_id: The execution_id string (e.g. "exec-abc123def456")
             learnings: Optional learnings dict from RecipeLearningService.analyze_execution()
+            workspace_id: Optional workspace UUID for isolation filtering
 
         Returns:
             Dict with quality_score, breakdown object, grade, and bottlenecks array.
         """
         # Fetch execution record
-        execution = self.db.query(RecipeExecution).filter(
+        query = self.db.query(RecipeExecution).filter(
             RecipeExecution.execution_id == execution_id
-        ).first()
+        )
+        if workspace_id:
+            query = query.filter(RecipeExecution.workspace_id == workspace_id)
+        execution = query.first()
 
         if not execution:
             raise ValueError(f"Execution not found: {execution_id}")
 
         # Fetch the associated recipe
-        recipe = self.db.query(WorkflowTemplate).filter(
+        recipe_query = self.db.query(WorkflowTemplate).filter(
             WorkflowTemplate.id == execution.recipe_id
-        ).first()
+        )
+        if workspace_id:
+            recipe_query = recipe_query.filter(WorkflowTemplate.workspace_id == workspace_id)
+        recipe = recipe_query.first()
 
         if not recipe:
             raise ValueError(f"Recipe not found for execution: {execution_id}")

@@ -56,7 +56,12 @@ async def execute_recipe_direct(
         db_url: Optional database URL (uses default SessionLocal if not provided)
     """
     # Create a fresh DB session for this async task
-    db = SessionLocal()
+    if db_url:
+        engine = create_engine(db_url)
+        _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        db = _SessionLocal()
+    else:
+        db = SessionLocal()
 
     try:
         logger.info(f"[recipe_direct] Starting execution {recipe_execution_id} for recipe {recipe_id}")
@@ -118,11 +123,8 @@ async def execute_recipe_direct(
             prompt_template = step.get('prompt_template', '')
             error_handling = step.get('error_handling', 'stop')
             max_retries = step.get('max_retries', 1)
-            pass_to = step.get('pass_to')
-
             agent = agent_map.get(agent_id)
             agent_name = agent.name if agent else f"Agent {agent_id}"
-            model_cfg = (agent.model_config or {}) if agent else {}
 
             logger.info(f"[recipe_direct] Step {step_order}/{total_steps}: {agent_name} — {prompt_template[:80]}")
 
@@ -180,8 +182,10 @@ async def execute_recipe_direct(
                         # Coerce non-string outputs to JSON strings for _resolve_prompt compatibility
                         if isinstance(raw_output, (dict, list)):
                             step_result["output"] = json.dumps(raw_output)
+                        elif raw_output is not None:
+                            step_result["output"] = str(raw_output)
                         else:
-                            step_result["output"] = str(raw_output) if raw_output else ""
+                            step_result["output"] = ""
                         step_result["tokens_used"] = result.get("execution", {}).get("tokens_used", 0)
 
                         # Extract tool calls from execution metadata

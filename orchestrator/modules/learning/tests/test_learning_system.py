@@ -8,15 +8,13 @@ and pattern recognition.
 import pytest
 from datetime import datetime
 from unittest.mock import Mock, MagicMock
-from uuid import uuid4
 
 from modules.learning import LearningSystemUpdater
 from modules.orchestrator.stages import AggregatedResults
 from modules.agents import SubtaskExecution, SubtaskStatus
 from core.models import Agent, Workflow, WorkflowExecution
 
-# Test workspace ID for all test fixtures
-TEST_WORKSPACE_ID = uuid4()
+from .conftest import TEST_WORKSPACE_ID
 
 
 class TestLearningSystemUpdater:

@@ -172,7 +172,7 @@ export function ViewRecipeModal({
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-green-400">
-                        {recipe.quality_score ? `${(recipe.quality_score * 100).toFixed(0)}%` : 'N/A'}
+                        {recipe.quality_score != null ? `${(recipe.quality_score * 100).toFixed(0)}%` : 'N/A'}
                       </div>
                       <div className="text-xs text-gray-400">Quality Score</div>
                     </div>
@@ -351,7 +351,7 @@ export function ViewRecipeModal({
                           <CheckCircle className="w-3 h-3" />
                           Success Rate
                         </div>
-                        <div className="text-2xl font-semibold text-green-400">{recipe.success_rate || 95}%</div>
+                        <div className="text-2xl font-semibold text-green-400">{recipe.success_rate != null ? recipe.success_rate : 95}%</div>
                         <div className="text-xs text-gray-500">works every time</div>
                       </div>
                       <div className="text-center">
@@ -387,7 +387,7 @@ export function ViewRecipeModal({
                               Input Schema
                             </h4>
                             <pre className="text-xs bg-background/50 rounded p-2 overflow-x-auto">
-                              {JSON.stringify(typeof recipe.inputs === 'string' ? JSON.parse(recipe.inputs) : recipe.inputs, null, 2)}
+                              {JSON.stringify(typeof recipe.inputs === 'string' ? (() => { try { return JSON.parse(recipe.inputs) } catch { return recipe.inputs } })() : recipe.inputs, null, 2)}
                             </pre>
                           </div>
                         )}
@@ -398,7 +398,7 @@ export function ViewRecipeModal({
                               Output Schema
                             </h4>
                             <pre className="text-xs bg-background/50 rounded p-2 overflow-x-auto">
-                              {JSON.stringify(typeof recipe.outputs === 'string' ? JSON.parse(recipe.outputs) : recipe.outputs, null, 2)}
+                              {JSON.stringify(typeof recipe.outputs === 'string' ? (() => { try { return JSON.parse(recipe.outputs) } catch { return recipe.outputs } })() : recipe.outputs, null, 2)}
                             </pre>
                           </div>
                         )}

@@ -358,7 +358,7 @@ function buildStepExecutionData(execution: any): StepExecutionData[] {
     else if (execResult.status === 'running') status = 'running'
 
     return {
-      step_id: subtask.description?.slice(0, 40) || `step-${index + 1}`,
+      step_id: subtask.id || subtask.subtask_id || `step-${index + 1}`,
       order: index + 1,
       agent_id: agent.agent_id,
       agent_name: agent.agent_name,
@@ -416,7 +416,7 @@ function buildLearningData(execution: any): LearningData | null {
     suggestions: [],
     performance_metrics: {
       total_duration_ms: execution?.output_data?.total_execution_time_ms,
-      success_rate: execution?.output_data?.subtasks
+      success_rate: execution?.output_data?.subtasks?.length
         ? execution.output_data.subtasks.filter((s: any) => s.execution_result?.status === 'completed').length / execution.output_data.subtasks.length
         : undefined,
     },
@@ -739,7 +739,7 @@ export function ExecutionKitchen({
 
     const stageCompletionFlags: Record<number, boolean> = {
       1: subtasks.length > 0, 2: hasAgents,
-      3: hasContextRetrieved || currentStage > 3, 4: hasExecutionResults && allTasksDone,
+      3: hasContextRetrieved || current > 3, 4: hasExecutionResults && allTasksDone,
       5: !!(resultAggregationMeta || output.aggregated_result || output.final_report),
       6: hasLearningUpdate || learningUpdates.length > 0, 7: !!qualityScores,
       8: !!(memoryStorageMeta || memoryIntegrationSummary), 9: execution.status === 'completed'
@@ -954,6 +954,7 @@ export function ExecutionKitchen({
   }, [isExecuting, completedStages, executionData])
 
   useEffect(() => {
+    if (isRecipeMode) return // Recipe mode uses its own polling via useRecipeExecution
     const loadWorkflow = async () => {
       try {
         const workflow = await apiClient.getWorkflow(workflowId.toString())
@@ -971,7 +972,7 @@ export function ExecutionKitchen({
       } catch (error) { console.error('Error loading workflow:', error) }
     }
     loadWorkflow()
-  }, [workflowId, generateLogsFromExecution])
+  }, [workflowId, generateLogsFromExecution, isRecipeMode])
 
   useEffect(() => { if (autoStart && !hasAutoStarted && executionData) { setHasAutoStarted(true); setTimeout(handleStartExecution, 1000) } }, [autoStart, hasAutoStarted, executionData])
 
