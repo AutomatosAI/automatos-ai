@@ -9,6 +9,7 @@ API routes for Composio integration:
 - Webhook handling for triggers
 """
 
+import asyncio
 import os
 import hmac
 import hashlib
@@ -21,13 +22,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
-from core.database.database import get_db
+from core.database.database import get_db, get_db_session
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.composio import AgentAppFeature, TriggerSubscription
+from core.models.routing import UnroutedEvent
+from core.routing.cache import get_routing_cache
+from core.routing.engine import UniversalRouter
+from core.routing.ingestors.jira_trigger import JiraTriggerIngestor
 
 logger = logging.getLogger(__name__)
 
@@ -541,16 +546,164 @@ async def handle_webhook(
         raise HTTPException(status_code=400, detail="Missing trigger_name or entity_id")
     
     logger.info(f"Received webhook: {trigger_name} for entity {entity_id}")
-    
-    # Find matching subscription
-    # TODO: Route to appropriate agent/workflow
-    # This will be expanded in the execution layer integration
-    
+
+    # Determine ingestor by trigger_name prefix and build RequestEnvelope
+    if trigger_name.startswith("JIRA_"):
+        ingestor = JiraTriggerIngestor()
+        envelope = ingestor.ingest(
+            trigger_name=trigger_name,
+            entity_id=entity_id,
+            event_data=event_data,
+            db=db,
+        )
+    else:
+        # Unsupported trigger type — store as unrouted and return
+        logger.warning(f"No ingestor for trigger prefix: {trigger_name}")
+        try:
+            unrouted = UnroutedEvent(
+                workspace_id=UUID(int=0),
+                source=trigger_name,
+                content=str(event_data)[:2000],
+                raw_payload=payload,
+                reason=f"No ingestor for trigger: {trigger_name}",
+            )
+            db.add(unrouted)
+            db.commit()
+        except Exception:
+            logger.exception("Failed to store unrouted webhook event")
+            db.rollback()
+        return {
+            "status": "unrouted",
+            "trigger_name": trigger_name,
+            "reason": f"No ingestor for trigger: {trigger_name}",
+        }
+
+    # Route the envelope through the universal router
+    universal_router = UniversalRouter(db, cache=get_routing_cache())
+    try:
+        decision = await universal_router.route(envelope)
+    except Exception:
+        logger.exception("Router failed for webhook event")
+        decision = None
+
+    if decision is None:
+        # No route found — already stored as unrouted by router
+        return {
+            "status": "unrouted",
+            "trigger_name": trigger_name,
+            "entity_id": entity_id,
+            "reason": "No route found",
+        }
+
+    # Dispatch based on routing decision (async background task)
+    if decision.route_type == "agent" and decision.agent_id is not None:
+        asyncio.create_task(
+            _dispatch_agent(
+                agent_id=decision.agent_id,
+                content=envelope.content,
+                metadata=envelope.metadata,
+            )
+        )
+    elif decision.route_type == "workflow" and decision.workflow_id is not None:
+        asyncio.create_task(
+            _dispatch_workflow(
+                workflow_id=decision.workflow_id,
+                envelope=envelope,
+            )
+        )
+
     return {
-        "status": "received",
+        "status": "dispatched",
         "trigger_name": trigger_name,
-        "entity_id": entity_id
+        "entity_id": entity_id,
+        "route_type": decision.route_type,
+        "agent_id": decision.agent_id,
+        "workflow_id": decision.workflow_id,
+        "confidence": decision.confidence,
+        "reasoning": decision.reasoning[:200],
     }
+
+
+# =============================================================================
+# Webhook Dispatch Helpers
+# =============================================================================
+
+async def _dispatch_agent(
+    agent_id: int,
+    content: str,
+    metadata: Dict[str, Any],
+) -> None:
+    """Execute an agent in the background for a webhook-triggered request."""
+    try:
+        from modules.agents.factory.agent_factory import AgentFactory
+
+        with get_db_session() as db:
+            factory = AgentFactory(db_session=db)
+            result = await factory.execute_with_prompt(
+                agent=agent_id,
+                prompt=content,
+                context=metadata,
+            )
+            status = result.get("status", "unknown")
+            logger.info(
+                f"[webhook] Agent {agent_id} execution completed: status={status}"
+            )
+    except Exception:
+        logger.exception(f"[webhook] Agent {agent_id} dispatch failed")
+
+
+async def _dispatch_workflow(
+    workflow_id: int,
+    envelope: "RequestEnvelope",
+) -> None:
+    """Execute a workflow in the background for a webhook-triggered request.
+
+    If a recipe is registered for *workflow_id* in the recipe registry,
+    the recipe is executed directly.  Otherwise, falls back to the
+    standard 9-stage workflow pipeline.
+    """
+    try:
+        from modules.workflows.recipes import get_recipe
+
+        recipe_cls = get_recipe(workflow_id=workflow_id)
+        if recipe_cls is not None:
+            # Recipe-based dispatch
+            with get_db_session() as db:
+                recipe = recipe_cls()
+                result = await recipe.execute(envelope, db, envelope.workspace_id)
+                logger.info(
+                    "[webhook] Recipe for workflow %d completed: success=%s",
+                    workflow_id,
+                    result.success if hasattr(result, "success") else "unknown",
+                )
+            return
+
+        # Standard workflow dispatch (no matching recipe)
+        from api.workflows import execute_workflow_with_progress
+        from core.models.core import WorkflowExecution, ExecutionStatus
+
+        with get_db_session() as db:
+            execution = WorkflowExecution(
+                workflow_id=workflow_id,
+                input_data={
+                    "content": envelope.content,
+                    "metadata": envelope.metadata,
+                },
+                status=ExecutionStatus.PENDING.value,
+            )
+            db.add(execution)
+            db.commit()
+            db.refresh(execution)
+            execution_id = execution.id
+
+        await execute_workflow_with_progress(execution_id, {})
+        logger.info(
+            "[webhook] Workflow %d execution %d completed",
+            workflow_id,
+            execution_id,
+        )
+    except Exception:
+        logger.exception("[webhook] Workflow %d dispatch failed", workflow_id)
 
 
 # =============================================================================

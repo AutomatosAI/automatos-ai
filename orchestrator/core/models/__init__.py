@@ -16,6 +16,7 @@ from .context_policy import *
 from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
 from .composio_cache import *  # Redesign: Composio metadata cache
+from .routing import *  # PRD-50: Universal Orchestrator Router
 
 # Optional model packs (may not exist in all deployments/branches)
 try:
