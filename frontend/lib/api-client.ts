@@ -839,13 +839,23 @@ class ApiClient {
 
       if (!response.ok) {
         console.error('❌ API Error:', response.status, response.statusText)
+        // Try to extract detail message from response body
+        let detail = response.statusText
+        try {
+          const errorBody = await response.json()
+          if (errorBody?.detail) {
+            detail = typeof errorBody.detail === 'string' ? errorBody.detail : JSON.stringify(errorBody.detail)
+          }
+        } catch {
+          // Response body not JSON, use statusText
+        }
         if (response.status === 401) {
           throw new Error(
             'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
             'Make sure you are signed in and the API client is configured with Clerk.'
           )
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(detail || `HTTP ${response.status}`)
       }
 
       const data = await response.json()

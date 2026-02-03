@@ -311,6 +311,8 @@ async def update_workflow_recipe(
     System recipes cannot be modified.
     """
     try:
+        logger.info(f"[update_recipe] PUT {recipe_id} - fields: {list(recipe_data.keys())}")
+
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
@@ -344,6 +346,7 @@ async def update_workflow_recipe(
         if 'steps' in recipe_data:
             is_valid, error = recipe.validate_steps()
             if not is_valid:
+                logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
                 raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
 
             # Validate agent_id references exist in workspace
@@ -356,6 +359,7 @@ async def update_workflow_recipe(
                 existing_ids = {a.id for a in existing_agents}
                 missing = [aid for aid in agent_ids if aid not in existing_ids]
                 if missing:
+                    logger.warning(f"[update_recipe] Agent IDs not found for {recipe_id}: {missing}")
                     raise HTTPException(
                         status_code=400,
                         detail=f"Agent IDs not found in workspace: {missing}"
@@ -365,12 +369,14 @@ async def update_workflow_recipe(
         if 'execution_config' in recipe_data:
             is_valid, error = recipe.validate_execution_config()
             if not is_valid:
+                logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
                 raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
 
         # Validate schedule_config if updated
         if 'schedule_config' in recipe_data:
             is_valid, error = recipe.validate_schedule_config()
             if not is_valid:
+                logger.warning(f"[update_recipe] schedule_config validation failed for {recipe_id}: {error}")
                 raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
 
         recipe.updated_at = datetime.now()

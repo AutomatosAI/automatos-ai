@@ -141,29 +141,45 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
   }
 
   const handleEditClick = (recipe: any) => {
-    // Transform recipe data to CreateRecipeModal format
+    // Transform recipe data to CreateRecipeModal form format
+    // Backend stores different field names than the form expects
+    const backendConfig = recipe.execution_config || {}
+    const backendSchedule = recipe.schedule_config || {}
+
+    // Map steps: backend stores agent_id as integer, form expects string
+    const formSteps = (recipe.steps || []).map((step: any, idx: number) => ({
+      step_id: step.step_id || `step-${idx + 1}`,
+      order: step.order ?? idx + 1,
+      agent_id: step.agent_id != null ? String(step.agent_id) : '',
+      prompt_template: step.prompt_template || '',
+      pass_to: step.pass_to,
+      error_handling: step.error_handling || 'stop',
+    }))
+
     const initialData = {
       name: recipe.name || '',
       description: recipe.description || '',
       inputs: typeof recipe.inputs === 'string' ? recipe.inputs : JSON.stringify(recipe.inputs || {}, null, 2),
       outputs: typeof recipe.outputs === 'string' ? recipe.outputs : JSON.stringify(recipe.outputs || {}, null, 2),
-      steps: recipe.steps || [],
-      execution_config: recipe.execution_config || {
-        mode: 'sequential',
-        max_retries: 3,
-        retry_delay: 1000,
-        backoff_strategy: 'exponential',
-        timeout_per_step: 120000,
-        total_timeout: 600000,
-        quality_threshold: 0.7,
-        auto_learning: true,
-        parallel_limit: 5,
-        memory_isolation: 'shared',
+      steps: formSteps,
+      execution_config: {
+        mode: backendConfig.mode || 'sequential',
+        max_retries: backendConfig.max_retries ?? 3,
+        retry_delay: backendConfig.retry_delay ?? 1000,
+        backoff_strategy: backendConfig.backoff_strategy || 'exponential',
+        // Backend stores seconds as per_step_timeout, form expects ms as timeout_per_step
+        timeout_per_step: (backendConfig.per_step_timeout ?? 120) * 1000,
+        total_timeout: (backendConfig.total_timeout ?? 600) * 1000,
+        quality_threshold: backendConfig.quality_threshold ?? 0.7,
+        // Backend stores as auto_learn, form expects auto_learning
+        auto_learning: backendConfig.auto_learn ?? true,
+        parallel_limit: backendConfig.parallel_limit ?? 5,
+        memory_isolation: backendConfig.memory_isolation || 'shared',
       },
-      schedule_config: recipe.schedule_config || {
-        type: 'manual',
-        cron_expression: '',
-        trigger_config: {},
+      schedule_config: {
+        type: backendSchedule.type || 'manual',
+        cron_expression: backendSchedule.cron_expression || '',
+        trigger_config: backendSchedule.trigger_config || {},
       },
     }
 
