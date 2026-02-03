@@ -183,14 +183,14 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
         )
     }, [workspaceTools])
 
-    // Get ALL workspace apps (active + added, but NOT pending)
-    // Pending apps should allow retry since OAuth never completed
+    // Get ALL workspace apps (active + added + pending)
+    // All represent apps the user has interacted with in their workspace
     const workspaceApps = useMemo(() => {
         return new Set(
             workspaceTools
                 .filter((tool: any) => {
                     const status = (tool.status || '').toLowerCase()
-                    return status === 'active' || status === 'added'
+                    return status === 'active' || status === 'added' || status === 'pending'
                 })
                 .map((tool: any) => (tool.app_name || '').toUpperCase())
         )

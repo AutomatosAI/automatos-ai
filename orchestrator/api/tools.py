@@ -205,8 +205,9 @@ async def connected(
 
     # PERFORMANCE FIX: Removed pending sync from page loads (see marketplace endpoint comment)
 
-    # Include both "active" (connected) and "added" (in workspace but not connected yet) apps
-    active = [c for c in connections if (c.get("status") or "").lower() in ("active", "added")]
+    # Include active (connected), added (in workspace, auth revoked), and pending (OAuth in progress) apps.
+    # All three represent apps the user has interacted with in their workspace.
+    active = [c for c in connections if (c.get("status") or "").lower() in ("active", "added", "pending")]
 
     # Enrich with cached metadata if present
     conn_app_names = [c.get("app_name") for c in active if c.get("app_name")]
