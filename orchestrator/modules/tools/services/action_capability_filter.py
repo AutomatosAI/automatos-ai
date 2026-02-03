@@ -270,6 +270,14 @@ class ActionCapabilityFilter:
         ).scalar_one_or_none()
 
         if not metadata:
+            # If the metadata table is empty (sync hasn't been run yet),
+            # don't block — classification hasn't been performed.
+            total = self.db.execute(
+                select(ComposioActionMetadata.action_id).limit(1)
+            ).first()
+            if not total:
+                logger.info(f"Action metadata table empty (sync not run), allowing: {action_id}")
+                return True, "Metadata not yet synced (allowing)"
             return False, f"Unknown action: {action_id}"
 
         # Extract capabilities from intent
