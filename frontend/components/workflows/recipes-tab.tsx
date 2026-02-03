@@ -33,16 +33,24 @@ import {
   useRecordRecipeUsage,
   useExecuteRecipe,
   useSubmitRecipeToMarketplace,
-  useRecipeSuggestions
+  useRecipeSuggestions,
+  useRecipeExecutions
 } from '@/hooks/use-recipe-api'
 import { useToast } from '@/hooks/use-toast'
 import { CreateRecipeModal } from './create-recipe-modal'
 import { ViewRecipeModal } from './view-recipe-modal'
 import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
 
+interface RecipeExecutionInfo {
+  recipeExecutionId: string
+  recipeId: string
+  recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
+  recipeName: string
+}
+
 interface RecipesTabProps {
   onUseRecipe: (recipe: any) => void
-  onExecuteRecipe?: (workflowId: number) => void
+  onExecuteRecipe?: (workflowId: number, recipeExecInfo?: RecipeExecutionInfo) => void
   onOpenCreateModal?: () => void
 }
 
@@ -77,6 +85,13 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
   // Fetch suggestions for the selected recipe when viewing
   const { data: selectedRecipeSuggestions } = useRecipeSuggestions(
     showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  )
+
+  // Fetch recent executions for the selected recipe when viewing
+  const selectedRecipeId = showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  const { data: selectedRecipeExecutions, isLoading: executionsLoading } = useRecipeExecutions(
+    selectedRecipeId,
+    { limit: 5 }
   )
 
   const recipes = (recipesData as any)?.items || []
@@ -119,9 +134,19 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
         description: `"${recipe.name}" is now cooking.`,
         variant: 'default',
       })
-      // Navigate to ExecutionKitchen via parent
-      if (onExecuteRecipe && result?.workflow_id) {
-        onExecuteRecipe(result.workflow_id)
+      // Navigate to ExecutionKitchen via parent with recipe execution info
+      if (onExecuteRecipe && result?.recipe_execution_id) {
+        onExecuteRecipe(0, {
+          recipeExecutionId: result.recipe_execution_id,
+          recipeId: recipeId,
+          recipeSteps: (recipe.steps || []).map((s: any, i: number) => ({
+            step_id: s.step_id || `step-${i + 1}`,
+            order: s.order || i + 1,
+            prompt_template: s.prompt_template || '',
+            agent_id: s.agent_id,
+          })),
+          recipeName: recipe.name,
+        })
       }
     } catch (error: any) {
       toast({
@@ -481,6 +506,8 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
         }}
         recipe={selectedRecipe}
         suggestions={selectedRecipeSuggestions}
+        executions={(selectedRecipeExecutions as any)?.items || (selectedRecipeExecutions as any) || []}
+        executionsLoading={executionsLoading}
         onEdit={() => {
           setShowViewModal(false)
           handleEditClick(selectedRecipe)

@@ -1,17 +1,30 @@
 'use client'
 
 import * as React from 'react'
-import { X, Eye, Lightbulb, Bot, Play, Share2, Code, Settings, Calendar, BarChart3, Zap, CheckCircle, ArrowRight, Download, Users, Star, AlertTriangle } from 'lucide-react'
+import { X, Eye, Lightbulb, Bot, Play, Share2, Code, Settings, Calendar, BarChart3, Zap, CheckCircle, ArrowRight, Download, Users, Star, AlertTriangle, Clock, XCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
+import { cn } from '@/lib/utils'
+
+interface RecipeExecutionHistoryItem {
+  id: number | string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  current_step?: number
+  total_steps?: number
+  started_at?: string
+  completed_at?: string
+  total_duration_ms?: number
+}
 
 interface ViewRecipeModalProps {
   open: boolean
   onClose: () => void
   recipe: any
   suggestions?: any
+  executions?: RecipeExecutionHistoryItem[]
+  executionsLoading?: boolean
   onEdit?: () => void
   onExecute?: () => void
   onShare?: () => void
@@ -22,6 +35,8 @@ export function ViewRecipeModal({
   onClose,
   recipe,
   suggestions,
+  executions,
+  executionsLoading,
   onEdit,
   onExecute,
   onShare,
@@ -232,6 +247,88 @@ export function ViewRecipeModal({
                     </div>
                   )}
                 </div>
+
+                {/* Recent Executions (workspace recipes only) */}
+                {!isMarketplaceRecipe && (
+                  <div className="glass-card rounded-xl p-6">
+                    <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-orange-400" />
+                      Recent Runs
+                    </h3>
+                    {executionsLoading ? (
+                      <div className="flex items-center justify-center py-6 text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        <span className="text-sm">Loading execution history...</span>
+                      </div>
+                    ) : executions && executions.length > 0 ? (
+                      <div className="space-y-2">
+                        {executions.slice(0, 5).map((exec) => (
+                          <div
+                            key={exec.id}
+                            className="flex items-center gap-3 bg-secondary/30 rounded-lg px-4 py-3 border border-white/5"
+                          >
+                            {/* Status icon */}
+                            <div className={cn(
+                              'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0',
+                              exec.status === 'completed' && 'bg-emerald-400/20',
+                              exec.status === 'failed' && 'bg-red-400/20',
+                              exec.status === 'running' && 'bg-orange-400/20',
+                              exec.status === 'pending' && 'bg-gray-400/20',
+                            )}>
+                              {exec.status === 'completed' ? (
+                                <CheckCircle className="w-4 h-4 text-emerald-400" />
+                              ) : exec.status === 'failed' ? (
+                                <XCircle className="w-4 h-4 text-red-400" />
+                              ) : exec.status === 'running' ? (
+                                <Loader2 className="w-4 h-4 text-orange-400 animate-spin" />
+                              ) : (
+                                <Clock className="w-4 h-4 text-gray-400" />
+                              )}
+                            </div>
+
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    'text-[10px] h-4 capitalize',
+                                    exec.status === 'completed' && 'border-emerald-400/30 text-emerald-400',
+                                    exec.status === 'failed' && 'border-red-400/30 text-red-400',
+                                    exec.status === 'running' && 'border-orange-400/30 text-orange-400',
+                                    exec.status === 'pending' && 'border-gray-400/30 text-gray-400',
+                                  )}
+                                >
+                                  {exec.status}
+                                </Badge>
+                                {exec.current_step != null && exec.total_steps != null && exec.status !== 'completed' && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    Step {exec.current_step}/{exec.total_steps}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Duration + timestamp */}
+                            <div className="flex items-center gap-3 flex-shrink-0 text-[11px] text-muted-foreground">
+                              {exec.total_duration_ms != null && (
+                                <span>{(exec.total_duration_ms / 1000).toFixed(1)}s</span>
+                              )}
+                              {exec.started_at && (
+                                <span>{new Date(exec.started_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-gray-500">
+                        <p className="text-sm">No executions yet.</p>
+                        <p className="text-xs mt-1">Click Cook to run this recipe for the first time.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Why People Love This (ONLY for Marketplace) */}
                 {isMarketplaceRecipe && (

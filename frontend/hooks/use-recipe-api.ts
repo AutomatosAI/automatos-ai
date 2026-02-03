@@ -12,6 +12,7 @@ export const recipeKeys = {
   categories: () => [...recipeKeys.all, 'categories'] as const,
   suggestions: (id: string) => [...recipeKeys.all, 'suggestions', id] as const,
   executions: (id: string, params?: any) => [...recipeKeys.all, 'executions', id, params] as const,
+  execution: (recipeId: string, executionId: string) => [...recipeKeys.all, 'execution', recipeId, executionId] as const,
 }
 
 // List recipes with filtering
@@ -174,6 +175,23 @@ export function useRecipeExecutions(recipeId: string | undefined, params?: { sta
     queryFn: () => apiClient.getRecipeExecutions(recipeId!, params),
     enabled: !!recipeId,
     staleTime: 1 * 60 * 1000, // 1 minute
+  })
+}
+
+// Get single recipe execution detail with polling while running
+export function useRecipeExecution(recipeId: string | undefined, executionId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.execution(recipeId || '', executionId || ''),
+    queryFn: () => apiClient.getRecipeExecution(recipeId!, executionId!),
+    enabled: !!recipeId && !!executionId,
+    refetchInterval: (data: any) => {
+      // Poll every 3s while execution is running or pending
+      const status = data?.status
+      if (status === 'running' || status === 'pending') {
+        return 3000
+      }
+      return false // Stop polling when completed/failed
+    },
   })
 }
 

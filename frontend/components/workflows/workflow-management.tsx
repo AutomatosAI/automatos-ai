@@ -187,6 +187,14 @@ export function WorkflowManagement() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [autoStartExecution, setAutoStartExecution] = useState(false)
 
+  // Recipe direct execution state
+  const [recipeExecInfo, setRecipeExecInfo] = useState<{
+    recipeExecutionId: string
+    recipeId: string
+    recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
+    recipeName: string
+  } | null>(null)
+
   // Workflow creation form state
   const [workflowForm, setWorkflowForm] = useState({
     name: '',
@@ -497,12 +505,16 @@ export function WorkflowManagement() {
   })
 
   // Show Execution Theater if workflow is selected
-  if (showExecutionKitchen && selectedWorkflowId) {
+  if (showExecutionKitchen && (selectedWorkflowId || recipeExecInfo)) {
     return (
-      <ExecutionKitchen 
-        workflowId={selectedWorkflowId}
+      <ExecutionKitchen
+        workflowId={selectedWorkflowId || 0}
         onBack={handleBackFromKitchen}
         autoStart={autoStartExecution}
+        executionType={recipeExecInfo ? 'recipe' : 'workflow'}
+        recipeExecutionId={recipeExecInfo?.recipeExecutionId}
+        recipeId={recipeExecInfo?.recipeId}
+        recipeSteps={recipeExecInfo?.recipeSteps}
       />
     )
   }
@@ -625,8 +637,16 @@ export function WorkflowManagement() {
                 handleTemplateChange(recipeId)
                 setShowCreateModal(true) // Open modal after populating recipe data
               }}
-              onExecuteRecipe={(workflowId: number) => {
-                setSelectedWorkflowId(workflowId)
+              onExecuteRecipe={(workflowId: number, recipeExecution?: any) => {
+                if (recipeExecution) {
+                  // Direct recipe execution mode
+                  setRecipeExecInfo(recipeExecution)
+                  setSelectedWorkflowId(null)
+                } else {
+                  // Legacy workflow execution mode
+                  setSelectedWorkflowId(workflowId)
+                  setRecipeExecInfo(null)
+                }
                 setAutoStartExecution(false) // Execution already started on backend
                 setShowExecutionKitchen(true)
               }}

@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
-from core.models import Workflow, WorkflowExecution, Agent, workflow_agents
+from core.models import Agent
 from core.models.core import RecipeExecution
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
@@ -547,17 +547,20 @@ async def execute_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Execute a recipe directly via the 9-stage workflow engine.
+    Execute a recipe directly — step by step, no 9-stage pipeline.
 
-    Creates a Workflow from recipe data, a WorkflowExecution record, and launches
-    execute_workflow_with_progress as an async task. Also creates a RecipeExecution
-    record for recipe-specific tracking.
+    Creates a RecipeExecution record and launches execute_recipe_direct()
+    as an async task. Each step calls its assigned agent with filtered
+    Composio actions. Results stored in RecipeExecution.step_results.
 
     Body (optional):
     - input_data: Dict matching the recipe's inputs schema
     """
     try:
-        logger.info(f"[execute_recipe] Starting for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
+        import asyncio
+        from api.recipe_executor import execute_recipe_direct
+
+        logger.info(f"[execute_recipe] Starting direct execution for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
 
         # Fetch recipe and validate ownership
         recipe = db.query(WorkflowRecipe).filter(
@@ -570,110 +573,33 @@ async def execute_recipe(
             logger.warning(f"[execute_recipe] Recipe not found: {recipe_id}")
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
+        if not recipe.steps:
+            raise HTTPException(status_code=400, detail="Recipe has no steps to execute")
+
         logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
 
         input_data = body.get('input_data') or {}
 
-        # Fill in defaults for missing required inputs (don't block execution)
+        # Fill in defaults for missing required inputs
         if recipe.inputs:
             for param_name, param_def in recipe.inputs.items():
                 if isinstance(param_def, dict) and param_name not in input_data:
                     default = param_def.get('default', '')
                     input_data[param_name] = default
-                    if param_def.get('required'):
-                        logger.info(f"[execute_recipe] Auto-filled missing required input '{param_name}' with default")
 
-        # Build workflow_definition from recipe steps (RECIPE mode)
-        # Enrich steps with 'description' field from prompt_template so the
-        # execution manager can display meaningful step names instead of "Unknown"
-        recipe_steps = []
-        for step in (recipe.steps or []):
-            enriched = dict(step)
-            if 'description' not in enriched and enriched.get('prompt_template'):
-                enriched['description'] = enriched['prompt_template']
-            if 'name' not in enriched and enriched.get('prompt_template'):
-                enriched['name'] = enriched['prompt_template'][:80]
-            recipe_steps.append(enriched)
-
-        workflow_definition = {
-            "steps": recipe_steps,
-            "config": recipe.execution_config or {},
-            "goal": recipe.description,
-            "category": "recipe",
-            "priority": "medium",
-            "version": recipe.version or "1.0",
-            "recipe_template_id": recipe.template_id,
-        }
-
-        # Create a Workflow from recipe data
-        timestamp = datetime.now().strftime("%H%M%S")
-        workflow = Workflow(
-            workspace_id=ctx.workspace_id,
-            name=f"{recipe.name} {timestamp}",
-            description=recipe.description,
-            workflow_definition=workflow_definition,
-            status='active',
-            created_by=ctx.user.email if ctx.user else 'system',
-        )
-        db.add(workflow)
-        db.flush()  # Get workflow.id without committing
-
-        # Associate agents from recipe steps to the Workflow
-        agent_ids_from_steps = list({
-            step.get('agent_id') for step in recipe_steps if step.get('agent_id')
-        })
-        if agent_ids_from_steps:
-            agent_objects = db.query(Agent).filter(
-                Agent.id.in_(agent_ids_from_steps),
-                Agent.workspace_id == ctx.workspace_id
-            ).all()
-            workflow.agents.extend(agent_objects)
-
-        # Pick first step's agent as default agent_id for WorkflowExecution (required field)
-        default_agent_id = None
-        if recipe_steps and recipe_steps[0].get('agent_id'):
-            default_agent_id = recipe_steps[0]['agent_id']
-        if not default_agent_id and agent_ids_from_steps:
-            default_agent_id = agent_ids_from_steps[0]
-        if not default_agent_id:
-            # Fallback: get any active agent in workspace
-            fallback_agent = db.query(Agent).filter(
-                Agent.workspace_id == ctx.workspace_id,
-                Agent.status == 'active'
-            ).first()
-            if fallback_agent:
-                default_agent_id = fallback_agent.id
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No active agents available to execute this recipe"
-                )
-
-        # Create WorkflowExecution record
-        workflow_execution = WorkflowExecution(
-            workflow_id=workflow.id,
-            agent_id=default_agent_id,
-            workspace_id=ctx.workspace_id,
-            input_data=input_data or {},
-            status='pending',
-        )
-        db.add(workflow_execution)
-        db.flush()
-
-        # Create RecipeExecution record for recipe-specific tracking
+        # Create RecipeExecution record
         recipe_execution_id = f"exec-{uuid4().hex[:12]}"
         recipe_execution = RecipeExecution(
             execution_id=recipe_execution_id,
             recipe_id=recipe.id,
             workspace_id=ctx.workspace_id,
-            status='running',
+            status='pending',
             input_data=input_data,
-            current_stage=1,
             current_step=0,
             triggered_by=ctx.user.email if ctx.user else 'anonymous',
             execution_metadata={
-                'workflow_id': workflow.id,
-                'workflow_execution_id': workflow_execution.id,
+                'execution_type': 'recipe_direct',
+                'total_steps': len(recipe.steps),
             },
         )
         db.add(recipe_execution)
@@ -683,27 +609,25 @@ async def execute_recipe(
         recipe.last_used_at = datetime.now()
 
         db.commit()
-        db.refresh(workflow)
-        db.refresh(workflow_execution)
 
-        logger.info(
-            f"Recipe execution started: recipe={recipe_id}, "
-            f"workflow_id={workflow.id}, execution_id={workflow_execution.id}"
-        )
+        logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
 
-        # Launch execute_workflow_with_progress as async task
-        import asyncio
-        from api.workflows import execute_workflow_with_progress
+        # Launch direct executor as async task
         asyncio.create_task(
-            execute_workflow_with_progress(workflow_execution.id, {})
+            execute_recipe_direct(
+                recipe_execution_id=recipe_execution_id,
+                recipe_id=recipe.id,
+                workspace_id=ctx.workspace_id,
+                input_data=input_data,
+            )
         )
 
         return {
-            "workflow_id": workflow.id,
-            "workflow_execution_id": workflow_execution.id,
-            "recipe_execution_id": recipe_execution.execution_id,
+            "recipe_execution_id": recipe_execution_id,
+            "recipe_id": recipe_id,
             "status": "started",
-            "message": "Recipe execution started",
+            "total_steps": len(recipe.steps),
+            "message": "Recipe execution started (direct mode)",
         }
 
     except HTTPException as he:
@@ -713,6 +637,73 @@ async def execute_recipe(
         logger.error(f"[execute_recipe] Unhandled error: {e}", exc_info=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error executing recipe: {str(e)}")
+
+
+@router.get("/{recipe_id}/executions/{execution_id}")
+async def get_recipe_execution_detail(
+    recipe_id: str,
+    execution_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed status of a specific recipe execution.
+
+    Returns step-level results, current progress, and overall status.
+    Used by frontend for polling execution progress.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Get execution
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        total_steps = len(recipe.steps or [])
+        step_results = execution.step_results or []
+
+        return {
+            "execution_id": execution.execution_id,
+            "recipe_id": recipe_id,
+            "recipe_name": recipe.name,
+            "status": execution.status,
+            "current_step": execution.current_step or 0,
+            "total_steps": total_steps,
+            "step_results": step_results,
+            "input_data": execution.input_data,
+            "output_data": execution.output_data,
+            "error_message": execution.error_message,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+            "triggered_by": execution.triggered_by,
+            "execution_metadata": execution.execution_metadata,
+            "total_duration_ms": (
+                execution.output_data.get("total_duration_ms")
+                if execution.output_data else None
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting execution detail: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting execution: {str(e)}")
 
 
 # ===================================================================

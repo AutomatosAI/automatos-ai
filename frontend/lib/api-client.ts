@@ -1378,6 +1378,10 @@ class ApiClient {
     return this.request(`/api/workflow-recipes/${recipeId}/executions${query ? '?' + query : ''}`)
   }
 
+  async getRecipeExecution(recipeId: string, executionId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
+  }
+
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
 
   /** Index a GitHub repository */

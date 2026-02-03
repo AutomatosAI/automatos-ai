@@ -19,7 +19,8 @@ import {
   FileText,
   Sparkles,
   Activity,
-  Lightbulb
+  Lightbulb,
+  Loader2
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,11 +42,16 @@ import {
   type MemoryData,
 } from './theater/theater-self-learning-panel'
 import { RecipeSuggestionsPanel, type SuggestionsData } from './recipe-suggestions-panel'
+import { RecipeStepProgress, type RecipeStepResult } from './recipe-step-progress'
 
 interface ExecutionKitchenProps {
   workflowId: number
   onBack: () => void
   autoStart?: boolean
+  executionType?: 'workflow' | 'recipe'
+  recipeExecutionId?: string
+  recipeId?: string
+  recipeSteps?: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
 }
 
 interface LogEntry {
@@ -463,7 +469,17 @@ function buildMemoryData(execution: any): MemoryData | null {
 }
 
 // Main Component
-export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: ExecutionKitchenProps) {
+export function ExecutionKitchen({
+  workflowId,
+  onBack,
+  autoStart = false,
+  executionType = 'workflow',
+  recipeExecutionId: initialRecipeExecutionId,
+  recipeId,
+  recipeSteps,
+}: ExecutionKitchenProps) {
+  const isRecipeMode = executionType === 'recipe'
+
   const [isExecuting, setIsExecuting] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [executionData, setExecutionData] = useState<any>(null)
@@ -488,6 +504,50 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
   const [suggestionsData, setSuggestionsData] = useState<any>(null)
   const executionCompleteCountRef = useRef(0)
   const prevIsExecutingRef = useRef(false)
+
+  // Recipe direct execution state
+  const [recipeExecId, setRecipeExecId] = useState<string | undefined>(initialRecipeExecutionId)
+  const [recipeExecData, setRecipeExecData] = useState<any>(null)
+  const [recipeStepResults, setRecipeStepResults] = useState<RecipeStepResult[]>([])
+
+  // Recipe execution polling
+  useEffect(() => {
+    if (!isRecipeMode || !recipeId || !recipeExecId) return
+
+    // Set initial executing state
+    setIsExecuting(true)
+    setExecutionData({ name: 'Recipe Execution', description: 'Direct recipe execution' })
+
+    const poll = async () => {
+      try {
+        const data: any = await apiClient.getRecipeExecution(recipeId, recipeExecId!)
+        setRecipeExecData(data)
+        setRecipeStepResults(data.step_results || [])
+        setExecutionData((prev: any) => ({
+          ...prev,
+          name: data.recipe_name || prev?.name || 'Recipe',
+          description: `Execution ${data.execution_id}`,
+          execution: data,
+        }))
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          setIsExecuting(false)
+        }
+      } catch (err) {
+        console.error('Error polling recipe execution:', err)
+      }
+    }
+
+    // Initial fetch
+    poll()
+
+    // Poll every 3s while running
+    const interval = setInterval(() => {
+      poll()
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [isRecipeMode, recipeId, recipeExecId])
 
   const logsEndRef = useRef<HTMLDivElement>(null)
   const execution = executionData?.execution
@@ -1003,13 +1063,24 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
             </Badge>
           </div>
           <div className="flex items-center gap-2">
-            {!isExecuting ? (
-              <Button onClick={handleStartExecution} className="gap-2 glow-orange"><Play className="w-4 h-4" />Execute</Button>
+            {isRecipeMode ? (
+              // Recipe mode: execution already started, just show status
+              isExecuting && (
+                <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/30">
+                  <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                  Cooking...
+                </Badge>
+              )
             ) : (
-              <>
-                <Button variant="outline" size="sm" onClick={handlePauseExecution}><Pause className="w-4 h-4 mr-2" />Pause</Button>
-                <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300" onClick={handleStopExecution}><Square className="w-4 h-4 mr-2" />Stop</Button>
-              </>
+              // Workflow mode: full execution controls
+              !isExecuting ? (
+                <Button onClick={handleStartExecution} className="gap-2 glow-orange"><Play className="w-4 h-4" />Execute</Button>
+              ) : (
+                <>
+                  <Button variant="outline" size="sm" onClick={handlePauseExecution}><Pause className="w-4 h-4 mr-2" />Pause</Button>
+                  <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300" onClick={handleStopExecution}><Square className="w-4 h-4 mr-2" />Stop</Button>
+                </>
+              )
             )}
             <Button variant="ghost" size="icon" onClick={() => setIsFullscreen(!isFullscreen)}>
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1018,41 +1089,60 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
         </div>
       </div>
 
-      {/* Stage Pipeline - using new TheaterStageProgress component */}
-      <div className="px-6 py-4">
-        <TheaterStageProgress currentStage={currentStage} onStageClick={handleStageClick} />
-      </div>
-
-      {/* Step Execution Timeline - visible when we have step data */}
-      {stepExecutions.length > 0 && (
-        <div className="px-6 pb-4">
-          <div className="glass-panel rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Zap className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold">Step Execution Timeline</h3>
-              <Badge variant="outline" className="text-[10px] h-5 ml-auto">
-                {stepExecutions.filter(s => s.status === 'success').length}/{stepExecutions.length} completed
-              </Badge>
-            </div>
-            <div className="space-y-3 max-h-[300px] overflow-y-auto theater-scrollbar pr-1">
-              {stepExecutions.map((step, index) => (
-                <TheaterStepExecution key={step.step_id} step={step} index={index} />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Self-Learning Panel - visible after Learn stage (stage 6+) */}
-      {showSelfLearning && (learningData || qualityData || memoryData) && (
-        <div className="px-6 pb-4">
-          <TheaterSelfLearningPanel
-            learningData={learningData}
-            qualityData={qualityData}
-            memoryData={memoryData}
-            defaultOpen={false}
+      {/* Recipe Mode: Step Progress | Workflow Mode: 9-Stage Pipeline */}
+      {isRecipeMode ? (
+        <div className="px-6 py-4">
+          <RecipeStepProgress
+            currentStep={recipeExecData?.current_step || 0}
+            totalSteps={recipeExecData?.total_steps || recipeSteps?.length || 0}
+            status={
+              recipeExecData?.status === 'completed' ? 'completed' :
+              recipeExecData?.status === 'failed' ? 'failed' :
+              recipeExecData?.status === 'running' ? 'running' : 'pending'
+            }
+            stepResults={recipeStepResults}
+            steps={recipeSteps}
           />
         </div>
+      ) : (
+        <>
+          {/* Stage Pipeline - using new TheaterStageProgress component */}
+          <div className="px-6 py-4">
+            <TheaterStageProgress currentStage={currentStage} onStageClick={handleStageClick} />
+          </div>
+
+          {/* Step Execution Timeline - visible when we have step data */}
+          {stepExecutions.length > 0 && (
+            <div className="px-6 pb-4">
+              <div className="glass-panel rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Zap className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-semibold">Step Execution Timeline</h3>
+                  <Badge variant="outline" className="text-[10px] h-5 ml-auto">
+                    {stepExecutions.filter(s => s.status === 'success').length}/{stepExecutions.length} completed
+                  </Badge>
+                </div>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto theater-scrollbar pr-1">
+                  {stepExecutions.map((step, index) => (
+                    <TheaterStepExecution key={step.step_id} step={step} index={index} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Self-Learning Panel - visible after Learn stage (stage 6+) */}
+          {showSelfLearning && (learningData || qualityData || memoryData) && (
+            <div className="px-6 pb-4">
+              <TheaterSelfLearningPanel
+                learningData={learningData}
+                qualityData={qualityData}
+                memoryData={memoryData}
+                defaultOpen={false}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* Suggestions Panel - shown when user clicks "Review" on notification toast */}
@@ -1109,65 +1199,107 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
       {/* Main Content: Log (75%) + Sidebar (25%) */}
       <div className="flex-1 flex gap-4 px-6 pb-6 min-h-0">
         <div className="flex-1 flex flex-col gap-3">
-          {/* Stream View Toggle */}
-          <div className="flex items-center justify-between glass-panel rounded-xl p-2">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="stream-toggle" className="text-xs text-muted-foreground cursor-pointer">
-                Stream View:
-              </Label>
-              <div className="flex items-center gap-2 bg-black/20 rounded-lg p-1">
-                <button
-                  onClick={() => setUseAISDK(false)}
-                  className={cn(
-                    "px-3 py-1 text-xs rounded-md transition-all",
-                    !useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Detailed Logs
-                </button>
-                <button
-                  onClick={() => setUseAISDK(true)}
-                  className={cn(
-                    "px-3 py-1 text-xs rounded-md transition-all",
-                    useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  AI SDK Stream
-                </button>
-              </div>
+          {isRecipeMode ? (
+            /* Recipe mode: show execution output or waiting message */
+            <div className="flex-1 glass-panel rounded-2xl p-4 overflow-auto theater-scrollbar">
+              {recipeExecData?.status === 'completed' && recipeExecData?.output_data?.final_output ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <h3 className="text-sm font-semibold text-emerald-400">Execution Complete</h3>
+                    {recipeExecData?.output_data?.total_duration_ms && (
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {(recipeExecData.output_data.total_duration_ms / 1000).toFixed(1)}s total
+                      </span>
+                    )}
+                  </div>
+                  <pre className="text-sm text-foreground/90 whitespace-pre-wrap break-words">
+                    {recipeExecData.output_data.final_output}
+                  </pre>
+                </div>
+              ) : recipeExecData?.status === 'failed' ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-4 h-4 text-red-400" />
+                    <h3 className="text-sm font-semibold text-red-400">Execution Failed</h3>
+                  </div>
+                  <p className="text-sm text-red-400/80">{recipeExecData.error_message || 'Unknown error'}</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
+                  <p className="text-sm text-muted-foreground">Executing recipe steps...</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">
+                    Step {recipeExecData?.current_step || 0} of {recipeExecData?.total_steps || '?'}
+                  </p>
+                </div>
+              )}
             </div>
-            {useAISDK && currentExecutionId && (
-              <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
-                <Sparkles className="w-3 h-3 mr-1" />
-                Real-time AI SDK
-              </Badge>
-            )}
-          </div>
-
-          {/* Conditional View */}
-          {useAISDK && currentExecutionId ? (
-            <WorkflowStreamViewer
-              executionId={currentExecutionId}
-              className="flex-1"
-              onStageUpdate={(stage, stageName) => {
-                setCurrentStage(stage);
-                if (!completedStages.includes(stage - 1) && stage > 1) {
-                  setCompletedStages(prev => [...prev, stage - 1]);
-                }
-              }}
-              onComplete={() => {
-                setIsExecuting(false);
-                setCompletedStages([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-                if (currentExecutionId) loadExecutionById(currentExecutionId);
-              }}
-            />
           ) : (
-            <StreamingLog logs={logs} selectedStage={selectedStageFilter} onClearFilter={() => setSelectedStageFilter(null)} />
+            <>
+              {/* Stream View Toggle */}
+              <div className="flex items-center justify-between glass-panel rounded-xl p-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="stream-toggle" className="text-xs text-muted-foreground cursor-pointer">
+                    Stream View:
+                  </Label>
+                  <div className="flex items-center gap-2 bg-black/20 rounded-lg p-1">
+                    <button
+                      onClick={() => setUseAISDK(false)}
+                      className={cn(
+                        "px-3 py-1 text-xs rounded-md transition-all",
+                        !useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Detailed Logs
+                    </button>
+                    <button
+                      onClick={() => setUseAISDK(true)}
+                      className={cn(
+                        "px-3 py-1 text-xs rounded-md transition-all",
+                        useAISDK ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      AI SDK Stream
+                    </button>
+                  </div>
+                </div>
+                {useAISDK && currentExecutionId && (
+                  <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
+                    <Sparkles className="w-3 h-3 mr-1" />
+                    Real-time AI SDK
+                  </Badge>
+                )}
+              </div>
+
+              {/* Conditional View */}
+              {useAISDK && currentExecutionId ? (
+                <WorkflowStreamViewer
+                  executionId={currentExecutionId}
+                  className="flex-1"
+                  onStageUpdate={(stage, stageName) => {
+                    setCurrentStage(stage);
+                    if (!completedStages.includes(stage - 1) && stage > 1) {
+                      setCompletedStages(prev => [...prev, stage - 1]);
+                    }
+                  }}
+                  onComplete={() => {
+                    setIsExecuting(false);
+                    setCompletedStages([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+                    if (currentExecutionId) loadExecutionById(currentExecutionId);
+                  }}
+                />
+              ) : (
+                <StreamingLog logs={logs} selectedStage={selectedStageFilter} onClearFilter={() => setSelectedStageFilter(null)} />
+              )}
+            </>
           )}
         </div>
-        <div className="w-[300px]">
-          <MetricsSidebar currentStage={currentStage} executionData={executionData} isExecuting={isExecuting} />
-        </div>
+        {!isRecipeMode && (
+          <div className="w-[300px]">
+            <MetricsSidebar currentStage={currentStage} executionData={executionData} isExecuting={isExecuting} />
+          </div>
+        )}
       </div>
     </div>
   )
