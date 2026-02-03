@@ -1145,7 +1145,14 @@ class ApiClient {
   }
 
   async getActiveWorkflows() {
-    return this.request('/api/workflows/active')
+    return this.request<{
+      active_workflows: any[];
+      recipe_runs: any[];
+      total_active: number;
+      total_recipe_runs: number;
+      system_load: number;
+      last_updated: string;
+    }>('/api/workflows/active')
   }
 
   async getWorkflowStatsDashboard() {

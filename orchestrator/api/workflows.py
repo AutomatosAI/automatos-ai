@@ -24,6 +24,7 @@ from core.models import (
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
+from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
 from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
@@ -270,13 +271,61 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
                 "updated_at": workflow.updated_at.isoformat()
             })
         
+        # Also fetch recipe executions for the Cooking tab
+        recipe_runs = []
+        try:
+            recent_recipe_execs = db.query(RecipeExecution).filter(
+                RecipeExecution.workspace_id == ctx.workspace_id
+            ).order_by(desc(RecipeExecution.started_at)).limit(20).all()
+
+            for exec_rec in recent_recipe_execs:
+                # Get recipe name
+                recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == exec_rec.recipe_id).first()
+                recipe_name = recipe.name if recipe else f"Recipe #{exec_rec.recipe_id}"
+
+                step_results = exec_rec.step_results or []
+                total_steps = len(step_results) if step_results else 0
+                current_step = exec_rec.current_step or 0
+
+                # Calculate duration
+                duration = None
+                if exec_rec.completed_at and exec_rec.started_at:
+                    duration = str(exec_rec.completed_at - exec_rec.started_at)
+
+                # Get total tokens and duration from output_data
+                output = exec_rec.output_data or {}
+                total_tokens = output.get("total_tokens", 0)
+                total_duration_ms = output.get("total_duration_ms", 0)
+
+                recipe_runs.append({
+                    "id": exec_rec.id,
+                    "execution_id": exec_rec.execution_id,
+                    "recipe_id": exec_rec.recipe_id,
+                    "recipe_name": recipe_name,
+                    "type": "recipe",
+                    "status": exec_rec.status,
+                    "current_step": current_step,
+                    "total_steps": total_steps,
+                    "step_results": step_results,
+                    "started_at": exec_rec.started_at.isoformat() if exec_rec.started_at else None,
+                    "completed_at": exec_rec.completed_at.isoformat() if exec_rec.completed_at else None,
+                    "duration": duration,
+                    "total_tokens": total_tokens,
+                    "total_duration_ms": total_duration_ms,
+                    "error_message": exec_rec.error_message,
+                })
+        except Exception as recipe_err:
+            logger.warning(f"Error fetching recipe executions for cooking tab: {recipe_err}")
+
         return {
             "active_workflows": workflow_data,
+            "recipe_runs": recipe_runs,
             "total_active": len(workflow_data),
+            "total_recipe_runs": len(recipe_runs),
             "system_load": min(100, len(workflow_data) * 15),
             "last_updated": datetime.now().isoformat()
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting active workflows: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")

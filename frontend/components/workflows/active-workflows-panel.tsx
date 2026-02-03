@@ -21,7 +21,9 @@ import {
   Search,
   Filter,
   X,
-  Copy
+  Copy,
+  ChefHat,
+  Zap
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -92,9 +94,38 @@ interface ActiveWorkflow {
   updated_at: string;
 }
 
+interface RecipeRun {
+  id: number;
+  execution_id: string;
+  recipe_id: number;
+  recipe_name: string;
+  type: 'recipe';
+  status: string;
+  current_step: number;
+  total_steps: number;
+  step_results: Array<{
+    step_id: string;
+    order: number;
+    agent_name: string;
+    status: string;
+    output: string | null;
+    duration_ms: number;
+    tokens_used: number;
+    error: string | null;
+  }>;
+  started_at: string | null;
+  completed_at: string | null;
+  duration: string | null;
+  total_tokens: number;
+  total_duration_ms: number;
+  error_message: string | null;
+}
+
 interface ActiveWorkflowsData {
   active_workflows: ActiveWorkflow[];
+  recipe_runs: RecipeRun[];
   total_active: number;
+  total_recipe_runs: number;
   system_load: number;
   last_updated: string;
 }
@@ -298,11 +329,14 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
     )
   }
 
-  if (!workflowsData || workflowsData.active_workflows.length === 0) {
+  const hasWorkflows = (workflowsData?.active_workflows?.length ?? 0) > 0
+  const hasRecipeRuns = (workflowsData?.recipe_runs?.length ?? 0) > 0
+
+  if (!workflowsData || (!hasWorkflows && !hasRecipeRuns)) {
     return (
       <div className="text-center py-12">
         <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-4" />
-        <p className="text-muted-foreground">No active workflows found</p>
+        <p className="text-muted-foreground">No active workflows or recipe runs found</p>
       </div>
     )
   }
@@ -316,7 +350,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             <span className="text-white">What's</span> <span className="text-orange-500">Cooking</span>
           </h3>
           <p className="text-sm text-muted-foreground">
-            {filteredWorkflows.length} of {workflowsData.total_active} workflows • {workflowsData.system_load}% system load
+            {filteredWorkflows.length} workflow{filteredWorkflows.length !== 1 ? 's' : ''}{hasRecipeRuns ? ` • ${workflowsData.recipe_runs.length} recipe run${workflowsData.recipe_runs.length !== 1 ? 's' : ''}` : ''} • {workflowsData.system_load}% system load
           </p>
         </div>
 
@@ -558,6 +592,148 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             )
           })}
         </div>
+      )}
+
+      {/* Recipe Runs Section */}
+      {hasRecipeRuns && (
+        <>
+          <div className="flex items-center gap-2 mt-6">
+            <ChefHat className="w-5 h-5 text-orange-400" />
+            <h3 className="text-base font-semibold">
+              <span className="text-white">Recipe</span> <span className="text-orange-400">Runs</span>
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              {workflowsData.recipe_runs.length}
+            </Badge>
+          </div>
+          <div className="space-y-3">
+            {workflowsData.recipe_runs.map((run, index) => {
+              const isRunning = run.status === 'running'
+              const isFailed = run.status === 'failed'
+              const isCompleted = run.status === 'completed'
+
+              return (
+                <motion.div
+                  key={`recipe-${run.id}`}
+                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Status Indicator */}
+                    <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${
+                      isRunning ? 'bg-blue-500/20' : isFailed ? 'bg-red-500/20' : isCompleted ? 'bg-green-500/20' : 'bg-gray-500/20'
+                    }`}>
+                      {isRunning ? (
+                        <Activity className="w-5 h-5 text-blue-400 animate-pulse" />
+                      ) : isFailed ? (
+                        <AlertTriangle className="w-5 h-5 text-red-400" />
+                      ) : isCompleted ? (
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <Clock className="w-5 h-5 text-gray-400" />
+                      )}
+                    </div>
+
+                    {/* Recipe Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold text-base">{run.recipe_name}</h4>
+                        <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30">
+                          <Zap className="w-3 h-3 mr-1" />
+                          Recipe
+                        </Badge>
+                        <Badge className={`text-xs ${
+                          isRunning
+                            ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                            : isFailed
+                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              : isCompleted
+                                ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                                : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                        }`}>
+                          {isRunning ? 'cooking' : isFailed ? 'burnt' : isCompleted ? 'cooked' : run.status}
+                        </Badge>
+                      </div>
+                      {/* Step progress */}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Step {run.current_step} of {run.total_steps}</span>
+                        {run.error_message && (
+                          <span className="text-red-400 truncate max-w-[200px]">{run.error_message}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="hidden lg:flex items-center gap-6 text-sm">
+                      {run.started_at && (
+                        <div className="text-left max-w-[200px]">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(run.started_at).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="text-center">
+                        <p className="text-muted-foreground text-xs">Steps</p>
+                        <p className="font-medium">{run.total_steps}</p>
+                      </div>
+                      {run.total_tokens > 0 && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground text-xs">Tokens</p>
+                          <p className="font-medium">{run.total_tokens.toLocaleString()}</p>
+                        </div>
+                      )}
+                      {run.total_duration_ms > 0 && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground text-xs">Duration</p>
+                          <p className="font-medium">{(run.total_duration_ms / 1000).toFixed(1)}s</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step Results Preview (collapsed) */}
+                  {run.step_results && run.step_results.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <div className="flex gap-2 flex-wrap">
+                        {run.step_results.map((step: any, stepIdx: number) => (
+                          <div
+                            key={stepIdx}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
+                              step.status === 'success'
+                                ? 'bg-green-500/10 text-green-400'
+                                : step.status === 'failed'
+                                  ? 'bg-red-500/10 text-red-400'
+                                  : step.status === 'running'
+                                    ? 'bg-blue-500/10 text-blue-400'
+                                    : 'bg-gray-500/10 text-gray-400'
+                            }`}
+                          >
+                            {step.status === 'success' ? (
+                              <CheckCircle className="w-3 h-3" />
+                            ) : step.status === 'failed' ? (
+                              <AlertTriangle className="w-3 h-3" />
+                            ) : step.status === 'running' ? (
+                              <Activity className="w-3 h-3 animate-pulse" />
+                            ) : (
+                              <Clock className="w-3 h-3" />
+                            )}
+                            <span>{step.agent_name}</span>
+                            {step.duration_ms > 0 && (
+                              <span className="opacity-60">({(step.duration_ms / 1000).toFixed(1)}s)</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {/* Live Progress Panel */}

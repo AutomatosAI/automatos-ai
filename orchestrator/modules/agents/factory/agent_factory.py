@@ -2133,7 +2133,115 @@ To use actions, respond with JSON blocks like:
             app_matches: List[tuple] = []
             top_action_params: Dict[str, str] = {}
 
-            if q_tokens:
+            # ── PRIMARY: Capability-based filtering via taxonomy ──
+            # Uses INTENT_TO_CAPABILITIES mapping (e.g., "send"/"post" → "message.send")
+            # to select semantically correct actions from ComposioActionMetadata.
+            # This prevents the LLM from seeing irrelevant actions like SLACK_CREATE_CHANNEL
+            # when the intent is to send a message.
+            capability_matched = False
+            try:
+                from modules.tools.capabilities.taxonomy import get_capabilities_for_intent
+                from modules.tools.capabilities.models import ComposioActionMetadata
+
+                required_caps = get_capabilities_for_intent(task_prompt or "")
+                self.logger.info(f"🔌 [hints] Capability extraction: '{task_prompt[:80]}' → {required_caps}")
+
+                # Check if metadata table has data
+                metadata_count = self.db_session.query(ComposioActionMetadata.id).limit(1).first()
+                if metadata_count and required_caps:
+                    # Query actions matching capabilities for the agent's allowed apps
+                    # app_id in ComposioActionMetadata is lowercase (e.g., "slack")
+                    allowed_apps_lower = [a.lower() for a in allowed_apps]
+
+                    from sqlalchemy import select
+                    metadata_query = (
+                        select(ComposioActionMetadata)
+                        .where(ComposioActionMetadata.app_id.in_(allowed_apps_lower))
+                        .where(ComposioActionMetadata.capabilities.overlap(required_caps))
+                        .where(ComposioActionMetadata.destructive == False)
+                    )
+                    metadata_rows = self.db_session.execute(metadata_query).scalars().all()
+
+                    if metadata_rows:
+                        # Rank by capability match count + confidence
+                        intent_words = set(q.split())
+                        scored = []
+                        for meta in metadata_rows:
+                            score = 0.0
+                            action_caps = set(meta.capabilities or [])
+                            cap_matches = len(action_caps & set(required_caps))
+                            score += min(0.4, cap_matches * 0.15)
+                            kw_matches = len(set(meta.intent_keywords or []) & intent_words)
+                            score += min(0.4, kw_matches * 0.1)
+                            score += (meta.classification_confidence or 0.5) * 0.2
+                            scored.append((meta, score))
+                        scored.sort(key=lambda x: x[1], reverse=True)
+
+                        # Group by app
+                        from collections import defaultdict
+                        app_action_map = defaultdict(list)
+                        for meta, _score in scored:
+                            app_key = (meta.app_id or "").upper()
+                            if len(app_action_map[app_key]) < 6:
+                                app_action_map[app_key].append(meta.action_id)
+
+                        for app_key in allowed_apps:
+                            actions_for_app = app_action_map.get(app_key, [])
+                            if actions_for_app:
+                                app_matches.append((app_key, actions_for_app))
+
+                        if app_matches:
+                            capability_matched = True
+                            self.logger.info(
+                                f"🔌 [hints] Capability filter matched {sum(len(a) for _, a in app_matches)} actions "
+                                f"for caps={required_caps}"
+                            )
+
+                            # Get parameter hints for top actions from ComposioActionCache
+                            for meta, _score in scored[:5]:
+                                action_id = meta.action_id
+                                if action_id and len(top_action_params) < 10:
+                                    cache_row = (
+                                        self.db_session.query(ComposioActionCache.parameters)
+                                        .filter(ComposioActionCache.action_name == action_id)
+                                        .first()
+                                    )
+                                    if cache_row and cache_row[0]:
+                                        try:
+                                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
+                                            param_hints = ParameterHintExtractor.extract_hints(cache_row[0], max_params=5)
+                                            if param_hints:
+                                                top_action_params[action_id] = param_hints
+                                        except Exception:
+                                            pass
+            except Exception as cap_err:
+                self.logger.warning(f"🔌 [hints] Capability filtering failed (falling back to token search): {cap_err}")
+
+            # ── FALLBACK: Token-based ILIKE search on ComposioActionCache ──
+            # Used when ComposioActionMetadata is empty (sync hasn't run) or
+            # capability filtering found no matches.
+            #
+            # Key improvement: Rank results by relevance BEFORE truncating.
+            # Previously took first 6 from 24 unranked results, often cutting off
+            # the correct action (e.g., SLACK_SEND_MESSAGE dropped, SLACK_ADD_STAR kept).
+            #
+            # Additionally, use taxonomy capability keywords to boost relevant actions.
+            # e.g., if intent maps to "message.send", actions with "send"+"message"
+            # in their name get a score boost.
+            if not capability_matched and q_tokens:
+                self.logger.info(f"🔌 [hints] Falling back to token search (tokens={q_tokens})")
+
+                # Derive capability-boost keywords from taxonomy (no DB needed)
+                cap_boost_terms = set()
+                try:
+                    from modules.tools.capabilities.taxonomy import get_capabilities_for_intent
+                    caps = get_capabilities_for_intent(task_prompt or "")
+                    for cap in caps:
+                        # "message.send" → {"message", "send"}
+                        cap_boost_terms.update(cap.split("."))
+                except Exception:
+                    pass
+
                 for app in allowed_apps[:12]:
                     token_filters = []
                     for tok in q_tokens:
@@ -2150,38 +2258,54 @@ To use actions, respond with JSON blocks like:
                         .all()
                     )
                     self.logger.info(f"🔌 [hints] Token search for {app}: {len(rows)} matches (tokens={q_tokens})")
-                    actions = []
+
+                    # Score and rank actions instead of taking first N
+                    scored_actions = []
                     for r in rows:
                         if not r or not r[0]:
                             continue
                         action_name = str(r[0])
-                        # action_name from DB should be API identifier (e.g., GMAIL_FETCH_EMAILS)
-                        # If it's still a display name (legacy data), reconstruct
                         if " " in action_name and not action_name.startswith(f"{app}_"):
                             action_name = f"{app}_{action_name.upper().replace(' ', '_')}"
                         if is_messaging_intent:
                             al = action_name.lower()
                             if any(tok in al for tok in dangerous_tokens):
                                 continue
+
+                        # Score: how many tokens appear in the action NAME (not just description)
+                        name_lower = action_name.lower()
+                        name_score = sum(1 for tok in q_tokens if tok in name_lower)
+                        # Bonus: capability terms in action name
+                        cap_score = sum(1 for term in cap_boost_terms if term in name_lower)
+                        total_score = name_score * 2 + cap_score * 3
+
+                        scored_actions.append((action_name, total_score, r[1]))
+
+                    # Sort by score descending, then deduplicate
+                    scored_actions.sort(key=lambda x: x[1], reverse=True)
+                    seen = set()
+                    actions = []
+                    for action_name, _score, params in scored_actions:
+                        if action_name in seen:
+                            continue
+                        seen.add(action_name)
                         actions.append(action_name)
-                        if len(top_action_params) < 10 and r[1]:
+                        if len(top_action_params) < 10 and params:
                             try:
                                 from modules.tools.formatting.schema_detector import ParameterHintExtractor
-                                param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
+                                param_hints = ParameterHintExtractor.extract_hints(params, max_params=5)
                                 if param_hints:
                                     top_action_params[action_name] = param_hints
                             except Exception:
                                 pass
 
-                    # Deduplicate preserving order
-                    seen = set()
-                    actions = [a for a in actions if not (a in seen or seen.add(a))]
                     if actions:
+                        self.logger.info(f"🔌 [hints] Ranked actions for {app}: {actions[:6]}")
                         app_matches.append((app, actions[:6]))
 
-            # Fallback: if no token matches, get top actions for each app
+            # Fallback: if no token matches either, get top actions for each app
             if not app_matches:
-                self.logger.info(f"🔌 [hints] No token matches, fetching top actions per app")
+                self.logger.info(f"🔌 [hints] No matches at all, fetching top actions per app")
                 for app in allowed_apps[:6]:
                     rows = (
                         self.db_session.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
