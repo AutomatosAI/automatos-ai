@@ -125,7 +125,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
             <div key={i} className="h-48 glass-card animate-pulse" />
           ))}
         </div>
-      ) : recipes.length === 0 ? (
+      ) : filteredRecipes.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No recipes found. Recipes will be available soon!</p>

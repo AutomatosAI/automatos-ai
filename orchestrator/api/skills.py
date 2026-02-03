@@ -212,7 +212,9 @@ async def import_git_repository(
         )
         
         if result["status"] == "error":
-            raise HTTPException(status_code=400, detail=result["error"])
+            error_detail = result.get("error", "Unknown error")
+            logger.warning("Git import failed: %s (git_url=%s)", error_detail, source_data.git_url)
+            raise HTTPException(status_code=400, detail=error_detail)
         
         return {
             "message": f"Successfully imported {result['skills_discovered']} skills from Git repository",

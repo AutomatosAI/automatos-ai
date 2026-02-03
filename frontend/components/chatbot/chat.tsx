@@ -14,6 +14,7 @@ import { updateChatTitle } from '@/lib/chat/api'
 import type { ChatMessage, VisibilityType, Artifact, AppUsage, CodeSnippet, DocumentReference, DatabaseResult } from '@/types'
 import { apiClient } from '@/lib/api-client'
 import { toast } from 'sonner'
+import { useUser } from '@clerk/nextjs'
 
 // Widget Architecture (PRD-38.1)
 import { useWorkspaceStore } from '@/stores/workspace-store'
@@ -67,10 +68,14 @@ export function Chat({
   const [usage, setUsage] = useState<AppUsage | undefined>(initialLastContext)
   const [hasGeneratedTitle, setHasGeneratedTitle] = useState(false)
 
-  // PRD-40: Dynamic Tool Suggestions state
+  // PRD-40/41: Dynamic Tool Suggestions state
   const [activeTool, setActiveTool] = useState<string | null>(null)
   const [toolSuggestions, setToolSuggestions] = useState<string[]>([])
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const [hasContextSuggestions, setHasContextSuggestions] = useState(false)
+
+  // PRD-41: Get user for context-aware suggestions
+  const { user } = useUser()
 
   const messagesContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -344,7 +349,7 @@ export function Chat({
     }
   }, [messages, activeChatId, hasGeneratedTitle])
 
-  // PRD-40: Tool icon click handler
+  // PRD-40/41: Tool icon click handler (Phase 1 + Phase 2: Context-Aware)
   const handleToolIconClick = useCallback(async (appName: string) => {
     // Track tool icon click
     analytics.track('tool_icon_clicked', {
@@ -363,16 +368,30 @@ export function Chat({
     setIsLoadingSuggestions(true)
 
     try {
-      const data = await apiClient.request<SuggestionResponse>(
-        `/api/tools/${appName}/suggestions`
-      )
-      setToolSuggestions(data.suggestions || [])
+      // PRD-41: Include user_id and session_id for context-aware suggestions
+      const userId = user?.id
+      const sessionId = activeChatId || id
 
-      // Track suggestions loaded
+      // Build URL with query params if we have user context
+      let url = `/api/tools/${appName}/suggestions`
+      if (userId && sessionId) {
+        const params = new URLSearchParams({
+          user_id: userId,
+          session_id: sessionId,
+        })
+        url = `${url}?${params.toString()}`
+      }
+
+      const data = await apiClient.request<SuggestionResponse>(url)
+      setToolSuggestions(data.suggestions || [])
+      setHasContextSuggestions(data.has_context || false)
+
+      // Track suggestions loaded (including context flag)
       analytics.track('suggestions_loaded', {
         app: appName,
         source: data.source,
         count: data.suggestions.length,
+        has_context: data.has_context || false,
       })
     } catch (error) {
       console.error('Failed to fetch tool suggestions:', error)
@@ -382,7 +401,7 @@ export function Chat({
     } finally {
       setIsLoadingSuggestions(false)
     }
-  }, [activeTool])
+  }, [activeTool, user, activeChatId, id])
 
   // PRD-40: Suggestion click handler
   const handleSuggestionClick = useCallback((suggestion: string) => {
@@ -631,6 +650,7 @@ export function Chat({
                       setToolSuggestions([])
                     }}
                     isLoading={isLoadingSuggestions}
+                    hasContext={hasContextSuggestions}
                   />
                   <MultimodalInput
                     chatId={id}
