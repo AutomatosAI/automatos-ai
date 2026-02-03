@@ -660,13 +660,28 @@ class ComposioClient:
                     # Ignore non-function tools unless function payload exists.
                     continue
 
-                action_name = (
+                # Extract display name (human-readable) from function.name or item.name
+                display_name_raw = (
                     (fn or {}).get("name")
                     or item.get("name")
-                    or item.get("slug")
                     or ""
                 )
-                action_name = str(action_name).strip()
+                display_name_raw = str(display_name_raw).strip()
+
+                # Extract slug and derive API enum identifier (e.g., "GMAIL_FETCH_EMAILS")
+                item_slug = str(item.get("slug") or "").strip()
+                item_enum = str(item.get("enum") or "").strip()
+
+                # Prefer enum > slug-derived > display-name-derived
+                if item_enum:
+                    action_name = item_enum.upper()
+                elif item_slug:
+                    action_name = item_slug.upper().replace("-", "_")
+                elif display_name_raw:
+                    action_name = display_name_raw
+                else:
+                    continue
+
                 if not action_name:
                     continue
 
@@ -711,7 +726,7 @@ class ComposioClient:
                     {
                         "app_name": app_name,
                         "name": action_name,
-                        "display_name": (fn or {}).get("name") or item.get("display_name") or action_name,
+                        "display_name": display_name_raw or item.get("display_name") or action_name,
                         "description": (
                             (fn or {}).get("description")
                             or item.get("description")

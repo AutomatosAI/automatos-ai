@@ -2139,6 +2139,7 @@ To use actions, respond with JSON blocks like:
                     for tok in q_tokens:
                         like = f"%{tok}%"
                         token_filters.append(ComposioActionCache.action_name.ilike(like))
+                        token_filters.append(ComposioActionCache.display_name.ilike(like))
                         token_filters.append(ComposioActionCache.description.ilike(like))
 
                     rows = (
@@ -2153,19 +2154,16 @@ To use actions, respond with JSON blocks like:
                     for r in rows:
                         if not r or not r[0]:
                             continue
-                        raw_name = str(r[0])
-                        # Reconstruct proper Composio API format: APP_ACTION_NAME
-                        # DB may store display names like "Fetch emails" instead of "GMAIL_FETCH_EMAILS"
-                        if raw_name.startswith(f"{app}_"):
-                            action_name = raw_name  # Already proper format
-                        else:
-                            action_name = f"{app}_{raw_name.upper().replace(' ', '_')}"
+                        action_name = str(r[0])
+                        # action_name from DB should be API identifier (e.g., GMAIL_FETCH_EMAILS)
+                        # If it's still a display name (legacy data), reconstruct
+                        if " " in action_name and not action_name.startswith(f"{app}_"):
+                            action_name = f"{app}_{action_name.upper().replace(' ', '_')}"
                         if is_messaging_intent:
                             al = action_name.lower()
                             if any(tok in al for tok in dangerous_tokens):
                                 continue
                         actions.append(action_name)
-                        # Extract param hints for top actions (keyed by reconstructed name)
                         if len(top_action_params) < 10 and r[1]:
                             try:
                                 from modules.tools.formatting.schema_detector import ParameterHintExtractor
@@ -2191,22 +2189,23 @@ To use actions, respond with JSON blocks like:
                         .limit(10)
                         .all()
                     )
-                    # Reconstruct proper action names
                     actions = []
                     for r in rows:
                         if not r or not r[0]:
                             continue
-                        raw = str(r[0])
-                        name = raw if raw.startswith(f"{app}_") else f"{app}_{raw.upper().replace(' ', '_')}"
+                        name = str(r[0])
+                        # Legacy fallback: if still display name, reconstruct
+                        if " " in name and not name.startswith(f"{app}_"):
+                            name = f"{app}_{name.upper().replace(' ', '_')}"
                         actions.append(name)
                     self.logger.info(f"🔌 [hints] Fallback for {app}: {len(actions)} actions")
                     if actions:
                         app_matches.append((app, actions[:6]))
-                    # Also extract param hints for first few
                     for r in rows[:3]:
                         if r and r[0] and r[1] and len(top_action_params) < 10:
-                            raw = str(r[0])
-                            name = raw if raw.startswith(f"{app}_") else f"{app}_{raw.upper().replace(' ', '_')}"
+                            name = str(r[0])
+                            if " " in name and not name.startswith(f"{app}_"):
+                                name = f"{app}_{name.upper().replace(' ', '_')}"
                             try:
                                 from modules.tools.formatting.schema_detector import ParameterHintExtractor
                                 param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
