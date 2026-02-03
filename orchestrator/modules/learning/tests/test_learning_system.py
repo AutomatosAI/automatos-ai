@@ -8,11 +8,15 @@ and pattern recognition.
 import pytest
 from datetime import datetime
 from unittest.mock import Mock, MagicMock
+from uuid import uuid4
 
 from modules.learning import LearningSystemUpdater
 from modules.orchestrator.stages import AggregatedResults
 from modules.agents import SubtaskExecution, SubtaskStatus
 from core.models import Agent, Workflow, WorkflowExecution
+
+# Test workspace ID for all test fixtures
+TEST_WORKSPACE_ID = uuid4()
 
 
 class TestLearningSystemUpdater:
@@ -43,7 +47,7 @@ class TestLearningSystemUpdater:
         workflow = Workflow(
             name="Test Workflow",
             description="Test learning workflow",
-            user_id=1
+            workspace_id=TEST_WORKSPACE_ID
         )
         db_session.add(workflow)
         db_session.flush()
@@ -51,7 +55,7 @@ class TestLearningSystemUpdater:
         execution = WorkflowExecution(
             workflow_id=workflow.id,
             status="completed",
-            user_id=1
+            workspace_id=TEST_WORKSPACE_ID
         )
         db_session.add(execution)
         db_session.flush()
@@ -161,7 +165,7 @@ class TestWorkflowPatternLearning:
         workflow = Workflow(
             name="Pattern Test Workflow",
             description="Test pattern learning",
-            user_id=1
+            workspace_id=TEST_WORKSPACE_ID
         )
         db_session.add(workflow)
         db_session.flush()
@@ -192,7 +196,7 @@ class TestWorkflowPatternLearning:
         workflow = Workflow(
             name="Failed Pattern Workflow",
             description="Test failure learning",
-            user_id=1
+            workspace_id=TEST_WORKSPACE_ID
         )
         db_session.add(workflow)
         db_session.flush()

@@ -780,7 +780,7 @@ export function ExecutionKitchen({
   const streamAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!currentExecutionId) return
+    if (!currentExecutionId || !useAISDK || isRecipeMode) return
 
     const connectAISDKStream = async () => {
       try {
@@ -897,7 +897,7 @@ export function ExecutionKitchen({
     return () => {
       if (streamAbortRef.current) streamAbortRef.current.abort()
     }
-  }, [currentExecutionId, loadExecutionById])
+  }, [currentExecutionId, loadExecutionById, useAISDK, isRecipeMode])
 
   // Polling for real-time updates during execution
   useEffect(() => {

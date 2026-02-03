@@ -2144,7 +2144,7 @@ To use actions, respond with JSON blocks like:
                 from modules.tools.capabilities.models import ComposioActionMetadata
 
                 required_caps = get_capabilities_for_intent(task_prompt or "")
-                self.logger.info(f"🔌 [hints] Capability extraction: '{task_prompt[:80]}' → {required_caps}")
+                self.logger.debug(f"🔌 [hints] Capability extraction: prompt_len={len(task_prompt or '')} → {required_caps}")
 
                 # Check if metadata table has data
                 metadata_count = self.db_session.query(ComposioActionMetadata.id).limit(1).first()

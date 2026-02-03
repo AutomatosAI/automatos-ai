@@ -25,8 +25,10 @@ class RecipeMemoryService:
     Retrieves relevant memories for pre-execution context enhancement.
     """
 
-    def __init__(self, db: Optional[Session] = None, mem0_client: Optional[Mem0Client] = None):
-        self.db = db or next(get_db())
+    def __init__(self, db: Session, mem0_client: Optional[Mem0Client] = None):
+        if db is None:
+            raise ValueError("RecipeMemoryService requires an injected DB session")
+        self.db = db
         self.mem0 = mem0_client or Mem0Client()
 
     def store_execution_memory(
@@ -168,7 +170,10 @@ class RecipeMemoryService:
         if not recipe:
             raise ValueError(f"Recipe not found: {recipe_id}")
 
-        workspace_id = recipe.workspace_id
+        # Resolve workspace_id: prefer context, then execution, then recipe
+        workspace_id = (context or {}).get("workspace_id") or recipe.workspace_id
+        if not workspace_id:
+            logger.warning(f"No workspace_id for recipe {recipe_id} (marketplace recipe?), memory retrieval may be incomplete")
         template_id = recipe.template_id or str(recipe.id)
         context = context or {}
 

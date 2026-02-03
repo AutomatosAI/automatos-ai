@@ -35,21 +35,33 @@ def upgrade():
     op.create_index('idx_llm_models_workspace', 'llm_models', ['workspace_id'])
 
     # Migrate existing data: Set workspace_id to first workspace (or leave NULL for system-wide items)
-    # For skills and patterns, assign to first workspace
-    op.execute("""
-        UPDATE skills
-        SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
-        WHERE workspace_id IS NULL;
-    """)
+    # Safety check: ensure a workspace exists before backfilling
+    conn = op.get_bind()
+    workspace_row = conn.execute(sa.text("SELECT id FROM workspaces ORDER BY created_at LIMIT 1")).first()
+    skills_count = conn.execute(sa.text("SELECT COUNT(*) FROM skills")).scalar()
+    patterns_count = conn.execute(sa.text("SELECT COUNT(*) FROM patterns")).scalar()
 
-    op.execute("""
-        UPDATE patterns
-        SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
-        WHERE workspace_id IS NULL;
-    """)
+    if not workspace_row and (skills_count > 0 or patterns_count > 0):
+        raise RuntimeError(
+            "Cannot backfill workspace_id: no workspace found in 'workspaces' table, "
+            f"but skills ({skills_count} rows) and/or patterns ({patterns_count} rows) need a workspace_id. "
+            "Create a workspace first, then re-run this migration."
+        )
+
+    if workspace_row:
+        op.execute("""
+            UPDATE skills
+            SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
+            WHERE workspace_id IS NULL;
+        """)
+
+        op.execute("""
+            UPDATE patterns
+            SET workspace_id = (SELECT id FROM workspaces ORDER BY created_at LIMIT 1)
+            WHERE workspace_id IS NULL;
+        """)
 
     # For llm_models, keep NULL for system-wide models (can be shared across workspaces)
-    # Only set workspace_id for custom user models if needed
 
     # Now make workspace_id NOT NULL for skills and patterns (required for isolation)
     op.alter_column('skills', 'workspace_id', nullable=False)

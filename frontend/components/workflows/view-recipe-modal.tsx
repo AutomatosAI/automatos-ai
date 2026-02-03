@@ -479,11 +479,11 @@ export function ViewRecipeModal({
                 data={suggestions || {
                   recipe_id: recipe.template_id || recipe.id,
                   quality_score: recipe.quality_score,
-                  suggestions: recipe.learning_data?.suggestions || [],
-                  patterns: recipe.learning_data?.patterns || [],
-                  performance_metrics: recipe.learning_data?.performance_metrics || null,
-                  last_analyzed_at: null,
-                  analysis_count: 0,
+                  suggestions: recipe.learning_data?.latest_suggestions || [],
+                  patterns: recipe.learning_data?.latest_patterns || [],
+                  performance_metrics: recipe.learning_data?.latest_performance || null,
+                  last_analyzed_at: recipe.learning_data?.last_analyzed_at || null,
+                  analysis_count: recipe.learning_data?.analyses?.length || 0,
                 }}
                 recipeName={recipe.name}
                 onApplyPromptRewrite={(suggestion) => {

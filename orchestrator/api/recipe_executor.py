@@ -175,8 +175,13 @@ async def execute_recipe_direct(
                     )
 
                     if result.get("status") == "success":
-                        step_result["status"] = "success"
-                        step_result["output"] = result.get("result", "")
+                        step_result["status"] = "completed"
+                        raw_output = result.get("result", "")
+                        # Coerce non-string outputs to JSON strings for _resolve_prompt compatibility
+                        if isinstance(raw_output, (dict, list)):
+                            step_result["output"] = json.dumps(raw_output)
+                        else:
+                            step_result["output"] = str(raw_output) if raw_output else ""
                         step_result["tokens_used"] = result.get("execution", {}).get("tokens_used", 0)
 
                         # Extract tool calls from execution metadata
@@ -185,7 +190,7 @@ async def execute_recipe_direct(
 
                         success = True
                         previous_output = step_result["output"]
-                        logger.info(f"[recipe_direct] Step {step_order} succeeded ({step_result['tokens_used']} tokens)")
+                        logger.info(f"[recipe_direct] Step {step_order} completed ({step_result['tokens_used']} tokens)")
                     else:
                         last_error = result.get("error", "Agent returned non-success status")
                         logger.warning(f"[recipe_direct] Step {step_order} failed: {last_error}")

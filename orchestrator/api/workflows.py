@@ -654,7 +654,8 @@ async def duplicate_workflow(
             status='active',  # New duplicates are active by default
             created_by=duplicate_data.get("created_by", "system") if duplicate_data else "system",
             owner=duplicate_data.get("owner", original.owner) if duplicate_data else original.owner,
-            default_policy_id=original.default_policy_id
+            default_policy_id=original.default_policy_id,
+            workspace_id=ctx.workspace_id
         )
         
         # Copy agent associations

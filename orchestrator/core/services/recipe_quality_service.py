@@ -25,8 +25,10 @@ class RecipeQualityService:
     Updates the recipe's quality_score with a rolling average.
     """
 
-    def __init__(self, db: Optional[Session] = None):
-        self.db = db or next(get_db())
+    def __init__(self, db: Session):
+        if db is None:
+            raise ValueError("RecipeQualityService requires an injected DB session")
+        self.db = db
 
     def assess_quality(
         self, execution_id: str, learnings: Optional[Dict[str, Any]] = None
@@ -186,9 +188,11 @@ class RecipeQualityService:
         step_results = execution.step_results or []
         execution_config = recipe.execution_config or {}
 
-        # Get configured timeouts
-        timeout_per_step = execution_config.get("timeout_per_step", 120000)  # default 2 min
-        total_timeout = execution_config.get("total_timeout", 600000)  # default 10 min
+        # Get configured timeouts (stored in seconds in WorkflowTemplate, convert to ms)
+        per_step_sec = execution_config.get("per_step_timeout", 120)  # default 2 min in seconds
+        total_sec = execution_config.get("total_timeout", 600)  # default 10 min in seconds
+        timeout_per_step = per_step_sec * 1000  # convert to ms
+        total_timeout = total_sec * 1000  # convert to ms
 
         # Score: per-step time efficiency
         step_time_scores: List[float] = []

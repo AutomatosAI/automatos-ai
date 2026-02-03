@@ -18,6 +18,8 @@ import uuid
 
 from core.database.database import get_db
 from core.models import Workflow, WorkflowExecution, Agent
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 # from services.orchestrator_service import EnhancedOrchestratorService  # Temporarily disabled
 # websocket_manager removed - using AI SDK SSE streaming
 
@@ -30,6 +32,7 @@ router = APIRouter(prefix="/api/orchestrator", tags=["orchestrator"])
 @router.post("/task/submit")
 async def submit_complex_task(
     task_data: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -78,9 +81,10 @@ async def submit_complex_task(
             description=workflow_data["description"],
             workflow_definition=workflow_data,
             status="active",
-            created_by="orchestrator"
+            created_by="orchestrator",
+            workspace_id=ctx.workspace_id
         )
-        
+
         db.add(workflow)
         db.commit()
         db.refresh(workflow)
@@ -108,6 +112,7 @@ async def submit_complex_task(
 @router.post("/task/analyze")
 async def analyze_task(
     analysis_data: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -157,7 +162,8 @@ async def analyze_task(
                 description=workflow_data["description"],
                 workflow_definition=workflow_data,
                 status="active",
-                created_by="orchestrator"
+                created_by="orchestrator",
+                workspace_id=ctx.workspace_id
             )
             db.add(workflow)
             db.commit()

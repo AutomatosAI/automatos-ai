@@ -406,13 +406,14 @@ class ComposioToolExecutor:
                     }
 
             # Normalize to canonical action_name
-            action_upper = str(mapped.action_name or action_upper).upper()
+            original_action = str(mapped.action_name or action_upper).upper()
+            action_upper = original_action
 
             # If action_name is a display name (no app prefix), reconstruct proper API format
             # e.g., "FETCH EMAILS" + app "GMAIL" → "GMAIL_FETCH_EMAILS"
             if app_name and not action_upper.startswith(f"{app_name}_"):
                 reconstructed = f"{app_name}_{action_upper.replace(' ', '_')}"
-                logger.info(f"Reconstructed Composio action: '{action_upper}' -> '{reconstructed}'")
+                logger.info(f"Reconstructed Composio action: '{original_action}' -> '{reconstructed}'")
                 action_upper = reconstructed
         except Exception as exc:
             return {
@@ -423,9 +424,12 @@ class ComposioToolExecutor:
                 "execution_time_ms": int((time.time() - start_time) * 1000),
             }
         
-        # Validate access
+        # Validate access — check both original and reconstructed action names
         if not skip_validation:
-            if not self.validate_feature_access(agent_id, action_upper, app_name=app_name):
+            has_access = self.validate_feature_access(agent_id, action_upper, app_name=app_name)
+            if not has_access and original_action != action_upper:
+                has_access = self.validate_feature_access(agent_id, original_action, app_name=app_name)
+            if not has_access:
                 return {
                     "success": False,
                     "error": f"Agent {agent_id} does not have access to action: {action_upper}",

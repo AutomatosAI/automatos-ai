@@ -66,7 +66,13 @@ function VariableHighlightTextarea({
 
   const highlighted = React.useMemo(() => {
     if (!value) return ''
-    return value.replace(
+    // Escape HTML entities first to prevent XSS via dangerouslySetInnerHTML
+    const escaped = value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+    return escaped.replace(
       /\{(\w+)\}/g,
       '<span class="text-orange-400 font-semibold">{$1}</span>'
     )
@@ -93,7 +99,7 @@ function VariableHighlightTextarea({
         ref={overlayRef}
         className="absolute inset-0 px-3 py-2 text-sm font-mono whitespace-pre-wrap break-words pointer-events-none overflow-hidden"
         aria-hidden="true"
-        dangerouslySetInnerHTML={{ __html: highlighted || `<span class="text-muted-foreground/50">${placeholder || ''}</span>` }}
+        dangerouslySetInnerHTML={{ __html: highlighted || `<span class="text-muted-foreground/50">${(placeholder || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>` }}
       />
     </div>
   )
