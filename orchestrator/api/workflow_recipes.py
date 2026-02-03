@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from uuid import uuid4
 from core.database.database import get_db
 import logging
 
@@ -19,15 +20,52 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 
 # Import the model from main models file
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
+from core.models import Agent
+from core.models.core import RecipeExecution
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+
+
+def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[list]:
+    """Populate agent details for each step in the steps array."""
+    if not steps:
+        return steps
+
+    # Collect unique agent_ids
+    agent_ids = list({step.get('agent_id') for step in steps if step.get('agent_id')})
+    if not agent_ids:
+        return steps
+
+    # Batch-fetch agents
+    agents = db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+    agent_map = {agent.id: agent for agent in agents}
+
+    enriched = []
+    for step in steps:
+        step_copy = dict(step)
+        agent_id = step_copy.get('agent_id')
+        if agent_id and agent_id in agent_map:
+            agent = agent_map[agent_id]
+            model_cfg = agent.model_config or {}
+            tool_count = len(agent.skills) if agent.skills else 0
+            step_copy['agent'] = {
+                'id': agent.id,
+                'name': agent.name,
+                'model': model_cfg.get('model_id', 'unknown'),
+                'provider': model_cfg.get('provider', 'unknown'),
+                'tool_count': tool_count,
+                'status': agent.status,
+            }
+        else:
+            step_copy['agent'] = None
+        enriched.append(step_copy)
+
+    return enriched
 
 
 @router.get("")
 async def list_workflow_recipes(
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    category: Optional[str] = None,
-    difficulty: Optional[str] = None,
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
     search: Optional[str] = None,
@@ -40,8 +78,6 @@ async def list_workflow_recipes(
     List workflow recipes with filtering and pagination.
 
     Query Parameters:
-    - category: Filter by category (e.g., "Support", "Data Processing")
-    - difficulty: Filter by difficulty (beginner, intermediate, advanced)
     - is_featured: Show only featured recipes
     - is_public: Show only public recipes (default: true)
     - search: Search in name and description
@@ -56,11 +92,6 @@ async def list_workflow_recipes(
         )
 
         # Apply filters
-        if category:
-            query = query.filter(WorkflowRecipe.category == category)
-
-        if difficulty:
-            query = query.filter(WorkflowRecipe.difficulty == difficulty)
 
         if is_featured is not None:
             query = query.filter(WorkflowRecipe.is_featured == is_featured)
@@ -113,7 +144,8 @@ async def get_workflow_recipe(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get a single workflow recipe by its template_id"""
+    """Get a single workflow recipe by its template_id.
+    Returns recipe data with agent details populated for each step in the steps array."""
     try:
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
@@ -124,7 +156,10 @@ async def get_workflow_recipe(
         if not recipe:
             raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
 
-        return recipe.to_dict()
+        result = recipe.to_dict()
+        # Enrich steps with agent details
+        result['steps'] = _enrich_steps_with_agents(recipe.steps, db)
+        return result
 
     except HTTPException:
         raise
@@ -140,44 +175,29 @@ async def create_workflow_recipe(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new workflow recipe (simple or complex).
+    Create a new workflow recipe.
 
     Required fields:
     - template_id: Unique identifier (e.g., "my-custom-recipe")
     - name: Display name
     - description: Description of what the recipe does
-    - category: Category (e.g., "Development", "Data Processing")
-    - recipe_type: 'simple' or 'complex' (default: 'complex')
-
-    For simple recipes (recipe_type='simple'):
-    - agent_id: ID of agent to run the recipe
-    - prompt: Prompt text for the agent
-    - inputs: Array of {name, type, required, default}
-    - schedule: Optional cron string
-
-    For complex recipes (recipe_type='complex'):
     - template_definition: JSON structure with steps, agents, config
+    - steps: Array of step definitions (required, each step needs step_id, order, agent_id, prompt_template)
 
     Optional fields:
     - tags: Array of tags
-    - difficulty: beginner, intermediate, advanced (default: intermediate)
+    - inputs: Input schema
+    - outputs: Output schema
+    - execution_config: Runtime behavior config (defaults provided if omitted)
+    - schedule_config: Scheduling configuration
     - recommended_agents: Array of agent type names
-    - estimated_time: e.g., "5-10 minutes"
     - required_tools: Array of tool names
     - is_public: Boolean (default: true)
     - is_featured: Boolean (default: false)
-    - icon: Emoji or icon identifier
     """
     try:
         # Validate required fields
-        recipe_type = recipe_data.get('recipe_type', 'complex')
-        required_fields = ['template_id', 'name', 'description', 'category']
-
-        # Add type-specific required fields
-        if recipe_type == 'simple':
-            required_fields.extend(['agent_id', 'prompt'])
-        else:  # complex
-            required_fields.append('template_definition')
+        required_fields = ['template_id', 'name', 'description', 'template_definition', 'steps']
 
         for field in required_fields:
             if field not in recipe_data:
@@ -195,31 +215,70 @@ async def create_workflow_recipe(
                 detail=f"Recipe with ID '{recipe_data['template_id']}' already exists"
             )
 
-        # Create recipe - template_definition only required for complex recipes
-        template_def = recipe_data.get('template_definition') if recipe_type != 'simple' else recipe_data.get('template_definition')
+        # Apply execution_config defaults if not provided
+        execution_config = recipe_data.get('execution_config') or {
+            'mode': 'sequential',
+            'max_retries': 1,
+            'retry_delay': 5,
+            'per_step_timeout': 300,
+            'total_timeout': 1800,
+            'quality_threshold': 0.7,
+            'auto_learn': True,
+        }
 
+        # Create recipe (validation happens after assignment)
         recipe = WorkflowRecipe(
             workspace_id=ctx.workspace_id,
             template_id=recipe_data['template_id'],
             name=recipe_data['name'],
             description=recipe_data['description'],
-            category=recipe_data['category'],
-            recipe_type=recipe_type,
-            template_definition=template_def,
+            template_definition=recipe_data['template_definition'],
             tags=recipe_data.get('tags', []),
-            difficulty=recipe_data.get('difficulty', 'intermediate'),
+            steps=recipe_data['steps'],
+            inputs=recipe_data.get('inputs'),
+            outputs=recipe_data.get('outputs'),
+            execution_config=execution_config,
+            schedule_config=recipe_data.get('schedule_config'),
             recommended_agents=recipe_data.get('recommended_agents', []),
-            estimated_time=recipe_data.get('estimated_time'),
             required_tools=recipe_data.get('required_tools', []),
             is_public=recipe_data.get('is_public', True),
             is_featured=recipe_data.get('is_featured', False),
             is_system=False,  # User-created recipes are never system recipes
-            icon=recipe_data.get('icon'),
             preview_image=recipe_data.get('preview_image'),
             documentation_url=recipe_data.get('documentation_url'),
             version=recipe_data.get('version', '1.0'),
             created_by=recipe_data.get('created_by', ctx.user.email if ctx.user else "anonymous")
         )
+
+        # Validate steps structure
+        is_valid, error = recipe.validate_steps()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+        # Validate execution_config structure
+        is_valid, error = recipe.validate_execution_config()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+        # Validate schedule_config structure
+        is_valid, error = recipe.validate_schedule_config()
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
+
+        # Validate agent_id references exist in workspace
+        agent_ids = [step.get('agent_id') for step in recipe.steps if step.get('agent_id')]
+        if agent_ids:
+            existing_agents = db.query(Agent.id).filter(
+                Agent.id.in_(agent_ids),
+                Agent.workspace_id == ctx.workspace_id
+            ).all()
+            existing_ids = {a.id for a in existing_agents}
+            missing = [aid for aid in agent_ids if aid not in existing_ids]
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Agent IDs not found in workspace: {missing}"
+                )
 
         db.add(recipe)
         db.commit()
@@ -252,6 +311,8 @@ async def update_workflow_recipe(
     System recipes cannot be modified.
     """
     try:
+        logger.info(f"[update_recipe] PUT {recipe_id} - fields: {list(recipe_data.keys())}")
+
         recipe = db.query(WorkflowRecipe).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
@@ -269,15 +330,54 @@ async def update_workflow_recipe(
 
         # Update fields if provided
         updatable_fields = [
-            'name', 'description', 'category', 'tags', 'difficulty',
-            'template_definition', 'recommended_agents', 'estimated_time',
-            'required_tools', 'is_public', 'is_featured', 'icon',
+            'name', 'description', 'tags',
+            'template_definition', 'steps', 'inputs', 'outputs',
+            'execution_config', 'schedule_config',
+            'recommended_agents', 'required_tools',
+            'is_public', 'is_featured',
             'preview_image', 'documentation_url', 'version', 'changelog'
         ]
 
         for field in updatable_fields:
             if field in recipe_data:
                 setattr(recipe, field, recipe_data[field])
+
+        # Validate steps if updated
+        if 'steps' in recipe_data:
+            is_valid, error = recipe.validate_steps()
+            if not is_valid:
+                logger.warning(f"[update_recipe] Steps validation failed for {recipe_id}: {error}")
+                raise HTTPException(status_code=400, detail=f"Invalid steps: {error}")
+
+            # Validate agent_id references exist in workspace
+            agent_ids = [step.get('agent_id') for step in (recipe.steps or []) if step.get('agent_id')]
+            if agent_ids:
+                existing_agents = db.query(Agent.id).filter(
+                    Agent.id.in_(agent_ids),
+                    Agent.workspace_id == ctx.workspace_id
+                ).all()
+                existing_ids = {a.id for a in existing_agents}
+                missing = [aid for aid in agent_ids if aid not in existing_ids]
+                if missing:
+                    logger.warning(f"[update_recipe] Agent IDs not found for {recipe_id}: {missing}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Agent IDs not found in workspace: {missing}"
+                    )
+
+        # Validate execution_config if updated
+        if 'execution_config' in recipe_data:
+            is_valid, error = recipe.validate_execution_config()
+            if not is_valid:
+                logger.warning(f"[update_recipe] execution_config validation failed for {recipe_id}: {error} | data: {recipe_data.get('execution_config')}")
+                raise HTTPException(status_code=400, detail=f"Invalid execution_config: {error}")
+
+        # Validate schedule_config if updated
+        if 'schedule_config' in recipe_data:
+            is_valid, error = recipe.validate_schedule_config()
+            if not is_valid:
+                logger.warning(f"[update_recipe] schedule_config validation failed for {recipe_id}: {error}")
+                raise HTTPException(status_code=400, detail=f"Invalid schedule_config: {error}")
 
         recipe.updated_at = datetime.now()
         db.commit()
@@ -385,25 +485,25 @@ async def list_recipe_categories(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
-    """Get list of all recipe categories with counts"""
+    """Get list of all unique tags used across workspace recipes"""
     try:
-        from sqlalchemy import func
-
-        categories = db.query(
-            WorkflowRecipe.category,
-            func.count(WorkflowRecipe.id).label('count')
-        ).filter(
+        recipes = db.query(WorkflowRecipe.tags).filter(
             WorkflowRecipe.owner_type == 'workspace',
             WorkflowRecipe.workspace_id == ctx.workspace_id,
             WorkflowRecipe.is_public == True
-        ).group_by(
-            WorkflowRecipe.category
         ).all()
+
+        # Aggregate tags across all recipes
+        tag_counts: dict = {}
+        for (tags,) in recipes:
+            if tags:
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
 
         return {
             "categories": [
-                {"name": cat[0], "count": cat[1]}
-                for cat in categories
+                {"name": name, "count": count}
+                for name, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
             ]
         }
 
@@ -437,6 +537,395 @@ async def list_featured_recipes(
     except Exception as e:
         logger.error(f"Error listing featured recipes: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing featured recipes: {str(e)}")
+
+
+@router.post("/{recipe_id}/execute")
+async def execute_recipe(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db)
+):
+    """
+    Execute a recipe directly — step by step, no 9-stage pipeline.
+
+    Creates a RecipeExecution record and launches execute_recipe_direct()
+    as an async task. Each step calls its assigned agent with filtered
+    Composio actions. Results stored in RecipeExecution.step_results.
+
+    Body (optional):
+    - input_data: Dict matching the recipe's inputs schema
+    """
+    try:
+        import asyncio
+        from api.recipe_executor import execute_recipe_direct
+
+        logger.info(f"[execute_recipe] Starting direct execution for recipe_id={recipe_id}, workspace={ctx.workspace_id}")
+
+        # Fetch recipe and validate ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            logger.warning(f"[execute_recipe] Recipe not found: {recipe_id}")
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        if not recipe.steps:
+            raise HTTPException(status_code=400, detail="Recipe has no steps to execute")
+
+        logger.info(f"[execute_recipe] Recipe found: {recipe.name}, steps={len(recipe.steps or [])}")
+
+        input_data = body.get('input_data') or {}
+
+        # Fill in defaults for missing required inputs
+        if recipe.inputs:
+            for param_name, param_def in recipe.inputs.items():
+                if isinstance(param_def, dict) and param_name not in input_data:
+                    default = param_def.get('default', '')
+                    input_data[param_name] = default
+
+        # Create RecipeExecution record
+        recipe_execution_id = f"exec-{uuid4().hex[:12]}"
+        recipe_execution = RecipeExecution(
+            execution_id=recipe_execution_id,
+            recipe_id=recipe.id,
+            workspace_id=ctx.workspace_id,
+            status='pending',
+            input_data=input_data,
+            current_step=0,
+            triggered_by=ctx.user.email if ctx.user else 'anonymous',
+            execution_metadata={
+                'execution_type': 'recipe_direct',
+                'total_steps': len(recipe.steps),
+            },
+        )
+        db.add(recipe_execution)
+
+        # Update recipe usage stats
+        recipe.use_count += 1
+        recipe.last_used_at = datetime.now()
+
+        db.commit()
+
+        logger.info(f"[execute_recipe] Created execution {recipe_execution_id}, launching direct executor")
+
+        # Launch direct executor as async task
+        asyncio.create_task(
+            execute_recipe_direct(
+                recipe_execution_id=recipe_execution_id,
+                recipe_id=recipe.id,
+                workspace_id=ctx.workspace_id,
+                input_data=input_data,
+            )
+        )
+
+        return {
+            "recipe_execution_id": recipe_execution_id,
+            "recipe_id": recipe_id,
+            "status": "started",
+            "total_steps": len(recipe.steps),
+            "message": "Recipe execution started (direct mode)",
+        }
+
+    except HTTPException as he:
+        logger.warning(f"[execute_recipe] HTTPException: status={he.status_code}, detail={he.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"[execute_recipe] Unhandled error: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error executing recipe: {str(e)}")
+
+
+@router.get("/{recipe_id}/executions/{execution_id}")
+async def get_recipe_execution_detail(
+    recipe_id: str,
+    execution_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed status of a specific recipe execution.
+
+    Returns step-level results, current progress, and overall status.
+    Used by frontend for polling execution progress.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Get execution
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        total_steps = len(recipe.steps or [])
+        step_results = execution.step_results or []
+
+        return {
+            "execution_id": execution.execution_id,
+            "recipe_id": recipe_id,
+            "recipe_name": recipe.name,
+            "status": execution.status,
+            "current_step": execution.current_step or 0,
+            "total_steps": total_steps,
+            "step_results": step_results,
+            "input_data": execution.input_data,
+            "output_data": execution.output_data,
+            "error_message": execution.error_message,
+            "started_at": execution.started_at.isoformat() if execution.started_at else None,
+            "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+            "triggered_by": execution.triggered_by,
+            "execution_metadata": execution.execution_metadata,
+            "total_duration_ms": (
+                execution.output_data.get("total_duration_ms")
+                if execution.output_data else None
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting execution detail: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting execution: {str(e)}")
+
+
+# ===================================================================
+# SELF-LEARNING ENDPOINTS (Learn, Quality, Suggestions, Executions)
+# ===================================================================
+
+@router.post("/{recipe_id}/learn")
+async def analyze_execution_learning(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger learning analysis on a completed recipe execution (Stage 6).
+
+    Body:
+    - execution_id: The execution_id to analyze (required)
+
+    Returns patterns, suggestions, and performance_metrics.
+    """
+    try:
+        execution_id = body.get('execution_id')
+        if not execution_id:
+            raise HTTPException(status_code=400, detail="execution_id is required")
+
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Validate execution belongs to this recipe
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        from core.services.recipe_learning_service import RecipeLearningService
+        service = RecipeLearningService(db=db)
+        result = service.analyze_execution(execution_id)
+
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error analyzing execution: {str(e)}")
+
+
+@router.post("/{recipe_id}/assess-quality")
+async def assess_execution_quality(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    body: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger quality assessment on a recipe execution (Stage 7).
+
+    Body:
+    - execution_id: The execution_id to assess (required)
+    - learnings: Optional learnings dict from /learn endpoint for reliability scoring
+
+    Returns quality_score, breakdown, grade, and bottlenecks.
+    """
+    try:
+        execution_id = body.get('execution_id')
+        if not execution_id:
+            raise HTTPException(status_code=400, detail="execution_id is required")
+
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Validate execution belongs to this recipe
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        learnings = body.get('learnings')
+
+        from core.services.recipe_quality_service import RecipeQualityService
+        service = RecipeQualityService(db=db)
+        result = service.assess_quality(execution_id, learnings=learnings)
+
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error assessing quality: {str(e)}")
+
+
+@router.get("/{recipe_id}/suggestions")
+async def get_recipe_suggestions(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Get improvement suggestions from the recipe's learning_data.
+
+    Returns latest suggestions, patterns, and performance metrics
+    extracted from previous learning analyses.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        learning_data = recipe.learning_data or {}
+
+        return {
+            "recipe_id": recipe_id,
+            "quality_score": recipe.quality_score,
+            "suggestions": learning_data.get("latest_suggestions", []),
+            "patterns": learning_data.get("latest_patterns", []),
+            "performance_metrics": learning_data.get("latest_performance"),
+            "last_analyzed_at": learning_data.get("last_analyzed_at"),
+            "analysis_count": len(learning_data.get("analyses", [])),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting suggestions for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting suggestions: {str(e)}")
+
+
+@router.get("/{recipe_id}/executions")
+async def list_recipe_executions(
+    recipe_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    status: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """
+    List executions for a recipe with optional status filter.
+
+    Query Parameters:
+    - status: Filter by execution status (pending, running, completed, failed, cancelled)
+    - skip: Pagination offset
+    - limit: Pagination limit (1-100, default 20)
+
+    Returns list of executions with quality scores.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        query = db.query(RecipeExecution).filter(
+            RecipeExecution.recipe_id == recipe.id
+        )
+
+        if status:
+            query = query.filter(RecipeExecution.status == status)
+
+        total = query.count()
+
+        executions = query.order_by(
+            RecipeExecution.started_at.desc()
+        ).offset(skip).limit(limit).all()
+
+        return {
+            "items": [ex.to_dict() for ex in executions],
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "recipe_id": recipe_id,
+            "recipe_quality_score": recipe.quality_score,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing executions for recipe {recipe_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing executions: {str(e)}")
 
 
 # ===================================================================
@@ -519,15 +1008,15 @@ async def submit_recipe_to_marketplace(
             template_id=f"marketplace-{workspace_recipe.template_id}-{datetime.now().timestamp()}",
             name=workspace_recipe.name,
             description=workspace_recipe.description,
-            category=workspace_recipe.category,
-            recipe_type=workspace_recipe.recipe_type,
             template_definition=workspace_recipe.template_definition,
             tags=workspace_recipe.tags,
-            difficulty=workspace_recipe.difficulty,
+            steps=workspace_recipe.steps,
+            inputs=workspace_recipe.inputs,
+            outputs=workspace_recipe.outputs,
+            execution_config=workspace_recipe.execution_config,
+            schedule_config=workspace_recipe.schedule_config,
             recommended_agents=workspace_recipe.recommended_agents,
-            estimated_time=workspace_recipe.estimated_time,
             required_tools=workspace_recipe.required_tools,
-            icon=workspace_recipe.icon,
             preview_image=workspace_recipe.preview_image,
             documentation_url=workspace_recipe.documentation_url,
             version=workspace_recipe.version or '1.0',
@@ -544,8 +1033,8 @@ async def submit_recipe_to_marketplace(
 
             # Approval
             is_approved=is_trusted,
-            marketplace_category=recipe_data.get('category') or workspace_recipe.category,
-            marketplace_icon=recipe_data.get('icon') or workspace_recipe.icon,
+            marketplace_category=recipe_data.get('category') or (workspace_recipe.tags[0] if workspace_recipe.tags else 'General'),
+            marketplace_icon=recipe_data.get('icon') or workspace_recipe.marketplace_icon,
 
             # Visibility
             is_public=True,
@@ -645,15 +1134,15 @@ async def install_recipe_from_marketplace(
             template_id=template_id,
             name=recipe_name,
             description=marketplace_recipe.description,
-            category=marketplace_recipe.category,
-            recipe_type=marketplace_recipe.recipe_type,
             template_definition=marketplace_recipe.template_definition,
             tags=marketplace_recipe.tags,
-            difficulty=marketplace_recipe.difficulty,
+            steps=marketplace_recipe.steps,
+            inputs=marketplace_recipe.inputs,
+            outputs=marketplace_recipe.outputs,
+            execution_config=marketplace_recipe.execution_config,
+            schedule_config=marketplace_recipe.schedule_config,
             recommended_agents=marketplace_recipe.recommended_agents,
-            estimated_time=marketplace_recipe.estimated_time,
             required_tools=marketplace_recipe.required_tools,
-            icon=marketplace_recipe.icon,
             preview_image=marketplace_recipe.preview_image,
             documentation_url=marketplace_recipe.documentation_url,
             version=marketplace_recipe.version,

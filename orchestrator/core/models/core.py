@@ -80,6 +80,9 @@ class LLMModel(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
+    # PRD-37: Workspace isolation (nullable for system-wide models)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
 # Database Models
 class Agent(Base):
     __tablename__ = 'agents'
@@ -180,7 +183,10 @@ class Skill(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
-    
+
+    # PRD-37: Workspace isolation for multi-tenant SaaS
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+
     # PRD-22: New fields for Git-backed skills
     prompt_template = Column(Text, nullable=True)  # Core skill content (Level 2 progressive disclosure)
     tools_schema = Column(JSONB, nullable=True)  # PRD-22: Executable tool definitions for agents
@@ -326,6 +332,9 @@ class Pattern(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     created_by = Column(String(255))
 
+    # PRD-37: Workspace isolation for multi-tenant SaaS
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
+
 class Workflow(Base):
     __tablename__ = 'workflows'
     
@@ -366,6 +375,7 @@ class WorkflowExecution(Base):
     id = Column(Integer, primary_key=True)
     workflow_id = Column(Integer, ForeignKey('workflows.id'))
     agent_id = Column(Integer, ForeignKey('agents.id'))
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
     status = Column(String(50), default='pending')  # 'pending', 'running', 'completed', 'failed'
     input_data = Column(JSON)
     output_data = Column(JSON)
@@ -407,7 +417,7 @@ class Document(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
     is_shared = Column(Boolean, default=True)
     
-    # PRD-37: Workspace isolation
+    # PRD-37: Workspace isolation for multi-tenant SaaS
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False)
 
 class SystemConfiguration(Base):
@@ -1050,18 +1060,25 @@ class WorkflowTemplate(Base):
     created_by_user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
 
     # Categorization
-    category = Column(String(100), nullable=False, index=True)  # Development, Data Processing, etc.
     tags = Column(JSONB, default=list)  # ["code-review", "security", "automation"]
-    difficulty = Column(String(50), default='intermediate')  # beginner, intermediate, advanced
-    recipe_type = Column(String(20), default='complex', nullable=False)  # 'simple' or 'complex'
 
     # Template definition
     template_definition = Column(JSONB, nullable=False)  # Full workflow structure
     # Contains: { steps: [], agents: [], config: {}, variables: [] }
 
+    # Workflow definition (new 9-stage architecture)
+    steps = Column(JSONB, nullable=True)  # Array of step definitions: [{ step_number, agent_id, prompt_template, pass_to, error_handling }]
+    inputs = Column(JSONB, nullable=True)  # Input schema like function signature: { "param": { "type": "string", "required": true } }
+    outputs = Column(JSONB, nullable=True)  # Expected output format: { "field": { "type": "string" } }
+    execution_config = Column(JSONB, nullable=True)  # Runtime behavior: { mode, max_retries, timeout_per_step, quality_threshold }
+    schedule_config = Column(JSONB, nullable=True)  # Scheduling: { type: "manual"|"cron"|"trigger", cron_expression, trigger_config }
+
+    # Self-learning fields (Learn-Quality-Memory stages)
+    quality_score = Column(Float, nullable=True)  # Average quality from Stage 7 assessments (0.0 - 1.0)
+    learning_data = Column(JSONB, nullable=True)  # Patterns, suggestions, performance metrics from Stage 6
+
     # Recommended configuration
     recommended_agents = Column(JSONB, default=list)  # Agent types that work well with this template
-    estimated_time = Column(String(50))  # "5-10 minutes"
     required_tools = Column(JSONB, default=list)  # Tools that must be installed
 
     # Usage and popularity
@@ -1078,7 +1095,6 @@ class WorkflowTemplate(Base):
     is_approved = Column(Boolean, default=False)  # Approval status for marketplace items
 
     # Metadata
-    icon = Column(String(50))  # Emoji or icon identifier
     preview_image = Column(String(500))  # URL to preview image
     documentation_url = Column(String(500))  # Link to detailed documentation
     marketplace_category = Column(String(100))  # Marketplace-specific category
@@ -1104,7 +1120,83 @@ class WorkflowTemplate(Base):
     def is_marketplace_item(self):
         """Check if this is a marketplace recipe"""
         return self.owner_type == 'marketplace'
-    
+
+    def validate_steps(self):
+        """Validate steps array structure"""
+        if not self.steps:
+            return True, None
+
+        if not isinstance(self.steps, list):
+            return False, "steps must be an array"
+
+        for idx, step in enumerate(self.steps):
+            if not isinstance(step, dict):
+                return False, f"Step {idx} must be an object"
+
+            required_fields = ['step_id', 'order', 'agent_id', 'prompt_template']
+            for field in required_fields:
+                if field not in step:
+                    return False, f"Step {idx} missing required field: {field}"
+
+        return True, None
+
+    def validate_execution_config(self):
+        """Validate execution_config structure"""
+        if not self.execution_config:
+            return True, None
+
+        if not isinstance(self.execution_config, dict):
+            return False, "execution_config must be an object"
+
+        # Validate mode
+        if 'mode' in self.execution_config:
+            if self.execution_config['mode'] not in ['sequential', 'parallel']:
+                return False, "mode must be 'sequential' or 'parallel'"
+
+        # Validate numeric fields
+        numeric_fields = ['max_retries', 'retry_delay', 'per_step_timeout', 'total_timeout', 'parallel_limit']
+        for field in numeric_fields:
+            if field in self.execution_config:
+                if not isinstance(self.execution_config[field], (int, float)) or self.execution_config[field] < 0:
+                    return False, f"{field} must be a non-negative number"
+
+        # Validate quality_threshold
+        if 'quality_threshold' in self.execution_config:
+            threshold = self.execution_config['quality_threshold']
+            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 1:
+                return False, "quality_threshold must be between 0 and 1"
+
+        return True, None
+
+    def validate_schedule_config(self):
+        """Validate schedule_config structure"""
+        if not self.schedule_config:
+            return True, None
+
+        if not isinstance(self.schedule_config, dict):
+            return False, "schedule_config must be an object"
+
+        # Validate type
+        if 'type' not in self.schedule_config:
+            return False, "schedule_config must have 'type' field"
+
+        schedule_type = self.schedule_config['type']
+        if schedule_type not in ['manual', 'cron', 'trigger']:
+            return False, "type must be 'manual', 'cron', or 'trigger'"
+
+        # Validate cron expression if type is cron
+        if schedule_type == 'cron' and 'cron_expression' not in self.schedule_config:
+            return False, "cron type requires cron_expression field"
+
+        # Validate trigger config if type is trigger
+        if schedule_type == 'trigger' and 'trigger_config' not in self.schedule_config:
+            return False, "trigger type requires trigger_config field"
+
+        return True, None
+
+    # Relationship to executions
+    recipe_executions = relationship('RecipeExecution', back_populates='recipe', cascade='all, delete-orphan')
+
     def to_dict(self):
         """Convert template to dictionary for API responses"""
         return {
@@ -1118,13 +1210,16 @@ class WorkflowTemplate(Base):
             'cloned_from_id': self.cloned_from_id,
             'original_creator_id': self.original_creator_id,
             'created_by_user_id': self.created_by_user_id,
-            'category': self.category,
             'tags': self.tags or [],
-            'difficulty': self.difficulty,
-            'recipe_type': self.recipe_type,
             'template_definition': self.template_definition or {},
+            'steps': self.steps,
+            'inputs': self.inputs,
+            'outputs': self.outputs,
+            'execution_config': self.execution_config,
+            'schedule_config': self.schedule_config,
+            'quality_score': self.quality_score,
+            'learning_data': self.learning_data,
             'recommended_agents': self.recommended_agents or [],
-            'estimated_time': self.estimated_time,
             'required_tools': self.required_tools or [],
             'use_count': self.use_count,
             'success_rate': self.success_rate,
@@ -1136,7 +1231,6 @@ class WorkflowTemplate(Base):
             'is_system': self.is_system,
             'is_approved': self.is_approved,
             'is_marketplace_item': self.is_marketplace_item,
-            'icon': self.icon,
             'preview_image': self.preview_image,
             'documentation_url': self.documentation_url,
             'marketplace_category': self.marketplace_category,
@@ -1146,4 +1240,52 @@ class WorkflowTemplate(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'created_by': self.created_by,
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None
+        }
+
+
+class RecipeExecution(Base):
+    """
+    Tracks individual recipe executions.
+    Each execution record stores input/output data, step-level results,
+    current stage in the 9-stage workflow, and status.
+    """
+    __tablename__ = 'recipe_executions'
+
+    id = Column(Integer, primary_key=True)
+    execution_id = Column(String(255), unique=True, nullable=False, index=True)
+    recipe_id = Column(Integer, ForeignKey('workflow_recipes.id', ondelete='CASCADE'), nullable=False, index=True)
+    workspace_id = Column(UUID, ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False, index=True)
+    status = Column(String(50), nullable=False, default='pending', server_default='pending')
+    input_data = Column(JSONB, nullable=True)
+    output_data = Column(JSONB, nullable=True)
+    step_results = Column(JSONB, nullable=True)
+    current_stage = Column(Integer, nullable=True)
+    current_step = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    triggered_by = Column(String(255), nullable=True)
+    execution_metadata = Column(JSONB, nullable=True)
+
+    # Relationships
+    recipe = relationship('WorkflowTemplate', back_populates='recipe_executions')
+
+    def to_dict(self):
+        """Convert execution to dictionary for API responses"""
+        return {
+            'id': self.id,
+            'execution_id': self.execution_id,
+            'recipe_id': self.recipe_id,
+            'workspace_id': str(self.workspace_id) if self.workspace_id else None,
+            'status': self.status,
+            'input_data': self.input_data,
+            'output_data': self.output_data,
+            'step_results': self.step_results,
+            'current_stage': self.current_stage,
+            'current_step': self.current_step,
+            'error_message': self.error_message,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'triggered_by': self.triggered_by,
+            'execution_metadata': self.execution_metadata,
         }

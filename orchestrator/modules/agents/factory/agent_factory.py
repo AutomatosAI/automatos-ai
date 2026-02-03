@@ -28,7 +28,7 @@ from core.llm import (
 from core.models import (
     Agent, Skill, PriorityLevel, Base,
 )
-from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache, ComposioActionCache
 from modules.agents.services.skill_loader import get_skill_loader
 
 # Import new services (lazy import to avoid circular deps)
@@ -1093,6 +1093,11 @@ Available Shell Tools:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
             
+            # Preserve the original user prompt before any augmentation.
+            # This is used for Composio hint generation so action-instructions
+            # injected below don't skew intent matching.
+            original_user_prompt = prompt
+
             # Check if actions are needed and add capabilities
             action_executor = None
             if enable_actions and self._requires_actions(prompt):
@@ -1122,11 +1127,57 @@ To use actions, respond with JSON blocks like:
                 tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
                 self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
             
+            # Composio tool injection (follows chatbot pattern from service.py)
+            # If agent has Composio app assignments, add composio_execute + hints
+            _composio_workspace_id = None
+            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            if composio_apps:
+                # Add composio_execute tool schema (same as ToolRegistry registration)
+                composio_schema = {
+                    "type": "function",
+                    "function": {
+                        "name": "composio_execute",
+                        "description": (
+                            "Execute an external app action via Composio (connected third-party apps). "
+                            "Use this for actions in email/messaging and developer tools—e.g., "
+                            "read/send emails, post messages, create/manage repositories, issues, and pull requests. "
+                            "IMPORTANT: This tool has a 2-attempt limit. If the first attempt "
+                            "fails, check the error message carefully before retrying."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "app_name": {"type": "string", "description": "App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')"},
+                                "action": {"type": "string", "description": "Action name from Composio (e.g., 'GMAIL_LIST_EMAILS')"},
+                                "params": {"type": "object", "description": "Action parameters (schema depends on the action)", "default": {}}
+                            },
+                            "required": ["action"]
+                        }
+                    }
+                }
+                tool_schemas.append(composio_schema)
+
+                # Resolve workspace_id once for later tool execution calls
+                db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
+                _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
+
+                # Build and inject Composio hints (app names + candidate actions + param hints)
+                # NOTE: Uses original_user_prompt (not the possibly-augmented `prompt`)
+                # to avoid action-instruction injection skewing intent matching.
+                hint_lines = self._build_composio_hints(agent_runtime.agent_id, original_user_prompt)
+                if hint_lines:
+                    # Insert after system prompt, before user messages
+                    insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+                    messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
+
+                app_names = [t.get("name") for t in composio_apps]
+                self.logger.info(f"🔌 Composio: Added composio_execute tool + hints ({len(hint_lines)} lines) for apps {app_names} (workspace={_composio_workspace_id})")
+
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
-            
+
             action_executor = action_executor or get_action_executor()  # Ensure executor exists
-            
+
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
@@ -1192,7 +1243,8 @@ To use actions, respond with JSON blocks like:
                                 result = await tool_executor.execute_tool(
                                     tool_name=func_name,
                                     parameters=func_args,
-                                    agent_id=agent_runtime.agent_id
+                                    agent_id=agent_runtime.agent_id,
+                                    workspace_id=_composio_workspace_id
                                 )
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
@@ -1695,7 +1747,7 @@ To use actions, respond with JSON blocks like:
                     db.query(AgentAppAssignment)
                     .filter(
                         AgentAppAssignment.agent_id == agent.id,
-                        AgentAppAssignment.is_active == True,
+                        AgentAppAssignment.is_active.is_(True),
                         AgentAppAssignment.app_type == "EXTERNAL",
                     )
                     .all()
@@ -1906,10 +1958,16 @@ To use actions, respond with JSON blocks like:
                 
                 # PRD-17 Phase 3: Reuse agent's tool_executor (initialized once)
                 tool_executor = agent_runtime.tool_executor if agent_runtime else get_unified_tool_executor(self.db_session)
+                # Resolve workspace_id from agent_runtime if available
+                _ws_id = None
+                if agent_runtime and hasattr(agent_runtime, 'agent_id'):
+                    _db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
+                    _ws_id = getattr(_db_agent, 'workspace_id', None) if _db_agent else None
                 result = await tool_executor.execute_tool(
                     tool_name=action_type,
                     parameters=params,
-                    agent_id=0
+                    agent_id=agent_runtime.agent_id if agent_runtime else 0,
+                    workspace_id=_ws_id
                 )
                 
                 # Enhanced logging for research tools
@@ -1964,7 +2022,7 @@ To use actions, respond with JSON blocks like:
                 self.db_session.query(AgentAppAssignment)
                 .filter(
                     AgentAppAssignment.agent_id == agent_id,
-                    AgentAppAssignment.is_active == True,
+                    AgentAppAssignment.is_active.is_(True),
                     AgentAppAssignment.app_type == "EXTERNAL",
                 )
                 .all()
@@ -2002,6 +2060,316 @@ To use actions, respond with JSON blocks like:
             self.logger.warning(f"Failed to load Composio apps for agent {agent_id}: {e}")
             return []
     
+    def _build_composio_hints(self, agent_id: int, task_prompt: str) -> List[str]:
+        """
+        Build Composio app/action hint lines for system message injection.
+
+        Follows the SAME pattern as chatbot service.py (lines 606-727):
+        1. Query AgentAppAssignment for assigned external apps
+        2. Cross-reference with workspace connections (EntityManager)
+        3. Match candidate actions from ComposioActionCache using prompt tokens
+        4. Extract parameter hints for top actions
+        """
+        import re
+        from sqlalchemy import or_
+
+        try:
+            from core.composio.entity_manager import EntityManager
+
+            # 1. Assigned EXTERNAL apps for this agent
+            assigned = (
+                self.db_session.query(AgentAppAssignment)
+                .filter(
+                    AgentAppAssignment.agent_id == agent_id,
+                    AgentAppAssignment.is_active.is_(True),
+                    AgentAppAssignment.app_type == "EXTERNAL",
+                )
+                .all()
+            )
+            assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
+            self.logger.info(f"🔌 [hints] Agent {agent_id}: assigned_apps={assigned_apps}")
+            if not assigned_apps:
+                return []
+
+            # 2. Cross-reference with connected apps in workspace
+            connected_apps: List[str] = []
+            db_agent = self.db_session.query(Agent).filter(Agent.id == agent_id).first()
+            workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
+            self.logger.info(f"🔌 [hints] Agent {agent_id}: workspace_id={workspace_id}")
+
+            if workspace_id:
+                try:
+                    manager = EntityManager(self.db_session)
+                    entity = manager.get_entity_by_workspace(workspace_id)
+                    if entity:
+                        connected_apps = [
+                            (c.get("app_name") or "").upper()
+                            for c in manager.get_entity_connections(entity["id"])
+                            if c.get("status") == "active"
+                        ]
+                    self.logger.info(f"🔌 [hints] Agent {agent_id}: connected_apps={connected_apps}")
+                except Exception as conn_err:
+                    self.logger.warning(f"🔌 [hints] Connection check failed: {conn_err} - using all assigned apps")
+                    connected_apps = []  # Fallback: don't filter
+
+            allowed_apps = assigned_apps
+            if connected_apps:
+                connected_set = set(connected_apps)
+                allowed_apps = [a for a in assigned_apps if a in connected_set]
+
+            if not allowed_apps:
+                self.logger.info(f"🔌 Composio: Agent {agent_id} has apps {assigned_apps} but none connected (connected={connected_apps})")
+                # Fallback: use assigned apps anyway so LLM at least knows the names
+                allowed_apps = assigned_apps
+
+            # 3. Build hint header
+            hint_lines = [
+                "You have these external apps assigned (via Composio): "
+                + ", ".join(sorted(set(allowed_apps))) + ".",
+                "When you need external data/actions (email, Slack, etc.), use `composio_execute`.",
+            ]
+
+            # 4. Tokenize task prompt and match candidate actions from DB
+            q = (task_prompt or "").lower()
+            q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
+            stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
+            q_tokens = [t for t in q_tokens if t not in stop]
+            q_tokens = q_tokens[:10]
+
+            # Safety: avoid suggesting destructive actions for messaging intents
+            is_messaging_intent = bool(re.search(r"\b(send|message|post|dm|chat)\b", q))
+            dangerous_tokens = {
+                "archive", "delete", "remove", "revoke", "clear", "close", "disable",
+                "ban", "kick", "deactivate", "destroy", "purge",
+            }
+
+            app_matches: List[tuple] = []
+            top_action_params: Dict[str, str] = {}
+
+            # ── PRIMARY: Capability-based filtering via taxonomy ──
+            # Uses INTENT_TO_CAPABILITIES mapping (e.g., "send"/"post" → "message.send")
+            # to select semantically correct actions from ComposioActionMetadata.
+            # This prevents the LLM from seeing irrelevant actions like SLACK_CREATE_CHANNEL
+            # when the intent is to send a message.
+            capability_matched = False
+            try:
+                from modules.tools.capabilities.taxonomy import get_capabilities_for_intent
+                from modules.tools.capabilities.models import ComposioActionMetadata
+
+                required_caps = get_capabilities_for_intent(task_prompt or "")
+                self.logger.debug(f"🔌 [hints] Capability extraction: prompt_len={len(task_prompt or '')} → {required_caps}")
+
+                # Check if metadata table has data
+                metadata_count = self.db_session.query(ComposioActionMetadata.id).limit(1).first()
+                if metadata_count and required_caps:
+                    # Query actions matching capabilities for the agent's allowed apps
+                    # app_id in ComposioActionMetadata is lowercase (e.g., "slack")
+                    allowed_apps_lower = [a.lower() for a in allowed_apps]
+
+                    from sqlalchemy import select
+                    metadata_query = (
+                        select(ComposioActionMetadata)
+                        .where(ComposioActionMetadata.app_id.in_(allowed_apps_lower))
+                        .where(ComposioActionMetadata.capabilities.overlap(required_caps))
+                        .where(ComposioActionMetadata.destructive.is_(False))
+                    )
+                    metadata_rows = self.db_session.execute(metadata_query).scalars().all()
+
+                    if metadata_rows:
+                        # Rank by capability match count + confidence
+                        intent_words = set(q.split())
+                        scored = []
+                        for meta in metadata_rows:
+                            score = 0.0
+                            action_caps = set(meta.capabilities or [])
+                            cap_matches = len(action_caps & set(required_caps))
+                            score += min(0.4, cap_matches * 0.15)
+                            kw_matches = len(set(meta.intent_keywords or []) & intent_words)
+                            score += min(0.4, kw_matches * 0.1)
+                            score += (meta.classification_confidence or 0.5) * 0.2
+                            scored.append((meta, score))
+                        scored.sort(key=lambda x: x[1], reverse=True)
+
+                        # Group by app
+                        from collections import defaultdict
+                        app_action_map = defaultdict(list)
+                        for meta, _score in scored:
+                            app_key = (meta.app_id or "").upper()
+                            if len(app_action_map[app_key]) < 6:
+                                app_action_map[app_key].append(meta.action_id)
+
+                        for app_key in allowed_apps:
+                            actions_for_app = app_action_map.get(app_key, [])
+                            if actions_for_app:
+                                app_matches.append((app_key, actions_for_app))
+
+                        if app_matches:
+                            capability_matched = True
+                            self.logger.info(
+                                f"🔌 [hints] Capability filter matched {sum(len(a) for _, a in app_matches)} actions "
+                                f"for caps={required_caps}"
+                            )
+
+                            # Get parameter hints for top actions from ComposioActionCache
+                            for meta, _score in scored[:5]:
+                                action_id = meta.action_id
+                                if action_id and len(top_action_params) < 10:
+                                    cache_row = (
+                                        self.db_session.query(ComposioActionCache.parameters)
+                                        .filter(ComposioActionCache.action_name == action_id)
+                                        .first()
+                                    )
+                                    if cache_row and cache_row[0]:
+                                        try:
+                                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
+                                            param_hints = ParameterHintExtractor.extract_hints(cache_row[0], max_params=5)
+                                            if param_hints:
+                                                top_action_params[action_id] = param_hints
+                                        except Exception:
+                                            pass
+            except Exception as cap_err:
+                self.logger.warning(f"🔌 [hints] Capability filtering failed (falling back to token search): {cap_err}")
+
+            # ── FALLBACK: Token-based ILIKE search on ComposioActionCache ──
+            # Used when ComposioActionMetadata is empty (sync hasn't run) or
+            # capability filtering found no matches.
+            #
+            # Key improvement: Rank results by relevance BEFORE truncating.
+            # Previously took first 6 from 24 unranked results, often cutting off
+            # the correct action (e.g., SLACK_SEND_MESSAGE dropped, SLACK_ADD_STAR kept).
+            #
+            # Additionally, use taxonomy capability keywords to boost relevant actions.
+            # e.g., if intent maps to "message.send", actions with "send"+"message"
+            # in their name get a score boost.
+            if not capability_matched and q_tokens:
+                self.logger.info(f"🔌 [hints] Falling back to token search (tokens={q_tokens})")
+
+                # Derive capability-boost keywords from taxonomy (no DB needed)
+                cap_boost_terms = set()
+                try:
+                    from modules.tools.capabilities.taxonomy import get_capabilities_for_intent
+                    caps = get_capabilities_for_intent(task_prompt or "")
+                    for cap in caps:
+                        # "message.send" → {"message", "send"}
+                        cap_boost_terms.update(cap.split("."))
+                except Exception:
+                    pass
+
+                for app in allowed_apps[:12]:
+                    token_filters = []
+                    for tok in q_tokens:
+                        like = f"%{tok}%"
+                        token_filters.append(ComposioActionCache.action_name.ilike(like))
+                        token_filters.append(ComposioActionCache.display_name.ilike(like))
+                        token_filters.append(ComposioActionCache.description.ilike(like))
+
+                    rows = (
+                        self.db_session.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
+                        .filter(ComposioActionCache.app_name == app)
+                        .filter(or_(*token_filters))
+                        .limit(24)
+                        .all()
+                    )
+                    self.logger.info(f"🔌 [hints] Token search for {app}: {len(rows)} matches (tokens={q_tokens})")
+
+                    # Score and rank actions instead of taking first N
+                    scored_actions = []
+                    for r in rows:
+                        if not r or not r[0]:
+                            continue
+                        action_name = str(r[0])
+                        if " " in action_name and not action_name.startswith(f"{app}_"):
+                            action_name = f"{app}_{action_name.upper().replace(' ', '_')}"
+                        if is_messaging_intent:
+                            al = action_name.lower()
+                            if any(tok in al for tok in dangerous_tokens):
+                                continue
+
+                        # Score: how many tokens appear in the action NAME (not just description)
+                        name_lower = action_name.lower()
+                        name_score = sum(1 for tok in q_tokens if tok in name_lower)
+                        # Bonus: capability terms in action name
+                        cap_score = sum(1 for term in cap_boost_terms if term in name_lower)
+                        total_score = name_score * 2 + cap_score * 3
+
+                        scored_actions.append((action_name, total_score, r[1]))
+
+                    # Sort by score descending, then deduplicate
+                    scored_actions.sort(key=lambda x: x[1], reverse=True)
+                    seen = set()
+                    actions = []
+                    for action_name, _score, params in scored_actions:
+                        if action_name in seen:
+                            continue
+                        seen.add(action_name)
+                        actions.append(action_name)
+                        if len(top_action_params) < 10 and params:
+                            try:
+                                from modules.tools.formatting.schema_detector import ParameterHintExtractor
+                                param_hints = ParameterHintExtractor.extract_hints(params, max_params=5)
+                                if param_hints:
+                                    top_action_params[action_name] = param_hints
+                            except Exception:
+                                pass
+
+                    if actions:
+                        self.logger.info(f"🔌 [hints] Ranked actions for {app}: {actions[:6]}")
+                        app_matches.append((app, actions[:6]))
+
+            # Fallback: if no token matches either, get top actions for each app
+            if not app_matches:
+                self.logger.info(f"🔌 [hints] No matches at all, fetching top actions per app")
+                for app in allowed_apps[:6]:
+                    rows = (
+                        self.db_session.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
+                        .filter(ComposioActionCache.app_name == app)
+                        .limit(10)
+                        .all()
+                    )
+                    actions = []
+                    for r in rows:
+                        if not r or not r[0]:
+                            continue
+                        name = str(r[0])
+                        # Legacy fallback: if still display name, reconstruct
+                        if " " in name and not name.startswith(f"{app}_"):
+                            name = f"{app}_{name.upper().replace(' ', '_')}"
+                        actions.append(name)
+                    self.logger.info(f"🔌 [hints] Fallback for {app}: {len(actions)} actions")
+                    if actions:
+                        app_matches.append((app, actions[:6]))
+                    for r in rows[:3]:
+                        if r and r[0] and r[1] and len(top_action_params) < 10:
+                            name = str(r[0])
+                            if " " in name and not name.startswith(f"{app}_"):
+                                name = f"{app}_{name.upper().replace(' ', '_')}"
+                            try:
+                                from modules.tools.formatting.schema_detector import ParameterHintExtractor
+                                param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
+                                if param_hints:
+                                    top_action_params[name] = param_hints
+                            except Exception:
+                                pass
+
+            # Prefer apps with more matches
+            app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
+            for app, actions in app_matches[:6]:
+                hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
+
+            # Add parameter hints for top candidate actions
+            if top_action_params:
+                hint_lines.append("\nParameter hints for key actions:")
+                for action_name, params in list(top_action_params.items())[:5]:
+                    hint_lines.append(f"\n{action_name}:")
+                    hint_lines.append(params)
+
+            self.logger.info(f"🔌 Composio hints: apps={allowed_apps}, tokens={q_tokens}, matches={len(app_matches)}, param_hints={len(top_action_params)}, hint_lines={len(hint_lines)}")
+            return hint_lines
+
+        except Exception as e:
+            self.logger.warning(f"Failed to build Composio hints for agent {agent_id}: {e}", exc_info=True)
+            return []
+
     def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
         """
         Check if an agent has a specific tool capability.

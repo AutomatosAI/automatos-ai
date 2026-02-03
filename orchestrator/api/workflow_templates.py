@@ -25,9 +25,7 @@ from core.auth.dependencies import RequestContext
 
 @router.get("")
 async def list_workflow_templates(
-    ctx: RequestContext = Depends(get_request_context_hybrid), 
-    category: Optional[str] = None,
-    difficulty: Optional[str] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     is_featured: Optional[bool] = None,
     is_public: Optional[bool] = True,
     search: Optional[str] = None,
@@ -38,10 +36,8 @@ async def list_workflow_templates(
 ):
     """
     List workflow templates with filtering and pagination.
-    
+
     Query Parameters:
-    - category: Filter by category (e.g., "Support", "Data Processing")
-    - difficulty: Filter by difficulty (beginner, intermediate, advanced)
     - is_featured: Show only featured templates
     - is_public: Show only public templates (default: true)
     - search: Search in name and description
@@ -51,13 +47,8 @@ async def list_workflow_templates(
     """
     try:
         query = db.query(WorkflowTemplate).filter(WorkflowTemplate.workspace_id == ctx.workspace_id)
-        
+
         # Apply filters
-        if category:
-            query = query.filter(WorkflowTemplate.category == category)
-        
-        if difficulty:
-            query = query.filter(WorkflowTemplate.difficulty == difficulty)
         
         if is_featured is not None:
             query = query.filter(WorkflowTemplate.is_featured == is_featured)
@@ -134,27 +125,23 @@ async def create_workflow_template(
 ):
     """
     Create a new workflow template.
-    
+
     Required fields:
     - template_id: Unique identifier (e.g., "my-custom-template")
     - name: Display name
     - description: Description of what the template does
-    - category: Category (e.g., "Development", "Data Processing")
     - template_definition: JSON structure with steps, agents, config
-    
+
     Optional fields:
     - tags: Array of tags
-    - difficulty: beginner, intermediate, advanced (default: intermediate)
     - recommended_agents: Array of agent type names
-    - estimated_time: e.g., "5-10 minutes"
     - required_tools: Array of tool names
     - is_public: Boolean (default: true)
     - is_featured: Boolean (default: false)
-    - icon: Emoji or icon identifier
     """
     try:
         # Validate required fields
-        required_fields = ['template_id', 'name', 'description', 'category', 'template_definition']
+        required_fields = ['template_id', 'name', 'description', 'template_definition']
         for field in required_fields:
             if field not in template_data:
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
@@ -175,17 +162,13 @@ async def create_workflow_template(
             template_id=template_data['template_id'],
             name=template_data['name'],
             description=template_data['description'],
-            category=template_data['category'],
             template_definition=template_data['template_definition'],
             tags=template_data.get('tags', []),
-            difficulty=template_data.get('difficulty', 'intermediate'),
             recommended_agents=template_data.get('recommended_agents', []),
-            estimated_time=template_data.get('estimated_time'),
             required_tools=template_data.get('required_tools', []),
             is_public=template_data.get('is_public', True),
             is_featured=template_data.get('is_featured', False),
             is_system=False,  # User-created templates are never system templates
-            icon=template_data.get('icon'),
             preview_image=template_data.get('preview_image'),
             documentation_url=template_data.get('documentation_url'),
             version=template_data.get('version', '1.0'),
@@ -237,9 +220,9 @@ async def update_workflow_template(
         
         # Update fields if provided
         updatable_fields = [
-            'name', 'description', 'category', 'tags', 'difficulty',
-            'template_definition', 'recommended_agents', 'estimated_time',
-            'required_tools', 'is_public', 'is_featured', 'icon',
+            'name', 'description', 'tags',
+            'template_definition', 'recommended_agents',
+            'required_tools', 'is_public', 'is_featured',
             'preview_image', 'documentation_url', 'version', 'changelog'
         ]
         
@@ -344,26 +327,26 @@ async def record_template_usage(
 
 @router.get("/categories/list")
 async def list_template_categories(db: Session = Depends(get_db)):
-    """Get list of all template categories with counts"""
+    """Get list of all unique tags used across templates"""
     try:
-        from sqlalchemy import func
-        
-        categories = db.query(
-            WorkflowTemplate.category,
-            func.count(WorkflowTemplate.id).label('count')
-        ).filter(
+        templates = db.query(WorkflowTemplate.tags).filter(
             WorkflowTemplate.is_public == True
-        ).group_by(
-            WorkflowTemplate.category
         ).all()
-        
+
+        # Aggregate tags across all templates
+        tag_counts: dict = {}
+        for (tags,) in templates:
+            if tags:
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
         return {
             "categories": [
-                {"name": cat[0], "count": cat[1]}
-                for cat in categories
+                {"name": name, "count": count}
+                for name, count in sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
             ]
         }
-        
+
     except Exception as e:
         logger.error(f"Error listing template categories: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing categories: {str(e)}")

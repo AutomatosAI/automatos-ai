@@ -860,13 +860,23 @@ class ApiClient {
 
       if (!response.ok) {
         console.error('❌ API Error:', response.status, response.statusText)
+        // Try to extract detail message from response body
+        let detail = response.statusText
+        try {
+          const errorBody = await response.json()
+          if (errorBody?.detail) {
+            detail = typeof errorBody.detail === 'string' ? errorBody.detail : JSON.stringify(errorBody.detail)
+          }
+        } catch {
+          // Response body not JSON, use statusText
+        }
         if (response.status === 401) {
           throw new Error(
             'HTTP 401: Unauthorized (missing/invalid Clerk token). ' +
             'Make sure you are signed in and the API client is configured with Clerk.'
           )
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(detail || `HTTP ${response.status}`)
       }
 
       const data = await response.json()
@@ -1156,7 +1166,14 @@ class ApiClient {
   }
 
   async getActiveWorkflows() {
-    return this.request('/api/workflows/active')
+    return this.request<{
+      active_workflows: any[];
+      recipe_runs: any[];
+      total_active: number;
+      total_recipe_runs: number;
+      system_load: number;
+      last_updated: string;
+    }>('/api/workflows/active')
   }
 
   async getWorkflowStatsDashboard() {
@@ -1367,6 +1384,30 @@ class ApiClient {
     return this.request(`/api/workflow-recipes/install/${recipeId}`, {
       method: 'POST'
     })
+  }
+
+  async executeRecipe(recipeId: string, inputData?: Record<string, any>) {
+    return this.request(`/api/workflow-recipes/${recipeId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({ input_data: inputData || {} })
+    })
+  }
+
+  async getRecipeSuggestions(recipeId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/suggestions`)
+  }
+
+  async getRecipeExecutions(recipeId: string, params?: { status?: string; skip?: number; limit?: number }) {
+    const queryParams = new URLSearchParams()
+    if (params?.status) queryParams.append('status', params.status)
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString())
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString())
+    const query = queryParams.toString()
+    return this.request(`/api/workflow-recipes/${recipeId}/executions${query ? '?' + query : ''}`)
+  }
+
+  async getRecipeExecution(recipeId: string, executionId: string) {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
   }
 
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====

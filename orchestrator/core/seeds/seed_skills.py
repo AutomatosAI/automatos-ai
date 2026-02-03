@@ -11,17 +11,28 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from core.database import engine
 from core.models import Skill, Pattern
 
 # Create session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+def _get_default_workspace_id(db):
+    """Get the first workspace ID for seeding."""
+    row = db.execute(text("SELECT id FROM workspaces ORDER BY created_at LIMIT 1")).first()
+    if not row:
+        raise RuntimeError("No workspace found. Create a workspace before seeding skills.")
+    return row[0]
+
+
 def seed_skills():
     """Seed all 32 skills across 4 categories"""
     db = SessionLocal()
-    
+
     try:
+        workspace_id = _get_default_workspace_id(db)
+
         # Development Category Skills (8 skills)
         development_skills = [
             {
@@ -304,6 +315,7 @@ def seed_skills():
         else:
             # Create skill records
             for skill_data in all_skills:
+                skill_data["workspace_id"] = workspace_id
                 skill = Skill(**skill_data)
                 db.add(skill)
             
@@ -319,8 +331,9 @@ def seed_skills():
 def seed_patterns():
     """Seed sample patterns"""
     db = SessionLocal()
-    
+
     try:
+        workspace_id = _get_default_workspace_id(db)
         sample_patterns = [
             {
                 "name": "Multi-Agent Coordination",
@@ -390,6 +403,7 @@ def seed_patterns():
         else:
             # Create pattern records
             for pattern_data in sample_patterns:
+                pattern_data["workspace_id"] = workspace_id
                 pattern = Pattern(**pattern_data)
                 db.add(pattern)
             

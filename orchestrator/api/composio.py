@@ -217,9 +217,9 @@ async def list_connections(
     
     all_connections = entity_manager.get_entity_connections(entity["id"])
 
-    # Filter to only include connections that have been initiated (active or pending OAuth)
-    # Exclude 'added' status - those are just in workspace but not connected yet
-    connections = [c for c in all_connections if c.get("status") in ("active", "pending")]
+    # Include all workspace connections: active, pending OAuth, and disconnected (added).
+    # 'added' connections are shown so users can reconnect after disconnecting auth.
+    connections = [c for c in all_connections if c.get("status") in ("active", "pending", "added")]
 
     result = []
 
@@ -305,33 +305,55 @@ async def initiate_connection(
 @router.post("/connect/{app_name}/callback")
 async def connection_callback(
     app_name: str,
-    connection_id: str = Query(..., description="Composio connection ID"),
+    connection_id: Optional[str] = Query(None, description="Composio connection ID"),
     status: str = Query("active", description="Connection status"),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
     OAuth callback handler.
-    
+
     Called after user completes OAuth flow to update connection status.
+    The connection_id is optional — if not provided by the OAuth redirect,
+    we attempt to resolve it from the Composio API.
     """
     entity_manager = EntityManager(db)
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
-    
+
     if not entity:
         raise HTTPException(status_code=404, detail="Entity not found")
-    
-    success = entity_manager.update_connection_status(
-        entity_id=entity["id"],
+
+    resolved_connection_id = connection_id
+
+    # If no connection_id from OAuth redirect, try to resolve from Composio API
+    if not resolved_connection_id:
+        try:
+            client = get_composio_client()
+            composio_status = client.get_connection_status(
+                entity_id=entity["composio_entity_id"],
+                app=app_name.upper()
+            )
+            if composio_status:
+                resolved_connection_id = composio_status.get("id")
+                logger.info(f"[CALLBACK] Resolved connection_id from Composio API: {resolved_connection_id}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Could not resolve connection_id from Composio: {e}")
+
+    # Normalize status — treat "success" as "active"
+    normalized_status = "active" if status in ("success", "active") else status
+
+    # Use add_connection (upsert) — creates if missing, updates if exists.
+    # This is safer than update_connection_status which returns False if no row.
+    entity_manager.add_connection(
+        entity_id=str(entity["id"]),
         app_name=app_name.upper(),
-        status=status,
-        connection_id=connection_id
+        status=normalized_status,
+        connection_id=resolved_connection_id,
     )
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    
-    return {"status": "success", "app_name": app_name.upper(), "connected": status == "active"}
+
+    logger.info(f"[CALLBACK] {app_name.upper()} connection updated to {normalized_status} (connection_id={resolved_connection_id})")
+
+    return {"status": "success", "app_name": app_name.upper(), "connected": normalized_status == "active"}
 
 
 @router.delete("/connections/{app_name}")

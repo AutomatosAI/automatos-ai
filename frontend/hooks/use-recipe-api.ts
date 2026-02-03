@@ -10,6 +10,9 @@ export const recipeKeys = {
   detail: (id: string) => [...recipeKeys.details(), id] as const,
   featured: () => [...recipeKeys.all, 'featured'] as const,
   categories: () => [...recipeKeys.all, 'categories'] as const,
+  suggestions: (id: string) => [...recipeKeys.all, 'suggestions', id] as const,
+  executions: (id: string, params?: any) => [...recipeKeys.all, 'executions', id, params] as const,
+  execution: (recipeId: string, executionId: string) => [...recipeKeys.all, 'execution', recipeId, executionId] as const,
 }
 
 // List recipes with filtering
@@ -101,6 +104,19 @@ export function useDeleteRecipe() {
   })
 }
 
+// Execute recipe directly (creates workflow + launches execution)
+export function useExecuteRecipe() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ recipeId, inputData }: { recipeId: string; inputData?: Record<string, any> }) =>
+      apiClient.executeRecipe(recipeId, inputData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+    },
+  })
+}
+
 // Record recipe usage mutation
 export function useRecordRecipeUsage() {
   const queryClient = useQueryClient()
@@ -138,6 +154,43 @@ export function useInstallRecipeFromMarketplace() {
     onSuccess: () => {
       // Invalidate workspace recipes to show the newly installed recipe
       queryClient.invalidateQueries({ queryKey: recipeKeys.lists() })
+    },
+  })
+}
+
+// Get recipe suggestions from learning_data
+export function useRecipeSuggestions(recipeId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.suggestions(recipeId || ''),
+    queryFn: () => apiClient.getRecipeSuggestions(recipeId!),
+    enabled: !!recipeId,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+  })
+}
+
+// Get recipe executions list
+export function useRecipeExecutions(recipeId: string | undefined, params?: { status?: string; skip?: number; limit?: number }) {
+  return useQuery({
+    queryKey: recipeKeys.executions(recipeId || '', params),
+    queryFn: () => apiClient.getRecipeExecutions(recipeId!, params),
+    enabled: !!recipeId,
+    staleTime: 1 * 60 * 1000, // 1 minute
+  })
+}
+
+// Get single recipe execution detail with polling while running
+export function useRecipeExecution(recipeId: string | undefined, executionId: string | undefined) {
+  return useQuery({
+    queryKey: recipeKeys.execution(recipeId || '', executionId || ''),
+    queryFn: () => apiClient.getRecipeExecution(recipeId!, executionId!),
+    enabled: !!recipeId && !!executionId,
+    refetchInterval: (data: any) => {
+      // Poll every 3s while execution is running or pending
+      const status = data?.status
+      if (status === 'running' || status === 'pending') {
+        return 3000
+      }
+      return false // Stop polling when completed/failed
     },
   })
 }

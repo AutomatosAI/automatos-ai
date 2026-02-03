@@ -19,7 +19,8 @@ import {
     Settings,
     Star,
     AlertTriangle,
-    Clock
+    Clock,
+    RefreshCw
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -36,7 +37,9 @@ import {
 } from '@/hooks/use-composio-api'
 import { MarketplaceAppDetailsModal } from './marketplace-app-details-modal'
 import { apiClient } from '@/lib/api-client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSyncToolsCache } from '@/hooks/use-tools-api'
+import { useSystemRole } from '@/contexts/role-context'
 import { EnhancedPagination } from '@/components/ui/pagination'
 
 const statusIcons = {
@@ -59,6 +62,8 @@ interface MarketplaceToolsTabProps {
 
 export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     const { toast } = useToast()
+    const { isAdmin } = useSystemRole()
+    const syncCacheMutation = useSyncToolsCache()
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [connectingApp, setConnectingApp] = useState<string | null>(null)
     const [detailsModalOpen, setDetailsModalOpen] = useState(false)
@@ -178,14 +183,14 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
         )
     }, [workspaceTools])
 
-    // Get ALL workspace apps (active + added, but NOT pending)
-    // Pending apps should allow retry since OAuth never completed
+    // Get ALL workspace apps (active + added + pending)
+    // All represent apps the user has interacted with in their workspace
     const workspaceApps = useMemo(() => {
         return new Set(
             workspaceTools
                 .filter((tool: any) => {
                     const status = (tool.status || '').toLowerCase()
-                    return status === 'active' || status === 'added'
+                    return status === 'active' || status === 'added' || status === 'pending'
                 })
                 .map((tool: any) => (tool.app_name || '').toUpperCase())
         )
@@ -369,6 +374,18 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                     <Badge variant="outline" className="text-blue-400 border-blue-500/30">
                         {apps.length} Available
                     </Badge>
+                    {isAdmin && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => syncCacheMutation.mutate('full')}
+                            disabled={syncCacheMutation.isLoading}
+                            className="gap-2 text-muted-foreground hover:text-white"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncCacheMutation.isLoading ? 'animate-spin' : ''}`} />
+                            {syncCacheMutation.isLoading ? 'Syncing...' : 'Sync'}
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -584,12 +601,12 @@ function ToolCard({
                     <Separator />
 
                     {/* Action Section - Add to Workspace Button */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
                         <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
                             onClick={onDetails}
-                            className="text-muted-foreground hover:text-white p-0 h-auto"
+                            className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
                         >
                             Details
                         </Button>
@@ -598,9 +615,8 @@ function ToolCard({
                             <Button
                                 size="sm"
                                 variant="secondary"
-                                className="bg-secondary/50 hover:bg-secondary border border-white/10"
+                                className="flex-1 bg-secondary/50 hover:bg-secondary border border-white/10"
                                 disabled
-                                style={{ height: '32px', minWidth: '140px' }}
                                 onClick={() => console.log('🔵 [BTN] Already added button clicked (disabled)')}
                             >
                                 <CheckCircle className="w-3 h-3 mr-1" />
@@ -609,7 +625,7 @@ function ToolCard({
                         ) : (
                             <Button
                                 size="sm"
-                                className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
+                                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
                                 onClick={(e) => {
                                     console.log('🟢 [BTN] Add to Workspace button clicked!', {
                                         app: app.name,
@@ -620,7 +636,6 @@ function ToolCard({
                                     onConnect()
                                 }}
                                 disabled={isConnecting}
-                                style={{ height: '32px', minWidth: '140px' }}
                             >
                                 {isConnecting ? (
                                     <>

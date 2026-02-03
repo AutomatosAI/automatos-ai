@@ -676,6 +676,7 @@ class StreamingChatService:
                                 for tok in q_tokens:
                                     like = f"%{tok}%"
                                     token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                    token_filters.append(ComposioActionCache.display_name.ilike(like))
                                     token_filters.append(ComposioActionCache.description.ilike(like))
 
                                 # Fetch action_name AND parameters for schema-driven hints
@@ -1462,11 +1463,13 @@ class StreamingChatService:
                         if q_tokens:
                             from modules.tools.formatting.schema_detector import ParameterHintExtractor
 
+                            app_matches = []
                             for app in allowed_apps[:6]:
                                 token_filters = []
                                 for tok in q_tokens:
                                     like = f"%{tok}%"
                                     token_filters.append(ComposioActionCache.action_name.ilike(like))
+                                    token_filters.append(ComposioActionCache.display_name.ilike(like))
                                     token_filters.append(ComposioActionCache.description.ilike(like))
 
                                 rows = (
@@ -1488,6 +1491,7 @@ class StreamingChatService:
                                             top_action_params[action_name] = param_hints
 
                                 if actions:
+                                    app_matches.append((app, actions[:5]))
                                     hint_lines.append(f"- {app} actions: {', '.join(actions[:5])}")
 
                             if top_action_params:
@@ -1497,7 +1501,7 @@ class StreamingChatService:
                                     hint_lines.append(params)
 
                         llm_messages.insert(3, {"role": "system", "content": "\n".join(hint_lines)})
-                        logger.info(f"[Composio Hints] Agent {agent_id}: apps={allowed_apps}, tokens={q_tokens}, hints={len(top_action_params)}")
+                        logger.info(f"[Composio Hints] Agent {agent_id}: apps={allowed_apps}, tokens={q_tokens}, matches={len(app_matches)}, hints={len(top_action_params)}")
             except Exception as exc:
                 logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
 

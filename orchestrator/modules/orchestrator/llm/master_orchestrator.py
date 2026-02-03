@@ -48,6 +48,15 @@ class OrchestrationStrategy(Enum):
     ADAPTIVE = "adaptive"              # Adapt based on context
 
 
+class ExecutionMode(Enum):
+    """
+    Workflow execution modes based on user pre-configuration
+    """
+    AUTONOMOUS = "autonomous"  # User provides goal, system figures everything out (full 9-stage)
+    RECIPE = "recipe"          # User pre-defines all steps and agents (smart stage skipping)
+    HYBRID = "hybrid"          # User pre-defines some steps, system fills in the rest
+
+
 @dataclass
 class StageResult:
     """Result from a workflow stage"""
@@ -79,7 +88,9 @@ class WorkflowResult:
     """Complete workflow execution result"""
     workflow_id: int
     status: str
+    execution_mode: ExecutionMode  # NEW: Track which mode was used
     stages_completed: List[StageResult]
+    stages_skipped: List[Tuple[int, str]]  # NEW: Track skipped stages with reasons
     final_output: Any
     total_execution_time: float
     total_tokens_used: int
@@ -87,6 +98,152 @@ class WorkflowResult:
     orchestration_quality: float
     meta_insights: List[str]
     improvements_identified: List[str]
+
+
+def determine_execution_mode(workflow_definition: Dict[str, Any]) -> ExecutionMode:
+    """
+    Detect execution mode based on workflow/recipe configuration.
+
+    Logic:
+    - AUTONOMOUS: No steps defined OR no agents assigned to any step
+    - RECIPE: All steps have agents assigned
+    - HYBRID: Some steps have agents, some don't
+
+    Args:
+        workflow_definition: Workflow configuration with optional steps
+
+    Returns:
+        ExecutionMode enum value
+    """
+    steps = workflow_definition.get('steps', [])
+
+    # No steps defined = AUTONOMOUS (user just provided a goal)
+    if not steps or len(steps) == 0:
+        logger.info("ExecutionMode: AUTONOMOUS (no steps defined)")
+        return ExecutionMode.AUTONOMOUS
+
+    # Count how many steps have agents assigned
+    steps_with_agents = sum(1 for step in steps if step.get('agent_id'))
+    total_steps = len(steps)
+
+    # All steps have agents = RECIPE (fully pre-configured)
+    if steps_with_agents == total_steps:
+        logger.info(f"ExecutionMode: RECIPE ({total_steps}/{total_steps} steps have agents)")
+        return ExecutionMode.RECIPE
+
+    # Some steps have agents = HYBRID (mixed mode)
+    elif steps_with_agents > 0:
+        logger.info(f"ExecutionMode: HYBRID ({steps_with_agents}/{total_steps} steps have agents)")
+        return ExecutionMode.HYBRID
+
+    # No steps have agents = AUTONOMOUS (user defined steps but let system assign agents)
+    else:
+        logger.info(f"ExecutionMode: AUTONOMOUS ({total_steps} steps but no agents assigned)")
+        return ExecutionMode.AUTONOMOUS
+
+
+def should_run_stage(
+    stage_num: int,
+    stage_name: str,
+    mode: ExecutionMode,
+    context: Dict[str, Any]
+) -> Tuple[bool, str]:
+    """
+    Decide if a stage should run based on execution mode.
+
+    Args:
+        stage_num: Stage number (1-9)
+        stage_name: Stage name
+        mode: Execution mode
+        context: Additional context (steps, agents, etc.)
+
+    Returns:
+        Tuple of (should_run: bool, reason: str)
+    """
+
+    # AUTONOMOUS mode: Run all stages
+    if mode == ExecutionMode.AUTONOMOUS:
+        return (True, "")
+
+    # RECIPE mode: Smart stage skipping
+    elif mode == ExecutionMode.RECIPE:
+        if stage_num == 1:  # Task Decomposition
+            return (False, "Recipe already has pre-defined steps")
+
+        elif stage_num == 2:  # Agent Selection
+            return (False, "Recipe already has pre-assigned agents")
+
+        elif stage_num == 3:  # Context Engineering
+            # Conditional: Check if steps need internal context
+            needs_context = requires_internal_context(context.get('steps', []))
+            if needs_context:
+                return (True, "")
+            else:
+                return (False, "Steps only use external tools (no RAG/NL2SQL needed)")
+
+        else:  # Stages 4-9: Always run
+            return (True, "")
+
+    # HYBRID mode: Skip stage 1, but run agent selection for unassigned steps
+    elif mode == ExecutionMode.HYBRID:
+        if stage_num == 1:  # Task Decomposition
+            return (False, "Recipe already has pre-defined steps structure")
+
+        elif stage_num == 2:  # Agent Selection
+            # Only select agents for steps that don't have them
+            return (True, "Partial agent selection needed for unassigned steps")
+
+        elif stage_num == 3:  # Context Engineering
+            needs_context = requires_internal_context(context.get('steps', []))
+            return (needs_context, "" if needs_context else "Steps only use external tools")
+
+        else:  # Stages 4-9: Always run
+            return (True, "")
+
+    return (True, "")
+
+
+def requires_internal_context(steps: List[Dict[str, Any]]) -> bool:
+    """
+    Check if any step requires internal context tools (RAG, NL2SQL, CodeGraph).
+
+    Keywords that indicate need for internal context:
+    - Document/knowledge search: "find document", "search", "knowledge base"
+    - Database queries: "how many", "count", "analyze", "query", "sql"
+    - Code search: "code", "implementation", "codebase", "function"
+
+    Args:
+        steps: List of workflow steps
+
+    Returns:
+        True if any step needs internal context, False otherwise
+    """
+    context_keywords = [
+        # RAG indicators
+        'find document', 'search document', 'knowledge base', 'search knowledge',
+        'find information', 'lookup', 'retrieve document',
+
+        # NL2SQL indicators
+        'how many', 'count', 'total', 'sum', 'average', 'query database',
+        'analyze data', 'sql', 'database', 'table', 'records',
+
+        # CodeGraph indicators
+        'code', 'codebase', 'implementation', 'function', 'class',
+        'search code', 'find code', 'code search'
+    ]
+
+    for step in steps:
+        prompt = step.get('prompt_template', '').lower()
+        description = step.get('description', '').lower()
+        combined_text = f"{prompt} {description}"
+
+        # Check if any context keyword appears in step text
+        if any(keyword in combined_text for keyword in context_keywords):
+            logger.info(f"Step requires internal context: '{step.get('description', 'N/A')[:50]}...'")
+            return True
+
+    logger.info("No internal context required - steps use external tools only")
+    return False
 
 
 class MasterOrchestrator:
@@ -161,61 +318,100 @@ class MasterOrchestrator:
         """
         start_time = asyncio.get_event_loop().time()
         logger.info(f"🎯 Master Orchestrator starting workflow {workflow_id}")
-        
+
+        # NEW: Detect execution mode based on workflow configuration
+        execution_mode = determine_execution_mode(workflow_context or {})
+        logger.info(f"🔍 Execution Mode: {execution_mode.value.upper()}")
+
         # Step 1: Plan orchestration strategy
         plan = await self.plan_orchestration_strategy(
             task_description,
             workflow_context,
             strategy_override or self.default_strategy
         )
-        
+
         self.active_workflows[workflow_id] = plan
         logger.info(f"📋 Orchestration Plan: {plan.strategy.value}")
         logger.info(f"   Reasoning: {plan.reasoning[:200]}...")
         
-        # Step 2: Execute stages according to plan
+        # Step 2: Execute stages according to plan (with conditional execution)
         stage_results = []
+        stages_skipped = []  # NEW: Track skipped stages
         total_tokens = 0
         total_cost = 0.0
-        
+
         try:
             # Stage 1: Task Decomposition
-            stage1_result = await self._execute_stage_1(
-                task_description,
-                plan.stage_configurations.get(1, {})
+            should_run, skip_reason = should_run_stage(
+                1, "Task Decomposition", execution_mode, workflow_context or {}
             )
-            stage_results.append(stage1_result)
-            total_tokens += stage1_result.tokens_used
-            total_cost += stage1_result.cost
+
+            if should_run:
+                stage1_result = await self._execute_stage_1(
+                    task_description,
+                    plan.stage_configurations.get(1, {})
+                )
+                stage_results.append(stage1_result)
+                total_tokens += stage1_result.tokens_used
+                total_cost += stage1_result.cost
+
+                if stage1_result.status == "failed":
+                    raise Exception(f"Stage 1 failed: {stage1_result.issues}")
+
+                subtasks = stage1_result.result.get('subtasks', [])
+            else:
+                logger.info(f"⏭️  SKIPPED Stage 1 (Task Decomposition): {skip_reason}")
+                stages_skipped.append((1, skip_reason))
+                # Use pre-defined steps from workflow_context
+                subtasks = workflow_context.get('steps', [])
             
-            if stage1_result.status == "failed":
-                raise Exception(f"Stage 1 failed: {stage1_result.issues}")
-            
-            subtasks = stage1_result.result.get('subtasks', [])
-            
-            # Stage 2: Context Strategy Selection
-            stage2_result = await self._execute_stage_2(
-                subtasks,
-                plan.stage_configurations.get(2, {})
+            # Stage 2: Agent Selection
+            should_run, skip_reason = should_run_stage(
+                2, "Agent Selection", execution_mode, {'steps': subtasks}
             )
-            stage_results.append(stage2_result)
-            total_tokens += stage2_result.tokens_used
-            total_cost += stage2_result.cost
-            
-            # Stage 3: Agent Selection (LLM-driven)
-            stage3_result = await self._execute_stage_3(
-                subtasks,
-                workflow_context,
-                plan.stage_configurations.get(3, {})
+
+            agent_assignments = {}
+            if should_run:
+                stage2_result = await self._execute_stage_2(
+                    subtasks,
+                    plan.stage_configurations.get(2, {})
+                )
+                stage_results.append(stage2_result)
+                total_tokens += stage2_result.tokens_used
+                total_cost += stage2_result.cost
+                agent_assignments = stage2_result.result
+            else:
+                logger.info(f"⏭️  SKIPPED Stage 2 (Agent Selection): {skip_reason}")
+                stages_skipped.append((2, skip_reason))
+                # Use pre-assigned agents from recipe steps
+                agent_assignments = {
+                    f"subtask_{i}": [{"agent_id": step.get('agent_id')}]
+                    for i, step in enumerate(subtasks)
+                    if step.get('agent_id')
+                }
+
+            # Stage 3: Context Engineering (LLM-driven)
+            should_run, skip_reason = should_run_stage(
+                3, "Context Engineering", execution_mode, {'steps': subtasks}
             )
-            stage_results.append(stage3_result)
-            total_tokens += stage3_result.tokens_used
-            total_cost += stage3_result.cost
+
+            if should_run:
+                stage3_result = await self._execute_stage_3(
+                    subtasks,
+                    workflow_context,
+                    plan.stage_configurations.get(3, {})
+                )
+                stage_results.append(stage3_result)
+                total_tokens += stage3_result.tokens_used
+                total_cost += stage3_result.cost
+            else:
+                logger.info(f"⏭️  SKIPPED Stage 3 (Context Engineering): {skip_reason}")
+                stages_skipped.append((3, skip_reason))
             
-            # Stage 4: Execution with Monitoring
+            # Stage 4: Execution with Monitoring (always runs)
             stage4_result = await self._execute_stage_4(
                 subtasks,
-                stage3_result.result,  # Agent assignments
+                agent_assignments,  # Use agent_assignments from Stage 2 or pre-defined
                 plan.stage_configurations.get(4, {})
             )
             stage_results.append(stage4_result)
@@ -251,7 +447,9 @@ class MasterOrchestrator:
             result = WorkflowResult(
                 workflow_id=workflow_id,
                 status="completed",
+                execution_mode=execution_mode,  # NEW
                 stages_completed=stage_results,
+                stages_skipped=stages_skipped,  # NEW
                 final_output=stage5_result.result.get('synthesized_result'),
                 total_execution_time=execution_time,
                 total_tokens_used=total_tokens,
@@ -268,7 +466,9 @@ class MasterOrchestrator:
             result = WorkflowResult(
                 workflow_id=workflow_id,
                 status="failed",
+                execution_mode=execution_mode,  # NEW
                 stages_completed=stage_results,
+                stages_skipped=stages_skipped,  # NEW
                 final_output=None,
                 total_execution_time=execution_time,
                 total_tokens_used=total_tokens,

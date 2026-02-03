@@ -376,20 +376,45 @@ class ComposioClient:
     
     def get_available_apps(self) -> List[Dict[str, Any]]:
         """
-        Get all available Composio apps.
-        
+        Get all available Composio apps with full pagination.
+
+        The Composio API defaults to 100 items per page. We paginate using
+        cursor-based pagination to fetch ALL toolkits (typically 500+).
+
         Returns:
             List of available apps with metadata
         """
         if not self.composio:
             return []
-        
+
         try:
-            # Use toolkits.get() to list apps
-            apps = self.composio.toolkits.get()
+            # Paginate through all toolkit pages (max 1000 per page)
+            all_apps = []
+            cursor = None
+            page = 0
+            while True:
+                page += 1
+                kwargs = {"limit": 1000}
+                if cursor:
+                    kwargs["cursor"] = cursor
+                response = self.composio.toolkits.list(**kwargs)
+                items = response.items or []
+                all_apps.extend(items)
+                total = getattr(response, "total_items", len(all_apps))
+                logger.info(
+                    f"Fetched page {page}: {len(items)} toolkits "
+                    f"({len(all_apps)}/{int(total)} total)"
+                )
+                next_cursor = getattr(response, "next_cursor", None)
+                if not next_cursor or not items or len(all_apps) >= total:
+                    break
+                cursor = next_cursor
+
+            logger.info(f"Fetched {len(all_apps)} total toolkits from Composio API")
+
             trigger_map = self._build_trigger_map()
             results = []
-            for app in apps:
+            for app in all_apps:
                 # Try multiple sources for triggers
                 raw_triggers = None
                 source = "none"
@@ -402,9 +427,9 @@ class ComposioClient:
                 if not raw_triggers:
                     raw_triggers = trigger_map.get(app.slug.lower(), [])
                     source = f"trigger_map[{app.slug.lower()}]"
-                
+
                 normalized_triggers = self._normalize_triggers(raw_triggers)
-                
+
                 # Log if we found triggers (for debugging)
                 if normalized_triggers and app.slug.lower() in ["slack", "gmail", "github"]:
                     logger.debug(f"Found {len(normalized_triggers)} triggers for {app.slug} (source: {source})")
@@ -419,16 +444,25 @@ class ComposioClient:
                     )
                 else:
                     description = getattr(app, "description", None) or ""
-                
+
+                # SDK uses tools_count (not actions_count)
+                action_count = 0
+                if hasattr(app, "meta"):
+                    action_count = int(
+                        getattr(app.meta, "tools_count", 0)
+                        or getattr(app.meta, "actions_count", 0)
+                        or 0
+                    )
+
                 results.append(
                     {
-                        "name": app.slug, # Use slug as the identifier (e.g. 'github')
+                        "name": app.slug,  # Use slug as the identifier (e.g. 'github')
                         "display_name": app.name,
                         "description": description,
                         "logo_url": app.meta.logo if hasattr(app, "meta") else None,
                         "categories": [c.name for c in app.meta.categories] if hasattr(app, "meta") and app.meta.categories else [],
                         "auth_schemes": app.auth_schemes or [],
-                        "action_count": getattr(app.meta, "actions_count", None) or getattr(app, "actions_count", None) or 0,
+                        "action_count": action_count,
                         "triggers": normalized_triggers,
                         "trigger_count": len(normalized_triggers),
                     }
@@ -660,13 +694,28 @@ class ComposioClient:
                     # Ignore non-function tools unless function payload exists.
                     continue
 
-                action_name = (
+                # Extract display name (human-readable) from function.name or item.name
+                display_name_raw = (
                     (fn or {}).get("name")
                     or item.get("name")
-                    or item.get("slug")
                     or ""
                 )
-                action_name = str(action_name).strip()
+                display_name_raw = str(display_name_raw).strip()
+
+                # Extract slug and derive API enum identifier (e.g., "GMAIL_FETCH_EMAILS")
+                item_slug = str(item.get("slug") or "").strip()
+                item_enum = str(item.get("enum") or "").strip()
+
+                # Prefer enum > slug-derived > display-name-derived
+                if item_enum:
+                    action_name = item_enum.upper()
+                elif item_slug:
+                    action_name = item_slug.upper().replace("-", "_")
+                elif display_name_raw:
+                    action_name = display_name_raw
+                else:
+                    continue
+
                 if not action_name:
                     continue
 
@@ -711,7 +760,7 @@ class ComposioClient:
                     {
                         "app_name": app_name,
                         "name": action_name,
-                        "display_name": (fn or {}).get("name") or item.get("display_name") or action_name,
+                        "display_name": display_name_raw or item.get("display_name") or action_name,
                         "description": (
                             (fn or {}).get("description")
                             or item.get("description")

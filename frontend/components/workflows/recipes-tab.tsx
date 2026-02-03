@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus,
@@ -16,112 +16,121 @@ import {
   Eye,
   Clock,
   Star,
-  Share2
+  Share2,
+  Loader2,
+  Lightbulb,
+  Play,
+  Bot,
+  Zap,
+  Wrench,
+  BarChart3
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Progress } from '@/components/ui/progress'
 import {
   useWorkflowRecipes,
-  useCreateRecipe,
-  useUpdateRecipe,
   useDeleteRecipe,
   useRecordRecipeUsage,
-  useSubmitRecipeToMarketplace
+  useExecuteRecipe,
+  useSubmitRecipeToMarketplace,
+  useRecipeSuggestions,
+  useRecipeExecutions
 } from '@/hooks/use-recipe-api'
 import { useToast } from '@/hooks/use-toast'
+import { CreateRecipeModal } from './create-recipe-modal'
+import { ViewRecipeModal } from './view-recipe-modal'
+import { RecipeSuggestionsPanel } from './recipe-suggestions-panel'
 
-interface RecipesTabProps {
-  onUseRecipe: (recipe: any) => void
-  onOpenCreateModal?: () => void
+interface RecipeExecutionInfo {
+  recipeExecutionId: string
+  recipeId: string
+  recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
+  recipeName: string
 }
 
-export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) {
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<string>('all')
-  const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all')
+interface RecipesTabProps {
+  searchTerm?: string
+  externalCreateOpen?: boolean
+  onCreateModalClosed?: () => void
+  onUseRecipe: (recipe: any) => void
+  onExecuteRecipe?: (workflowId: number, recipeExecInfo?: RecipeExecutionInfo) => void
+}
+
+// Generate a consistent color from agent_id
+function agentColor(id: number): string {
+  const colors = [
+    'from-blue-500/80 to-blue-600/80',
+    'from-purple-500/80 to-purple-600/80',
+    'from-emerald-500/80 to-emerald-600/80',
+    'from-orange-500/80 to-orange-600/80',
+    'from-pink-500/80 to-pink-600/80',
+    'from-cyan-500/80 to-cyan-600/80',
+    'from-yellow-500/80 to-yellow-600/80',
+    'from-red-500/80 to-red-600/80',
+  ]
+  return colors[(id || 0) % colors.length]
+}
+
+export function RecipesTab({
+  searchTerm: externalSearchTerm,
+  externalCreateOpen,
+  onCreateModalClosed,
+  onUseRecipe,
+  onExecuteRecipe,
+}: RecipesTabProps) {
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showEditModal, setShowEditModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
-  const [recipeForm, setRecipeForm] = useState<any>({
-    recipe_id: '',
-    name: '',
-    description: '',
-    goal: '',  // NEW: Workflow goal
-    context: {},  // NEW: Workflow context
-    category: 'Development',
-    difficulty: 'intermediate',
-    tags: [],
-    icon: '📋',
-    recipe_definition: {
-      steps: [],
-      agents: [],
-      config: {}
-    },
-    recommended_agents: [],
-    estimated_time: '',
-    is_public: true,
-    is_featured: false
-  })
+  const [sharingRecipeId, setSharingRecipeId] = useState<string | null>(null)
+  const [cookingRecipeId, setCookingRecipeId] = useState<string | null>(null)
+  const [editRecipeData, setEditRecipeData] = useState<any>(null)
+  const [editRecipeId, setEditRecipeId] = useState<string | null>(null)
+
+  // Sync external create modal open state
+  useEffect(() => {
+    if (externalCreateOpen) {
+      setEditRecipeData(null)
+      setEditRecipeId(null)
+      setShowCreateModal(true)
+    }
+  }, [externalCreateOpen])
 
   // Fetch recipes with filtering
   const { data: recipesData, isLoading, error, refetch } = useWorkflowRecipes({
-    category: selectedCategory !== 'all' ? selectedCategory : undefined,
-    difficulty: selectedDifficulty !== 'all' ? selectedDifficulty : undefined,
-    search: searchTerm || undefined,
+    search: externalSearchTerm || undefined,
     limit: 100
   })
 
-  const createMutation = useCreateRecipe()
-  const updateMutation = useUpdateRecipe()
   const deleteMutation = useDeleteRecipe()
   const recordUsageMutation = useRecordRecipeUsage()
+  const executeRecipeMutation = useExecuteRecipe()
   const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
   const { toast } = useToast()
+  const cookingRef = useRef(false)
 
-  const recipes = recipesData?.items || []
+  // Fetch suggestions for the selected recipe when viewing
+  const { data: selectedRecipeSuggestions } = useRecipeSuggestions(
+    showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  )
 
-  const handleCreateRecipe = async () => {
-    try {
-      await createMutation.mutateAsync({
-        ...recipeForm,
-        created_by: 'user'
-      })
-      setShowCreateModal(false)
-      resetForm()
-      refetch()
-    } catch (error) {
-      console.error('Error creating recipe:', error)
-    }
-  }
+  // Fetch recent executions for the selected recipe when viewing
+  const selectedRecipeId = showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
+  const { data: selectedRecipeExecutions, isLoading: executionsLoading } = useRecipeExecutions(
+    selectedRecipeId,
+    { limit: 5 }
+  )
 
-  const handleUpdateRecipe = async () => {
-    if (!selectedRecipe) return
-    try {
-      await updateMutation.mutateAsync({
-        recipeId: selectedRecipe.recipe_id,
-        recipeData: recipeForm
-      })
-      setShowEditModal(false)
-      setSelectedRecipe(null)
-      resetForm()
-      refetch()
-    } catch (error) {
-      console.error('Error updating recipe:', error)
-    }
-  }
+  const recipes = (recipesData as any)?.items || []
 
   const handleDeleteRecipe = async () => {
     if (!selectedRecipe) return
     try {
-      await deleteMutation.mutateAsync(selectedRecipe.recipe_id)
+      await deleteMutation.mutateAsync(selectedRecipe.template_id || selectedRecipe.id)
       setShowDeleteDialog(false)
       setSelectedRecipe(null)
       refetch()
@@ -130,16 +139,40 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     }
   }
 
-  const handleUseRecipe = async (recipe: any) => {
+  const handleCookRecipe = async (recipe: any) => {
+    if (cookingRef.current) return
+    cookingRef.current = true
+    const recipeId = recipe.template_id || recipe.id?.toString()
+    setCookingRecipeId(recipeId)
     try {
-      // Record usage
-      await recordUsageMutation.mutateAsync(recipe.recipe_id)
-      // Notify parent component with full recipe object
-      onUseRecipe(recipe)
-    } catch (error) {
-      console.error('Error recording recipe usage:', error)
-      // Still pass recipe even if recording fails
-      onUseRecipe(recipe)
+      const result: any = await executeRecipeMutation.mutateAsync({ recipeId })
+      toast({
+        title: 'Recipe Started',
+        description: `"${recipe.name}" is now cooking.`,
+        variant: 'default',
+      })
+      if (onExecuteRecipe && result?.recipe_execution_id) {
+        onExecuteRecipe(0, {
+          recipeExecutionId: result.recipe_execution_id,
+          recipeId: recipeId,
+          recipeSteps: (recipe.steps || []).map((s: any, i: number) => ({
+            step_id: s.step_id || `step-${i + 1}`,
+            order: s.order || i + 1,
+            prompt_template: s.prompt_template || '',
+            agent_id: s.agent_id,
+          })),
+          recipeName: recipe.name,
+        })
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Execution Failed',
+        description: error?.message || 'Failed to start recipe execution',
+        variant: 'destructive',
+      })
+    } finally {
+      setCookingRecipeId(null)
+      cookingRef.current = false
     }
   }
 
@@ -149,22 +182,46 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   }
 
   const handleEditClick = (recipe: any) => {
-    setSelectedRecipe(recipe)
-    setRecipeForm({
-      recipe_id: recipe.recipe_id,
-      name: recipe.name,
-      description: recipe.description,
-      category: recipe.category,
-      difficulty: recipe.difficulty,
-      tags: recipe.tags || [],
-      icon: recipe.icon || '📋',
-      recipe_definition: recipe.recipe_definition || { steps: [], agents: [], config: {} },
-      recommended_agents: recipe.recommended_agents || [],
-      estimated_time: recipe.estimated_time || '',
-      is_public: recipe.is_public,
-      is_featured: recipe.is_featured
-    })
-    setShowEditModal(true)
+    const backendConfig = recipe.execution_config || {}
+    const backendSchedule = recipe.schedule_config || {}
+
+    const formSteps = (recipe.steps || []).map((step: any, idx: number) => ({
+      step_id: step.step_id || `step-${idx + 1}`,
+      order: step.order ?? idx + 1,
+      agent_id: step.agent_id != null ? String(step.agent_id) : '',
+      prompt_template: step.prompt_template || '',
+      pass_to: step.pass_to,
+      error_handling: step.error_handling || 'stop',
+    }))
+
+    const initialData = {
+      name: recipe.name || '',
+      description: recipe.description || '',
+      inputs: typeof recipe.inputs === 'string' ? recipe.inputs : JSON.stringify(recipe.inputs || {}, null, 2),
+      outputs: typeof recipe.outputs === 'string' ? recipe.outputs : JSON.stringify(recipe.outputs || {}, null, 2),
+      steps: formSteps,
+      execution_config: {
+        mode: backendConfig.mode || 'sequential',
+        max_retries: backendConfig.max_retries ?? 3,
+        retry_delay: backendConfig.retry_delay ?? 1000,
+        backoff_strategy: backendConfig.backoff_strategy || 'exponential',
+        timeout_per_step: (backendConfig.per_step_timeout ?? 120) * 1000,
+        total_timeout: (backendConfig.total_timeout ?? 600) * 1000,
+        quality_threshold: backendConfig.quality_threshold ?? 0.7,
+        auto_learning: backendConfig.auto_learn ?? true,
+        parallel_limit: backendConfig.parallel_limit ?? 5,
+        memory_isolation: backendConfig.memory_isolation || 'shared',
+      },
+      schedule_config: {
+        type: backendSchedule.type || 'manual',
+        cron_expression: backendSchedule.cron_expression || '',
+        trigger_config: backendSchedule.trigger_config || {},
+      },
+    }
+
+    setEditRecipeData(initialData)
+    setEditRecipeId(recipe.template_id || recipe.id?.toString())
+    setShowCreateModal(true)
   }
 
   const handleDeleteClick = (recipe: any) => {
@@ -173,54 +230,32 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
   }
 
   const handleShareToMarketplace = async (recipe: any) => {
+    setSharingRecipeId(recipe.template_id || recipe.id?.toString())
     try {
-      const result = await submitToMarketplaceMutation.mutateAsync({
-        recipe_id: recipe.recipe_id,
+      const result: any = await submitToMarketplaceMutation.mutateAsync({
+        recipe_id: recipe.template_id,
         category: recipe.category,
         icon: recipe.icon
       })
 
       if (result.auto_approved) {
-        toast({
-          title: 'Published to Marketplace',
-          description: 'Your recipe is now live in the marketplace!',
-          variant: 'default'
-        })
+        toast({ title: 'Published to Marketplace', description: 'Your recipe is now live in the marketplace!', variant: 'default' })
       } else {
-        toast({
-          title: 'Submitted for Approval',
-          description: 'Your recipe has been submitted and is awaiting approval.',
-          variant: 'default'
-        })
+        toast({ title: 'Submitted for Approval', description: 'Your recipe has been submitted and is awaiting approval.', variant: 'default' })
       }
+      refetch()
     } catch (error: any) {
-      toast({
-        title: 'Submission Failed',
-        description: error?.message || 'Failed to submit recipe to marketplace',
-        variant: 'destructive'
-      })
+      toast({ title: 'Submission Failed', description: error?.message || 'Failed to submit recipe to marketplace', variant: 'destructive' })
+    } finally {
+      setSharingRecipeId(null)
     }
   }
 
-  const resetForm = () => {
-    setRecipeForm({
-      recipe_id: '',
-      name: '',
-      description: '',
-      category: 'Development',
-      difficulty: 'intermediate',
-      tags: [],
-      icon: '📋',
-      recipe_definition: {
-        steps: [],
-        agents: [],
-        config: {}
-      },
-      recommended_agents: [],
-      estimated_time: '',
-      is_public: true,
-      is_featured: false
-    })
+  const closeCreateModal = () => {
+    setShowCreateModal(false)
+    setEditRecipeData(null)
+    setEditRecipeId(null)
+    onCreateModalClosed?.()
   }
 
   if (isLoading) {
@@ -247,396 +282,239 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
 
   return (
     <div className="space-y-6">
-      {/* Header with Search and Filters */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex-1 flex gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-            <Input
-              placeholder="Search recipes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 bg-secondary/50 border-secondary"
-            />
-          </div>
-          
-          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="w-[180px] bg-secondary/50 border-secondary">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="Support">Support</SelectItem>
-              <SelectItem value="Data Processing">Data Processing</SelectItem>
-              <SelectItem value="Content">Content</SelectItem>
-              <SelectItem value="Security">Security</SelectItem>
-              <SelectItem value="Development">Development</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedDifficulty} onValueChange={setSelectedDifficulty}>
-            <SelectTrigger className="w-[180px] bg-secondary/50 border-secondary">
-              <SelectValue placeholder="Difficulty" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Levels</SelectItem>
-              <SelectItem value="beginner">Beginner</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button 
-          onClick={() => setShowCreateModal(true)}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Recipe
-        </Button>
-      </div>
-
-      {/* Recipes Grid */}
+      {/* Recipes Grid — 4 per row */}
       {recipes.length === 0 ? (
         <div className="text-center py-12">
           <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <p className="text-muted-foreground">No recipes found</p>
+          <p className="text-xs text-muted-foreground mt-1">Create your first recipe to get started</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {recipes.map((recipe: any, index: number) => (
-            <motion.div
-              key={recipe.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-            >
-              <Card className="glass-card card-glow hover:border-primary/30 transition-all duration-300 h-full flex flex-col">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-2xl">{recipe.icon || '📋'}</span>
-                        <CardTitle className="text-lg">{recipe.name}</CardTitle>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {recipes.map((recipe: any, index: number) => {
+            const steps = recipe.steps || []
+            const agentIds = [...new Set(steps.map((s: any) => s.agent_id).filter(Boolean))] as number[]
+            const stepCount = steps.length
+            const qualityScore = recipe.quality_score
+            const qualityPct = qualityScore != null ? Math.round(qualityScore * 100) : null
+            const tools = recipe.required_tools || []
+            const isCooking = cookingRecipeId === (recipe.template_id || recipe.id?.toString())
+            const isSharing = sharingRecipeId === (recipe.template_id || recipe.id?.toString())
+
+            return (
+              <motion.div
+                key={recipe.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: index * 0.05 }}
+              >
+                <Card className="glass-card hover:border-orange-500/30 transition-all duration-300 h-full flex flex-col group">
+                  {/* Card Header — icon, name, badges */}
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/10 border border-orange-500/30 flex items-center justify-center shrink-0 text-xl">
+                        {recipe.icon || '🍳'}
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {recipe.description}
-                      </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Badge variant="outline" className="text-xs">
-                          {recipe.category}
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-sm font-semibold leading-tight truncate">{recipe.name}</CardTitle>
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                          {recipe.description || 'No description'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Badges row */}
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {recipe.marketplace_category && (
+                        <Badge variant="outline" className="text-[10px] h-5 bg-blue-500/10 text-blue-400 border-blue-500/20">
+                          {recipe.marketplace_category}
                         </Badge>
-                        <Badge variant="outline" className="text-xs capitalize">
-                          {recipe.difficulty}
+                      )}
+                      {recipe.is_system && (
+                        <Badge variant="outline" className="text-[10px] h-5 bg-purple-500/10 text-purple-400 border-purple-500/20">
+                          System
                         </Badge>
-                        {recipe.is_system && (
-                          <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
-                            System
-                          </Badge>
+                      )}
+                      {recipe.learning_data?.latest_suggestions?.length > 0 && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] h-5 bg-orange-500/10 text-orange-400 border-orange-500/20 cursor-pointer hover:bg-orange-500/20"
+                          onClick={(e) => { e.stopPropagation(); handleViewClick(recipe) }}
+                        >
+                          <Lightbulb className="w-2.5 h-2.5 mr-0.5" />
+                          {recipe.learning_data.latest_suggestions.length}
+                        </Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="flex-1 flex flex-col justify-between pt-0 space-y-3">
+                    {/* Quality score bar */}
+                    {qualityPct != null && (
+                      <div>
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                          <span>Quality Score</span>
+                          <span className={qualityPct >= 80 ? 'text-emerald-400' : qualityPct >= 50 ? 'text-orange-400' : 'text-red-400'}>
+                            {qualityPct}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-secondary/80 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              qualityPct >= 80 ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' :
+                              qualityPct >= 50 ? 'bg-gradient-to-r from-orange-500 to-yellow-400' :
+                              'bg-gradient-to-r from-red-500 to-red-400'
+                            }`}
+                            style={{ width: `${qualityPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Stats row */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-white">{stepCount}</div>
+                        <div className="text-[10px] text-muted-foreground">Steps</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-orange-400">{agentIds.length}</div>
+                        <div className="text-[10px] text-muted-foreground">Agents</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-white">{recipe.use_count || 0}</div>
+                        <div className="text-[10px] text-muted-foreground">Runs</div>
+                      </div>
+                    </div>
+
+                    {/* Agent avatars */}
+                    {agentIds.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        {agentIds.slice(0, 4).map((aid) => {
+                          const step = steps.find((s: any) => s.agent_id === aid)
+                          return (
+                            <div
+                              key={aid}
+                              className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-white/10`}
+                              title={`Agent ${aid}`}
+                            >
+                              <Bot className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          )
+                        })}
+                        {agentIds.length > 4 && (
+                          <div className="w-7 h-7 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center text-[10px] text-muted-foreground font-medium">
+                            +{agentIds.length - 4}
+                          </div>
+                        )}
+                        {/* Tool icons */}
+                        {tools.length > 0 && (
+                          <>
+                            <div className="w-px h-5 bg-white/10 mx-1" />
+                            {tools.slice(0, 3).map((tool: string, i: number) => (
+                              <div
+                                key={i}
+                                className="w-7 h-7 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center"
+                                title={tool}
+                              >
+                                <Wrench className="w-3 h-3 text-muted-foreground" />
+                              </div>
+                            ))}
+                            {tools.length > 3 && (
+                              <span className="text-[10px] text-muted-foreground">+{tools.length - 3}</span>
+                            )}
+                          </>
                         )}
                       </div>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex-1 flex flex-col justify-between space-y-4">
-                  {/* Recipe Stats */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Used {recipe.use_count} times</span>
-                      {recipe.estimated_time && <span>{recipe.estimated_time}</span>}
-                    </div>
-                    
-                    {/* Recommended Agents */}
-                    {recipe.recommended_agents && recipe.recommended_agents.length > 0 && (
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1 flex items-center">
-                          <Users className="w-3 h-3 mr-1" />
-                          Recommended Agents
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {recipe.recommended_agents.slice(0, 3).map((agent: string, idx: number) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
-                              {agent}
-                            </Badge>
-                          ))}
-                          {recipe.recommended_agents.length > 3 && (
-                            <span className="text-xs text-muted-foreground">
-                              +{recipe.recommended_agents.length - 3} more
-                            </span>
-                          )}
-                        </div>
-                      </div>
                     )}
-                  </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    <Button 
-                      className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                      size="sm"
-                      onClick={() => handleUseRecipe(recipe)}
-                    >
-                      <Plus className="w-3 h-3 mr-2" />
-                      Use
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleViewClick(recipe)}
-                    >
-                      <Eye className="w-3 h-3" />
-                    </Button>
-                    {!recipe.is_system && (
-                      <>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleEditClick(recipe)}
-                        >
-                          <Edit className="w-3 h-3" />
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleDeleteClick(recipe)}
-                          className="text-red-400 hover:text-red-300"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
+                    {/* Action buttons */}
+                    <div className="flex gap-1.5 pt-1 border-t border-white/5">
+                      <Button
+                        className="flex-1 bg-orange-600/90 hover:bg-orange-500 text-white text-xs h-8 transition-all duration-200"
+                        size="sm"
+                        onClick={() => handleCookRecipe(recipe)}
+                        disabled={isCooking}
+                      >
+                        {isCooking ? (
+                          <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                        ) : (
+                          <Play className="w-3 h-3 mr-1.5" />
+                        )}
+                        {isCooking ? 'Starting...' : 'Cook'}
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleViewClick(recipe)} title="View">
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
+                      {!recipe.is_system && (
+                        <>
+                          {!recipe.is_marketplace_item && (
+                            <Button
+                              variant="ghost" size="sm" className="h-8 w-8 p-0"
+                              onClick={() => handleShareToMarketplace(recipe)}
+                              disabled={isSharing}
+                              title="Share"
+                            >
+                              {isSharing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEditClick(recipe)} title="Edit">
+                            <Edit className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-400 hover:text-red-300"
+                            onClick={() => handleDeleteClick(recipe)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )
+          })}
         </div>
       )}
 
-      {/* Create Recipe Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Create Workflow Recipe</DialogTitle>
-            <DialogDescription>
-              Create a reusable recipe that others can use to quickly start workflows
-            </DialogDescription>
-          </DialogHeader>
-          
-          <RecipeForm
-            form={recipeForm}
-            onChange={setRecipeForm}
-            onSubmit={handleCreateRecipe}
-            onCancel={() => {
-              setShowCreateModal(false)
-              resetForm()
-            }}
-            isLoading={createMutation.isPending}
-            submitLabel="Create Recipe"
-          />
-        </DialogContent>
-      </Dialog>
+      {/* Create/Edit Recipe Modal (4-step wizard) */}
+      <CreateRecipeModal
+        open={showCreateModal}
+        onClose={closeCreateModal}
+        onSave={() => {
+          closeCreateModal()
+          refetch()
+        }}
+        initialData={editRecipeData}
+        recipeId={editRecipeId || undefined}
+      />
 
       {/* View Recipe Modal */}
-      <Dialog open={showViewModal} onOpenChange={setShowViewModal}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">{selectedRecipe?.icon || '📋'}</span>
-                <div>
-                  <DialogTitle className="text-2xl">{selectedRecipe?.name}</DialogTitle>
-                  <p className="text-sm text-muted-foreground mt-1">{selectedRecipe?.recipe_id}</p>
-                </div>
-              </div>
-              {!selectedRecipe?.is_system && (
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => {
-                    setShowViewModal(false)
-                    handleEditClick(selectedRecipe)
-                  }}
-                >
-                  <Edit className="w-3 h-3 mr-2" />
-                  Edit
-                </Button>
-              )}
-            </div>
-          </DialogHeader>
-          
-          {selectedRecipe && (
-            <div className="space-y-6">
-              {/* Badges */}
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="text-xs">{selectedRecipe.category}</Badge>
-                <Badge variant="outline" className="text-xs capitalize">{selectedRecipe.difficulty}</Badge>
-                {selectedRecipe.is_system && (
-                  <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/20">
-                    System Recipe
-                  </Badge>
-                )}
-                {selectedRecipe.is_featured && (
-                  <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
-                    <Star className="w-3 h-3 mr-1" />
-                    Featured
-                  </Badge>
-                )}
-              </div>
-
-              {/* Description */}
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Description</h3>
-                <p className="text-sm text-muted-foreground">{selectedRecipe.description}</p>
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-4 p-4 bg-secondary/30 rounded-lg">
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Used</div>
-                  <div className="text-lg font-semibold">{selectedRecipe.use_count} times</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Success Rate</div>
-                  <div className="text-lg font-semibold">{selectedRecipe.success_rate || 0}%</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">
-                    <Clock className="w-3 h-3 inline mr-1" />
-                    Duration
-                  </div>
-                  <div className="text-lg font-semibold">{selectedRecipe.estimated_time || 'N/A'}</div>
-                </div>
-              </div>
-
-              {/* Recommended Agents */}
-              {selectedRecipe.recommended_agents && selectedRecipe.recommended_agents.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2 flex items-center">
-                    <Users className="w-4 h-4 mr-2" />
-                    Recommended Agents ({selectedRecipe.recommended_agents.length})
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedRecipe.recommended_agents.map((agent: string, idx: number) => (
-                      <Badge key={idx} variant="outline">{agent}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Tags */}
-              {selectedRecipe.tags && selectedRecipe.tags.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2">Tags</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedRecipe.tags.map((tag: string, idx: number) => (
-                      <Badge key={idx} variant="secondary" className="text-xs">#{tag}</Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recipe Definition */}
-              {selectedRecipe.recipe_definition && (
-                <div>
-                  <h3 className="text-sm font-semibold mb-2 flex items-center">
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Workflow Steps
-                  </h3>
-                  {selectedRecipe.recipe_definition.steps && selectedRecipe.recipe_definition.steps.length > 0 ? (
-                    <div className="space-y-2">
-                      {selectedRecipe.recipe_definition.steps.map((step: any, idx: number) => (
-                        <div key={idx} className="flex items-start p-3 bg-secondary/30 rounded-lg">
-                          <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-semibold mr-3 flex-shrink-0">
-                            {idx + 1}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium text-sm">{step.name || step}</div>
-                            {step.type && <div className="text-xs text-muted-foreground mt-1">Type: {step.type}</div>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No steps defined</p>
-                  )}
-                </div>
-              )}
-
-              {/* Metadata */}
-              <div className="pt-4 border-t border-secondary text-xs text-muted-foreground space-y-1">
-                <div>Created by: {selectedRecipe.created_by}</div>
-                <div>Version: {selectedRecipe.version}</div>
-                {selectedRecipe.created_at && (
-                  <div>Created: {new Date(selectedRecipe.created_at).toLocaleDateString()}</div>
-                )}
-                {selectedRecipe.last_used_at && (
-                  <div>Last used: {new Date(selectedRecipe.last_used_at).toLocaleDateString()}</div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4 border-t border-secondary">
-                <Button
-                  className="flex-1 bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                  onClick={() => {
-                    setShowViewModal(false)
-                    handleUseRecipe(selectedRecipe)
-                  }}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Use This Recipe
-                </Button>
-                {!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowViewModal(false)
-                      handleShareToMarketplace(selectedRecipe)
-                    }}
-                    disabled={submitToMarketplaceMutation.isPending}
-                  >
-                    <Share2 className="w-4 h-4 mr-2" />
-                    Share to Marketplace
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => setShowViewModal(false)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Recipe Modal */}
-      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Recipe</DialogTitle>
-            <DialogDescription>
-              Update recipe information and configuration
-            </DialogDescription>
-          </DialogHeader>
-          
-          <RecipeForm
-            form={recipeForm}
-            onChange={setRecipeForm}
-            onSubmit={handleUpdateRecipe}
-            onCancel={() => {
-              setShowEditModal(false)
-              setSelectedRecipe(null)
-              resetForm()
-            }}
-            isLoading={updateMutation.isPending}
-            submitLabel="Update Recipe"
-            isEdit
-          />
-        </DialogContent>
-      </Dialog>
+      <ViewRecipeModal
+        open={showViewModal}
+        onClose={() => {
+          setShowViewModal(false)
+          setSelectedRecipe(null)
+        }}
+        recipe={selectedRecipe}
+        suggestions={selectedRecipeSuggestions}
+        executions={(selectedRecipeExecutions as any)?.items || (selectedRecipeExecutions as any) || []}
+        executionsLoading={executionsLoading}
+        onEdit={() => {
+          setShowViewModal(false)
+          handleEditClick(selectedRecipe)
+        }}
+        onExecute={() => {
+          setShowViewModal(false)
+          handleCookRecipe(selectedRecipe)
+        }}
+        onShare={!selectedRecipe?.is_system && !selectedRecipe?.is_marketplace_item
+          ? () => handleShareToMarketplace(selectedRecipe)
+          : undefined
+        }
+      />
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
@@ -644,13 +522,13 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
           <DialogHeader>
             <DialogTitle>Delete Recipe?</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete "{selectedRecipe?.name}"? This action cannot be undone.
+              Are you sure you want to delete &quot;{selectedRecipe?.name}&quot;? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="flex justify-end gap-4 mt-6">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setShowDeleteDialog(false)
                 setSelectedRecipe(null)
@@ -658,12 +536,12 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               variant="destructive"
               onClick={handleDeleteRecipe}
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isLoading}
             >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete Recipe'}
+              {deleteMutation.isLoading ? 'Deleting...' : 'Delete Recipe'}
             </Button>
           </div>
         </DialogContent>
@@ -671,191 +549,3 @@ export function RecipesTab({ onUseRecipe, onOpenCreateModal }: RecipesTabProps) 
     </div>
   )
 }
-
-// Recipe Form Component
-interface RecipeFormProps {
-  form: any
-  onChange: (form: any) => void
-  onSubmit: () => void
-  onCancel: () => void
-  isLoading: boolean
-  submitLabel: string
-  isEdit?: boolean
-}
-
-function RecipeForm({ form, onChange, onSubmit, onCancel, isLoading, submitLabel, isEdit }: RecipeFormProps) {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="recipe_id">Recipe ID *</Label>
-          <Input
-            id="recipe_id"
-            value={form.recipe_id}
-            onChange={(e) => onChange({ ...form, recipe_id: e.target.value })}
-            placeholder="my-custom-recipe"
-            disabled={isEdit}
-            className="bg-secondary/50 border-secondary"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Unique identifier (lowercase, hyphens only)
-          </p>
-        </div>
-        
-        <div>
-          <Label htmlFor="icon">Icon</Label>
-          <Input
-            id="icon"
-            value={form.icon}
-            onChange={(e) => onChange({ ...form, icon: e.target.value })}
-            placeholder="📋"
-            className="bg-secondary/50 border-secondary"
-          />
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="name">Recipe Name *</Label>
-        <Input
-          id="name"
-          value={form.name}
-          onChange={(e) => onChange({ ...form, name: e.target.value })}
-          placeholder="My Workflow Recipe"
-          className="bg-secondary/50 border-secondary"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="description">Description *</Label>
-        <Textarea
-          id="description"
-          value={form.description}
-          onChange={(e) => onChange({ ...form, description: e.target.value })}
-          placeholder="Describe what this recipe does..."
-          className="bg-secondary/50 border-secondary min-h-[80px]"
-        />
-      </div>
-
-      <div>
-        <Label htmlFor="goal">Workflow Goal (Optional)</Label>
-        <Input
-          id="goal"
-          value={form.goal || ''}
-          onChange={(e) => onChange({ ...form, goal: e.target.value })}
-          placeholder="e.g., Review PR #123 for security vulnerabilities"
-          className="bg-secondary/50 border-secondary"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          High-level objective - overrides description if provided
-        </p>
-      </div>
-
-      <div>
-        <Label htmlFor="context">Workflow Context (Optional JSON)</Label>
-        <Textarea
-          id="context"
-          value={typeof form.context === 'string' ? form.context : JSON.stringify(form.context || {}, null, 2)}
-          onChange={(e) => {
-            try {
-              const parsed = JSON.parse(e.target.value)
-              onChange({ ...form, context: parsed })
-            } catch {
-              // Invalid JSON, keep as string temporarily
-              onChange({ ...form, context: e.target.value })
-            }
-          }}
-          placeholder={'{\n  "codegraph_project": "my-app",\n  "pr_number": 123,\n  "git_url": "https://github.com/..."\n}'}
-          className="bg-secondary/50 border-secondary min-h-[100px] font-mono text-xs"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
-        </p>
-        <div className="mt-2 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs text-orange-300 flex items-start gap-2">
-          <span className="text-sm">⚡</span>
-          <span><strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 py-0.5 rounded">codegraph_project</code> in context to give agents access to indexed code.</span>
-        </div>
-      </div>
-
-      <div>
-        <Label htmlFor="tags">Tags (Optional)</Label>
-        <Input
-          id="tags"
-          value={Array.isArray(form.tags) ? form.tags.join(', ') : ''}
-          onChange={(e) => {
-            const tagArray = e.target.value.split(',').map(t => t.trim()).filter(Boolean)
-            onChange({ ...form, tags: tagArray })
-          }}
-          placeholder="project:automatos-ai, type:pr-review, automated"
-          className="bg-secondary/50 border-secondary"
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Comma-separated tags for organization and filtering
-        </p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <Label htmlFor="category">Category *</Label>
-          <Select 
-            value={form.category}
-            onValueChange={(value) => onChange({ ...form, category: value })}
-          >
-            <SelectTrigger className="bg-secondary/50 border-secondary">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Support">Support</SelectItem>
-              <SelectItem value="Data Processing">Data Processing</SelectItem>
-              <SelectItem value="Content">Content</SelectItem>
-              <SelectItem value="Security">Security</SelectItem>
-              <SelectItem value="Development">Development</SelectItem>
-              <SelectItem value="Marketing">Marketing</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label htmlFor="difficulty">Difficulty *</Label>
-          <Select 
-            value={form.difficulty}
-            onValueChange={(value) => onChange({ ...form, difficulty: value })}
-          >
-            <SelectTrigger className="bg-secondary/50 border-secondary">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="beginner">Beginner</SelectItem>
-              <SelectItem value="intermediate">Intermediate</SelectItem>
-              <SelectItem value="advanced">Advanced</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label htmlFor="estimated_time">Estimated Time</Label>
-          <Input
-            id="estimated_time"
-            value={form.estimated_time}
-            onChange={(e) => onChange({ ...form, estimated_time: e.target.value })}
-            placeholder="5-10 minutes"
-            className="bg-secondary/50 border-secondary"
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-4 pt-4 border-t border-secondary">
-        <Button variant="outline" onClick={onCancel} disabled={isLoading}>
-          Cancel
-        </Button>
-        <Button 
-          onClick={onSubmit} 
-          disabled={isLoading || !form.recipe_id || !form.name || !form.description}
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-        >
-          {isLoading ? 'Saving...' : submitLabel}
-        </Button>
-      </div>
-    </div>
-  )
-}
-

@@ -1,13 +1,16 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { FileText, Download } from 'lucide-react'
+import { useState } from 'react'
+import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Separator } from '@/components/ui/separator'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
+import { useInstallRecipeFromMarketplace } from '@/hooks/use-recipe-api'
+import { ViewRecipeModal } from '@/components/workflows/view-recipe-modal'
 
 interface MarketplaceRecipesTabProps {
   searchQuery: string
@@ -15,8 +18,12 @@ interface MarketplaceRecipesTabProps {
 
 export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProps) {
   const [selectedType, setSelectedType] = useState('all')
+  const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
+  const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
+  const [showViewModal, setShowViewModal] = useState(false)
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const installMutation = useInstallRecipeFromMarketplace()
 
   const { data: recipes = [], isLoading } = useQuery({
     queryKey: ['marketplaceRecipes', selectedType, searchQuery],
@@ -30,26 +37,24 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
     },
   })
 
-  // Apply client-side filter by selectedType so filter buttons actually work
-  const filteredRecipes = useMemo(() => {
-    if (selectedType === 'all') return recipes
-    return recipes.filter((r: any) =>
-      (r.metadata?.recipe_type || r.recipe_type || '').toLowerCase() === selectedType
-    )
-  }, [recipes, selectedType])
+  const handleViewRecipe = (recipe: any) => {
+    setSelectedRecipe(recipe)
+    setShowViewModal(true)
+  }
 
-  const installMutation = useMutation({
-    mutationFn: async (recipeId: number) => {
-      return apiClient.post(`/api/workflow-recipes/install/${recipeId}`)
-    },
-    onSuccess: (data) => {
+  const handleInstall = async (e: React.MouseEvent, recipeId: number) => {
+    e.stopPropagation()
+    setInstallingRecipeId(recipeId)
+    try {
+      const data = await installMutation.mutateAsync(recipeId)
+
       toast({
-        title: 'Recipe Installed',
-        description: data.message || 'Recipe installed successfully',
+        title: 'Recipe Added to Workspace',
+        description: data.message || 'Recipe added successfully',
         variant: 'default'
       })
 
-      // Show warnings if any
+      // Show warnings for missing dependencies (e.g., agents not found in marketplace)
       if (data.warnings && data.warnings.length > 0) {
         data.warnings.forEach((warning: string) => {
           toast({
@@ -60,20 +65,17 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
         })
       }
 
-      // Invalidate workspace recipes query to show new recipe
-      queryClient.invalidateQueries({ queryKey: ['workflowRecipes'] })
-    },
-    onError: (error: any) => {
+      // Also invalidate marketplace queries for updated install counts
+      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+    } catch (error: any) {
       toast({
         title: 'Installation Failed',
-        description: error?.message || 'Failed to install recipe',
+        description: error?.message || 'Failed to add recipe to workspace',
         variant: 'destructive'
       })
+    } finally {
+      setInstallingRecipeId(null)
     }
-  })
-
-  const handleInstall = (recipeId: number) => {
-    installMutation.mutate(recipeId)
   }
 
   return (
@@ -130,47 +132,98 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredRecipes.map((recipe: any) => (
-            <Card key={recipe.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
+          {recipes.map((recipe: any) => (
+            <Card
+              key={recipe.id}
+              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
+              onClick={() => handleViewRecipe(recipe)}
+            >
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold line-clamp-1">{recipe.name}</h3>
-                    <p className="text-xs text-muted-foreground">by {recipe.creator_name}</p>
+                {/* Icon INLINE with Title - EXACTLY like Agent */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <ChefHat className="w-10 h-10 text-orange-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-white line-clamp-1">
+                          {recipe.name}
+                        </h3>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        by {recipe.creator_name || 'Unknown'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground line-clamp-2">{recipe.description}</p>
 
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    {recipe.category || 'Workflow'}
-                  </Badge>
-                  {recipe.metadata?.recipe_type && (
-                    <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30">
-                      {recipe.metadata.recipe_type}
+              <CardContent className="space-y-3">
+                {/* Description */}
+                <p className="text-sm text-gray-400 line-clamp-2">
+                  {recipe.description || 'No description available'}
+                </p>
+
+                {/* Category badge */}
+                {recipe.marketplace_category && (
+                  <div className="flex flex-col gap-2">
+                    <Badge variant="outline" className="text-xs border-gray-700 text-gray-400 w-fit">
+                      {recipe.marketplace_category}
                     </Badge>
-                  )}
+                  </div>
+                )}
+
+                {/* Stats Row */}
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <div className="flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{recipe.steps?.length || 0} Steps</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>{recipe.steps ? new Set(recipe.steps.map((s: any) => s.agent_id)).size : 0} Agents</span>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-2 border-t border-secondary">
-                  <span className="text-xs text-muted-foreground">
-                    {recipe.install_count >= 1000
-                      ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
-                      : `${recipe.install_count} installs`}
-                  </span>
+                {/* Install count */}
+                <div className="text-xs text-gray-500 pb-2">
+                  {recipe.install_count >= 1000
+                    ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
+                    : `${recipe.install_count || 0} installs`}
+                </div>
+
+                {/* Action Buttons - EXACTLY like Agent */}
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleViewRecipe(recipe)
+                    }}
+                  >
+                    Details
+                  </Button>
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={() => handleInstall(recipe.id)}
-                    disabled={installMutation.isPending}
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleInstall(e, recipe.id)
+                    }}
+                    disabled={installingRecipeId === recipe.id}
                   >
-                    <Download className="w-3 h-3 mr-1" />
-                    {installMutation.isPending ? 'Installing...' : 'Install'}
+                    {installingRecipeId === recipe.id ? (
+                      <>
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3 h-3 mr-1" />
+                        Add to Workspace
+                      </>
+                    )}
                   </Button>
                 </div>
               </CardContent>
@@ -178,6 +231,21 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           ))}
         </div>
       )}
+
+      {/* View Recipe Modal */}
+      <ViewRecipeModal
+        open={showViewModal}
+        onClose={() => {
+          setShowViewModal(false)
+          setSelectedRecipe(null)
+        }}
+        recipe={selectedRecipe}
+        onExecute={(e) => {
+          if (selectedRecipe) {
+            handleInstall(e as any, selectedRecipe.id)
+          }
+        }}
+      />
     </div>
   )
 }

@@ -67,6 +67,14 @@ class MarketplaceItemOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # Recipe-specific fields
+    owner_type: Optional[str] = None
+    steps: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    inputs: Optional[Dict[str, Any]] = None
+    outputs: Optional[Dict[str, Any]] = None
+    execution_config: Optional[Dict[str, Any]] = None
+    schedule_config: Optional[Dict[str, Any]] = None
+
     class Config:
         from_attributes = True
 
@@ -265,19 +273,23 @@ async def list_items(
                     name=recipe.name,
                     description=recipe.description or '',
                     creator_name=creator_name,
-                    icon=recipe.marketplace_icon or recipe.icon,
-                    category=recipe.marketplace_category or recipe.category,
+                    icon=recipe.marketplace_icon,
+                    category=recipe.marketplace_category,
                     tags=recipe.tags or [],
                     install_count=recipe.install_count,
                     is_featured=recipe.is_featured,
                     is_approved=recipe.is_approved,
                     version=recipe.version,
+                    owner_type=recipe.owner_type,
+                    steps=recipe.steps or [],
+                    inputs=recipe.inputs,
+                    outputs=recipe.outputs,
+                    execution_config=recipe.execution_config,
+                    schedule_config=recipe.schedule_config,
                     metadata={
-                        'recipe_type': recipe.recipe_type,
-                        'difficulty': recipe.difficulty,
-                        'estimated_time': recipe.estimated_time,
                         'required_tools': recipe.required_tools or [],
-                        'recommended_agents': recipe.recommended_agents or []
+                        'recommended_agents': recipe.recommended_agents or [],
+                        'quality_score': recipe.quality_score
                     },
                     created_at=recipe.created_at,
                     updated_at=recipe.updated_at

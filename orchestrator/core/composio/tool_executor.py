@@ -351,19 +351,40 @@ class ComposioToolExecutor:
                 if False:  # Disabled
                     pass
                 else:
-                    # Cache miss - proceed with execution anyway (agnostic mode)
-                    # Composio API will validate; if invalid, it will fail there
-                    logger.warning(
-                        f"Action '{raw_action}' not in cache for {app_name} "
-                        f"({total_for_app} actions cached). Attempting direct execution via Composio API."
-                    )
-                    if suggestions:
-                        logger.info(f"Cache has these alternatives: {suggestions}")
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Action '{raw_action}' is not mapped in composio_actions_cache for {app_name}. "
+                            + (
+                                "The cache appears empty for this app. Run the cache sync."
+                                if total_for_app == 0
+                                else (
+                                    "Use one of the suggested safe actions instead."
+                                    if suggestions
+                                    else "No safe suggestions found in cache; run the cache sync."
+                                )
+                            )
+                            + examples_clause
+                        ),
+                        "error_type": "composio_action_not_mapped",
+                        "data": {
+                            "app_name": app_name,
+                            "requested_action": raw_action,
+                            "suggested_actions": suggestions,
+                        },
+                        "execution_time_ms": int((time.time() - start_time) * 1000),
+                    }
 
-                    # Use the raw action name - let Composio decide if it's valid
-                    action_upper = raw_action.upper()
+            # Normalize to canonical action_name
+            original_action = str(mapped.action_name or action_upper).upper()
+            action_upper = original_action
 
-            # Action name is already set above (no more auto-mapping)
+            # If action_name is a display name (no app prefix), reconstruct proper API format
+            # e.g., "FETCH EMAILS" + app "GMAIL" → "GMAIL_FETCH_EMAILS"
+            if app_name and not action_upper.startswith(f"{app_name}_"):
+                reconstructed = f"{app_name}_{action_upper.replace(' ', '_')}"
+                logger.info(f"Reconstructed Composio action: '{original_action}' -> '{reconstructed}'")
+                action_upper = reconstructed
         except Exception as exc:
             return {
                 "success": False,
@@ -373,9 +394,12 @@ class ComposioToolExecutor:
                 "execution_time_ms": int((time.time() - start_time) * 1000),
             }
         
-        # Validate access
+        # Validate access — check both original and reconstructed action names
         if not skip_validation:
-            if not self.validate_feature_access(agent_id, action_upper, app_name=app_name):
+            has_access = self.validate_feature_access(agent_id, action_upper, app_name=app_name)
+            if not has_access and original_action != action_upper:
+                has_access = self.validate_feature_access(agent_id, original_action, app_name=app_name)
+            if not has_access:
                 return {
                     "success": False,
                     "error": f"Agent {agent_id} does not have access to action: {action_upper}",

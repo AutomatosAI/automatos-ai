@@ -52,12 +52,12 @@ import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
 import { MonitoringTab } from './monitoring-tab'
 import { RecipesTab } from './recipes-tab'
-import { ExecutionTheater } from './execution-theater'
+import { ExecutionKitchen } from './execution-kitchen'
 
 // Real data will be loaded from backend
 const initialWorkflowStats = [
   {
-    label: 'Active Workflows',
+    label: 'Cooking Now',
     value: '0',
     change: 'Loading...',
     icon: GitBranch,
@@ -183,9 +183,21 @@ export function WorkflowManagement() {
   })
   
   // Execution Theater state
-  const [showExecutionTheater, setShowExecutionTheater] = useState(false)
+  const [showExecutionKitchen, setShowExecutionKitchen] = useState(false)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<number | null>(null)
   const [autoStartExecution, setAutoStartExecution] = useState(false)
+
+  // Recipe creation modal (triggered from top "Create Recipe" button)
+  const [recipeCreateOpen, setRecipeCreateOpen] = useState(false)
+  const [recipeSearchTerm, setRecipeSearchTerm] = useState('')
+
+  // Recipe direct execution state
+  const [recipeExecInfo, setRecipeExecInfo] = useState<{
+    recipeExecutionId: string
+    recipeId: string
+    recipeSteps: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
+    recipeName: string
+  } | null>(null)
 
   // Workflow creation form state
   const [workflowForm, setWorkflowForm] = useState({
@@ -228,7 +240,7 @@ export function WorkflowManagement() {
       // Update stats with real data
       setWorkflowStats([
         {
-          label: 'Active Workflows',
+          label: 'Cooking Now',
           value: statsData.activeWorkflows.toString(),
           change: `${statsData.activeWorkflows > 0 ? '+' : ''}${statsData.activeWorkflows} total`,
           icon: GitBranch,
@@ -318,6 +330,21 @@ export function WorkflowManagement() {
       .filter(agent => workflowForm.selectedAgents.includes(agent.id))
       .map(agent => parseInt(agent.id))
 
+    // Normalize step objects: ensure integer agent_ids and proper structure
+    const steps = Array.isArray(workflowForm.customSteps) && workflowForm.customSteps.length > 0
+      ? workflowForm.customSteps.map((step: any, idx: number) => {
+          if (typeof step === 'object' && step !== null) {
+            return {
+              ...step,
+              agent_id: typeof step.agent_id === 'string' ? parseInt(step.agent_id, 10) : step.agent_id,
+              order: step.order || idx + 1,
+              step_id: step.step_id || `step_${idx + 1}`,
+            }
+          }
+          return step // string steps pass through as-is
+        })
+      : workflowForm.customSteps
+
     // Prepare the workflow data in the expected backend API format
     const workflowData = {
       name: workflowForm.name,
@@ -327,7 +354,7 @@ export function WorkflowManagement() {
       category: workflowForm.template ? workflowTemplates.find(t => t.id === workflowForm.template)?.name : 'automation',
       priority: workflowForm.priority,
       config: workflowForm.configuration,
-      steps: workflowForm.customSteps,
+      steps: steps,
       agents: workflowForm.selectedAgents,
       tags: workflowForm.template ? [workflowForm.template] : ['custom']
     }
@@ -381,7 +408,7 @@ export function WorkflowManagement() {
         setTimeout(() => {
           setSelectedWorkflowId(result.id)
           setAutoStartExecution(false) // Don't auto-start, let user decide
-          setShowExecutionTheater(true)
+          setShowExecutionKitchen(true)
         }, 500) // Small delay to allow UI to update
       }
       
@@ -431,14 +458,19 @@ export function WorkflowManagement() {
       // New format - full template object from backend API
       // Add timestamp to avoid name conflicts
       const timestamp = new Date().toISOString().slice(11, 19).replace(/:/g, '')
+      // Fix: Read from template.steps (JSONB column), not template_definition.steps
+      const recipeSteps = template.steps || template.template_definition?.steps || []
+      const agentIdsFromSteps = recipeSteps
+        .map((step: any) => step.agent_id?.toString())
+        .filter(Boolean)
       setWorkflowForm({
         ...workflowForm,
         template: template.template_id || template.id,
         name: `${template.name} ${timestamp}`,
         description: template.description,
         priority: template.priority || 'medium',
-        selectedAgents: template.recommended_agents || [],
-        customSteps: template.template_definition?.steps || []
+        selectedAgents: agentIdsFromSteps.length > 0 ? agentIdsFromSteps : template.recommended_agents || [],
+        customSteps: recipeSteps,
       })
     }
   }
@@ -454,11 +486,11 @@ export function WorkflowManagement() {
 
   const handleWorkflowClick = (workflowId: number) => {
     setSelectedWorkflowId(workflowId)
-    setShowExecutionTheater(true)
+    setShowExecutionKitchen(true)
   }
 
-  const handleBackFromTheater = () => {
-    setShowExecutionTheater(false)
+  const handleBackFromKitchen = () => {
+    setShowExecutionKitchen(false)
     setSelectedWorkflowId(null)
     setAutoStartExecution(false) // Reset auto-start flag
     // Reload workflows to get fresh data
@@ -477,12 +509,16 @@ export function WorkflowManagement() {
   })
 
   // Show Execution Theater if workflow is selected
-  if (showExecutionTheater && selectedWorkflowId) {
+  if (showExecutionKitchen && (selectedWorkflowId || recipeExecInfo)) {
     return (
-      <ExecutionTheater 
-        workflowId={selectedWorkflowId}
-        onBack={handleBackFromTheater}
+      <ExecutionKitchen
+        workflowId={selectedWorkflowId || 0}
+        onBack={handleBackFromKitchen}
         autoStart={autoStartExecution}
+        executionType={recipeExecInfo ? 'recipe' : 'workflow'}
+        recipeExecutionId={recipeExecInfo?.recipeExecutionId}
+        recipeId={recipeExecInfo?.recipeId}
+        recipeSteps={recipeExecInfo?.recipeSteps}
       />
     )
   }
@@ -505,12 +541,12 @@ export function WorkflowManagement() {
           </p>
         </div>
         
-        <Button 
+        <Button
           className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-          onClick={handleCreateWorkflow}
+          onClick={() => setRecipeCreateOpen(true)}
         >
           <Plus className="w-4 h-4 mr-2" />
-          Create Workflow
+          Create Recipe
         </Button>
       </motion.div>
 
@@ -554,25 +590,32 @@ export function WorkflowManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="active" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
-            <TabsTrigger value="active" className="flex items-center space-x-2">
-              <Play className="w-4 h-4" />
-              <span className="hidden sm:inline">Active</span>
-            </TabsTrigger>
-            <TabsTrigger value="templates" className="flex items-center space-x-2">
-              <GitBranch className="w-4 h-4" />
-              <span className="hidden sm:inline">Recipes</span>
-            </TabsTrigger>
-            <TabsTrigger value="history" className="flex items-center space-x-2">
-              <Clock className="w-4 h-4" />
-              <span className="hidden sm:inline">History</span>
-            </TabsTrigger>
-            <TabsTrigger value="monitoring" className="flex items-center space-x-2">
-              <Activity className="w-4 h-4" />
-              <span className="hidden sm:inline">Monitoring</span>
-            </TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="templates" className="space-y-6">
+          <div className="flex items-center gap-4">
+            <TabsList className="bg-secondary/50 shrink-0">
+              <TabsTrigger value="templates" className="flex items-center space-x-2">
+                <GitBranch className="w-4 h-4" />
+                <span className="hidden sm:inline">Recipes</span>
+              </TabsTrigger>
+              <TabsTrigger value="active" className="flex items-center space-x-2">
+                <Play className="w-4 h-4" />
+                <span className="hidden sm:inline">Cooking</span>
+              </TabsTrigger>
+              <TabsTrigger value="monitoring" className="flex items-center space-x-2">
+                <Activity className="w-4 h-4" />
+                <span className="hidden sm:inline">Monitoring</span>
+              </TabsTrigger>
+            </TabsList>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="Search recipes..."
+                value={recipeSearchTerm}
+                onChange={(e) => setRecipeSearchTerm(e.target.value)}
+                className="pl-10 bg-secondary/50 border-secondary"
+              />
+            </div>
+          </div>
 
           <TabsContent value="active" className="space-y-6">
             {/* Loading State */}
@@ -604,20 +647,26 @@ export function WorkflowManagement() {
 
           <TabsContent value="templates" className="space-y-6">
             <RecipesTab
+              searchTerm={recipeSearchTerm}
+              externalCreateOpen={recipeCreateOpen}
+              onCreateModalClosed={() => setRecipeCreateOpen(false)}
               onUseRecipe={(recipeId) => {
-                setError(null) // Clear any previous errors
+                setError(null)
                 handleTemplateChange(recipeId)
-                setShowCreateModal(true) // Open modal after populating recipe data
-              }}
-              onOpenCreateModal={() => {
-                setError(null) // Clear any previous errors
                 setShowCreateModal(true)
               }}
+              onExecuteRecipe={(workflowId: number, recipeExecution?: any) => {
+                if (recipeExecution) {
+                  setRecipeExecInfo(recipeExecution)
+                  setSelectedWorkflowId(null)
+                } else {
+                  setSelectedWorkflowId(workflowId)
+                  setRecipeExecInfo(null)
+                }
+                setAutoStartExecution(false)
+                setShowExecutionKitchen(true)
+              }}
             />
-          </TabsContent>
-
-          <TabsContent value="history" className="space-y-6">
-            <HistoryTab />
           </TabsContent>
 
           <TabsContent value="monitoring" className="space-y-6">
@@ -626,196 +675,71 @@ export function WorkflowManagement() {
         </Tabs>
       </motion.div>
 
-      {/* Create Workflow Modal - Simplified for Intelligent Orchestration */}
+      {/* Cook Workflow Confirmation Modal */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="glass-card max-w-2xl">
+        <DialogContent className="glass-card max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create New Workflow</DialogTitle>
-            <p className="text-sm text-muted-foreground mt-2">
-              Describe your task and the Orchestrator will intelligently select the best agents and execute it.
-            </p>
+            <DialogTitle className="text-xl font-semibold">Cook Workflow?</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Simplified Single-Step Form */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-4"
-            >
-              <div>
-                <Label htmlFor="name">Workflow Name <span className="text-red-400">*</span></Label>
-                <Input
-                  id="name"
-                  value={workflowForm.name}
-                  onChange={(e) => setWorkflowForm({...workflowForm, name: e.target.value})}
-                  placeholder="e.g., Analyze API Documentation"
-                  className="bg-secondary/50 border-secondary"
-                />
+          <div className="space-y-4 py-4">
+            {/* Workflow Name - Read Only */}
+            <div className="space-y-2">
+              <Label className="text-sm text-muted-foreground">Recipe</Label>
+              <div className="px-4 py-3 bg-secondary/50 rounded-lg border border-border/50">
+                <p className="font-medium">{workflowForm.name || 'Untitled Workflow'}</p>
               </div>
+            </div>
 
-              <div>
-                <Label htmlFor="description">Task Description <span className="text-red-400">*</span></Label>
-                <Textarea
-                  id="description"
-                  value={workflowForm.description}
-                  onChange={(e) => setWorkflowForm({...workflowForm, description: e.target.value})}
-                  placeholder="Describe what you want the workflow to accomplish. Be as specific as possible - the Orchestrator uses this to intelligently select agents and break down the task."
-                  className="bg-secondary/50 border-secondary min-h-[120px]"
-                  rows={5}
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  💡 <strong>Tip:</strong> Include context, goals, and expected outcomes for better results
+            {/* Description - Read Only */}
+            <div className="space-y-2">
+              <Label className="text-sm text-muted-foreground">Description</Label>
+              <div className="px-4 py-3 bg-secondary/50 rounded-lg border border-border/50 min-h-[100px]">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {workflowForm.description || 'No description provided'}
                 </p>
               </div>
-
-              <div>
-                <Label htmlFor="priority">Priority</Label>
-                <Select 
-                  value={workflowForm.priority || "medium"} 
-                  onValueChange={(value) => setWorkflowForm({...workflowForm, priority: value})}
-                >
-                  <SelectTrigger className="bg-secondary/50 border-secondary">
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium (Default)</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Advanced Options Toggle */}
-              <div className="flex items-center justify-between">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="text-blue-400 hover:text-blue-300"
-                >
-                  <ChevronRight className={`w-4 h-4 mr-2 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
-                  Advanced Options (Goal & Context)
-                </Button>
-              </div>
-
-              {/* Advanced Options */}
-              {showAdvanced && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="space-y-4 p-4 bg-secondary/20 border border-secondary rounded-lg"
-                >
-                  <div>
-                    <Label htmlFor="goal">Workflow Goal (Optional)</Label>
-                    <Input
-                      id="goal"
-                      value={workflowForm.goal}
-                      onChange={(e) => setWorkflowForm({...workflowForm, goal: e.target.value})}
-                      placeholder="e.g., Review PR #123 for security vulnerabilities"
-                      className="bg-secondary/50 border-secondary"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      High-level objective - overrides description if provided
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="context">Workflow Context (Optional JSON)</Label>
-                    <Textarea
-                      id="context"
-                      value={contextJson}
-                      onChange={(e) => setContextJson(e.target.value)}
-                      placeholder={`{\n  "codegraph_project": "my-app",\n  "pr_number": 123,\n  "git_url": "https://github.com/..."\n}`}
-                      className="bg-secondary/50 border-secondary font-mono text-sm min-h-[100px]"
-                      rows={5}
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Additional context for execution (JSON format). Useful for CodeGraph integration, PR reviews, etc.
-                    </p>
-                  </div>
-
-                  <div className="text-xs text-yellow-400 flex items-start space-x-2">
-                    <Zap className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <strong>Pro Tip:</strong> Use <code className="bg-black/30 px-1 rounded">codegraph_project</code> in context to give agents access to indexed code.
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                <div className="flex items-start space-x-3">
-                  <Bot className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1 text-sm">
-                    <p className="font-semibold text-blue-300 mb-1">Intelligent Orchestration</p>
-                    <p className="text-muted-foreground">
-                      The Orchestrator will automatically analyze your task, select the most capable agents, 
-                      decompose the work into subtasks, and manage execution - no manual configuration needed.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* Error Display */}
-            {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
-                <p className="text-red-400 text-sm">{error}</p>
-              </div>
-            )}
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end space-x-2 pt-4 border-t border-border/30">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowCreateModal(false)
-                  setError(null)
-                  setShowAdvanced(false)
-                  setContextJson('')
-                  setWorkflowForm({
-                    name: '',
-                    description: '',
-                    goal: '',
-                    context: {},
-                    template: '',
-                    priority: 'medium',
-                    selectedAgents: [],
-                    customSteps: [],
-                    configuration: {
-                      maxRetries: 3,
-                      timeout: 30,
-                      parallelExecution: false
-                    }
-                  })
-                }}
-                disabled={isCreating}
-              >
-                Cancel
-              </Button>
-              
-              <Button
-                onClick={handleSubmitWorkflow}
-                disabled={isCreating || !workflowForm.name || !workflowForm.description}
-                className="bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 text-white"
-              >
-                {isCreating ? (
-                  <>
-                    <Bot className="w-4 h-4 mr-2 animate-spin" />
-                    Creating Workflow...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 mr-2" />
-                    Create & Deploy
-                  </>
-                )}
-              </Button>
             </div>
+          </div>
+
+          {/* Error Display */}
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowCreateModal(false)
+                setError(null)
+              }}
+              disabled={isCreating}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+
+            <Button
+              onClick={handleSubmitWorkflow}
+              disabled={isCreating || !workflowForm.name || !workflowForm.description}
+              className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
+            >
+              {isCreating ? (
+                <>
+                  <Bot className="w-4 h-4 mr-2 animate-spin" />
+                  Cooking...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 mr-2" />
+                  Cook
+                </>
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

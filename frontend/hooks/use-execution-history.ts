@@ -1,11 +1,3 @@
-"""
-Execution History Hook
-=======================
-
-React hook for fetching and managing execution history data.
-Connects Enhanced Orchestrator View to real backend data.
-"""
-
 import { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '@/lib/api-client'
 

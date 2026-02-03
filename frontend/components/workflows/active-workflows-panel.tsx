@@ -21,7 +21,9 @@ import {
   Search,
   Filter,
   X,
-  Copy
+  Copy,
+  ChefHat,
+  Zap
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +55,7 @@ import { useActiveWorkflows, useExecuteWorkflowAdvanced } from '@/hooks/use-work
 import { LiveProgressPanel } from './live-progress-panel'
 import { apiClient } from '@/lib/api-client'
 import { useQueryClient } from '@tanstack/react-query'
+import { useToast } from '@/hooks/use-toast'
 
 interface ActiveWorkflow {
   id: number;
@@ -91,9 +94,38 @@ interface ActiveWorkflow {
   updated_at: string;
 }
 
+interface RecipeRun {
+  id: number;
+  execution_id: string;
+  recipe_id: number;
+  recipe_name: string;
+  type: 'recipe';
+  status: string;
+  current_step: number;
+  total_steps: number;
+  step_results: Array<{
+    step_id: string;
+    order: number;
+    agent_name: string;
+    status: string;
+    output: string | null;
+    duration_ms: number;
+    tokens_used: number;
+    error: string | null;
+  }>;
+  started_at: string | null;
+  completed_at: string | null;
+  duration: string | null;
+  total_tokens: number;
+  total_duration_ms: number;
+  error_message: string | null;
+}
+
 interface ActiveWorkflowsData {
   active_workflows: ActiveWorkflow[];
+  recipe_runs: RecipeRun[];
   total_active: number;
+  total_recipe_runs: number;
   system_load: number;
   last_updated: string;
 }
@@ -113,6 +145,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
   const [statusFilter, setStatusFilter] = useState<string>('all')
 
   const queryClient = useQueryClient()
+  const { toast } = useToast()
 
   // Use React Query hook for active workflows
   const { data: workflowsData, isLoading: loading, error, refetch } = useActiveWorkflows()
@@ -155,13 +188,34 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
   }, [autoRefresh, refetch])
 
   const handleExecuteWorkflow = async (workflowId: number) => {
-    executeWorkflowMutation.mutate({
-      workflowId: workflowId.toString(),
-      options: {
-        priority: 'normal',
-        timeout: 300
-      }
-    })
+    console.log('🔥 Cook button clicked! Workflow ID:', workflowId)
+    try {
+      executeWorkflowMutation.mutate({
+        workflowId: workflowId.toString(),
+        options: {
+          priority: 'normal',
+          timeout: 300
+        }
+      }, {
+        onSuccess: (data) => {
+          console.log('✅ Execution started:', data)
+          toast({
+            title: "Workflow started cooking!",
+            description: `Execution ID: ${data.execution_id}`,
+          })
+        },
+        onError: (error: any) => {
+          console.error('❌ Execution failed:', error)
+          toast({
+            title: "Failed to start cooking",
+            description: error?.message || "Unknown error",
+            variant: "destructive",
+          })
+        }
+      })
+    } catch (error) {
+      console.error('❌ Exception in handleExecuteWorkflow:', error)
+    }
   }
 
   const handleDuplicateWorkflow = async (workflowId: number, workflowName: string) => {
@@ -185,11 +239,20 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
     try {
       await apiClient.deleteWorkflow(workflowToDelete.id)
       await queryClient.invalidateQueries({ queryKey: ['activeWorkflows'] })
+      toast({
+        title: "Workflow removed",
+        description: `"${workflowToDelete.name}" has been removed from the kitchen.`,
+      })
       setWorkflowToDelete(null)
       refetch()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting workflow:', error)
-      alert('Failed to delete workflow')
+      console.error('Error details:', error?.response?.data || error?.message)
+      toast({
+        title: "Failed to remove workflow",
+        description: error?.response?.data?.detail || error?.message || "Unknown error occurred",
+        variant: "destructive",
+      })
     } finally {
       setIsDeleting(false)
     }
@@ -266,11 +329,14 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
     )
   }
 
-  if (!workflowsData || workflowsData.active_workflows.length === 0) {
+  const hasWorkflows = (workflowsData?.active_workflows?.length ?? 0) > 0
+  const hasRecipeRuns = (workflowsData?.recipe_runs?.length ?? 0) > 0
+
+  if (!workflowsData || (!hasWorkflows && !hasRecipeRuns)) {
     return (
       <div className="text-center py-12">
         <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-4" />
-        <p className="text-muted-foreground">No active workflows found</p>
+        <p className="text-muted-foreground">No active workflows or recipe runs found</p>
       </div>
     )
   }
@@ -281,10 +347,10 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">
-            <span className="text-white">Active</span> <span className="text-orange-500">Workflows</span>
+            <span className="text-white">What's</span> <span className="text-orange-500">Cooking</span>
           </h3>
           <p className="text-sm text-muted-foreground">
-            {filteredWorkflows.length} of {workflowsData.total_active} workflows • {workflowsData.system_load}% system load
+            {filteredWorkflows.length} workflow{filteredWorkflows.length !== 1 ? 's' : ''}{hasRecipeRuns ? ` • ${workflowsData.recipe_runs.length} recipe run${workflowsData.recipe_runs.length !== 1 ? 's' : ''}` : ''} • {workflowsData.system_load}% system load
           </p>
         </div>
 
@@ -361,7 +427,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
         )}
       </div>
 
-      {/* Active Workflows Grid */}
+      {/* Active Workflows List */}
       {filteredWorkflows.length === 0 ? (
         <div className="text-center py-12">
           <Search className="h-8 w-8 text-muted-foreground mx-auto mb-4" />
@@ -378,7 +444,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
           </Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-3">
           {filteredWorkflows.map((workflow, index) => {
             const StatusIcon = getStatusIcon(workflow.current_execution.status)
             const statusColor = getStatusColor(workflow.current_execution.status)
@@ -386,137 +452,88 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
             return (
               <motion.div
                 key={workflow.id}
-                className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
-                onClick={() => onWorkflowClick?.(workflow.id)}
+                className="glass-card p-4 hover:border-primary/20 transition-all duration-300"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
               >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-4">
+                  {/* Status Indicator */}
+                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-secondary/50">
+                    <StatusIcon className={`w-5 h-5 ${statusColor}`} />
+                  </div>
+
+                  {/* Workflow Info */}
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-lg mb-1">{workflow.name}</h4>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-base">{workflow.name}</h4>
+                      <Badge className={`text-xs ${
+                        workflow.current_execution.status === 'running'
+                          ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                          : workflow.current_execution.status === 'failed'
+                            ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                            : workflow.metrics.last_execution
+                              ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                              : 'bg-red-500/20 text-red-400 border-red-500/30'
+                      }`}>
+                        {workflow.current_execution.status === 'running'
+                          ? 'cooking'
+                          : workflow.current_execution.status === 'failed'
+                            ? 'burnt'
+                            : workflow.metrics.last_execution
+                              ? 'cooked'
+                              : 'never cooked'
+                        }
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground line-clamp-1">
                       {workflow.description}
                     </p>
                   </div>
 
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation()
-                        onWorkflowClick?.(workflow.id)
-                      }}>
-                        <Eye className="w-4 h-4 mr-2" />
-                        Open Execution Theater
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation()
-                        handleExecuteWorkflow(workflow.id)
-                      }}>
-                        <Play className="w-4 h-4 mr-2" />
-                        Execute Workflow
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation()
-                        handleDuplicateWorkflow(workflow.id, workflow.name)
-                      }}>
-                        <Copy className="w-4 h-4 mr-2" />
-                        Duplicate Workflow
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setWorkflowToDelete({ id: workflow.id, name: workflow.name })
-                        }}
-                        className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Delete Workflow
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                {/* Current Execution Status */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center space-x-2">
-                      <StatusIcon className={`w-4 h-4 ${statusColor}`} />
-                      <span className="text-sm font-medium">{workflow.current_execution.current_step}</span>
-                    </div>
-                    <Badge className={getStatusBadgeStyle(workflow.current_execution.status)}>
-                      {workflow.current_execution.status}
-                    </Badge>
-                  </div>
-
-                  {workflow.current_execution.status === 'running' && (
-                    <>
-                      <Progress value={workflow.current_execution.progress} className="h-2 mb-2" />
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>{workflow.current_execution.progress}% complete</span>
-                        <span>
-                          ETA: {workflow.current_execution.estimated_completion ?
-                            new Date(workflow.current_execution.estimated_completion).toLocaleTimeString() :
-                            'Calculating...'
-                          }
-                        </span>
+                  {/* Metrics with Runtime Info */}
+                  <div className="hidden lg:flex items-center gap-6 text-sm">
+                    {/* Runtime Display - Only if cooked */}
+                    {(workflow.current_execution.started_at || workflow.metrics.last_execution) && (
+                      <div className="text-left max-w-[200px]">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="w-3 h-3" />
+                          {workflow.current_execution.status === 'running' && workflow.current_execution.started_at ? (
+                            <span>{new Date(workflow.current_execution.started_at).toLocaleString()}</span>
+                          ) : workflow.metrics.last_execution ? (
+                            <span>{new Date(workflow.metrics.last_execution).toLocaleString()}</span>
+                          ) : null}
+                        </div>
                       </div>
-                    </>
-                  )}
-                </div>
+                    )}
 
-                {/* Agents */}
-                <div className="mb-4">
-                  <div className="text-sm text-muted-foreground mb-2">
-                    Agents ({workflow.agents?.length || 0})
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {(workflow.agents || []).map(agent => (
-                      <Badge key={agent.id} variant="outline" className="text-xs">
-                        {agent.name}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Metrics */}
-                <div className="grid grid-cols-2 gap-4 mb-4 text-xs">
-                  <div>
-                    <p className="text-green-400">Total Runs</p>
-                    <p className="font-medium">{workflow.metrics.total_executions}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-400">Success Rate</p>
-                    <p className="font-medium">{workflow.metrics.success_rate}%</p>
-                  </div>
-                  <div>
-                    <p className="text-green-400">Avg Duration</p>
-                    <p className="font-medium">{workflow.metrics.avg_duration}</p>
-                  </div>
-                  <div>
-                    <p className="text-green-400">Last Run</p>
-                    <p className="font-medium">
-                      {workflow.metrics.last_execution ?
-                        new Date(workflow.metrics.last_execution).toLocaleDateString() :
-                        'Never'
-                      }
-                    </p>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex justify-between items-center pt-4 border-t border-border/30">
-                  <div className="text-xs">
-                    <span className="text-green-400">Created:</span> <span className="text-muted-foreground">{new Date(workflow.created_at).toLocaleDateString()}</span>
+                    <div className="text-center">
+                      <p className="text-muted-foreground text-xs">Agents</p>
+                      <p className="font-medium">{workflow.agents?.length || 0}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-muted-foreground text-xs">Runs</p>
+                      <p className="font-medium">{workflow.metrics.total_executions}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-muted-foreground text-xs">
+                        {workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0 ? 'Success' : 'Failed'}
+                      </p>
+                      <p className={`font-medium ${workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {workflow.metrics.success_rate === 100 || workflow.metrics.total_executions === 0
+                          ? `${workflow.metrics.success_rate}%`
+                          : `${100 - workflow.metrics.success_rate}%`
+                        }
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-muted-foreground text-xs">Avg Time</p>
+                      <p className="font-medium">{workflow.metrics.avg_duration}</p>
+                    </div>
                   </div>
 
-                  <div className="flex space-x-2">
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
                     <Button
                       size="sm"
                       variant="outline"
@@ -525,26 +542,198 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
                         onWorkflowClick?.(workflow.id)
                       }}
                     >
-                      <Eye className="w-3 h-3 mr-1" />
-                      Open Theater
+                      <Eye className="w-4 h-4" />
+                      <span className="hidden xl:inline ml-1">Kitchen</span>
                     </Button>
 
-                    {workflow.current_execution.status === 'idle' && (
-                      <Button
-                        size="sm"
-                        className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-                        onClick={() => handleExecuteWorkflow(workflow.id)}
-                      >
-                        <Play className="w-3 h-3 mr-1" />
-                        Execute
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        console.log('🔥 COOK BUTTON CLICKED - Workflow:', workflow.id, 'Status:', workflow.current_execution?.status)
+                        handleExecuteWorkflow(workflow.id)
+                      }}
+                      disabled={false}
+                    >
+                      <Play className="w-4 h-4" />
+                      <span className="hidden xl:inline ml-1">Cook</span>
+                    </Button>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => {
+                          e.stopPropagation()
+                          handleDuplicateWorkflow(workflow.id, workflow.name)
+                        }}>
+                          <Copy className="w-4 h-4 mr-2" />
+                          Duplicate
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setWorkflowToDelete({ id: workflow.id, name: workflow.name })
+                          }}
+                          className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               </motion.div>
             )
           })}
         </div>
+      )}
+
+      {/* Recipe Runs Section */}
+      {hasRecipeRuns && (
+        <>
+          <div className="flex items-center gap-2 mt-6">
+            <ChefHat className="w-5 h-5 text-orange-400" />
+            <h3 className="text-base font-semibold">
+              <span className="text-white">Recipe</span> <span className="text-orange-400">Runs</span>
+            </h3>
+            <Badge variant="outline" className="text-xs">
+              {workflowsData.recipe_runs.length}
+            </Badge>
+          </div>
+          <div className="space-y-3">
+            {workflowsData.recipe_runs.map((run, index) => {
+              const isRunning = run.status === 'running'
+              const isFailed = run.status === 'failed'
+              const isCompleted = run.status === 'completed'
+
+              return (
+                <motion.div
+                  key={`recipe-${run.id}`}
+                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Status Indicator */}
+                    <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${
+                      isRunning ? 'bg-blue-500/20' : isFailed ? 'bg-red-500/20' : isCompleted ? 'bg-green-500/20' : 'bg-gray-500/20'
+                    }`}>
+                      {isRunning ? (
+                        <Activity className="w-5 h-5 text-blue-400 animate-pulse" />
+                      ) : isFailed ? (
+                        <AlertTriangle className="w-5 h-5 text-red-400" />
+                      ) : isCompleted ? (
+                        <CheckCircle className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <Clock className="w-5 h-5 text-gray-400" />
+                      )}
+                    </div>
+
+                    {/* Recipe Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold text-base">{run.recipe_name}</h4>
+                        <Badge className="text-xs bg-orange-500/20 text-orange-300 border-orange-500/30">
+                          <Zap className="w-3 h-3 mr-1" />
+                          Recipe
+                        </Badge>
+                        <Badge className={`text-xs ${
+                          isRunning
+                            ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                            : isFailed
+                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              : isCompleted
+                                ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                                : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                        }`}>
+                          {isRunning ? 'cooking' : isFailed ? 'burnt' : isCompleted ? 'cooked' : run.status}
+                        </Badge>
+                      </div>
+                      {/* Step progress */}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Step {run.current_step} of {run.total_steps}</span>
+                        {run.error_message && (
+                          <span className="text-red-400 truncate max-w-[200px]">{run.error_message}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Metrics */}
+                    <div className="hidden lg:flex items-center gap-6 text-sm">
+                      {run.started_at && (
+                        <div className="text-left max-w-[200px]">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" />
+                            <span>{new Date(run.started_at).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="text-center">
+                        <p className="text-muted-foreground text-xs">Steps</p>
+                        <p className="font-medium">{run.total_steps}</p>
+                      </div>
+                      {run.total_tokens > 0 && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground text-xs">Tokens</p>
+                          <p className="font-medium">{run.total_tokens.toLocaleString()}</p>
+                        </div>
+                      )}
+                      {run.total_duration_ms > 0 && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground text-xs">Duration</p>
+                          <p className="font-medium">{(run.total_duration_ms / 1000).toFixed(1)}s</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Step Results Preview (collapsed) */}
+                  {run.step_results && run.step_results.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white/5">
+                      <div className="flex gap-2 flex-wrap">
+                        {run.step_results.map((step: any, stepIdx: number) => (
+                          <div
+                            key={stepIdx}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
+                              step.status === 'success'
+                                ? 'bg-green-500/10 text-green-400'
+                                : step.status === 'failed'
+                                  ? 'bg-red-500/10 text-red-400'
+                                  : step.status === 'running'
+                                    ? 'bg-blue-500/10 text-blue-400'
+                                    : 'bg-gray-500/10 text-gray-400'
+                            }`}
+                          >
+                            {step.status === 'success' ? (
+                              <CheckCircle className="w-3 h-3" />
+                            ) : step.status === 'failed' ? (
+                              <AlertTriangle className="w-3 h-3" />
+                            ) : step.status === 'running' ? (
+                              <Activity className="w-3 h-3 animate-pulse" />
+                            ) : (
+                              <Clock className="w-3 h-3" />
+                            )}
+                            <span>{step.agent_name}</span>
+                            {step.duration_ms > 0 && (
+                              <span className="opacity-60">({(step.duration_ms / 1000).toFixed(1)}s)</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )
+            })}
+          </div>
+        </>
       )}
 
       {/* Live Progress Panel */}
@@ -557,16 +746,16 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
         />
       )}
 
-      {/* Delete Individual Workflow Confirmation Dialog */}
+      {/* Remove Workflow Confirmation Dialog */}
       <Dialog open={!!workflowToDelete} onOpenChange={(open) => !open && setWorkflowToDelete(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-red-400" />
-              Delete Workflow
+              Remove from Kitchen
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete <span className="font-semibold text-white">"{workflowToDelete?.name}"</span>?
+              Are you sure you want to remove <span className="font-semibold text-white">"{workflowToDelete?.name}"</span> from the kitchen?
               <br /><br />
               This will permanently delete the workflow and all its execution history. This action cannot be undone.
             </DialogDescription>
@@ -585,7 +774,7 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700"
             >
-              {isDeleting ? 'Deleting...' : 'Delete Workflow'}
+              {isDeleting ? 'Removing...' : 'Remove from Kitchen'}
             </Button>
           </DialogFooter>
         </DialogContent>

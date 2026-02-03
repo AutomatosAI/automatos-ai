@@ -274,13 +274,26 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 )}
 
                 {/* Install count */}
-                <div className="flex items-center justify-between pt-2 border-t border-gray-800">
-                  <span className="text-xs text-gray-500">
-                    {formatInstallCount(agent.install_count)} installs
-                  </span>
+                <div className="text-xs text-gray-500 pb-2">
+                  {formatInstallCount(agent.install_count)} installs
+                </div>
+
+                {/* Action Buttons - Standard Layout */}
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleAgentClick(agent)
+                    }}
+                  >
+                    Details
+                  </Button>
                   <Button
                     size="sm"
-                    className="bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
+                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
                     onClick={(e) => {
                       e.stopPropagation()
                       handleAgentClick(agent)
