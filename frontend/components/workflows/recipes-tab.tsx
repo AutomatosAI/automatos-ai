@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   Plus,
@@ -72,13 +72,14 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
   const executeRecipeMutation = useExecuteRecipe()
   const submitToMarketplaceMutation = useSubmitRecipeToMarketplace()
   const { toast } = useToast()
+  const cookingRef = useRef(false)
 
   // Fetch suggestions for the selected recipe when viewing
   const { data: selectedRecipeSuggestions } = useRecipeSuggestions(
     showViewModal ? selectedRecipe?.template_id || selectedRecipe?.recipe_id : undefined
   )
 
-  const recipes = recipesData?.items || []
+  const recipes = (recipesData as any)?.items || []
 
 
   const handleDeleteRecipe = async () => {
@@ -107,10 +108,12 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
   }
 
   const handleCookRecipe = async (recipe: any) => {
+    if (cookingRef.current) return
+    cookingRef.current = true
     const recipeId = recipe.template_id || recipe.id?.toString()
     setCookingRecipeId(recipeId)
     try {
-      const result = await executeRecipeMutation.mutateAsync({ recipeId })
+      const result: any = await executeRecipeMutation.mutateAsync({ recipeId })
       toast({
         title: 'Recipe Started',
         description: `"${recipe.name}" is now cooking.`,
@@ -128,6 +131,7 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
       })
     } finally {
       setCookingRecipeId(null)
+      cookingRef.current = false
     }
   }
 
@@ -176,7 +180,7 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
   const handleShareToMarketplace = async (recipe: any) => {
     setSharingRecipeId(recipe.template_id || recipe.id?.toString())
     try {
-      const result = await submitToMarketplaceMutation.mutateAsync({
+      const result: any = await submitToMarketplaceMutation.mutateAsync({
         recipe_id: recipe.template_id,
         category: recipe.category,
         icon: recipe.icon
@@ -498,9 +502,9 @@ export function RecipesTab({ onUseRecipe, onExecuteRecipe, onOpenCreateModal }: 
             <Button 
               variant="destructive"
               onClick={handleDeleteRecipe}
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isLoading}
             >
-              {deleteMutation.isPending ? 'Deleting...' : 'Delete Recipe'}
+              {deleteMutation.isLoading ? 'Deleting...' : 'Delete Recipe'}
             </Button>
           </div>
         </DialogContent>

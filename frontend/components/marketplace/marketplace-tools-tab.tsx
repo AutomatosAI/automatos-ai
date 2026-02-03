@@ -19,7 +19,8 @@ import {
     Settings,
     Star,
     AlertTriangle,
-    Clock
+    Clock,
+    RefreshCw
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -36,7 +37,9 @@ import {
 } from '@/hooks/use-composio-api'
 import { MarketplaceAppDetailsModal } from './marketplace-app-details-modal'
 import { apiClient } from '@/lib/api-client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSyncToolsCache } from '@/hooks/use-tools-api'
+import { useSystemRole } from '@/contexts/role-context'
 import { EnhancedPagination } from '@/components/ui/pagination'
 
 const statusIcons = {
@@ -59,6 +62,8 @@ interface MarketplaceToolsTabProps {
 
 export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     const { toast } = useToast()
+    const { isAdmin } = useSystemRole()
+    const syncCacheMutation = useSyncToolsCache()
     const [selectedCategory, setSelectedCategory] = useState('all')
     const [connectingApp, setConnectingApp] = useState<string | null>(null)
     const [detailsModalOpen, setDetailsModalOpen] = useState(false)
@@ -369,6 +374,18 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                     <Badge variant="outline" className="text-blue-400 border-blue-500/30">
                         {apps.length} Available
                     </Badge>
+                    {isAdmin && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => syncCacheMutation.mutate('full')}
+                            disabled={syncCacheMutation.isLoading}
+                            className="gap-2 text-muted-foreground hover:text-white"
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncCacheMutation.isLoading ? 'animate-spin' : ''}`} />
+                            {syncCacheMutation.isLoading ? 'Syncing...' : 'Sync'}
+                        </Button>
+                    )}
                 </div>
             </div>
 

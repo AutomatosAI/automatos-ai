@@ -864,9 +864,9 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
                   {
                     altText: 'Review suggestions',
                     onClick: () => setShowSuggestionsPanel(true),
-                  },
+                  } as any,
                   'Review'
-                ),
+                ) as any,
               })
             }
           }
@@ -889,7 +889,7 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
           const latest = executions.sort((a: any, b: any) => b.id - a.id)[0]
           executionDetails = await apiClient.getWorkflowExecution(latest.id.toString())
           setCurrentExecutionId(latest.id)
-          if (executionDetails?.status === 'running') setIsExecuting(true)
+          if (executionDetails?.status === 'running' || executionDetails?.status === 'pending') setIsExecuting(true)
           generateLogsFromExecution(executionDetails)
         }
         setExecutionData({ ...(workflow as any), execution: executionDetails })
@@ -902,6 +902,17 @@ export function ExecutionKitchen({ workflowId, onBack, autoStart = false }: Exec
 
   const handleStartExecution = async () => {
     try {
+      // Guard: check if there's already a running/pending execution for this workflow
+      const execResponse: any = await apiClient.getWorkflowExecutions(workflowId.toString())
+      const executions = (execResponse?.items || execResponse || []) as any[]
+      const activeExec = executions.find((e: any) => e.status === 'running' || e.status === 'pending')
+      if (activeExec) {
+        setCurrentExecutionId(activeExec.id)
+        setIsExecuting(true)
+        loadExecutionById(activeExec.id)
+        return
+      }
+
       lastExecutionIdRef.current = null
       setIsExecuting(true)
       setCurrentStage(1)
