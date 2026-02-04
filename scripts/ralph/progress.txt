@@ -32,6 +32,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - ARRAY contains-element filter: `Model.array_col.any(value)` for PostgreSQL ARRAY columns
 - Workspace auth scoping: compare `ctx.workspace_id` with path param, raise 403 on mismatch
 - Cascade deletes on disable: query Agent.id by workspace_id, then bulk delete junction rows with `.delete(synchronize_session="fetch")`
+- PUT-replace pattern for junction tables: delete all existing rows first, then add new ones (simpler than diffing)
+- Agent PK is Integer; path param hint is `agent_id: int` (not UUID)
 
 ---
 
@@ -211,4 +213,25 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Disable cascade: query Agent.id for workspace agents, then delete AgentAssignedPlugin rows matching those agent_ids + the plugin_id
   - enable_count increment/decrement on MarketplacePlugin must handle None default (use `(plugin.enable_count or 0) + 1`)
   - Separate router file (workspace_plugins.py) keeps prefix `/api/workspaces` clean and avoids conflicts with marketplace_plugins.py prefix `/api/marketplace/plugins`
+---
+
+## 2026-02-04 - US-012
+- Implemented 2 agent plugin assignment API endpoints in orchestrator/api/agent_plugins.py:
+  - GET /api/agents/{agent_id}/plugins — list plugins assigned to an agent (joined with marketplace_plugins for details, ordered by priority)
+  - PUT /api/agents/{agent_id}/plugins — replace plugin assignments (body: plugin_ids UUID array, validates all are workspace-enabled)
+- Pydantic models: UpdateAgentPluginsBody, AgentPluginOut
+- Workspace auth: validates agent.workspace_id matches ctx.workspace_id (403 on mismatch)
+- PUT endpoint validates all plugin_ids are enabled for the agent's workspace before assigning
+- Priority auto-assigned from list order (enumerate index)
+- Registered router in main.py
+- Files changed:
+  - `orchestrator/api/agent_plugins.py` (created)
+  - `orchestrator/main.py` (added import + include_router)
+  - `scripts/ralph/prd.json` (marked US-012 passes: true)
+- **Learnings for future iterations:**
+  - Agent PK is Integer (not UUID) — path param type hint is `agent_id: int`
+  - Agent.workspace_id can be None (marketplace agents) — check `if agent.workspace_id and agent.workspace_id != ctx.workspace_id` to allow null workspace agents
+  - PUT replace pattern: delete all existing rows with `synchronize_session="fetch"`, then add new ones — simpler than diffing
+  - Workspace-enabled plugin validation: query WorkspaceEnabledPlugin.plugin_id as a set, then check each requested plugin_id against it
+  - Separate router file (agent_plugins.py) with prefix `/api/agents` keeps endpoints under agent namespace without polluting agents.py
 ---

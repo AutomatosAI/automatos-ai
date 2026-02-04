@@ -221,7 +221,7 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Only plugins enabled for the workspace can be assigned to agents in that workspace"
     },
     {

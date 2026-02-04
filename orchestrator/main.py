@@ -73,6 +73,7 @@ from api.routing import router as routing_router  # PRD-50: Universal Orchestrat
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
 from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
+from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -462,6 +463,7 @@ app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(workspace_plugins_router)  # PRD-42: Workspace Plugin Enablement
+app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 
