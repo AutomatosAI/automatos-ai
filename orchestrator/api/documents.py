@@ -10,6 +10,8 @@ import os
 import hashlib
 import tempfile
 import json
+import uuid
+import magic
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -74,6 +76,18 @@ db_config = {
 # Document manager uses centralized embedding manager
 doc_manager = DocumentManager(db_config)
 
+# Allowlist of accepted MIME types mapped to valid extensions
+ALLOWED_MIME_TYPES = {
+    "application/pdf": [".pdf"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+    "text/plain": [".txt", ".md", ".csv"],
+    "text/markdown": [".md"],
+    "text/csv": [".csv"],
+    "application/json": [".json"],
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+    "application/octet-stream": [".pdf", ".docx", ".xlsx"],  # fallback for binary
+}
+
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
     ctx: RequestContext = Depends(get_request_context_hybrid),
@@ -96,13 +110,32 @@ async def handle_request(
         
         if file_size > 50 * 1024 * 1024:  # 50MB limit
             raise HTTPException(status_code=400, detail="File too large (max 50MB)")
-        
+
+        # MIME type validation using python-magic (detect actual content type)
+        detected_mime = magic.from_buffer(content, mime=True)
+        file_extension = Path(file.filename).suffix.lower()
+
+        if detected_mime not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type not allowed. Detected MIME type: {detected_mime}"
+            )
+
+        # Verify extension matches detected MIME type
+        allowed_extensions = ALLOWED_MIME_TYPES[detected_mime]
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File extension '{file_extension}' does not match detected content type '{detected_mime}'. "
+                       f"Allowed extensions for this type: {', '.join(allowed_extensions)}"
+            )
+
         # Reset file pointer
         await file.seek(0)
-        
+
         # Generate file hash
         content_hash = hashlib.sha256(content).hexdigest()
-        
+
         # Check for duplicate
         existing = db.query(Document).filter(Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id).first()
         if existing:
@@ -112,43 +145,18 @@ async def handle_request(
                 status="duplicate",
                 message="Document already exists"
             )
-        
-        # Save file temporarily
+
+        # Save file temporarily with random filename (never use original filename)
         upload_dir = Path("/tmp/automotas_uploads")
         upload_dir.mkdir(exist_ok=True)
-        
-        file_path = upload_dir / f"{content_hash}_{file.filename}"
+
+        safe_filename = f"{uuid.uuid4().hex}{file_extension}"
+        file_path = upload_dir / safe_filename
         
         with open(file_path, "wb") as f:
             f.write(content)
-        
-        # Determine and validate file type
-        file_extension = Path(file.filename).suffix.lower()
 
-        # Allowed extensions and expected MIME types
-        ALLOWED_TYPES = {
-            '.pdf': {'application/pdf'},
-            '.md': {'text/markdown', 'text/plain', 'application/octet-stream'},
-            '.markdown': {'text/markdown', 'text/plain', 'application/octet-stream'},
-            '.txt': {'text/plain', 'application/octet-stream'},
-            '.doc': {'application/msword', 'application/octet-stream'},
-            '.docx': {'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream'},
-            '.json': {'application/json', 'text/plain', 'application/octet-stream'},
-        }
-
-        if file_extension not in ALLOWED_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(ALLOWED_TYPES.keys())}"
-            )
-
-        # Validate MIME type matches extension
-        if file.content_type and file.content_type not in ALLOWED_TYPES[file_extension]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"MIME type mismatch: {file.content_type} not valid for {file_extension}"
-            )
-
+        # Determine file type category from extension
         file_type = "unknown"
         if file_extension in ['.pdf']:
             file_type = "pdf"
@@ -756,11 +764,11 @@ async def semantic_search(
             doc_filter = "AND d.id = ANY(:document_ids)"
         
         # Format embedding as PostgreSQL array string for pgvector
-        # Validate embedding values are numeric (safe from injection since each value is cast to float)
+        # Pass as parameterized value to avoid SQL injection
         embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
-        
-        similarity_query = text(f"""
-            SELECT 
+
+        similarity_query = text("""
+            SELECT
                 dc.id as chunk_id,
                 dc.document_id,
                 dc.chunk_index,
@@ -770,18 +778,19 @@ async def semantic_search(
                 d.file_type,
                 d.file_size,
                 d.upload_date,
-                1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
+                1 - (dc.embedding <=> cast(:embedding as vector)) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE dc.embedding IS NOT NULL
                 AND d.workspace_id = :workspace_id
                 {doc_filter}
-                AND (1 - (dc.embedding <=> '{embedding_str}'::vector)) >= :min_similarity
-            ORDER BY dc.embedding <=> '{embedding_str}'::vector
+                AND (1 - (dc.embedding <=> cast(:embedding as vector))) >= :min_similarity
+            ORDER BY dc.embedding <=> cast(:embedding as vector)
             LIMIT :limit
-        """)
-        
+        """.format(doc_filter=doc_filter))
+
         params = {
+            "embedding": embedding_str,
             "min_similarity": min_similarity,
             "limit": limit,
             "workspace_id": ctx.workspace_id

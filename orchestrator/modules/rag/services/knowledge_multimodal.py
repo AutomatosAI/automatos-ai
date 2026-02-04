@@ -576,8 +576,10 @@ async def search_knowledge(
 
         # Use full-text search
         if search.use_fulltext:
-            query = text(f"""
-                SELECT 
+            # SAFETY: where_clause is built from static SQL fragments with parameterized bind
+            # variables only — no user input is interpolated into the SQL string itself.
+            fulltext_sql = """
+                SELECT
                     ki.id,
                     kt.type_name as kb_type,
                     ki.title,
@@ -590,15 +592,18 @@ async def search_knowledge(
                     ki.created_at
                 FROM knowledge_items ki
                 JOIN kb_types kt ON ki.kb_type_id = kt.id
-                WHERE {where_clause}
+                WHERE """ + where_clause + """
                     AND to_tsvector('english', ki.content || ' ' || COALESCE(ki.title, '')) @@ plainto_tsquery('english', :query)
                 ORDER BY relevance_score DESC, ki.quality_score DESC
                 LIMIT :limit
-            """)
+            """
+            query = text(fulltext_sql)
         else:
             # Simple LIKE search
-            query = text(f"""
-                SELECT 
+            # SAFETY: where_clause is built from static SQL fragments with parameterized bind
+            # variables only — no user input is interpolated into the SQL string itself.
+            like_sql = """
+                SELECT
                     ki.id,
                     kt.type_name as kb_type,
                     ki.title,
@@ -608,11 +613,12 @@ async def search_knowledge(
                     ki.created_at
                 FROM knowledge_items ki
                 JOIN kb_types kt ON ki.kb_type_id = kt.id
-                WHERE {where_clause}
+                WHERE """ + where_clause + """
                     AND (ki.content ILIKE '%' || :query || '%' OR ki.title ILIKE '%' || :query || '%')
                 ORDER BY ki.quality_score DESC
                 LIMIT :limit
-            """)
+            """
+            query = text(like_sql)
         
         results = db.execute(query, params).fetchall()
         

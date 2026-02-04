@@ -72,16 +72,14 @@ class FieldPropagationRequest(BaseModel):
 class FieldInteractionRequest(BaseModel):
     """Request model for modeling field interactions between contexts"""
     task_id: int = Field(..., ge=1, description="Task identifier for interaction modeling")
-    user_id: int = Field(..., ge=1, description="User identifier requesting interaction analysis")
     similarity_threshold: Optional[float] = Field(0.5, ge=0.0, le=1.0, description="Minimum similarity threshold for interactions")
     interaction_types: Optional[List[str]] = Field(["semantic", "temporal", "causal"], description="Types of interactions to model")
     max_interactions: Optional[int] = Field(50, ge=1, le=500, description="Maximum number of interactions to return")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "similarity_threshold": 0.7,
                 "interaction_types": ["semantic", "temporal", "causal"],
                 "max_interactions": 20
@@ -110,19 +108,17 @@ class DynamicFieldRequest(BaseModel):
 class FieldOptimizationRequest(BaseModel):
     """Request model for multi-objective field optimization"""
     task_id: int = Field(..., ge=1, description="Task identifier for optimization")
-    user_id: int = Field(..., ge=1, description="User identifier requesting optimization")
     objectives: Optional[Dict[str, float]] = Field(
-        {"performance": 0.4, "stability": 0.3, "adaptability": 0.3}, 
+        {"performance": 0.4, "stability": 0.3, "adaptability": 0.3},
         description="Optimization objectives with weights (must sum to 1.0)"
     )
     optimization_algorithm: Optional[str] = Field("multi_objective", description="Algorithm: multi_objective, genetic, simulated_annealing")
     max_iterations: Optional[int] = Field(100, ge=10, le=1000, description="Maximum optimization iterations")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "objectives": {"performance": 0.5, "stability": 0.3, "adaptability": 0.2},
                 "optimization_algorithm": "multi_objective",
                 "max_iterations": 150
@@ -168,9 +164,10 @@ async def update_field_context(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Field context update validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid field context update parameters")
     except Exception as e:
-        logger.error(f"Field context update failed: {e}")
+        logger.error(f"Field context update failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/propagate", response_model=Dict[str, Any])
@@ -197,9 +194,10 @@ async def propagate_field_influence(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Field propagation validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid field propagation parameters")
     except Exception as e:
-        logger.error(f"Field propagation failed: {e}")
+        logger.error(f"Field propagation failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/interactions", response_model=Dict[str, Any])
@@ -226,9 +224,10 @@ async def model_field_interactions(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Field interaction modeling not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Requested field interaction resource not found")
     except Exception as e:
-        logger.error(f"Field interaction modeling failed: {e}")
+        logger.error(f"Field interaction modeling failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/dynamic", response_model=Dict[str, Any])
@@ -256,9 +255,10 @@ async def manage_dynamic_fields(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Dynamic field management validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid dynamic field management parameters")
     except Exception as e:
-        logger.error(f"Dynamic field management failed: {e}")
+        logger.error(f"Dynamic field management failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fields/optimize", response_model=Dict[str, Any])
@@ -277,7 +277,7 @@ async def optimize_field_configuration(
         result = await orchestrator_service.optimize_field_configuration(
             db=db,
             task_id=request.task_id,
-            user_id=request.user_id,
+            user_id=ctx.user.id,
             objectives=request.objectives
         )
         
@@ -288,9 +288,10 @@ async def optimize_field_configuration(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Field optimization resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Requested field optimization resource not found")
     except Exception as e:
-        logger.error(f"Field optimization failed: {e}")
+        logger.error(f"Field optimization failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fields/context/{session_id}", response_model=Dict[str, Any])

@@ -172,11 +172,13 @@ async def test_rag_configuration(
         return result
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"RAG config {config_id} test not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="RAG configuration not found")
     except RuntimeError as e:
+        logger.error(f"RAG config {config_id} test runtime error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
-        logger.error(f"Error testing RAG config {config_id}: {e}")
+        logger.error(f"Error testing RAG config {config_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/system/health")

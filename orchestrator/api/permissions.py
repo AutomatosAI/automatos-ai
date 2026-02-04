@@ -353,14 +353,14 @@ async def list_assignments(
 @router.post("/assign")
 async def assign_tool_to_agent(
     assignment: AgentToolAssignmentRequest,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
     force: bool = Query(False, description="Force assignment even if conflicts exist"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Assign a tool to an agent with permission validation"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         # Verify agent and tool exist
         agent = db.query(Agent).filter(Agent.id == assignment.agent_id).first()
@@ -454,13 +454,13 @@ async def assign_tool_to_agent(
 @router.post("/bulk-assign")
 async def bulk_assign_tools(
     bulk_request: BulkAssignmentRequest,
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Bulk assign multiple tools to agents with conflict validation"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         results = {
             "successful": [],
@@ -577,13 +577,13 @@ async def revoke_tool_access(
     agent_id: int = Query(..., description="Agent ID"),
     tool_id: int = Query(..., description="Tool ID"),
     environment: str = Query(..., description="Environment"),
-    user_id: Optional[str] = Query(None, description="User ID for audit logging"),
     db: Session = Depends(get_db),
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Revoke an agent's access to a tool"""
     set_request_id(str(uuid.uuid4()))
-    
+    user_id = ctx.user.id
+
     try:
         # Find the permission
         permission = db.query(AgentToolPermission).filter(

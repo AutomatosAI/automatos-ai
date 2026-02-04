@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _validate_identifier(name: str) -> str:
     """Validate SQL identifier to prevent injection."""
-    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_.]*$', name):
         raise ValueError(f"Invalid SQL identifier: {name}")
     return name
 

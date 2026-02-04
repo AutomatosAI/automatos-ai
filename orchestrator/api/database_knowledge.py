@@ -4,6 +4,7 @@ Database Knowledge API Routes
 PRD-21: API endpoints for database knowledge source management
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
@@ -30,6 +31,8 @@ from modules.nl2sql import DatabaseIntrospectionService
 from core.models.database_knowledge import DatabaseQueryAudit
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge/sources/database", tags=["Database Knowledge"])
 
@@ -149,10 +152,8 @@ async def create_database_source(
         }
     
     except Exception as e:
-        import traceback
-        logger.error(f"Failed to create database source: {e}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Failed to create database source: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to create database source")
 
 
 @router.post("/{source_id}/query", response_model=Dict[str, Any])
@@ -182,7 +183,7 @@ async def query_database(
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"API query_database failed: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
 
 @router.post("/{source_id}/introspect")
@@ -209,15 +210,17 @@ async def introspect_schema(
             service_name="database_introspection"
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to resolve credentials: {e}")
-    
+        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
+
     # Introspect
     dialect = _map_dialect_to_introspector(source.dialect)
     try:
         inspector = DatabaseIntrospectionService(credential=creds, dialect=dialect)
         metadata = inspector.introspect(include_samples=True, sample_limit=5)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Introspection failed: {e}")
+        logging.getLogger(__name__).error(f"Introspection failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Schema introspection failed")
     
     # Persist
     source.schema_metadata = metadata
@@ -308,7 +311,8 @@ async def update_semantic_layer(
         }
     
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"Failed to update semantic layer for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to update semantic layer")
 
 
 @router.get("/{source_id}")
@@ -436,7 +440,8 @@ async def execute_template(
         }
     
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"Failed to execute template for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Template execution failed")
 
 
 @router.post("/{source_id}/query/sql")
@@ -489,7 +494,8 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=str(e))
+        logging.getLogger(__name__).error(f"SQL validation failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="SQL validation failed")
 
     # Resolve creds and execute
     from sqlalchemy import create_engine, text
@@ -523,7 +529,8 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=f"Failed to resolve credentials: {e}")
+        logging.getLogger(__name__).error(f"Failed to resolve credentials for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to resolve database credentials")
 
     # Build URL using SQLAlchemy URL.create() to safely escape credential values
     from sqlalchemy.engine import URL as SAURL
@@ -613,7 +620,8 @@ async def execute_validated_sql(
             confidence_score=None
         ))
         db.commit()
-        raise HTTPException(status_code=400, detail=f"Query failed: {e}")
+        logging.getLogger(__name__).error(f"SQL query execution failed for source {source_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
     return {
         "sql": validated_sql,

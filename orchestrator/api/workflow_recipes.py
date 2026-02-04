@@ -761,9 +761,10 @@ async def analyze_execution_learning(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Execution analysis resource not found for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Execution or recipe not found")
     except Exception as e:
-        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}")
+        logger.error(f"Error analyzing execution for recipe {recipe_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -821,9 +822,10 @@ async def assess_execution_quality(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Quality assessment resource not found for recipe {recipe_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Execution or recipe not found")
     except Exception as e:
-        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}")
+        logger.error(f"Error assessing quality for recipe {recipe_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

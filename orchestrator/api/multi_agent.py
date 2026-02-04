@@ -30,17 +30,15 @@ logger = logging.getLogger(__name__)
 class CollaborativeReasoningRequest(BaseModel):
     """Request model for collaborative reasoning between multiple agents"""
     task_id: int = Field(..., ge=1, description="Unique identifier for the task")
-    user_id: int = Field(..., ge=1, description="User identifier requesting the reasoning")
     agents: List[str] = Field(..., min_items=2, description="List of agent IDs to participate in reasoning")
     strategy: Optional[str] = Field("majority_vote", description="Reasoning strategy: majority_vote, weighted_consensus, expert_override, iterative_refinement")
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context for reasoning")
     timeout_seconds: Optional[int] = Field(300, ge=10, le=3600, description="Maximum time allowed for reasoning")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "agents": ["agent-001", "agent-002", "agent-003"],
                 "strategy": "majority_vote",
                 "context": {
@@ -55,17 +53,15 @@ class CollaborativeReasoningRequest(BaseModel):
 class AgentCoordinationRequest(BaseModel):
     """Request model for coordinating multiple agents"""
     task_id: int = Field(..., ge=1, description="Unique identifier for the task")
-    user_id: int = Field(..., ge=1, description="User identifier requesting coordination")
     agents: List[str] = Field(..., min_items=2, description="List of agent IDs to coordinate")
     strategy: Optional[str] = Field("adaptive", description="Coordination strategy: sequential, parallel, hierarchical, mesh, adaptive")
     load_balance: Optional[bool] = Field(True, description="Whether to perform load balancing")
     context: Optional[Dict[str, Any]] = Field(None, description="Coordination context and preferences")
-    
+
     class Config:
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "agents": ["agent-001", "agent-002", "agent-003"],
                 "strategy": "adaptive",
                 "load_balance": True,
@@ -111,7 +107,6 @@ class BehaviorMonitoringRequest(BaseModel):
 class OptimizationRequest(BaseModel):
     """Request model for multi-agent system optimization"""
     task_id: int = Field(..., ge=1, description="Unique identifier for the optimization task")
-    user_id: int = Field(..., ge=1, description="User identifier requesting optimization")
     agents: List[str] = Field(..., min_items=1, description="List of agent IDs to optimize")
     optimization_objectives: List[str] = Field(["performance", "efficiency"], description="Optimization objectives")
     config: Optional[Dict[str, Any]] = Field(None, description="Optimization configuration parameters")
@@ -123,7 +118,6 @@ class OptimizationRequest(BaseModel):
         schema_extra = {
             "example": {
                 "task_id": 123,
-                "user_id": 456,
                 "agents": ["agent-001", "agent-002", "agent-003"],
                 "optimization_objectives": ["performance", "efficiency", "resource_usage"],
                 "config": {
@@ -258,7 +252,7 @@ async def perform_collaborative_reasoning(
         result = await get_orchestrator_service().perform_collaborative_reasoning(
             db=db,
             task_id=request.task_id,
-            user_id=request.user_id,
+            user_id=ctx.user.id,
             agents=request.agents,
             context=request.context
         )
@@ -270,9 +264,10 @@ async def perform_collaborative_reasoning(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Collaborative reasoning resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Collaborative reasoning resource not found")
     except Exception as e:
-        logger.error(f"Collaborative reasoning failed: {e}")
+        logger.error(f"Collaborative reasoning failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/coordination/coordinate", response_model=Dict[str, Any], )
@@ -291,7 +286,7 @@ async def coordinate_agents(
         result = await get_orchestrator_service().coordinate_multi_agents(
             db=db,
             task_id=request.task_id,
-            user_id=request.user_id,
+            user_id=ctx.user.id,
             agents=request.agents,
             strategy=request.strategy,
             context=request.context
@@ -304,9 +299,10 @@ async def coordinate_agents(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Agent coordination resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Agent coordination resource not found")
     except Exception as e:
-        logger.error(f"Agent coordination failed: {e}")
+        logger.error(f"Agent coordination failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/behavior/monitor", response_model=Dict[str, Any], )
@@ -354,7 +350,7 @@ async def optimize_multi_agent_system(
         result = await get_orchestrator_service().optimize_multi_agent_system(
             db=db,
             task_id=request.task_id,
-            user_id=request.user_id,
+            user_id=ctx.user.id,
             agents=request.agents,
             config=request.config,
             context=request.context
@@ -367,9 +363,10 @@ async def optimize_multi_agent_system(
         }
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Multi-agent optimization resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Multi-agent optimization resource not found")
     except Exception as e:
-        logger.error(f"Multi-agent optimization failed: {e}")
+        logger.error(f"Multi-agent optimization failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/coordination/rebalance", response_model=Dict[str, Any], )

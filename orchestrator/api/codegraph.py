@@ -147,9 +147,10 @@ async def index_github_repository(
         return IndexResponse(**result)
         
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Validation error indexing GitHub repository: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Invalid repository indexing parameters")
     except Exception as e:
-        logger.error(f"Error indexing GitHub repository: {e}")
+        logger.error(f"Error indexing GitHub repository: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -187,9 +188,10 @@ async def search_symbols(
         return SearchResponse(**results, prompt_block=None)
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Symbol search resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project or symbol not found")
     except Exception as e:
-        logger.error(f"Error searching symbols: {e}")
+        logger.error(f"Error searching symbols: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -230,9 +232,10 @@ async def search_semantic(
         return SearchResponse(**results)
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Semantic search resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found for semantic search")
     except Exception as e:
-        logger.error(f"Error performing semantic search: {e}")
+        logger.error(f"Error performing semantic search: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -304,9 +307,10 @@ async def delete_project(
         return result
         
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Project not found for deletion: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Project not found")
     except Exception as e:
-        logger.error(f"Error deleting project: {e}")
+        logger.error(f"Error deleting project: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -428,9 +432,10 @@ async def get_call_graph_api(
         call_graph = await codegraph_service.get_call_graph(project, symbol, depth, direction, workspace_id=ctx.workspace_id)
         return call_graph
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Call graph resource not found: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Symbol or project not found for call graph")
     except Exception as e:
-        logger.error(f"Call graph error: {e}")
+        logger.error(f"Call graph error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

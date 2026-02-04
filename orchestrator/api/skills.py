@@ -669,8 +669,10 @@ async def cleanup_old_skill_mappings(
         if old_skill_ids:
             placeholders = ','.join([f':id{i}' for i in range(len(old_skill_ids))])
             params = {f'id{i}': skill_id for i, skill_id in enumerate(old_skill_ids)}
+            # SAFETY: placeholders contains only generated `:idN` bind-parameter names, not user input
+            delete_sql = "DELETE FROM agent_skills WHERE skill_id IN (" + placeholders + ")"
             deleted_count = db.execute(
-                text(f"DELETE FROM agent_skills WHERE skill_id IN ({placeholders})"),
+                text(delete_sql),
                 params
             ).rowcount
         else:

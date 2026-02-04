@@ -75,6 +75,24 @@ def _workspace_exists(db, workspace_id: UUID) -> bool:
     return bool(row)
 
 
+def _user_is_workspace_member(db, workspace_id: UUID, clerk_user_id: Optional[str]) -> bool:
+    """Return True if the Clerk user is an active member of the workspace."""
+    if not clerk_user_id:
+        return False
+    row = db.execute(
+        text(
+            "SELECT 1 FROM workspace_members wm "
+            "JOIN users u ON wm.user_id = u.id "
+            "WHERE wm.workspace_id = :workspace_id "
+            "AND u.clerk_user_id = :clerk_user_id "
+            "AND wm.is_active = true "
+            "LIMIT 1"
+        ),
+        {"workspace_id": str(workspace_id), "clerk_user_id": clerk_user_id},
+    ).fetchone()
+    return bool(row)
+
+
 def _resolve_workspace_for_clerk_user(db, clerk_user_id: Optional[str], org_id: Optional[str]) -> Optional[UUID]:
     """
     Resolve a user's workspace from the DB when the client didn't send X-Workspace-ID.
@@ -200,6 +218,14 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
                 if not _workspace_exists(db, resolved):
                     logger.warning(f"Auth failed: Workspace {resolved} does not exist")
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+
+                # Verify workspace membership when user explicitly requests a workspace
+                if workspace_id and not _user_is_workspace_member(db, resolved, info.get("clerk_user_id")):
+                    logger.warning(f"Auth failed: User {info.get('email')} is not a member of workspace {resolved}")
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not a member of this workspace",
+                    )
 
                 user = UserContext(
                     id=info.get("clerk_user_id") or info.get("email"),

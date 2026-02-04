@@ -218,8 +218,10 @@ async def handle_request(
         return response
     
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during creation: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except EncryptionKeyError as e:
+        logger.error(f"Encryption error during credential creation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Encryption error")
     except Exception as e:
         logger.error(f"Failed to create credential: {e}", exc_info=True)
@@ -440,11 +442,13 @@ async def update_credential(
         )
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during update: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during update of {credential_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except Exception as e:
-        logger.error(f"Failed to update credential {credential_id}: {e}")
+        logger.error(f"Failed to update credential {credential_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -480,9 +484,10 @@ async def delete_credential(
         return {"message": "Credential deleted successfully", "credential_id": credential_id}
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during deletion: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except Exception as e:
-        logger.error(f"Failed to delete credential {credential_id}: {e}")
+        logger.error(f"Failed to delete credential {credential_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -514,9 +519,10 @@ async def test_credential(
         return result
     
     except CredentialNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        logger.error(f"Credential {credential_id} not found during test: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="Credential not found")
     except Exception as e:
-        logger.error(f"Failed to test credential {credential_id}: {e}")
+        logger.error(f"Failed to test credential {credential_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -588,11 +594,13 @@ async def resolve_credential(
     except HTTPException:
         raise
     except CredentialValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Credential validation error during resolution: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Credential validation failed")
     except EncryptionKeyError as e:
+        logger.error(f"Decryption failed during credential resolution: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Decryption failed")
     except Exception as e:
-        logger.error(f"Failed to resolve credential: {e}")
+        logger.error(f"Failed to resolve credential: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to resolve credential")
 
 
@@ -604,15 +612,15 @@ async def resolve_credential(
 async def get_audit_logs(
     credential_id: Optional[int] = Query(None),
     action: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     store: CredentialStore = Depends(get_credential_store)
 ):
     """Get credential audit logs with filtering"""
     set_request_id(str(uuid.uuid4()))
-    
+
     try:
+        user_id = ctx.user.id
         logs = store.get_audit_logs(
             credential_id=credential_id,
             action=action,
