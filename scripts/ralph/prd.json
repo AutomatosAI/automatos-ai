@@ -350,7 +350,7 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing marketplace tab patterns from marketplace-agents-tab.tsx and marketplace-tools-tab.tsx"
     },
     {

@@ -41,6 +41,9 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Frontend file upload: use `apiClient.getAuthHeaders()` for auth, then raw `fetch()` with `FormData` body — don't set Content-Type header
 - Admin pages use `usePageAPI('admin')` and follow standard page pattern: `MainLayout` wrapper, `glass-card` styling
 - No admin directory existed before US-017; `frontend/app/admin/` is the established path for admin pages
+- Workspace ID in frontend components: `localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')`
+- Marketplace homepage dual Tabs pattern: one `<Tabs>` for TabsList triggers, separate `<Tabs value={selectedTab}>` for TabsContent — both share state
+- Select dropdown: import `Select, SelectTrigger, SelectValue, SelectContent, SelectItem` from `@/components/ui/select`
 
 ---
 
@@ -363,4 +366,30 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Inline reject reason input (Textarea) is better UX than window.prompt — allows multiline, preview, and cancel without browser dialog
   - Batch actions: iterate sequentially with for-of loop (not Promise.all) to avoid overwhelming the backend with concurrent requests
   - Optimistic removal: remove approved/rejected plugins from local state immediately without refetching, but refetch on batch errors to resync
+---
+
+## 2026-02-04 - US-019
+- Implemented marketplace plugins browse page as a new tab in the marketplace homepage
+- Created marketplace-plugins-tab.tsx with full plugin browsing functionality:
+  - Featured plugins horizontal scroll section at top (for is_featured plugins)
+  - All plugins grid (4-column responsive) with cards showing: name, version, description, category, tags, skills_count, commands_count, token_estimate, enable_count
+  - Category filter pills from GET /api/marketplace/plugins/categories
+  - Sort dropdown (Popular, Newest, Name) controlling backend sort param
+  - Client-side search filter (debounced via parent searchQuery prop)
+  - Enable button per card that calls POST /api/workspaces/{id}/plugins
+  - Enabled badge on already-enabled plugins (fetched from GET /api/workspaces/{id}/plugins)
+  - Security status "Verified" badge for safe plugins
+- Added Plugins tab trigger and content to marketplace-homepage.tsx alongside existing tabs
+- Files changed:
+  - `frontend/components/marketplace/marketplace-plugins-tab.tsx` (created)
+  - `frontend/components/marketplace/marketplace-homepage.tsx` (added import, tab trigger, tab content)
+  - `scripts/ralph/prd.json` (marked US-019 passes: true)
+- **Learnings for future iterations:**
+  - Workspace ID for API calls: `localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')` — same pattern as api-client.ts request() method
+  - apiClient.get() and apiClient.post() handle auth headers and workspace ID injection automatically
+  - Marketplace homepage uses dual Tabs components: one for TabsList (triggers) and separate one for TabsContent — both must share same `value` state
+  - Plugin enable is optimistic: update local Set<string> and enable_count in state immediately after success, no refetch needed
+  - 409 conflict on enable means plugin is already enabled — handle gracefully with "Already Enabled" toast
+  - framer-motion AnimatePresence wraps the grid items for staggered entrance animation (delay capped at 0.5s for large lists)
+  - Select component from @/components/ui/select uses Radix UI: Select, SelectTrigger, SelectValue, SelectContent, SelectItem
 ---
