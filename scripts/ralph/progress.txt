@@ -23,6 +23,13 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - boto3 not installed locally; service guards with try/except and raises ImportError at instantiation time
 - Pydantic v2 `model_` prefix is reserved; fields like `model_used` need `model_config = {"protected_namespaces": ()}` on the BaseModel class
 - LLM JSON responses may have markdown code fences — strip before `json.loads()`
+- Admin auth: `_assert_admin(ctx)` checks `ctx.user.system_role == 'admin'`, raises 403
+- API auth dependency: `ctx: RequestContext = Depends(get_request_context_hybrid)` from `core.auth.hybrid`
+- DB session dependency: `db: Session = Depends(get_db)` from `core.database.database`
+- UploadFile multipart: `file: UploadFile = File(...)`, non-file fields use `Form()` not `Query()`
+- Import services inside endpoint functions to avoid circular import at module load time
+- FastAPI route ordering: fixed-path routes (e.g., `/categories`) must be defined before parameterized routes (e.g., `/{plugin_id}`) in the same router
+- ARRAY contains-element filter: `Model.array_col.any(value)` for PostgreSQL ARRAY columns
 
 ---
 
@@ -139,4 +146,47 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Manifest `contents` dict expected to have keys: skills, commands, agents, hooks (each a list) for count extraction
   - `datetime.utcnow()` used for `completed_at` on PluginSyncHistory — matches the `server_default=func.now()` pattern for started_at
   - Service composes MarketplaceS3Service + PluginScanService via constructor — keeps upload orchestration separate from storage and scanning concerns
+---
+
+## 2026-02-04 - US-009
+- Implemented 6 admin plugin API endpoints in orchestrator/api/admin_plugins.py:
+  - POST /upload — multipart zip upload with PluginUploadService orchestration, returns 202
+  - POST /{plugin_id}/approve — sets approval_status, approved_by, approved_at + sync history
+  - POST /{plugin_id}/reject — sets rejection_reason from RejectBody + sync history
+  - GET /{plugin_id}/scan — returns full ScanResultOut (static + LLM findings)
+  - POST /{plugin_id}/deactivate — sets is_active=False + sync history
+  - GET /pending — paginated list of pending plugins with scan summary data
+- Pydantic models: PluginUploadOut, RejectBody, PendingPluginOut, ScanResultOut
+- Admin auth via _assert_admin(ctx) helper (matches marketplace.py pattern)
+- Registered router in main.py with import + app.include_router
+- Files changed:
+  - `orchestrator/api/admin_plugins.py` (created)
+  - `orchestrator/main.py` (added import + include_router)
+- **Learnings for future iterations:**
+  - Admin endpoints use `_assert_admin(ctx)` prefix-underscore helper to avoid name collisions with marketplace.py's `assert_admin`
+  - UUID path params work directly with `plugin_id: UUID` type hint — FastAPI handles parsing
+  - UploadFile multipart pattern: `file: UploadFile = File(...)`, `source_type: str = Form("upload")` — Form() required for non-file multipart fields
+  - Service instantiation in endpoint: import inside function to avoid circular imports at module load time
+  - PendingPluginOut joins scan data by loading PluginSecurityScan separately for each plugin (N+1 query — acceptable for admin-only paginated endpoint)
+---
+
+## 2026-02-04 - US-010
+- Implemented 4 public marketplace plugin API endpoints in orchestrator/api/marketplace_plugins.py:
+  - GET /api/marketplace/plugins — list approved+active plugins with category, search, tags, sort (popular/newest/name), pagination
+  - GET /api/marketplace/plugins/categories — list all plugin categories ordered by sort_order
+  - GET /api/marketplace/plugins/{plugin_id} — full plugin detail including manifest.json from S3
+  - GET /api/marketplace/plugins/{plugin_id}/content — full plugin file content from S3 (for AgentFactory)
+- Pydantic response models: PluginSummaryOut, PluginDetailOut, PluginContentOut, CategoryOut
+- Auth required via get_request_context_hybrid on all endpoints
+- Only approved+active plugins returned (filtered in query)
+- Registered router in main.py
+- Files changed:
+  - `orchestrator/api/marketplace_plugins.py` (created)
+  - `orchestrator/main.py` (added import + include_router)
+- **Learnings for future iterations:**
+  - `/categories` endpoint must be defined BEFORE `/{plugin_id}` in the router to avoid FastAPI treating "categories" as a UUID path parameter
+  - ARRAY column filtering: `MarketplacePlugin.tags.any(tag)` works for PostgreSQL ARRAY contains-element check
+  - S3 manifest loading in detail endpoint uses try/except — gracefully returns null manifest if S3 is unavailable
+  - Plugin content endpoint strips S3 prefix to return relative file paths in the response dict
+  - Category name resolved via separate query per plugin in list endpoint (acceptable for paginated results with default limit 20)
 ---

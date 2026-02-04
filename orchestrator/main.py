@@ -71,6 +71,7 @@ from api.context_summarization import router as context_summarization_router  # 
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
 from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
+from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -458,6 +459,7 @@ app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
+app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 

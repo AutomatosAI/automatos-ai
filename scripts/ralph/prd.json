@@ -168,7 +168,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Admin-only endpoints. Follow existing auth patterns from marketplace.py"
     },
     {
@@ -186,7 +186,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Public-facing but auth required. Only returns approved+active plugins."
     },
     {
