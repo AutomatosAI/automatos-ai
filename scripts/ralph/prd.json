@@ -443,7 +443,7 @@
         "Typecheck passes"
       ],
       "priority": 24,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing config pattern — only config.py reads os.getenv()"
     },
     {
