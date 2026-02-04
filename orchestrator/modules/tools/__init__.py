@@ -31,11 +31,24 @@ from .execution import (
     UnifiedToolExecutor,
 )
 
+# Tool Router exports (shared layer — PRD-50)
+from .tool_router import (
+    ToolRouter,
+    get_tool_router,
+    get_tools_for_agent,
+    get_agent_tools,
+    execute_tool,
+    execute_tool_with_validation,
+    validate_action_for_intent,
+    get_filtered_composio_actions,
+    get_capability_filter_stats,
+)
+
 __all__ = [
     # Main Service
     "ToolService",
     "ToolServiceConfig",
-    
+
     # Registry
     "ToolRegistry",
     "ToolCategory",
@@ -43,7 +56,18 @@ __all__ = [
     "ToolParameter",
     "ToolSpec",
     "ToolDefinition",
-    
+
     # Execution
     "UnifiedToolExecutor",
+
+    # Tool Router (shared layer — PRD-50)
+    "ToolRouter",
+    "get_tool_router",
+    "get_tools_for_agent",
+    "get_agent_tools",
+    "execute_tool",
+    "execute_tool_with_validation",
+    "validate_action_for_intent",
+    "get_filtered_composio_actions",
+    "get_capability_filter_stats",
 ]

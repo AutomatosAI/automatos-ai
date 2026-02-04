@@ -282,12 +282,19 @@ INTENT_TO_CAPABILITIES: Dict[str, List[str]] = {
     # -------------------------------------------------------------------------
     "send": ["message.send", "email.send", "notification.send"],
     "post": ["message.send", "message.reply"],
+    "share": ["message.send", "file.share"],
     "notify": ["message.send", "notification.send"],
+    "alert": ["message.send", "notification.send"],
     "tell": ["message.send"],
     "dm": ["message.send"],
+    "announce": ["message.send"],
+    "broadcast": ["message.send", "notification.send"],
     "write": ["message.send", "file.write", "sheet.write"],
     "compose": ["email.send", "email.draft", "message.send"],
     "draft": ["email.draft"],
+    "deliver": ["message.send", "email.send"],
+    "submit": ["message.send", "data.create"],
+    "ping": ["message.send", "notification.send"],
 
     # -------------------------------------------------------------------------
     # Reading/Fetching content
@@ -295,6 +302,12 @@ INTENT_TO_CAPABILITIES: Dict[str, List[str]] = {
     "read": ["message.read", "file.read", "email.read", "data.read"],
     "get": ["message.read", "file.read", "data.read", "data.query"],
     "fetch": ["message.read", "file.read", "data.read"],
+    "summarize": ["email.read", "email.list", "message.read", "data.read", "data.query"],
+    "check": ["email.read", "email.list", "message.read", "data.read"],
+    "digest": ["email.read", "email.list", "message.read"],
+    "review": ["email.read", "message.read", "pr.read", "pr.review", "data.read"],
+    "gather": ["email.read", "message.read", "data.read", "data.query"],
+    "collect": ["email.read", "message.read", "data.read", "data.query"],
     "show": ["message.read", "file.list", "data.query", "channel.list"],
     "list": ["message.read", "file.list", "channel.list", "user.list", "task.list"],
     "find": ["search.general", "data.query", "user.lookup"],

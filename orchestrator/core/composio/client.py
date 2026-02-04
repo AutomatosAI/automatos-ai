@@ -806,6 +806,82 @@ class ComposioClient:
         self._action_count_cache[key] = (now, count)
         return count
     
+    def search_actions_for_step(
+        self,
+        search_query: str,
+        app_names: List[str],
+        entity_id: str,
+        limit: int = 5,
+        explicit_actions: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Use Composio SDK semantic search to find the best actions for a recipe step.
+
+        Returns OpenAI function-calling tool schemas so each Composio action becomes
+        its own top-level tool (the LLM calls ``SLACK_SEND_MESSAGE(channel, text)``
+        directly instead of ``composio_execute(action="SLACK_SEND_MESSAGE", ...)``).
+
+        Args:
+            search_query: Natural language description of the step's intent
+                          (e.g. "send a slack message").
+            app_names: Composio toolkit slugs the agent has connected
+                       (e.g. ["slack", "gmail"]).
+            entity_id: Composio entity / user id (typically workspace_id as str).
+            limit: Max actions to return per search (default 5).
+            explicit_actions: If provided, fetch these exact action schemas instead
+                              of searching.  Power-user override for ``tool_hints.explicit_actions``.
+
+        Returns:
+            List of dicts, each with:
+                - action_name: e.g. "SLACK_SEND_MESSAGE"
+                - schema: OpenAI function-calling tool dict (``{"type":"function","function":{...}}``)
+        """
+        if not self.toolset:
+            logger.warning("Composio toolset not initialized — cannot search actions")
+            return []
+
+        results: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        try:
+            if explicit_actions:
+                # Fetch exact action schemas by name
+                raw_tools = self.toolset.tools.get(
+                    user_id=entity_id,
+                    actions=explicit_actions,
+                )
+            else:
+                # Semantic search scoped to the agent's connected apps
+                raw_tools = self.toolset.tools.get(
+                    user_id=entity_id,
+                    search=search_query,
+                    toolkits=[n.lower() for n in app_names],
+                    limit=limit,
+                )
+
+            for tool in raw_tools:
+                if not isinstance(tool, dict) or tool.get("type") != "function":
+                    continue
+                fn = tool.get("function") or {}
+                action_name = fn.get("name") or ""
+                if not action_name or action_name in seen:
+                    continue
+                seen.add(action_name)
+                results.append({
+                    "action_name": action_name,
+                    "schema": tool,  # Already in OpenAI format
+                })
+
+        except Exception as e:
+            logger.error(f"Composio semantic search failed (query={search_query!r}): {e}")
+
+        logger.info(
+            f"[ComposioClient] search_actions_for_step query={search_query!r} "
+            f"apps={app_names} explicit={bool(explicit_actions)} → {len(results)} actions: "
+            f"{[r['action_name'] for r in results]}"
+        )
+        return results
+
     def execute_action(
         self,
         action: str,
