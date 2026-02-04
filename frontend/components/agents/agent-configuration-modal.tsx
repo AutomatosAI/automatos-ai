@@ -17,7 +17,7 @@ import {
   Database,
   Network,
   Clock,
-  Wrench
+  Wrench,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -83,27 +83,7 @@ interface AgentConfiguration {
   }>
 }
 
-const agentTypeOptions = [
-  { value: 'code_architect', label: 'Code Architect', icon: '🏗️' },
-  { value: 'security_expert', label: 'Security Expert', icon: '🛡️' },
-  { value: 'performance_optimizer', label: 'Performance Optimizer', icon: '⚡' },
-  { value: 'data_analyst', label: 'Data Analyst', icon: '📊' },
-  { value: 'infrastructure_manager', label: 'Infrastructure Manager', icon: '☁️' },
-  { value: 'custom', label: 'Custom Agent', icon: '🤖' }
-]
-
-const priorityLevels = [
-  { value: 'low', label: 'Low Priority', color: 'text-gray-400' },
-  { value: 'medium', label: 'Medium Priority', color: 'text-blue-400' },
-  { value: 'high', label: 'High Priority', color: 'text-orange-400' },
-  { value: 'critical', label: 'Critical Priority', color: 'text-red-400' }
-]
-
-const environments = [
-  { value: 'development', label: 'Development', color: 'text-blue-400' },
-  { value: 'staging', label: 'Staging', color: 'text-yellow-400' },
-  { value: 'production', label: 'Production', color: 'text-green-400' }
-]
+import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP, DB_TO_CATEGORY_MAP } from '@/lib/agent-constants'
 
 export function AgentConfigurationModal({
   agentId,
@@ -116,6 +96,8 @@ export function AgentConfigurationModal({
 
   // Form state
   const [formData, setFormData] = useState<any>({})
+  // Track the original DB agent_type so we can preserve it on save
+  const [originalAgentType, setOriginalAgentType] = useState<string>('custom')
 
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
@@ -173,11 +155,15 @@ export function AgentConfigurationModal({
       }
 
       // Initialize form data with real agent data
+      const dbAgentType = (agent as any).agent_type || 'custom'
+      const categoryName = DB_TO_CATEGORY_MAP[dbAgentType] || 'Custom'
+      setOriginalAgentType(dbAgentType)
+
       setFormData({
         name: (agent as any).name || '',
         description: (agent as any).description || '',
         tags: Array.isArray((agent as any).tags) ? ((agent as any).tags as string[]).join(', ') : '',
-        agent_type: (agent as any).agent_type || 'custom',
+        agent_type: categoryName,
         priority_level: (agentConfig as any).priority_level || 'medium',
         max_concurrent_tasks: (agentConfig as any).max_concurrent_tasks || 5,
         auto_start: (agentConfig as any).auto_start || false,
@@ -290,10 +276,21 @@ export function AgentConfigurationModal({
         .map((tag: string) => tag.trim())
         .filter((tag: string) => tag.length > 0)
 
+      // Convert category name to database agent_type value.
+      // If the user's selected category maps to 'Custom' and the original DB type
+      // was a specialized type (e.g. 'security_expert'), preserve the original.
+      const selectedCategory = formData.agent_type || 'Custom'
+      const mappedDbType = CATEGORY_TO_DB_MAP[selectedCategory] || 'custom'
+      const originalMapsToCategory = DB_TO_CATEGORY_MAP[originalAgentType] || 'Custom'
+      const dbAgentType =
+        (mappedDbType === 'custom' && originalMapsToCategory === selectedCategory)
+          ? originalAgentType
+          : mappedDbType
+
       const updatePayload = {
         name: formData.name,
         description: formData.description,
-        agent_type: formData.agent_type,
+        agent_type: dbAgentType,
         tags,
         configuration: {
           priority_level: formData.priority_level,
@@ -431,14 +428,10 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
                     <span>General</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="performance" className="flex items-center space-x-2">
-                    <Zap className="w-4 h-4" />
-                    <span>Performance</span>
                   </TabsTrigger>
                   <TabsTrigger value="resources" className="flex items-center space-x-2">
                     <Database className="w-4 h-4" />
@@ -499,159 +492,44 @@ export function AgentConfigurationModal({
                       </div>
 
                       <div className="space-y-2">
-                        <Label>Agent Type</Label>
+                        <Label>Category</Label>
                         <Select
-                          value={formData.agent_type || 'custom'}
+                          value={formData.agent_type || 'Custom'}
                           onValueChange={(value) => updateFormData('agent_type', value)}
                         >
                           <SelectTrigger>
-                            <SelectValue />
+                            {formData.agent_type ? (
+                              <div className="flex items-center gap-2">
+                                {(() => {
+                                  const selected = AGENT_CATEGORIES.find(c => c.id === formData.agent_type)
+                                  if (!selected) return <SelectValue />
+                                  const Icon = selected.icon
+                                  return (
+                                    <>
+                                      <Icon className={`w-4 h-4 ${selected.color}`} />
+                                      <span>{selected.name}</span>
+                                    </>
+                                  )
+                                })()}
+                              </div>
+                            ) : (
+                              <SelectValue placeholder="Select category..." />
+                            )}
                           </SelectTrigger>
                           <SelectContent>
-                            {agentTypeOptions.map((type) => (
-                              <SelectItem key={type.value} value={type.value}>
-                                <div className="flex items-center space-x-2">
-                                  <span>{type.icon}</span>
-                                  <span>{type.label}</span>
-                                </div>
-                              </SelectItem>
-                            ))}
+                            {AGENT_CATEGORIES.map(cat => {
+                              const Icon = cat.icon
+                              return (
+                                <SelectItem key={cat.id} value={cat.id}>
+                                  <div className="flex items-center gap-2">
+                                    <Icon className={`w-4 h-4 ${cat.color}`} />
+                                    <span>{cat.name}</span>
+                                  </div>
+                                </SelectItem>
+                              )
+                            })}
                           </SelectContent>
                         </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Priority Level</Label>
-                        <Select
-                          value={formData.priority_level || 'medium'}
-                          onValueChange={(value) => updateFormData('priority_level', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {priorityLevels.map((priority) => (
-                              <SelectItem key={priority.value} value={priority.value}>
-                                <span className={priority.color}>{priority.label}</span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Environment</Label>
-                        <Select
-                          value={formData.environment || 'development'}
-                          onValueChange={(value) => updateFormData('environment', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {environments.map((env) => (
-                              <SelectItem key={env.value} value={env.value}>
-                                <span className={env.color}>{env.label}</span>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="performance" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">Performance Settings</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      <div className="space-y-3">
-                        <Label>Max Concurrent Tasks</Label>
-                        <div className="space-y-2">
-                          <Slider
-                            value={[formData.max_concurrent_tasks || 5]}
-                            onValueChange={(value) => updateFormData('max_concurrent_tasks', value[0])}
-                            max={20}
-                            min={1}
-                            step={1}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>1 task</span>
-                            <span className="font-medium">{formData.max_concurrent_tasks || 5} tasks</span>
-                            <span>20 tasks</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label>Timeout (seconds)</Label>
-                        <div className="space-y-2">
-                          <Slider
-                            value={[formData.timeout_seconds || 300]}
-                            onValueChange={(value) => updateFormData('timeout_seconds', value[0])}
-                            max={3600}
-                            min={30}
-                            step={30}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>30s</span>
-                            <span className="font-medium">{formData.timeout_seconds || 300}s</span>
-                            <span>1 hour</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Label>Retry Attempts</Label>
-                        <div className="space-y-2">
-                          <Slider
-                            value={[formData.retry_attempts || 3]}
-                            onValueChange={(value) => updateFormData('retry_attempts', value[0])}
-                            max={10}
-                            min={0}
-                            step={1}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-sm text-muted-foreground">
-                            <span>0</span>
-                            <span className="font-medium">{formData.retry_attempts || 3} attempts</span>
-                            <span>10</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <Separator />
-
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-0.5">
-                            <Label>Auto Start</Label>
-                            <p className="text-sm text-muted-foreground">
-                              Automatically start agent on system boot
-                            </p>
-                          </div>
-                          <Switch
-                            checked={formData.auto_start || false}
-                            onCheckedChange={(checked) => updateFormData('auto_start', checked)}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-0.5">
-                            <Label>Performance Monitoring</Label>
-                            <p className="text-sm text-muted-foreground">
-                              Enable detailed performance tracking
-                            </p>
-                          </div>
-                          <Switch
-                            checked={formData.performance_monitoring !== false}
-                            onCheckedChange={(checked) => updateFormData('performance_monitoring', checked)}
-                          />
-                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -864,7 +742,7 @@ export function AgentConfigurationModal({
                           <Wrench className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                           <h3 className="text-lg font-semibold mb-2">No Active Tools</h3>
                           <p className="text-muted-foreground">
-                            No active tools available. Enable tools in Settings > Tools first.
+                            No active tools available. Enable tools in Settings {'->'} Tools first.
                           </p>
                         </div>
                       )}

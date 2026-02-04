@@ -36,6 +36,8 @@ from core.models import Base
 from api.agents import router as agents_router
 from api.workflows import router as workflows_router
 from api.workflow_templates import router as workflow_templates_router
+from api.workflow_recipes import router as workflow_recipes_router
+from api.marketplace import router as marketplace_router
 from api.documents import router as documents_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
@@ -72,6 +74,12 @@ from api.templates import router as templates_router
 from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router  # PRD-37: Team Management
+from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
+# Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
+try:
+    from api.bug_reports import router as bug_reports_router
+except ImportError:
+    bug_reports_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -397,7 +405,9 @@ def require_api_key(x_api_key: str = Header(None)):
 app.include_router(agents_router)
 app.include_router(models_router)  # PRD-15: Model management
 app.include_router(workflows_router)
-app.include_router(workflow_templates_router)
+app.include_router(workflow_templates_router)  # Legacy - backward compatibility
+app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
+app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(documents_router)
 app.include_router(system_router)
 app.include_router(context_engineering_router)
@@ -452,6 +462,9 @@ if workspaces_router is not None:
 app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(team_router)  # PRD-37: Team Management
+app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
+if bug_reports_router is not None:
+    app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

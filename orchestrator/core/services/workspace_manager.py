@@ -6,9 +6,11 @@ and enable parallel execution. Workspace is automatically cleaned up after execu
 
 Key Features:
 - Unique workspace per execution: /tmp/workflow_{execution_id}/workspace
-- Permanent results storage: /var/automatos/results/{execution_id}/
+- Results storage: $AUTOMATOS_RESULTS_BASE/{execution_id}/ (default: /var/lib/automatos/results)
 - Automatic cleanup after execution
 - Safe file operations within workspace boundaries
+
+Note: For production SaaS, results will move to S3/GCS with workspace_id isolation.
 """
 
 import os
@@ -24,15 +26,17 @@ logger = logging.getLogger(__name__)
 class WorkspaceManager:
     """
     Manages workspace lifecycle for workflow executions.
-    
+
     Each execution gets:
     - Temporary workspace: /tmp/workflow_{execution_id}/workspace (auto-deleted)
-    - Permanent results dir: /var/automatos/results/{execution_id}/ (persistent)
+    - Results dir: $AUTOMATOS_RESULTS_BASE/{execution_id}/ (configurable via env var)
+
+    Future: Will use S3 with workspace_id isolation for production SaaS.
     """
     
-    # Base directories
+    # Base directories — configurable via AUTOMATOS_RESULTS_BASE env var
     TEMP_BASE = Path("/tmp")
-    RESULTS_BASE = Path("/var/automatos/results")
+    RESULTS_BASE = Path(os.environ.get("AUTOMATOS_RESULTS_BASE", "/var/lib/automatos/results"))
     
     def __init__(self, execution_id: int):
         """

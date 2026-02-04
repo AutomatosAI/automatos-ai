@@ -2,8 +2,9 @@
 const path = require('path')
 
 const nextConfig = {
-  typescript: { 
-    ignoreBuildErrors: true 
+  reactStrictMode: false,
+  typescript: {
+    ignoreBuildErrors: true
   },
   // Next 14.x Turbopack config lives under `experimental.turbo`.
   // Keep the newer `turbopack` key as well for forward-compat.

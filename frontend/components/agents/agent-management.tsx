@@ -90,9 +90,9 @@ export function AgentManagement() {
       color: 'text-green-400'
     },
     {
-      label: 'Agent Types',
-      value: (agentStats as any)?.agents_by_type ? Object.keys((agentStats as any).agents_by_type).length : (agentTypes as any[])?.length || '0',
-      change: (agentStats as any)?.agents_by_type ? `${Object.keys((agentStats as any).agents_by_type).length} types` : '0 types',
+      label: 'Categories',
+      value: '10',  // Total available marketplace categories
+      change: '10 categories',
       icon: Settings,
       color: 'text-blue-400'
     },

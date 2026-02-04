@@ -106,6 +106,18 @@ export interface DocumentReference {
 }
 
 /**
+ * Routing decision metadata from universal router
+ */
+export interface RoutingInfo {
+  requestId?: string
+  agentId: number
+  agentName?: string
+  confidence: number
+  routeType: string
+  reasoning: string
+}
+
+/**
  * Message metadata
  */
 export interface MessageMetadata {
@@ -115,6 +127,7 @@ export interface MessageMetadata {
   processing_time?: number
   tools_used?: string[]
   database_count?: number
+  routing?: RoutingInfo
 }
 
 /**
@@ -141,6 +154,7 @@ export type ChatMessage = UIMessage<MessageMetadata> & {
   documents?: DocumentReference[]
   database_results?: DatabaseResult[]
   toolCalls?: ToolCall[]
+  routingInfo?: RoutingInfo
 }
 
 /**

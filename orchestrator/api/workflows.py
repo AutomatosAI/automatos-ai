@@ -24,6 +24,7 @@ from core.models import (
     WorkflowExecutionCreate, WorkflowExecutionResponse,
     WorkflowStatus, ExecutionStatus
 )
+from core.models.core import RecipeExecution, WorkflowTemplate as WorkflowRecipe
 # websocket_manager removed - using AI SDK SSE streaming
 from core.services.workspace_manager import WorkspaceManager
 from core.auth.hybrid import get_request_context_hybrid
@@ -270,13 +271,61 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
                 "updated_at": workflow.updated_at.isoformat()
             })
         
+        # Also fetch recipe executions for the Cooking tab
+        recipe_runs = []
+        try:
+            recent_recipe_execs = db.query(RecipeExecution).filter(
+                RecipeExecution.workspace_id == ctx.workspace_id
+            ).order_by(desc(RecipeExecution.started_at)).limit(20).all()
+
+            for exec_rec in recent_recipe_execs:
+                # Get recipe name
+                recipe = db.query(WorkflowRecipe).filter(WorkflowRecipe.id == exec_rec.recipe_id).first()
+                recipe_name = recipe.name if recipe else f"Recipe #{exec_rec.recipe_id}"
+
+                step_results = exec_rec.step_results or []
+                total_steps = len(step_results) if step_results else 0
+                current_step = exec_rec.current_step or 0
+
+                # Calculate duration
+                duration = None
+                if exec_rec.completed_at and exec_rec.started_at:
+                    duration = str(exec_rec.completed_at - exec_rec.started_at)
+
+                # Get total tokens and duration from output_data
+                output = exec_rec.output_data or {}
+                total_tokens = output.get("total_tokens", 0)
+                total_duration_ms = output.get("total_duration_ms", 0)
+
+                recipe_runs.append({
+                    "id": exec_rec.id,
+                    "execution_id": exec_rec.execution_id,
+                    "recipe_id": exec_rec.recipe_id,
+                    "recipe_name": recipe_name,
+                    "type": "recipe",
+                    "status": exec_rec.status,
+                    "current_step": current_step,
+                    "total_steps": total_steps,
+                    "step_results": step_results,
+                    "started_at": exec_rec.started_at.isoformat() if exec_rec.started_at else None,
+                    "completed_at": exec_rec.completed_at.isoformat() if exec_rec.completed_at else None,
+                    "duration": duration,
+                    "total_tokens": total_tokens,
+                    "total_duration_ms": total_duration_ms,
+                    "error_message": exec_rec.error_message,
+                })
+        except Exception as recipe_err:
+            logger.warning(f"Error fetching recipe executions for cooking tab: {recipe_err}")
+
         return {
             "active_workflows": workflow_data,
+            "recipe_runs": recipe_runs,
             "total_active": len(workflow_data),
+            "total_recipe_runs": len(recipe_runs),
             "system_load": min(100, len(workflow_data) * 15),
             "last_updated": datetime.now().isoformat()
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting active workflows: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")
@@ -364,7 +413,7 @@ async def update_workflow(
         raise HTTPException(status_code=500, detail=f"Error updating workflow: {str(e)}")
 
 @router.delete("/{workflow_id}")
-async def delete_workflow(workflow_id: int, db: Session = Depends(get_db)):
+async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Delete workflow"""
     try:
         workflow = db.query(Workflow).filter(Workflow.id == workflow_id, Workflow.workspace_id == ctx.workspace_id).first()
@@ -605,7 +654,8 @@ async def duplicate_workflow(
             status='active',  # New duplicates are active by default
             created_by=duplicate_data.get("created_by", "system") if duplicate_data else "system",
             owner=duplicate_data.get("owner", original.owner) if duplicate_data else original.owner,
-            default_policy_id=original.default_policy_id
+            default_policy_id=original.default_policy_id,
+            workspace_id=ctx.workspace_id
         )
         
         # Copy agent associations
@@ -858,6 +908,7 @@ async def execute_workflow_advanced(
     workflow_id: int,
     execution_data: Dict[str, Any],
     background_tasks: BackgroundTasks,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Execute workflow with advanced options and live progress tracking"""
@@ -883,6 +934,7 @@ async def execute_workflow_advanced(
         execution = WorkflowExecution(
             workflow_id=workflow_id,
             agent_id=agent_id,
+            workspace_id=ctx.workspace_id,
             input_data=execution_data.get('input_data', {}),
             status=ExecutionStatus.PENDING.value
         )
@@ -923,6 +975,7 @@ async def execute_workflow_advanced(
 async def execute_workflow(
     workflow_id: int,
     execution_data: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Execute workflow (simplified version for journey tests)"""
@@ -931,46 +984,45 @@ async def execute_workflow(
         workflow = db.query(Workflow).options(
             joinedload(Workflow.agents)
         ).filter(Workflow.id == workflow_id).first()
-        
+
         if not workflow:
             raise HTTPException(status_code=404, detail="Workflow not found")
-        
+
         if not workflow.id:
             raise HTTPException(status_code=400, detail="Invalid workflow data")
-        
-        # Get agent with skills and tool assignments loaded
+
+        # Get agent with skills loaded
         agent = db.query(Agent).options(
-            joinedload(Agent.skills),
-            joinedload(Agent.tool_assignments)
+            joinedload(Agent.skills)
         ).filter(Agent.status == 'active').first()
-        
+
         if not agent:
             raise HTTPException(status_code=400, detail="No active agents available")
-        
+
         if not agent.id:
             logger.error(f"❌ Agent object missing ID: {agent}")
             raise HTTPException(status_code=500, detail="Agent data corruption - missing ID")
-        
+
         # Validate input_data
         input_data = execution_data.get('input_data')
         if not input_data:
             logger.warning("⚠️  No input_data provided, using empty dict")
             input_data = {}
-        
+
         if not isinstance(input_data, dict):
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"input_data must be a dictionary, got {type(input_data).__name__}"
             )
-        
+
         logger.info(f"🚀 Creating execution for workflow {workflow_id} with agent {agent.id}")
         logger.info(f"   Agent skills: {len(agent.skills) if agent.skills else 0}")
-        logger.info(f"   Agent tools: {len(agent.tool_assignments) if agent.tool_assignments else 0}")
-        
+
         # Create execution record
         execution = WorkflowExecution(
             workflow_id=workflow_id,
             agent_id=agent.id,
+            workspace_id=ctx.workspace_id,
             input_data=input_data,
             status=ExecutionStatus.PENDING.value
         )
@@ -1011,14 +1063,14 @@ async def execute_workflow(
         raise HTTPException(status_code=500, detail=f"Error executing workflow: {str(e)}")
 
 @router.post("/execute")
-async def execute_workflow_general(execution_data: Dict[str, Any], db: Session = Depends(get_db)):
+async def execute_workflow_general(execution_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """General workflow execution endpoint"""
     try:
         workflow_id = execution_data.get('workflow_id')
         if not workflow_id:
             raise HTTPException(status_code=400, detail="workflow_id required")
-        
-        return await execute_workflow(workflow_id, execution_data, db)
+
+        return await execute_workflow(workflow_id, execution_data, ctx, db)
         
     except Exception as e:
         logger.error(f"Error in general workflow execution: {e}")
@@ -1216,12 +1268,26 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
     execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
     if not execution:
         raise HTTPException(status_code=404, detail="Execution not found")
-    
-    logger.info(f"🚀 Starting AI SDK stream for execution {execution_id}")
-    
+
+    # CRITICAL: Don't stream if execution already finished
+    if execution.status in ['completed', 'failed', 'cancelled']:
+        logger.warning(f"⚠️  Attempted to stream already finished execution {execution_id} (status: {execution.status})")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Execution already finished",
+                "status": execution.status,
+                "execution_id": execution_id,
+                "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+                "message": "Cannot stream a completed execution. Please start a new execution."
+            }
+        )
+
+    logger.info(f"🚀 Starting AI SDK stream for execution {execution_id} (status: {execution.status})")
+
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
-        
+
         return StreamingResponse(
             stream_workflow_as_aisdk(execution_id),
             media_type="text/plain; charset=utf-8",
@@ -1270,12 +1336,26 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
     execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
     if not execution:
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
-    
-    logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id}")
-    
+
+    # CRITICAL: Don't stream if execution already finished
+    if execution.status in ['completed', 'failed', 'cancelled']:
+        logger.warning(f"⚠️  Attempted to stream already finished execution {execution_id} (status: {execution.status})")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Execution already finished",
+                "status": execution.status,
+                "execution_id": execution_id,
+                "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+                "message": "Cannot stream a completed execution. Please start a new execution."
+            }
+        )
+
+    logger.info(f"🚀 Starting AI SDK chat stream for execution {execution_id} (status: {execution.status})")
+
     try:
         from consumers.workflows.streaming import stream_workflow_as_aisdk
-        
+
         return StreamingResponse(
             stream_workflow_as_aisdk(execution_id),
             media_type="text/plain; charset=utf-8",
@@ -1381,42 +1461,85 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
             stage_tracker = WorkflowStageTracker(execution_id, redis_client, stream_manager=stream_manager)
 
             
-            # Check if workflow already has explicit tasks defined
+            # ========== EXECUTION MODE DETECTION ==========
+            # Determine execution mode based on workflow/recipe configuration
             workflow_def = workflow.workflow_definition or {}
             predefined_tasks = workflow_def.get("tasks", [])
-            
+            predefined_steps = workflow_def.get("steps", [])  # Recipe steps with pre-assigned agents
+
+            # Get task description early (needed for all execution modes)
+            goal = workflow_def.get("goal")
+            task_description = goal or workflow.description or workflow.name
+
+            # Detect execution mode (AUTONOMOUS, RECIPE, HYBRID)
+            execution_mode = "AUTONOMOUS"  # Default
+
+            # Check if this is a recipe with pre-defined steps and agents
+            if predefined_steps and len(predefined_steps) > 0:
+                # Count steps with pre-assigned agents
+                steps_with_agents = sum(1 for step in predefined_steps if step.get("agent_id") or step.get("required_agent_id"))
+                total_steps = len(predefined_steps)
+
+                if steps_with_agents == total_steps:
+                    execution_mode = "RECIPE"  # All steps have agents
+                elif steps_with_agents > 0:
+                    execution_mode = "HYBRID"  # Some steps have agents
+                else:
+                    execution_mode = "AUTONOMOUS"  # No agents assigned
+            elif predefined_tasks and len(predefined_tasks) > 0:
+                # Legacy tasks format - treat as RECIPE if agents are assigned
+                steps_with_agents = sum(1 for task in predefined_tasks if task.get("required_agent_id"))
+                total_tasks = len(predefined_tasks)
+
+                if steps_with_agents == total_tasks:
+                    execution_mode = "RECIPE"
+                elif steps_with_agents > 0:
+                    execution_mode = "HYBRID"
+
+            logger.info(f"🔍 EXECUTION MODE: {execution_mode}")
+            logger.info(f"   Predefined Steps: {len(predefined_steps)}")
+            logger.info(f"   Predefined Tasks: {len(predefined_tasks)}")
+
+            # Store execution mode in input_data
+            execution.input_data = execution.input_data or {}
+            execution.input_data["execution_mode"] = execution_mode
+            attributes.flag_modified(execution, "input_data")
+            db.commit()
+
             # ========== STAGE 1: TASK DECOMPOSITION ==========
-            await stage_tracker.start_stage(1)
-            
-            if predefined_tasks and len(predefined_tasks) > 0:
-                # Use predefined tasks instead of decomposing
-                logger.info(f"📋 Using {len(predefined_tasks)} predefined tasks from workflow definition")
-                steps = predefined_tasks
-                
-                # Store metadata
-                execution.input_data = execution.input_data or {}
+            # RECIPE mode: Skip - steps are pre-defined
+            # HYBRID mode: Skip - partial steps are pre-defined
+            # AUTONOMOUS mode: Run - need to decompose
+
+            should_skip_stage1 = execution_mode in ["RECIPE", "HYBRID"]
+
+            if should_skip_stage1:
+                logger.info(f"⏭️  SKIPPED Stage 1: {execution_mode} mode has pre-defined steps")
+                # Use predefined steps/tasks
+                steps = predefined_steps if predefined_steps else predefined_tasks
                 execution.input_data["decomposition"] = {
                     "is_real": False,
                     "is_predefined": True,
+                    "execution_mode": execution_mode,
                     "task_count": len(steps),
-                    "execution_strategy": workflow_def.get("execution_strategy", "parallel")
+                    "skip_reason": f"{execution_mode} mode - steps pre-defined"
                 }
+                attributes.flag_modified(execution, "input_data")
+                db.commit()
             else:
-                # REAL TASK DECOMPOSITION using LLM
+                await stage_tracker.start_stage(1)
+                # AUTONOMOUS mode: REAL TASK DECOMPOSITION using LLM
                 decomposer = RealTaskDecomposer()
-                
-                # Get task description from workflow (prioritize goal > description > name)
-                # goal and context are stored in workflow_definition for 9-stage workflows
-                goal = workflow_def.get("goal")
-                task_description = goal or workflow.description or workflow.name
+
+                # Get additional parameters for decomposition
                 task_type = workflow_def.get("category", "general")
                 complexity = workflow_def.get("priority", "medium")
-                
+
                 # Pass workflow context to decomposer if available (for CodeGraph, PR review, etc.)
                 workflow_context = workflow_def.get("context", {})
-                
+
                 logger.info(f"🔧 Decomposing task with RealTaskDecomposer: {task_description[:100]}")
-                
+
                 try:
                     # Call REAL LLM to decompose task
                     decomposition_result = await decomposer.decompose_task(
@@ -1426,12 +1549,11 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         requirements=[],
                         max_subtasks=None
                     )
-                    
+
                     # Extract real subtasks from LLM response
                     steps = decomposition_result.get("subtasks", [])
-                    
+
                     # Store decomposition metadata
-                    execution.input_data = execution.input_data or {}
                     execution.input_data["decomposition"] = {
                         "is_real": True,
                         "llm_model": decomposition_result.get("llm_model"),
@@ -1441,9 +1563,9 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     }
                     attributes.flag_modified(execution, "input_data")
                     db.commit()
-                    
+
                     logger.info(f"✅ Decomposed into {len(steps)} real subtasks")
-                    
+
                 except Exception as e:
                     logger.error(f"❌ Task decomposition failed: {e}, falling back to default steps", exc_info=True)
                     logger.error(f"❌ DECOMPOSITION ERROR TRACEBACK:")
@@ -1455,254 +1577,308 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                         {"description": "Execute main task", "estimated_duration": "60 seconds", "agent_type": "worker"},
                         {"description": "Finalize results", "estimated_duration": "20 seconds", "agent_type": "orchestrator"}
                     ]
-            
-            await stage_tracker.complete_stage(1, {"subtasks": len(steps)})
+
+                await stage_tracker.complete_stage(1, {"subtasks": len(steps)})
             
             # ========== STAGE 2: AGENT SELECTION ==========
-            await stage_tracker.start_stage(2)
-            # INTELLIGENT AGENT SELECTION
+            # RECIPE mode: Skip - agents are pre-assigned
+            # HYBRID mode: Partial - select agents only for steps without assignments
+            # AUTONOMOUS mode: Run - select optimal agents
 
-            logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
-            
-            # Check if we should use smart grouping
-            use_smart_selection = True  # Enable smart selection by default
-            workflow_ctx = workflow_def.get("context")
-            if workflow_ctx:
-                try:
-                    ctx = json.loads(workflow_ctx) if isinstance(workflow_ctx, str) else workflow_ctx
-                    use_smart_selection = ctx.get("use_smart_selection", True)
-                except:
-                    pass
-            
-            # Check if tasks have specific agent requirements
-            has_agent_requirements = any(
-                task.get("required_agent_id") for task in steps
-            ) if isinstance(steps, list) else False
-            
-            agent_assignments = {}
-            try:
-                logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
-                
-                if use_smart_selection and not has_agent_requirements:
-                    # Use BATCH LLM agent selection (NO LOOPS!)
-                    logger.info("⚡ Using BATCH LLM agent selection (semantic + LLM in one shot)")
-                    logger.info(f"  📋 Number of steps to assign: {len(steps)}")
-                    
-                    from core.llm.llm_agent_selector import LLMAgentSelector
-                    
-                    llm_selector = LLMAgentSelector(db_session=db)
-                    
-                    # Select agents for ALL subtasks in ONE BATCH (no loops!)
-                    agent_assignments = await llm_selector.select_agents_for_subtasks(
-                        steps,
-                        workflow_context={
-                            "description": task_description,
-                            "workflow_id": execution.workflow_id
-                        }
-                    )
-                    logger.info(f"  ✅ BATCH selection complete: {len(agent_assignments)} assignments")
-                    
-                    # Create selection summary
-                    unique_agents = set()
-                    for matches in agent_assignments.values():
-                        for match in matches:
-                            unique_agents.add(match.agent_id)
-                    
-                    # Calculate average match score
-                    total_score = 0
-                    count = 0
-                    for matches in agent_assignments.values():
-                        for match in matches:
-                            total_score += match.match_score
-                            count += 1
-                    avg_score = total_score / count if count > 0 else 0.9
-                    
-                    selection_summary = {
-                        "total_subtasks": len(steps),
-                        "unique_agents": len(unique_agents),
-                        "selection_method": "llm_intelligent",
-                        "efficiency_ratio": len(steps) / len(unique_agents) if unique_agents else 0,
-                        "avg_match_score": avg_score
-                    }
-                    
-                elif has_agent_requirements:
-                    # Use specified agents from predefined tasks
-                    logger.info("📌 Using specified agents from task definitions")
-                    agent_assignments = {}
-                    
-                    for idx, task in enumerate(steps):
-                        # Use the subtask_id from the step, not a generated one!
-                        subtask_id = task.get("subtask_id", f"subtask_{idx}")
-                        required_agent_id = task.get("required_agent_id")
-                        
-                        if required_agent_id:
-                            # Get the agent details
-                            agent = db.query(Agent).filter(Agent.id == required_agent_id).first()
-                            if agent:
-                                from modules.orchestrator.llm import AgentMatch
-                                agent_assignments[subtask_id] = [
-                                    AgentMatch(
-                                        agent_id=agent.id,
-                                        agent_name=agent.name,
-                                        agent_type=agent.agent_type,
-                                        match_score=1.0,  # Perfect match since explicitly specified
-                                        skill_coverage=1.0,
-                                        availability_score=1.0,
-                                        performance_score=0.8,
-                                        reasoning=f"Explicitly specified for task: {task.get('name', 'Unknown')}",
-                                        matched_skills=task.get("required_skills", []),
-                                        missing_skills=[]
-                                    )
-                                ]
-                                logger.info(f"✅ Task {idx}: Using specified agent {agent.name} (ID: {agent.id})")
-                            else:
-                                logger.warning(f"⚠️ Task {idx}: Specified agent {required_agent_id} not found")
-                else:
-                    # Fallback: Use batch LLM selector
-                    logger.info("⚡ Fallback: Using BATCH LLM agent selection")
-                    from core.llm.llm_agent_selector import LLMAgentSelector
-                    
-                    llm_selector = LLMAgentSelector(db_session=db)
-                    agent_assignments = await llm_selector.select_agents_for_subtasks(
-                        steps,
-                        workflow_context={
-                            "description": task_description,
-                            "workflow_id": execution.workflow_id
-                        }
-                    )
-                
-                # Store agent selection results
-                if has_agent_requirements:
-                    # Create summary for explicit assignments
-                    selection_summary = {
+            should_skip_stage2 = execution_mode == "RECIPE"
+
+            if should_skip_stage2:
+                logger.info(f"⏭️  SKIPPED Stage 2: RECIPE mode has pre-assigned agents")
+
+                # Extract agent assignments from pre-defined steps
+                agent_assignments = {}
+                for idx, step in enumerate(steps):
+                    subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                    agent_id = step.get("agent_id") or step.get("required_agent_id")
+
+                    if agent_id:
+                        # Get agent details
+                        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+                        if agent:
+                            from modules.orchestrator.llm import AgentMatch
+                            agent_assignments[subtask_id] = [
+                                AgentMatch(
+                                    agent_id=agent.id,
+                                    agent_name=agent.name,
+                                    agent_type=agent.agent_type,
+                                    match_score=1.0,  # Perfect match - pre-assigned
+                                    reasoning=f"Pre-assigned in recipe: {step.get('name', 'Unknown')}",
+                                    skills_matched=[],
+                                    performance_score=1.0,
+                                    availability_score=1.0,
+                                    collaboration_score=1.0
+                                )
+                            ]
+                            logger.info(f"✅ Step {idx}: Pre-assigned agent {agent.name} (ID: {agent.id})")
+
+                execution.input_data["agent_selection"] = {
+                    "is_real": False,
+                    "is_predefined": True,
+                    "execution_mode": execution_mode,
+                    "summary": {
                         "total_assignments": len(agent_assignments),
                         "unique_agents": len(set(matches[0].agent_id for matches in agent_assignments.values() if matches)),
-                        "avg_match_score": 1.0  # All explicit matches are perfect
-                    }
-                else:
-                    # Summary for LLM selection (both smart and fallback)
-                    unique_agents = set()
-                    for matches in agent_assignments.values():
-                        for match in matches:
-                            unique_agents.add(match.agent_id)
-                    
-                    total_score = 0
-                    count = 0
-                    for matches in agent_assignments.values():
-                        for match in matches:
-                            total_score += match.match_score
-                            count += 1
-                    avg_score = total_score / count if count > 0 else 0.9
-                    
-                    selection_summary = {
-                        "total_assignments": len(agent_assignments),
-                        "unique_agents": len(unique_agents),
-                        "avg_match_score": avg_score
-                    }
-                    logger.info(f"  Using LLM selection summary: {selection_summary}")
-                execution.input_data["agent_selection"] = {
-                    "is_real": True,
-                    "summary": selection_summary,
-                    "assignments": {
-                        subtask_id: [
-                            {
-                                "agent_id": match.agent_id,
-                                "agent_name": match.agent_name,
-                                "match_score": match.match_score,
-                                "reasoning": match.reasoning
-                            }
-                            for match in matches
-                        ]
-                        for subtask_id, matches in agent_assignments.items()
-                    }
+                        "avg_match_score": 1.0
+                    },
+                    "skip_reason": "RECIPE mode - agents pre-assigned"
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-                
-                logger.info(f"✅ Agent selection complete: {selection_summary['avg_match_score']:.2f} avg match score")
-                
-                # Enhance steps with selected agents
-                for idx, step in enumerate(steps):
-                    # Use the subtask_id from the step, not a generated one!
-                    subtask_id = step.get("subtask_id", f"subtask_{idx}")
-                    if subtask_id in agent_assignments and agent_assignments[subtask_id]:
-                        best_match = agent_assignments[subtask_id][0]
-                        step["selected_agent"] = {
-                            "agent_id": best_match.agent_id,
-                            "agent_name": best_match.agent_name,
-                            "match_score": best_match.match_score
+
+            else:
+                await stage_tracker.start_stage(2)
+                # INTELLIGENT AGENT SELECTION
+
+                logger.info(f"🤖 Selecting optimal agents for {len(steps)} subtasks...")
+
+                # Check if we should use smart grouping
+                use_smart_selection = True  # Enable smart selection by default
+                workflow_ctx = workflow_def.get("context")
+                if workflow_ctx:
+                    try:
+                        ctx = json.loads(workflow_ctx) if isinstance(workflow_ctx, str) else workflow_ctx
+                        use_smart_selection = ctx.get("use_smart_selection", True)
+                    except (json.JSONDecodeError, TypeError, ValueError) as e:
+                        logger.error(f"Error parsing workflow context: {e}", exc_info=True)
+
+                # Check if tasks have specific agent requirements (HYBRID mode)
+                has_agent_requirements = any(
+                    task.get("required_agent_id") or task.get("agent_id") for task in steps
+                ) if isinstance(steps, list) else False
+                agent_assignments = {}
+                try:
+                    logger.info(f"🔍 DEBUG: use_smart_selection={use_smart_selection}, has_agent_requirements={has_agent_requirements}")
+
+                    if use_smart_selection and not has_agent_requirements:
+                        # Use BATCH LLM agent selection (NO LOOPS!)
+                        logger.info("⚡ Using BATCH LLM agent selection (semantic + LLM in one shot)")
+                        logger.info(f"  📋 Number of steps to assign: {len(steps)}")
+
+                        from core.llm.llm_agent_selector import LLMAgentSelector
+
+                        llm_selector = LLMAgentSelector(db_session=db)
+
+                        # Select agents for ALL subtasks in ONE BATCH (no loops!)
+                        agent_assignments = await llm_selector.select_agents_for_subtasks(
+                            steps,
+                            workflow_context={
+                                "description": task_description,
+                                "workflow_id": execution.workflow_id
+                            }
+                        )
+                        logger.info(f"  ✅ BATCH selection complete: {len(agent_assignments)} assignments")
+
+                        # Create selection summary
+                        unique_agents = set()
+                        for matches in agent_assignments.values():
+                            for match in matches:
+                                unique_agents.add(match.agent_id)
+
+                        # Calculate average match score
+                        total_score = 0
+                        count = 0
+                        for matches in agent_assignments.values():
+                            for match in matches:
+                                total_score += match.match_score
+                                count += 1
+                        avg_score = total_score / count if count > 0 else 0.9
+
+                        selection_summary = {
+                            "total_subtasks": len(steps),
+                            "unique_agents": len(unique_agents),
+                            "selection_method": "llm_intelligent",
+                            "efficiency_ratio": len(steps) / len(unique_agents) if unique_agents else 0,
+                            "avg_match_score": avg_score
                         }
+
+                    elif has_agent_requirements:
+                        # Use specified agents from predefined tasks (HYBRID mode)
+                        logger.info("📌 Using specified agents from task definitions")
+                        agent_assignments = {}
+
+                        for idx, task in enumerate(steps):
+                            # Use the subtask_id from the step, not a generated one!
+                            subtask_id = task.get("subtask_id", f"subtask_{idx}")
+                            required_agent_id = task.get("required_agent_id") or task.get("agent_id")
+
+                            if required_agent_id:
+                                # Get the agent details
+                                agent = db.query(Agent).filter(Agent.id == required_agent_id).first()
+                                if agent:
+                                    from modules.orchestrator.llm import AgentMatch
+                                    agent_assignments[subtask_id] = [
+                                        AgentMatch(
+                                            agent_id=agent.id,
+                                            agent_name=agent.name,
+                                            agent_type=agent.agent_type,
+                                            match_score=1.0,  # Perfect match since explicitly specified
+                                            reasoning=f"Explicitly specified for task: {task.get('name', 'Unknown')}",
+                                            skills_matched=task.get("required_skills", []),
+                                            performance_score=0.8,
+                                            availability_score=1.0,
+                                            collaboration_score=1.0
+                                        )
+                                    ]
+                                    logger.info(f"✅ Task {idx}: Using specified agent {agent.name} (ID: {agent.id})")
+                                else:
+                                    logger.warning(f"⚠️ Task {idx}: Specified agent {required_agent_id} not found")
+
+                        # Create summary for explicit assignments
+                        selection_summary = {
+                            "total_assignments": len(agent_assignments),
+                            "unique_agents": len(set(matches[0].agent_id for matches in agent_assignments.values() if matches)),
+                            "avg_match_score": 1.0  # All explicit matches are perfect
+                        }
+
+                    else:
+                        # Fallback: Use batch LLM selector
+                        logger.info("⚡ Fallback: Using BATCH LLM agent selection")
+                        from core.llm.llm_agent_selector import LLMAgentSelector
+
+                        llm_selector = LLMAgentSelector(db_session=db)
+                        agent_assignments = await llm_selector.select_agents_for_subtasks(
+                            steps,
+                            workflow_context={
+                                "description": task_description,
+                                "workflow_id": execution.workflow_id
+                            }
+                        )
+
+                        # Summary for LLM selection
+                        unique_agents = set()
+                        for matches in agent_assignments.values():
+                            for match in matches:
+                                unique_agents.add(match.agent_id)
+
+                        total_score = 0
+                        count = 0
+                        for matches in agent_assignments.values():
+                            for match in matches:
+                                total_score += match.match_score
+                                count += 1
+                        avg_score = total_score / count if count > 0 else 0.9
+
+                        selection_summary = {
+                            "total_assignments": len(agent_assignments),
+                            "unique_agents": len(unique_agents),
+                            "avg_match_score": avg_score
+                        }
+                        logger.info(f"  Using LLM selection summary: {selection_summary}")
+
+                    # Store agent selection results
+                    execution.input_data["agent_selection"] = {
+                        "is_real": True,
+                        "summary": selection_summary,
+                        "assignments": {
+                            subtask_id: [
+                                {
+                                    "agent_id": match.agent_id,
+                                    "agent_name": match.agent_name,
+                                    "match_score": match.match_score,
+                                    "reasoning": match.reasoning
+                                }
+                                for match in matches
+                            ]
+                            for subtask_id, matches in agent_assignments.items()
+                        }
+                    }
+                    attributes.flag_modified(execution, "input_data")
+                    db.commit()
+
+                    logger.info(f"✅ Agent selection complete: {selection_summary['avg_match_score']:.2f} avg match score")
+
+                    # Enhance steps with selected agents
+                    for idx, step in enumerate(steps):
+                        # Use the subtask_id from the step, not a generated one!
+                        subtask_id = step.get("subtask_id", f"subtask_{idx}")
+                        if subtask_id in agent_assignments and agent_assignments[subtask_id]:
+                            best_match = agent_assignments[subtask_id][0]
+                            step["selected_agent"] = {
+                                "agent_id": best_match.agent_id,
+                                "agent_name": best_match.agent_name,
+                                "match_score": best_match.match_score
+                            }
                 
-                await stage_tracker.complete_stage(2, {
-                    "agents_assigned": len(agent_assignments),
-                    "avg_match_score": selection_summary.get('avg_match_score', 0)
-                })
+                    await stage_tracker.complete_stage(2, {
+                        "agents_assigned": len(agent_assignments),
+                        "avg_match_score": selection_summary.get('avg_match_score', 0)
+                    })
+
+                except Exception as e:
+                    logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
+                    logger.error(f"❌ Full traceback:", exc_info=True)
+                    execution.input_data["agent_selection"] = {
+                        "is_real": False,
+                        "error": str(e)
+                    }
+
+                    await stage_tracker.complete_stage(2, {"agents_assigned": len(agent_assignments)})
             
-            except Exception as e:
-                logger.error(f"❌ Agent selection failed: {e}, continuing without specific agents")
-                logger.error(f"❌ Full traceback:", exc_info=True)
-                execution.input_data["agent_selection"] = {
-                    "is_real": False,
-                    "error": str(e)
-                }
-                
-                await stage_tracker.complete_stage(2, {"agents_assigned": len(agent_assignments)})
-            
-            # MEMORY SYSTEM INITIALIZATION (PRD 04 & 05 Integration)
-            logger.info(f"🧠 Initializing memory system...")
-            memory_integrator = None
+            # MEMORY SYSTEM INITIALIZATION (Mem0 Integration with Workspace Isolation)
+            logger.info(f"🧠 Initializing Mem0 memory system with workspace isolation...")
+            mem0_client = None
             memory_retrieval_results = {}
+
+            # Get workspace_id for memory scoping
+            workspace_id = execution.workspace_id
+
             try:
-                # Initialize memory system using centralized embedding manager
-                from modules.memory.storage import HierarchicalMemorySystem
-                from modules.orchestrator.stages import WorkflowMemoryIntegrator
-                
-                # Memory system uses centralized embedding manager internally
-                memory_system = HierarchicalMemorySystem()
-                
-                memory_integrator = WorkflowMemoryIntegrator(memory_system)
-                logger.info(f"✅ Memory system initialized")
-                    
-                # Get agent IDs from assignments
-                agent_ids = []
-                for subtask_id, matches in agent_assignments.items():
-                    if matches and len(matches) > 0:
-                        agent_ids.append(matches[0].agent_id)
-                
-                # Retrieve memories for context
-                logger.info(f"🧠 Retrieving memories for {len(agent_ids)} agents...")
-                memory_retrieval_results = await memory_integrator.retrieve_workflow_memories(
-                    workflow_id=execution.workflow_id,
-                    workflow_description=task_description,
-                    agent_ids=list(set(agent_ids))  # Unique agent IDs
+                # Initialize Mem0 client
+                from modules.memory.integrations.mem0_client import Mem0Client
+
+                mem0_client = Mem0Client()
+                logger.info(f"✅ Mem0 client initialized")
+
+                # Create workspace-scoped user_id for memory isolation
+                # Format: workspace_{workspace_id}_workflow_{workflow_id}
+                memory_scope_id = f"workspace_{workspace_id}_workflow_{execution.workflow_id}"
+
+                # Retrieve workflow memories from Mem0
+                logger.info(f"🧠 Retrieving workflow memories for scope: {memory_scope_id}")
+
+                memories = mem0_client.search(
+                    query=task_description,
+                    user_id=memory_scope_id,
+                    limit=10
                 )
-                
+
+                logger.info(f"✅ Retrieved {len(memories)} memories from Mem0")
+
+                # Format memories for execution context
+                memory_retrieval_results = {
+                    "total_memories_retrieved": len(memories),
+                    "workspace_id": str(workspace_id),
+                    "memory_scope": memory_scope_id,
+                    "memories": [
+                        {
+                            "id": m.get("id"),
+                            "content": m.get("memory"),
+                            "score": m.get("score", 0),
+                            "created_at": m.get("created_at")
+                        }
+                        for m in memories
+                    ]
+                }
+
                 execution.input_data["memory_retrieval"] = {
                     "is_real": True,
                     "results": memory_retrieval_results
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-                
-                logger.info(
-                    f"✅ Retrieved {memory_retrieval_results.get('total_memories_retrieved', 0)} memories "
-                    f"for {len(memory_retrieval_results.get('agent_memories', {}))} agents"
-                )
-                
-                # Enhanced logging for UI visibility
-                memory_details = []
-                for agent_id, agent_mems in memory_retrieval_results.get('agent_memories', {}).items():
-                    working = len(agent_mems.get('working_memory', []))
-                    short = len(agent_mems.get('short_term', []))
-                    long = len(agent_mems.get('long_term', []))
-                    if working + short + long > 0:
-                        memory_details.append(f"Agent {agent_id}: {working}W/{short}S/{long}L")
-                
-                if memory_details:
-                    logger.info(f"📊 Memory breakdown: {', '.join(memory_details)}")
-                
+
+                # Enhanced logging
+                if memories:
+                    sample_memories = [m.get("memory", "")[:50] for m in memories[:3]]
+                    logger.info(f"📊 Sample memories: {sample_memories}")
+
             except Exception as e:
-                logger.error(f"❌ Memory initialization or retrieval failed: {e}")
+                logger.error(f"❌ Mem0 initialization or retrieval failed: {e}")
                 logger.warning(f"⚠️ Continuing workflow without memory system")
                 execution.input_data["memory_retrieval"] = {
                     "is_real": False,
@@ -1710,8 +1886,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-                # Ensure memory_integrator is None so we know it's not available
-                memory_integrator = None
+                # Ensure mem0_client is None so we know it's not available
+                mem0_client = None
             
             # ========== STAGE 3: CONTEXT ENGINEERING ==========
             await stage_tracker.start_stage(3)
@@ -1732,9 +1908,8 @@ async def execute_workflow_with_progress(execution_id: int, options: Dict[str, A
                     # If context is a JSON string, parse it
                     if isinstance(workflow_ctx, str):
                         try:
-                            import json
                             workflow_ctx = json.loads(workflow_ctx)
-                        except:
+                        except Exception:
                             workflow_ctx = None
                     
                     # Only enhance subtasks that need context
@@ -2119,33 +2294,80 @@ Subtask Results:
             
             # ========== STAGE 8: MEMORY STORAGE ==========
             await stage_tracker.start_stage(8)
-            
-            # MEMORY STORAGE (Store experiences in agent memory)
-            logger.info(f"💾 Storing execution experiences...")
+
+            # MEMORY STORAGE (Store experiences to Mem0 with workspace isolation)
+            logger.info(f"💾 Storing execution experiences to Mem0...")
             memory_storage_results = {}
             try:
-                if memory_integrator is not None:
-                    memory_storage_results = await memory_integrator.store_execution_experiences(
-                        workflow_id=execution.workflow_id,
-                        execution_id=execution_id,
-                        subtask_executions=subtask_results if execution.input_data.get("agent_execution", {}).get("is_real") else {},
-                        aggregated_results=aggregated_results
+                if mem0_client is not None and 'aggregated_results' in locals():
+                    # Create workspace-scoped memory storage
+                    memory_scope_id = f"workspace_{workspace_id}_workflow_{execution.workflow_id}"
+
+                    # Build experience summary from execution
+                    quality_scores = aggregated_results.quality_scores
+                    execution_summary_text = f"""
+Workflow Execution Complete:
+- Workflow: {workflow.name if workflow else 'Unknown'}
+- Execution ID: {execution_id}
+- Status: Completed
+- Overall Quality: {quality_scores.overall:.0%}
+- Completeness: {quality_scores.completeness:.0%}
+- Accuracy: {quality_scores.accuracy:.0%}
+- Efficiency: {quality_scores.efficiency:.0%}
+- Reliability: {quality_scores.reliability:.0%}
+- Subtasks: {len(steps)}
+- Success Rate: {execution_summary.get('success_rate', 0):.0%} if 'execution_summary' in locals() else 'N/A'
+- Total Tokens: {aggregated_results.total_tokens_used}
+- Total Time: {aggregated_results.total_execution_time_ms}ms
+
+Key Learnings:
+"""
+                    # Add agent-specific learnings
+                    for idx, step in enumerate(steps[:5]):  # Limit to top 5
+                        if "execution_result" in step:
+                            result = step["execution_result"]
+                            execution_summary_text += f"\n- Step {idx+1}: {step.get('description', 'Unknown')[:80]} - {result.get('status', 'unknown')}"
+
+                    # Store to Mem0
+                    messages = [
+                        {"role": "system", "content": "Workflow execution completed"},
+                        {"role": "assistant", "content": execution_summary_text}
+                    ]
+
+                    metadata = {
+                        "workspace_id": str(workspace_id),
+                        "workflow_id": execution.workflow_id,
+                        "execution_id": execution_id,
+                        "quality_score": quality_scores.overall,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                    logger.info(f"💾 Storing memory to Mem0 scope: {memory_scope_id}")
+                    mem0_result = mem0_client.add(
+                        messages=messages,
+                        user_id=memory_scope_id,
+                        metadata=metadata
                     )
-                    
+
+                    memory_storage_results = {
+                        "total_experiences": 1,
+                        "workspace_id": str(workspace_id),
+                        "memory_scope": memory_scope_id,
+                        "mem0_result": mem0_result,
+                        "quality_score": quality_scores.overall
+                    }
+
                     execution.input_data["memory_storage"] = {
                         "is_real": True,
                         "results": memory_storage_results
                     }
                     attributes.flag_modified(execution, "input_data")
                     db.commit()
-                    
-                    logger.info(
-                        f"✅ Stored {memory_storage_results.get('total_experiences', 0)} experiences "
-                        f"across {len(memory_storage_results.get('per_agent', {}))} agents"
-                    )
+
+                    logger.info(f"✅ Stored execution experience to Mem0 (quality: {quality_scores.overall:.0%})")
                 else:
-                    logger.warning("Memory integrator not initialized, skipping memory storage")
-                    
+                    logger.warning("Mem0 client not initialized, skipping memory storage")
+
             except Exception as e:
                 logger.error(f"❌ Memory storage failed: {e}")
                 execution.input_data["memory_storage"] = {
@@ -2154,57 +2376,10 @@ Subtask Results:
                 }
                 attributes.flag_modified(execution, "input_data")
                 db.commit()
-            
-            
-            # MEMORY CONSOLIDATION (Consolidate learnings to long-term memory)
-            logger.info(f"🧠 Consolidating learnings to long-term memory...")
-            memory_consolidation_results = {}
-            try:
-                if memory_integrator is not None:
-                    memory_consolidation_results = await memory_integrator.consolidate_workflow_learnings(
-                        workflow_id=execution.workflow_id,
-                        execution_id=execution_id,
-                        aggregated_results=aggregated_results,
-                        decomposition_metadata=execution.input_data.get("decomposition", {})
-                    )
-                    
-                    execution.input_data["memory_consolidation"] = {
-                        "is_real": True,
-                        "results": memory_consolidation_results
-                    }
-                    
-                    # Get full memory integration summary
-                    memory_summary = memory_integrator.get_memory_integration_summary(
-                        retrieval_results=memory_retrieval_results,
-                        storage_results=memory_storage_results,
-                        consolidation_results=memory_consolidation_results
-                    )
-                    
-                    execution.input_data["memory_integration_summary"] = memory_summary
-                    attributes.flag_modified(execution, "input_data")
-                    db.commit()
-                    
-                    logger.info(
-                        f"✅ Memory consolidation complete: "
-                        f"{memory_consolidation_results.get('patterns_extracted', 0)} patterns, "
-                        f"{memory_consolidation_results.get('knowledge_nodes_created', 0)} knowledge nodes, "
-                        f"{len(memory_consolidation_results.get('agents_consolidated', []))} agents consolidated"
-                    )
-                else:
-                    logger.warning("Memory integrator not initialized, skipping consolidation")
-                    
-            except Exception as e:
-                logger.error(f"❌ Memory consolidation failed: {e}")
-                execution.input_data["memory_consolidation"] = {
-                    "is_real": False,
-                    "error": str(e)
-                }
-                attributes.flag_modified(execution, "input_data")
-                db.commit()
-            
+
             await stage_tracker.complete_stage(8, {
-                "experiences_stored": memory_storage_results.get('total_experiences', 0) if 'memory_storage_results' in locals() else 0,
-                "patterns_extracted": memory_consolidation_results.get('patterns_extracted', 0) if 'memory_consolidation_results' in locals() else 0
+                "experiences_stored": memory_storage_results.get('total_experiences', 0) if memory_storage_results else 0,
+                "quality_score": memory_storage_results.get('quality_score', 0) if memory_storage_results else 0
             })
             
             # ========== STAGE 9: RESPONSE GENERATION ==========

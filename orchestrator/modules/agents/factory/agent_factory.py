@@ -9,6 +9,7 @@ Multiple agents of different types can run simultaneously.
 
 import os
 import logging
+import re
 import time
 from typing import Dict, Any, List, Optional, Union, Tuple
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ from core.llm import (
 from core.models import (
     Agent, Skill, PriorityLevel, Base,
 )
-from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+from core.models.composio_cache import AgentAppAssignment, ComposioAppCache, ComposioActionCache
 from modules.agents.services.skill_loader import get_skill_loader
 
 # Import new services (lazy import to avoid circular deps)
@@ -998,13 +999,14 @@ Available Shell Tools:
         enable_actions: bool = True,
         action_executor: Optional[Any] = None,
         required_tools: Optional[List[str]] = None,
-        workspace_dir: Optional[str] = None  # Unique workspace per execution
+        workspace_dir: Optional[str] = None,  # Unique workspace per execution
+        composio_action_names: Optional[set] = None,  # Pre-resolved action names (recipe semantic search)
     ) -> Dict[str, Any]:
         """
         Execute a task with orchestrator-provided prompt.
-        
+
         The orchestrator provides the fully engineered prompt using Context Engineering.
-        
+
         Args:
             agent: Agent ID or runtime
             prompt: User prompt from orchestrator (may be atomic, molecular, or cellular)
@@ -1013,7 +1015,10 @@ Available Shell Tools:
             use_memory: Include agent's short-term memory
             max_retries: Number of retries on failure
             workspace_dir: Workspace directory for file operations
-            
+            composio_action_names: Pre-resolved Composio action names from semantic search.
+                When provided, these constrain the composio_execute action enum instead of
+                using the hint service.  Used by recipes for single-shot reliability.
+
         Returns:
             Execution result with LLM response
         """
@@ -1093,6 +1098,44 @@ Available Shell Tools:
                     if "assistant_response" in mem:
                         messages.append({"role": "assistant", "content": mem["assistant_response"]})
             
+            # Inject recipe step context if this is a multi-step recipe execution.
+            # This gives the agent explicit awareness of what previous steps produced,
+            # so references like "results" or "output" in the prompt are unambiguous.
+            # Supports both new keyed step_outputs dict and legacy step_results list.
+            _has_step_outputs = context and context.get("step_outputs")
+            _has_step_results = context and context.get("step_results")
+            if _has_step_outputs or _has_step_results:
+                recipe_step = context.get("step", "?")
+                total_steps = context.get("total_steps", "?")
+
+                if _has_step_outputs:
+                    # New path: keyed dict {"email_summary": {text, tool_calls, ...}}
+                    step_outputs = context["step_outputs"]
+                    completed_count = len(step_outputs)
+                else:
+                    # Legacy path: list of step result dicts
+                    prev_results = context["step_results"]
+                    completed_count = len([sr for sr in prev_results if sr.get("status") == "completed"])
+
+                if completed_count > 0:
+                    recipe_ctx_lines = [
+                        f"You are executing step {recipe_step} of {total_steps} in a recipe.",
+                        "Previous steps have already completed. Their outputs are provided",
+                        "in a separate system context message. When the user's task mentions",
+                        "'results', 'output', 'data', or 'findings', it refers to that",
+                        "previous step content. Use it directly — do not invent or fabricate data.",
+                    ]
+                    messages.append({"role": "system", "content": "\n".join(recipe_ctx_lines)})
+                    self.logger.info(
+                        f"📋 Recipe context: step {recipe_step}/{total_steps}, "
+                        f"{completed_count} prior step(s) injected"
+                    )
+
+            # Preserve the original user prompt before any augmentation.
+            # This is used for Composio hint generation so action-instructions
+            # injected below don't skew intent matching.
+            original_user_prompt = prompt
+
             # Check if actions are needed and add capabilities
             action_executor = None
             if enable_actions and self._requires_actions(prompt):
@@ -1122,11 +1165,104 @@ To use actions, respond with JSON blocks like:
                 tool_names = [t['function']['name'] for t in skill_tool_schemas_from_prompt]
                 self.logger.info(f"🦸 PRD-22: Added {len(skill_tool_schemas_from_prompt)} skill tools: {tool_names}")
             
+            # Composio tool injection — ONE path for all consumers (chatbot, recipe, trigger, API).
+            # Always uses composio_execute meta-tool + enum constraint.
+            # Recipes provide pre-resolved action names via composio_action_names to
+            # replace the hint service's action selection (semantic search > ILIKE).
+            _composio_workspace_id = None
+            composio_apps = [t for t in (agent_runtime.tools or []) if t.get("provider") == "Composio"]
+            if composio_apps:
+                composio_schema = {
+                    "type": "function",
+                    "function": {
+                        "name": "composio_execute",
+                        "description": (
+                            "Execute an external app action via Composio (connected third-party apps). "
+                            "Use this for actions in email/messaging and developer tools—e.g., "
+                            "read/send emails, post messages, create/manage repositories, issues, and pull requests. "
+                            "IMPORTANT: This tool has a 2-attempt limit. If the first attempt "
+                            "fails, check the error message carefully before retrying."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "app_name": {"type": "string", "description": "App name (e.g., 'GMAIL', 'SLACK', 'GITHUB')"},
+                                "action": {"type": "string", "description": "Action name from Composio (e.g., 'GMAIL_LIST_EMAILS')"},
+                                "params": {"type": "object", "description": "Action parameters (schema depends on the action)", "default": {}}
+                            },
+                            "required": ["action"]
+                        }
+                    }
+                }
+                tool_schemas.append(composio_schema)
+
+                # Resolve workspace_id once for later tool execution calls
+                db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
+                _composio_workspace_id = getattr(db_agent, 'workspace_id', None) if db_agent else None
+
+                if composio_action_names:
+                    # Recipe path: action names already resolved via semantic search.
+                    # Use them directly as the enum constraint — skip the hint service.
+                    sorted_actions = sorted(composio_action_names)
+                    composio_schema["function"]["parameters"]["properties"]["action"] = {
+                        "type": "string",
+                        "description": "Action name — must be one of these actions.",
+                        "enum": sorted_actions,
+                    }
+
+                    # Build a concise hint message so the LLM knows what actions are available
+                    app_names = [t.get("name") for t in composio_apps]
+                    hint_lines = [
+                        f"You have Composio apps connected: {', '.join(app_names)}.",
+                        f"Available actions (use exactly these names): {', '.join(sorted_actions)}.",
+                        "Call composio_execute with the action name and required params.",
+                    ]
+                    insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+                    messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
+
+                    self.logger.info(
+                        f"🔌 Composio (semantic): constrained to {len(sorted_actions)} actions: "
+                        f"{sorted_actions} (workspace={_composio_workspace_id})"
+                    )
+                else:
+                    # Chatbot/default path: use hint service for action selection.
+                    # NOTE: Uses original_user_prompt (not the possibly-augmented `prompt`)
+                    # to avoid action-instruction injection skewing intent matching.
+                    from modules.tools.services.composio_hint_service import ComposioHintService
+                    _hint_service = ComposioHintService(self.db_session)
+                    _hint_result = _hint_service.build_hints(
+                        agent_id=agent_runtime.agent_id,
+                        prompt=original_user_prompt,
+                        workspace_id=_composio_workspace_id,
+                    )
+                    if _hint_result.hint_lines:
+                        insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+                        messages.insert(insert_at, {"role": "system", "content": "\n".join(_hint_result.hint_lines)})
+
+                    # Constrain the action field to matched actions so the LLM cannot
+                    # hallucinate wrong action names.
+                    if _hint_result.matched_actions:
+                        final_actions = _hint_result.matched_actions
+
+                        composio_schema["function"]["parameters"]["properties"]["action"] = {
+                            "type": "string",
+                            "description": "Action name — must be one of the candidate actions listed above.",
+                            "enum": final_actions,
+                        }
+
+                    app_names = [t.get("name") for t in composio_apps]
+                    self.logger.info(
+                        f"🔌 Composio: hints={len(_hint_result.hint_lines)} lines, "
+                        f"strategy={_hint_result.strategy_used}, "
+                        f"constrained_actions={len(_hint_result.matched_actions)}, "
+                        f"apps={app_names} (workspace={_composio_workspace_id})"
+                    )
+
             all_tool_names = [t['function']['name'] for t in tool_schemas]
             self.logger.info(f"📦 Providing {len(tool_schemas)} total tools to agent: {all_tool_names}")
-            
+
             action_executor = action_executor or get_action_executor()  # Ensure executor exists
-            
+
             # Add the main prompt from orchestrator
             messages.append({"role": "user", "content": prompt})
             
@@ -1187,12 +1323,13 @@ To use actions, respond with JSON blocks like:
                             executed_calls_hashes.add(call_hash)
                             
                             self.logger.info(f"  🛠️  [TRACE] Calling {func_name}({func_args})")
-                            
+
                             try:
                                 result = await tool_executor.execute_tool(
                                     tool_name=func_name,
                                     parameters=func_args,
-                                    agent_id=agent_runtime.agent_id
+                                    agent_id=agent_runtime.agent_id,
+                                    workspace_id=_composio_workspace_id
                                 )
                                 tool_results.append({
                                     "tool_call_id": tool_call['id'],
@@ -1695,7 +1832,7 @@ To use actions, respond with JSON blocks like:
                     db.query(AgentAppAssignment)
                     .filter(
                         AgentAppAssignment.agent_id == agent.id,
-                        AgentAppAssignment.is_active == True,
+                        AgentAppAssignment.is_active.is_(True),
                         AgentAppAssignment.app_type == "EXTERNAL",
                     )
                     .all()
@@ -1906,10 +2043,16 @@ To use actions, respond with JSON blocks like:
                 
                 # PRD-17 Phase 3: Reuse agent's tool_executor (initialized once)
                 tool_executor = agent_runtime.tool_executor if agent_runtime else get_unified_tool_executor(self.db_session)
+                # Resolve workspace_id from agent_runtime if available
+                _ws_id = None
+                if agent_runtime and hasattr(agent_runtime, 'agent_id'):
+                    _db_agent = self.db_session.query(Agent).filter(Agent.id == agent_runtime.agent_id).first()
+                    _ws_id = getattr(_db_agent, 'workspace_id', None) if _db_agent else None
                 result = await tool_executor.execute_tool(
                     tool_name=action_type,
                     parameters=params,
-                    agent_id=0
+                    agent_id=agent_runtime.agent_id if agent_runtime else 0,
+                    workspace_id=_ws_id
                 )
                 
                 # Enhanced logging for research tools
@@ -1964,7 +2107,7 @@ To use actions, respond with JSON blocks like:
                 self.db_session.query(AgentAppAssignment)
                 .filter(
                     AgentAppAssignment.agent_id == agent_id,
-                    AgentAppAssignment.is_active == True,
+                    AgentAppAssignment.is_active.is_(True),
                     AgentAppAssignment.app_type == "EXTERNAL",
                 )
                 .all()
@@ -2002,6 +2145,27 @@ To use actions, respond with JSON blocks like:
             self.logger.warning(f"Failed to load Composio apps for agent {agent_id}: {e}")
             return []
     
+    def _build_composio_hints(self, agent_id: int, task_prompt: str) -> List[str]:
+        """
+        Build Composio app/action hint lines for system message injection.
+
+        Delegates to the unified ComposioHintService which implements 3-tier
+        resolution: capability-based → token-filtered (with mandatory gate) → top-N fallback.
+        """
+        try:
+            from modules.tools.services.composio_hint_service import ComposioHintService
+
+            hint_service = ComposioHintService(self.db_session)
+            result = hint_service.build_hints(
+                agent_id=agent_id,
+                prompt=task_prompt,
+                workspace_id=None,  # Service resolves from Agent.workspace_id
+            )
+            return result.hint_lines
+        except Exception as e:
+            self.logger.warning(f"Failed to build Composio hints for agent {agent_id}: {e}", exc_info=True)
+            return []
+
     def get_agent_tool_capability(self, agent_runtime: AgentRuntime, capability: str) -> bool:
         """
         Check if an agent has a specific tool capability.

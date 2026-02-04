@@ -604,125 +604,21 @@ class StreamingChatService:
                         )
 
             # Provide Composio app/action hints based on agent assignments (DB-backed).
-            # IMPORTANT: This must remain generic (no per-feature hardcoding).
+            # Delegates to unified ComposioHintService (3-tier resolution).
             try:
-                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
-                from core.composio.entity_manager import EntityManager
-
                 if latest_text and agent_id:
-                    # Assigned EXTERNAL apps for this agent
-                    assigned = (
-                        self.db.query(AgentAppAssignment)
-                        .filter(
-                            AgentAppAssignment.agent_id == agent_id,
-                            AgentAppAssignment.is_active == True,
-                            AgentAppAssignment.app_type == "EXTERNAL",
-                        )
-                        .all()
+                    from modules.tools.services.composio_hint_service import ComposioHintService
+
+                    hint_service = ComposioHintService(self.db)
+                    hint_result = hint_service.build_hints(
+                        agent_id=agent_id,
+                        prompt=latest_text,
+                        workspace_id=self.workspace_id,
                     )
-                    assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-
-                    # Optionally intersect with connected apps in this workspace
-                    connected_apps: List[str] = []
-                    if self.workspace_id:
-                        manager = EntityManager(self.db)
-                        entity = manager.get_entity_by_workspace(self.workspace_id)
-                        if entity:
-                            connected_apps = [
-                                (c.get("app_name") or "").upper()
-                                for c in manager.get_entity_connections(entity["id"])
-                                if c.get("status") == "active"
-                            ]
-
-                    allowed_apps = assigned_apps
-                    if connected_apps:
-                        connected_set = set(connected_apps)
-                        allowed_apps = [a for a in assigned_apps if a in connected_set]
-
-                    if allowed_apps:
-                        # Tokenize query once; use DB filtering instead of hardcoded synonyms.
-                        q = (latest_text or "").lower()
-                        q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
-                        # Keep token set small and meaningful (avoid stopword-like tokens).
-                        stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
-                        q_tokens = [t for t in q_tokens if t not in stop]
-                        q_tokens = q_tokens[:10]
-
-                        # Generic safety: if the user is trying to "send/post/message", avoid suggesting
-                        # destructive actions like ARCHIVE/DELETE/CLEAR/etc.
-                        is_messaging_intent = bool(re.search(r"\b(send|message|post|dm|chat)\b", q))
-                        dangerous_tokens = {
-                            "archive", "delete", "remove", "revoke", "clear", "close", "disable",
-                            "ban", "kick", "deactivate", "destroy", "purge",
-                        }
-
-                        hint_lines = [
-                            "You have these external apps assigned for this agent (via Composio): "
-                            + ", ".join(sorted(set(allowed_apps))) + ".",
-                            "When you need external data/actions (email, Slack, etc.), use `composio_execute`.",
-                        ]
-
-                        # Pull candidate actions *from the DB* using a filtered query per app.
-                        # This avoids loading thousands of actions into Python for scoring.
-                        # Schema-driven: Also fetch parameters to provide LLM hints
-                        if q_tokens:
-                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
-
-                            app_matches: List[tuple[str, List[str]]] = []
-                            top_action_params: Dict[str, str] = {}  # action_name -> param hints
-
-                            for app in allowed_apps[:12]:
-                                token_filters = []
-                                for tok in q_tokens:
-                                    like = f"%{tok}%"
-                                    token_filters.append(ComposioActionCache.action_name.ilike(like))
-                                    token_filters.append(ComposioActionCache.description.ilike(like))
-
-                                # Fetch action_name AND parameters for schema-driven hints
-                                rows = (
-                                    self.db.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
-                                    .filter(ComposioActionCache.app_name == app)
-                                    .filter(or_(*token_filters))
-                                    .limit(24)
-                                    .all()
-                                )
-                                actions = []
-                                for r in rows:
-                                    if not r or not r[0]:
-                                        continue
-                                    action_name = str(r[0])
-                                    if is_messaging_intent:
-                                        al = action_name.lower()
-                                        if any(tok in al for tok in dangerous_tokens):
-                                            continue
-                                    actions.append(action_name)
-                                    # Extract param hints for top 3 actions per app
-                                    if len(top_action_params) < 10 and r[1]:
-                                        param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
-                                        if param_hints:
-                                            top_action_params[action_name] = param_hints
-
-                                # Deduplicate while preserving order
-                                seen = set()
-                                actions = [a for a in actions if not (a in seen or seen.add(a))]
-                                if actions:
-                                    app_matches.append((app, actions[:6]))
-
-                            # Prefer apps with more matches
-                            app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
-                            for app, actions in app_matches[:6]:
-                                hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
-
-                            # Add parameter hints for top candidate actions (schema-driven, not hardcoded)
-                            if top_action_params:
-                                hint_lines.append("\nParameter hints for key actions:")
-                                for action_name, params in list(top_action_params.items())[:5]:
-                                    hint_lines.append(f"\n{action_name}:")
-                                    hint_lines.append(params)
-
+                    if hint_result.hint_lines:
                         insert_at = 2 if memory_context else 1
-                        llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_lines)})
-                        logger.info(f"[Composio Hints] Injected hints for apps={allowed_apps}, tokens={q_tokens}, param_hints={len(top_action_params)}")
+                        llm_messages.insert(insert_at, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                        logger.info(f"[Composio Hints] strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
             except Exception as exc:
                 logger.warning(f"Composio hint injection failed: {exc}", exc_info=True)
 
@@ -1412,92 +1308,21 @@ class StreamingChatService:
                 },
             )
 
-            # Provide Composio app/action hints based on agent assignments (schema-driven)
+            # Provide Composio app/action hints based on agent assignments.
+            # Delegates to unified ComposioHintService (3-tier resolution).
             try:
-                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
-                from core.composio.entity_manager import EntityManager
-                from sqlalchemy import or_
-
                 if latest_text and agent_id:
-                    assigned = (
-                        self.db.query(AgentAppAssignment)
-                        .filter(
-                            AgentAppAssignment.agent_id == agent_id,
-                            AgentAppAssignment.is_active == True,
-                            AgentAppAssignment.app_type == "EXTERNAL",
-                        )
-                        .all()
+                    from modules.tools.services.composio_hint_service import ComposioHintService
+
+                    hint_service = ComposioHintService(self.db)
+                    hint_result = hint_service.build_hints(
+                        agent_id=agent_id,
+                        prompt=latest_text,
+                        workspace_id=self.workspace_id,
                     )
-                    assigned_apps = [(a.app_name or "").upper() for a in assigned if a.app_name]
-
-                    connected_apps: List[str] = []
-                    if self.workspace_id:
-                        manager = EntityManager(self.db)
-                        entity = manager.get_entity_by_workspace(self.workspace_id)
-                        if entity:
-                            connected_apps = [
-                                (c.get("app_name") or "").upper()
-                                for c in manager.get_entity_connections(entity["id"])
-                                if c.get("status") == "active"
-                            ]
-
-                    allowed_apps = assigned_apps
-                    if connected_apps:
-                        connected_set = set(connected_apps)
-                        allowed_apps = [a for a in assigned_apps if a in connected_set]
-
-                    if allowed_apps:
-                        q = (latest_text or "").lower()
-                        q_tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) > 2]
-                        stop = {"the", "and", "for", "with", "from", "that", "this", "have", "has", "are", "you", "your"}
-                        q_tokens = [t for t in q_tokens if t not in stop][:10]
-
-                        hint_lines = [
-                            "You have these external apps assigned (via Composio): "
-                            + ", ".join(sorted(set(allowed_apps))) + ".",
-                            "Use `composio_execute` with action name and params.",
-                        ]
-
-                        top_action_params: Dict[str, str] = {}
-                        if q_tokens:
-                            from modules.tools.formatting.schema_detector import ParameterHintExtractor
-
-                            for app in allowed_apps[:6]:
-                                token_filters = []
-                                for tok in q_tokens:
-                                    like = f"%{tok}%"
-                                    token_filters.append(ComposioActionCache.action_name.ilike(like))
-                                    token_filters.append(ComposioActionCache.description.ilike(like))
-
-                                rows = (
-                                    self.db.query(ComposioActionCache.action_name, ComposioActionCache.parameters)
-                                    .filter(ComposioActionCache.app_name == app)
-                                    .filter(or_(*token_filters))
-                                    .limit(10)
-                                    .all()
-                                )
-                                actions = []
-                                for r in rows:
-                                    if not r or not r[0]:
-                                        continue
-                                    action_name = str(r[0])
-                                    actions.append(action_name)
-                                    if len(top_action_params) < 5 and r[1]:
-                                        param_hints = ParameterHintExtractor.extract_hints(r[1], max_params=5)
-                                        if param_hints:
-                                            top_action_params[action_name] = param_hints
-
-                                if actions:
-                                    hint_lines.append(f"- {app} actions: {', '.join(actions[:5])}")
-
-                            if top_action_params:
-                                hint_lines.append("\nParameter hints:")
-                                for action_name, params in list(top_action_params.items())[:3]:
-                                    hint_lines.append(f"\n{action_name}:")
-                                    hint_lines.append(params)
-
-                        llm_messages.insert(3, {"role": "system", "content": "\n".join(hint_lines)})
-                        logger.info(f"[Composio Hints] Agent {agent_id}: apps={allowed_apps}, tokens={q_tokens}, hints={len(top_action_params)}")
+                    if hint_result.hint_lines:
+                        llm_messages.insert(3, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                        logger.info(f"[Composio Hints] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
             except Exception as exc:
                 logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
 

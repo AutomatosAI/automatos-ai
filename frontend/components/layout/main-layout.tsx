@@ -24,6 +24,7 @@ export function MainLayout({ children }: MainLayoutProps) {
     if (pathname.startsWith('/documents')) return 'documents'
     if (pathname.startsWith('/workflows')) return 'workflows'
     if (pathname.startsWith('/tools')) return 'tools'
+    if (pathname.startsWith('/marketplace')) return 'marketplace'
     if (pathname.startsWith('/analytics')) return 'analytics'
     if (pathname.startsWith('/context')) return 'context'
     if (pathname.startsWith('/playbooks')) return 'playbooks'
@@ -69,13 +70,11 @@ export function MainLayout({ children }: MainLayoutProps) {
         </main>
       </div>
       
-      {/* Chat Widget - Only show on non-chat pages */}
-      {!pathname.startsWith('/chat') && (
-        <ChatWidget 
-          position="bottom-right"
-          context={chatContext}
-        />
-      )}
+      {/* Pilot Helper Widget — shown on ALL pages (overlay, no navigation) */}
+      <ChatWidget
+        position="bottom-right"
+        context={chatContext}
+      />
     </div>
   )
 }

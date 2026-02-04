@@ -137,6 +137,18 @@ class Config:
     NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL")
     
     # =============================================================================
+    # ROUTING (Universal Orchestrator Router)
+    # =============================================================================
+    COMPOSIO_WEBHOOK_SECRET: str = os.getenv("COMPOSIO_WEBHOOK_SECRET")
+    ROUTING_CACHE_TTL_HOURS: int = int(os.getenv("ROUTING_CACHE_TTL_HOURS", "24"))
+    ROUTING_LLM_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROUTING_LLM_CONFIDENCE_THRESHOLD", "0.5"))
+
+    # GitHub repo used by automated recipes (e.g., Jira Bug Triage → PR)
+    GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
+    GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
+    GITHUB_DEFAULT_BRANCH: str = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
+
+    # =============================================================================
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
@@ -149,6 +161,12 @@ class Config:
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
     S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
     
+    # =============================================================================
+    # JIRA BUG REPORTS (Pilot Helper Widget)
+    # =============================================================================
+    JIRA_PROJECT_KEY: str = os.getenv("JIRA_PROJECT_KEY", "PILOT")
+    JIRA_BUG_REPORTS_ENABLED: bool = os.getenv("JIRA_BUG_REPORTS_ENABLED", "true").lower() == "true"
+
     # =============================================================================
     # RAG / KNOWLEDGE SERVICES API
     # =============================================================================

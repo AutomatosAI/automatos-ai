@@ -6,7 +6,7 @@ import { usePageAPI } from '@/hooks/use-page-api'
 
 export default function ToolsPage() {
   usePageAPI('tools')
-  
+
   return (
     <MainLayout>
       <ToolsDashboard />

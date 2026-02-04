@@ -92,6 +92,9 @@ class ComposioClient:
         self._toolset = None
         self._action_count_cache: Dict[str, Any] = {}
         self._action_count_ttl_seconds = 600
+        # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls
+        self._auth_config_cache: Dict[str, Optional[str]] = {}
+        self._auth_config_cache_ttl = 3600  # 1 hour TTL
     
     @property
     def composio(self):
@@ -139,20 +142,32 @@ class ComposioClient:
     def _resolve_auth_config_id(self, app_slug: str) -> Optional[str]:
         """
         Find existing active Auth Config ID for an app slug.
+        PERFORMANCE: Cached for 1 hour to avoid repeated API calls.
         """
+        # Check cache first
+        cache_key = app_slug.lower()
+        if cache_key in self._auth_config_cache:
+            return self._auth_config_cache[cache_key]
+
         try:
-            # List all auth configs
+            # List all auth configs (expensive call)
+            logger.debug(f"Fetching auth_configs from Composio API for {app_slug}")
             response = self.composio.auth_configs.list()
             items = response.items if hasattr(response, 'items') else response.data if hasattr(response, 'data') else []
-            
+
             for c in items:
                 # Check for matching toolkit slug and enabled status
                 # Safe access to nested attributes
                 c_slug = getattr(c.toolkit, 'slug', '') if hasattr(c, 'toolkit') else ''
                 c_status = getattr(c, 'status', 'ENABLED')
-                
+
                 if c_slug.lower() == app_slug.lower() and c_status == 'ENABLED':
+                    # Cache the result
+                    self._auth_config_cache[cache_key] = c.id
                     return c.id
+
+            # Cache None result too (to avoid retrying)
+            self._auth_config_cache[cache_key] = None
             return None
         except Exception as e:
             logger.error(f"Error resolving auth config for {app_slug}: {e}")
@@ -361,20 +376,45 @@ class ComposioClient:
     
     def get_available_apps(self) -> List[Dict[str, Any]]:
         """
-        Get all available Composio apps.
-        
+        Get all available Composio apps with full pagination.
+
+        The Composio API defaults to 100 items per page. We paginate using
+        cursor-based pagination to fetch ALL toolkits (typically 500+).
+
         Returns:
             List of available apps with metadata
         """
         if not self.composio:
             return []
-        
+
         try:
-            # Use toolkits.get() to list apps
-            apps = self.composio.toolkits.get()
+            # Paginate through all toolkit pages (max 1000 per page)
+            all_apps = []
+            cursor = None
+            page = 0
+            while True:
+                page += 1
+                kwargs = {"limit": 1000}
+                if cursor:
+                    kwargs["cursor"] = cursor
+                response = self.composio.toolkits.list(**kwargs)
+                items = response.items or []
+                all_apps.extend(items)
+                total = getattr(response, "total_items", len(all_apps))
+                logger.info(
+                    f"Fetched page {page}: {len(items)} toolkits "
+                    f"({len(all_apps)}/{int(total)} total)"
+                )
+                next_cursor = getattr(response, "next_cursor", None)
+                if not next_cursor or not items or len(all_apps) >= total:
+                    break
+                cursor = next_cursor
+
+            logger.info(f"Fetched {len(all_apps)} total toolkits from Composio API")
+
             trigger_map = self._build_trigger_map()
             results = []
-            for app in apps:
+            for app in all_apps:
                 # Try multiple sources for triggers
                 raw_triggers = None
                 source = "none"
@@ -387,9 +427,9 @@ class ComposioClient:
                 if not raw_triggers:
                     raw_triggers = trigger_map.get(app.slug.lower(), [])
                     source = f"trigger_map[{app.slug.lower()}]"
-                
+
                 normalized_triggers = self._normalize_triggers(raw_triggers)
-                
+
                 # Log if we found triggers (for debugging)
                 if normalized_triggers and app.slug.lower() in ["slack", "gmail", "github"]:
                     logger.debug(f"Found {len(normalized_triggers)} triggers for {app.slug} (source: {source})")
@@ -404,16 +444,25 @@ class ComposioClient:
                     )
                 else:
                     description = getattr(app, "description", None) or ""
-                
+
+                # SDK uses tools_count (not actions_count)
+                action_count = 0
+                if hasattr(app, "meta"):
+                    action_count = int(
+                        getattr(app.meta, "tools_count", 0)
+                        or getattr(app.meta, "actions_count", 0)
+                        or 0
+                    )
+
                 results.append(
                     {
-                        "name": app.slug, # Use slug as the identifier (e.g. 'github')
+                        "name": app.slug,  # Use slug as the identifier (e.g. 'github')
                         "display_name": app.name,
                         "description": description,
                         "logo_url": app.meta.logo if hasattr(app, "meta") else None,
                         "categories": [c.name for c in app.meta.categories] if hasattr(app, "meta") and app.meta.categories else [],
                         "auth_schemes": app.auth_schemes or [],
-                        "action_count": getattr(app.meta, "actions_count", None) or getattr(app, "actions_count", None) or 0,
+                        "action_count": action_count,
                         "triggers": normalized_triggers,
                         "trigger_count": len(normalized_triggers),
                     }
@@ -645,13 +694,28 @@ class ComposioClient:
                     # Ignore non-function tools unless function payload exists.
                     continue
 
-                action_name = (
+                # Extract display name (human-readable) from function.name or item.name
+                display_name_raw = (
                     (fn or {}).get("name")
                     or item.get("name")
-                    or item.get("slug")
                     or ""
                 )
-                action_name = str(action_name).strip()
+                display_name_raw = str(display_name_raw).strip()
+
+                # Extract slug and derive API enum identifier (e.g., "GMAIL_FETCH_EMAILS")
+                item_slug = str(item.get("slug") or "").strip()
+                item_enum = str(item.get("enum") or "").strip()
+
+                # Prefer enum > slug-derived > display-name-derived
+                if item_enum:
+                    action_name = item_enum.upper()
+                elif item_slug:
+                    action_name = item_slug.upper().replace("-", "_")
+                elif display_name_raw:
+                    action_name = display_name_raw
+                else:
+                    continue
+
                 if not action_name:
                     continue
 
@@ -696,7 +760,7 @@ class ComposioClient:
                     {
                         "app_name": app_name,
                         "name": action_name,
-                        "display_name": (fn or {}).get("name") or item.get("display_name") or action_name,
+                        "display_name": display_name_raw or item.get("display_name") or action_name,
                         "description": (
                             (fn or {}).get("description")
                             or item.get("description")
@@ -742,6 +806,82 @@ class ComposioClient:
         self._action_count_cache[key] = (now, count)
         return count
     
+    def search_actions_for_step(
+        self,
+        search_query: str,
+        app_names: List[str],
+        entity_id: str,
+        limit: int = 5,
+        explicit_actions: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Use Composio SDK semantic search to find the best actions for a recipe step.
+
+        Returns OpenAI function-calling tool schemas so each Composio action becomes
+        its own top-level tool (the LLM calls ``SLACK_SEND_MESSAGE(channel, text)``
+        directly instead of ``composio_execute(action="SLACK_SEND_MESSAGE", ...)``).
+
+        Args:
+            search_query: Natural language description of the step's intent
+                          (e.g. "send a slack message").
+            app_names: Composio toolkit slugs the agent has connected
+                       (e.g. ["slack", "gmail"]).
+            entity_id: Composio entity / user id (typically workspace_id as str).
+            limit: Max actions to return per search (default 5).
+            explicit_actions: If provided, fetch these exact action schemas instead
+                              of searching.  Power-user override for ``tool_hints.explicit_actions``.
+
+        Returns:
+            List of dicts, each with:
+                - action_name: e.g. "SLACK_SEND_MESSAGE"
+                - schema: OpenAI function-calling tool dict (``{"type":"function","function":{...}}``)
+        """
+        if not self.toolset:
+            logger.warning("Composio toolset not initialized — cannot search actions")
+            return []
+
+        results: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        try:
+            if explicit_actions:
+                # Fetch exact action schemas by name
+                raw_tools = self.toolset.tools.get(
+                    user_id=entity_id,
+                    actions=explicit_actions,
+                )
+            else:
+                # Semantic search scoped to the agent's connected apps
+                raw_tools = self.toolset.tools.get(
+                    user_id=entity_id,
+                    search=search_query,
+                    toolkits=[n.lower() for n in app_names],
+                    limit=limit,
+                )
+
+            for tool in raw_tools:
+                if not isinstance(tool, dict) or tool.get("type") != "function":
+                    continue
+                fn = tool.get("function") or {}
+                action_name = fn.get("name") or ""
+                if not action_name or action_name in seen:
+                    continue
+                seen.add(action_name)
+                results.append({
+                    "action_name": action_name,
+                    "schema": tool,  # Already in OpenAI format
+                })
+
+        except Exception as e:
+            logger.error(f"Composio semantic search failed (query={search_query!r}): {e}")
+
+        logger.info(
+            f"[ComposioClient] search_actions_for_step query={search_query!r} "
+            f"apps={app_names} explicit={bool(explicit_actions)} → {len(results)} actions: "
+            f"{[r['action_name'] for r in results]}"
+        )
+        return results
+
     def execute_action(
         self,
         action: str,

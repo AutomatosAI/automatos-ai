@@ -631,10 +631,9 @@ class AgentExecutionManager:
             if not agent_id:
                 raise Exception("No agent assigned to subtask")
             
-            # 🔧 FIX: Load agent with skills and tool assignments from database
+            # 🔧 FIX: Load agent with skills from database
             agent = self.db.query(Agent).options(
                 joinedload(Agent.skills),
-                joinedload(Agent.tool_assignments)
             ).filter(Agent.id == agent_id).first()
             
             if not agent:

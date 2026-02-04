@@ -109,7 +109,14 @@ class EntityManager:
             if (c.get("status") or "").lower() == "active"
         ]
 
-    def add_connection(self, entity_id: str, app_name: str, status: str = "pending", **_: Any) -> None:
+    def add_connection(
+        self,
+        entity_id: str,
+        app_name: str,
+        status: str = "pending",
+        connection_id: Optional[str] = None,
+        **_: Any,
+    ) -> None:
         try:
             entity_pk = int(entity_id)
         except Exception:
@@ -126,6 +133,16 @@ class EntityManager:
             self.db.add(row)
         else:
             row.status = status or row.status
+
+        # Store connection_id when provided
+        if connection_id is not None:
+            row.connection_id = connection_id
+
+        # Set connected_at for active connections
+        if status == "active":
+            row.connected_at = row.connected_at or datetime.utcnow()
+
+        row.last_synced_at = datetime.utcnow()
         self.db.commit()
         return None
 
@@ -147,8 +164,8 @@ class EntityManager:
         row.status = status
         if status == "active":
             row.connected_at = row.connected_at or datetime.utcnow()
-        if "connection_id" in _ and _.get("connection_id"):
-            row.connection_id = _.get("connection_id")
+        if "connection_id" in _:
+            row.connection_id = _["connection_id"]
         row.last_synced_at = datetime.utcnow()
         self.db.commit()
         return True
