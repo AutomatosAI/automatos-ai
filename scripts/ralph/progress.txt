@@ -46,6 +46,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Select dropdown: import `Select, SelectTrigger, SelectValue, SelectContent, SelectItem` from `@/components/ui/select`
 - Agent persona API: GET `/api/agents/{id}/persona` returns `{persona_id, persona_name, use_custom_persona, custom_persona_prompt, system_prompt}`; PUT accepts `{persona_id?, custom_prompt?, use_custom: bool}`
 - Persona save is independent per-section — use separate save handler rather than coupling with main config save
+- Redis caching pattern: `get_redis_client()` → `.get_redis()` → `redis.Redis` conn; use `setex(key, ttl, value)` for cached writes, `RedisError` catch for graceful fallback
+- Plugin cache singleton: `from core.services.plugin_cache import get_plugin_content_cache; cache = get_plugin_content_cache()` — wraps S3 with Redis, falls back to S3 if Redis unavailable
 
 ---
 
@@ -537,4 +539,27 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Persona methods follow identical pattern to marketplace plugin methods — this.request() for JSON, URLSearchParams for query filters
   - Agent persona agentId is `number` (Integer PK), workspace/persona IDs are `string` (UUID)
   - setAgentPersona data types allow `null` for persona_id and custom_prompt to support clearing persona
+---
+
+## 2026-02-04 - US-027
+- Implemented PluginContentCache class in orchestrator/core/services/plugin_cache.py wrapping MarketplaceS3Service with Redis caching
+- Three cached methods: get_plugin_content(slug, version), get_manifest(slug, version), get_file(slug, version, file_path)
+- Cache key prefixes: `plugin_content:`, `plugin_manifest:`, `plugin_files:` — all keyed by `{slug}:{version}`
+- invalidate_plugin(slug, version) clears content + manifest direct keys, then scan_iter for file keys
+- Graceful fallback: `_redis_available` flag flips to False on first Redis failure, subsequent calls skip Redis entirely
+- TTL configurable via PLUGIN_CACHE_TTL_SECONDS env var (default 3600 = 1 hour)
+- Module-level singleton via get_plugin_content_cache() function
+- Added PLUGIN_CACHE_TTL_SECONDS to config.py and .env.example
+- Files changed:
+  - `orchestrator/core/services/plugin_cache.py` (created)
+  - `orchestrator/config.py` (added PLUGIN_CACHE_TTL_SECONDS)
+  - `orchestrator/.env.example` (added PLUGIN_CACHE_TTL_SECONDS)
+  - `scripts/ralph/prd.json` (marked US-027 passes: true)
+- **Learnings for future iterations:**
+  - RedisClient.get_redis() returns a `redis.Redis` connection (with `decode_responses=True` from connection pool) — returned strings are already Python str, not bytes
+  - `redis.Redis.setex(key, ttl, value)` for TTL-backed writes; value must be str (use `json.dumps()` for dicts)
+  - `redis.Redis.scan_iter(pattern)` for wildcard key matching (e.g., `plugin_files:slug:version:*`) — returns iterator, convert to list before `delete(*keys)`
+  - DatabaseCacheService raises ValueError if Redis unavailable; PluginContentCache uses optimistic flag + graceful fallback instead (never blocks S3 access)
+  - Singleton pattern with `_plugin_cache` module variable + `get_plugin_content_cache()` function matches DatabaseCacheService pattern
+  - Pre-existing syntax error in orchestrator/modules/tools/services/report_generator.py is unrelated — don't block on it
 ---

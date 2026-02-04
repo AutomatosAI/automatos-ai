@@ -507,7 +507,7 @@
         "Typecheck passes"
       ],
       "priority": 27,
-      "passes": false,
+      "passes": true,
       "notes": "Plugin content doesn't change often — caching reduces S3 reads significantly"
     },
     {
