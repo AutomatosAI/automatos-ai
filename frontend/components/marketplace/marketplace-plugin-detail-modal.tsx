@@ -23,6 +23,7 @@ import {
   Shield,
   ShieldCheck,
   ShieldAlert,
+  AlertTriangle,
   Terminal,
   Zap,
   Coins,
@@ -63,6 +64,7 @@ interface PluginDetail {
   recommended_models: string[]
   enable_count: number
   is_featured: boolean
+  is_active: boolean
   security_status: string | null
   source_type: string | null
   source_url: string | null
@@ -456,49 +458,56 @@ export function MarketplacePluginDetailModal({
                     )}
                   </CardContent>
 
-                  {/* Footer — Enable/Disable */}
+                  {/* Footer — Enable/Disable or Deactivated notice */}
                   <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
-                    <div className="flex gap-3">
-                      {isEnabled ? (
-                        onDisable ? (
-                          <Button
-                            onClick={onDisable}
-                            variant="outline"
-                            className="flex-1 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                          >
-                            <X className="w-4 h-4 mr-2" />
-                            Disable Plugin
-                          </Button>
+                    {plugin.is_active === false ? (
+                      <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400">
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+                        <span className="text-sm font-medium">This plugin has been deactivated</span>
+                      </div>
+                    ) : (
+                      <div className="flex gap-3">
+                        {isEnabled ? (
+                          onDisable ? (
+                            <Button
+                              onClick={onDisable}
+                              variant="outline"
+                              className="flex-1 border-red-500/30 text-red-400 hover:bg-red-500/10"
+                            >
+                              <X className="w-4 h-4 mr-2" />
+                              Disable Plugin
+                            </Button>
+                          ) : (
+                            <Button
+                              disabled
+                              variant="secondary"
+                              className="flex-1 bg-secondary/50 border border-white/10"
+                            >
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              Enabled for Workspace
+                            </Button>
+                          )
                         ) : (
                           <Button
-                            disabled
-                            variant="secondary"
-                            className="flex-1 bg-secondary/50 border border-white/10"
+                            onClick={onEnable}
+                            disabled={isEnabling}
+                            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
                           >
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Enabled for Workspace
+                            {isEnabling ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Enabling...
+                              </>
+                            ) : (
+                              <>
+                                <Download className="w-4 h-4 mr-2" />
+                                Enable for Workspace
+                              </>
+                            )}
                           </Button>
-                        )
-                      ) : (
-                        <Button
-                          onClick={onEnable}
-                          disabled={isEnabling}
-                          className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                        >
-                          {isEnabling ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Enabling...
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-4 h-4 mr-2" />
-                              Enable for Workspace
-                            </>
-                          )}
-                        </Button>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}

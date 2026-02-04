@@ -89,6 +89,7 @@ class PluginDetailOut(BaseModel):
     recommended_models: Optional[List[str]] = None
     enable_count: int = 0
     is_featured: bool = False
+    is_active: bool = True
     security_status: Optional[str] = None
     source_type: Optional[str] = None
     source_url: Optional[str] = None
@@ -260,10 +261,11 @@ async def get_plugin_detail(
     try:
         from core.models.marketplace_plugins import MarketplacePlugin, PluginCategory
 
+        # Allow deactivated plugins to be fetched (so the detail modal can show
+        # a "deactivated" state), but still require approved status.
         plugin = db.query(MarketplacePlugin).filter(
             MarketplacePlugin.id == plugin_id,
             MarketplacePlugin.approval_status == "approved",
-            MarketplacePlugin.is_active == True,
         ).first()
 
         if not plugin:
@@ -305,6 +307,7 @@ async def get_plugin_detail(
             recommended_models=plugin.recommended_models or [],
             enable_count=plugin.enable_count or 0,
             is_featured=plugin.is_featured or False,
+            is_active=plugin.is_active if plugin.is_active is not None else True,
             security_status=plugin.security_status,
             source_type=plugin.source_type,
             source_url=plugin.source_url,

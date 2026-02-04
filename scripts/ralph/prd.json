@@ -524,7 +524,7 @@
         "Typecheck passes"
       ],
       "priority": 28,
-      "passes": false,
+      "passes": true,
       "notes": "Cascade cleanup to prevent orphaned references when admin removes a plugin"
     }
   ]

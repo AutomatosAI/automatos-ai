@@ -26,9 +26,11 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.marketplace_plugins import (
+    AgentAssignedPlugin,
     MarketplacePlugin,
     PluginSecurityScan,
     PluginSyncHistory,
+    WorkspaceEnabledPlugin,
 )
 
 logger = logging.getLogger(__name__)
@@ -345,7 +347,7 @@ async def deactivate_plugin(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Deactivate a plugin (sets is_active=False)."""
+    """Deactivate a plugin and cascade-remove all workspace enablements and agent assignments."""
     _assert_admin(ctx)
 
     try:
@@ -360,7 +362,23 @@ async def deactivate_plugin(
 
         performed_by = str(getattr(ctx.user, "id", "admin"))
 
-        # Create sync history record
+        # Cascade: remove all WorkspaceEnabledPlugin records for this plugin
+        workspace_count = db.query(WorkspaceEnabledPlugin).filter(
+            WorkspaceEnabledPlugin.plugin_id == plugin_id,
+        ).count()
+        db.query(WorkspaceEnabledPlugin).filter(
+            WorkspaceEnabledPlugin.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+
+        # Cascade: remove all AgentAssignedPlugin records for this plugin
+        agent_count = db.query(AgentAssignedPlugin).filter(
+            AgentAssignedPlugin.plugin_id == plugin_id,
+        ).count()
+        db.query(AgentAssignedPlugin).filter(
+            AgentAssignedPlugin.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+
+        # Create sync history record with cascade details
         history = PluginSyncHistory(
             action="deactivate",
             plugin_id=plugin.id,
@@ -369,6 +387,8 @@ async def deactivate_plugin(
             completed_at=datetime.utcnow(),
             details={
                 "deactivated_by": performed_by,
+                "workspaces_affected": workspace_count,
+                "agents_affected": agent_count,
             },
             performed_by=performed_by,
         )
@@ -379,6 +399,9 @@ async def deactivate_plugin(
             "success": True,
             "message": f"Plugin '{plugin.name}' deactivated",
             "plugin_id": str(plugin.id),
+            "plugin_name": plugin.name,
+            "workspaces_affected": workspace_count,
+            "agents_affected": agent_count,
         }
 
     except HTTPException:

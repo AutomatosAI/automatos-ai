@@ -48,6 +48,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Persona save is independent per-section — use separate save handler rather than coupling with main config save
 - Redis caching pattern: `get_redis_client()` → `.get_redis()` → `redis.Redis` conn; use `setex(key, ttl, value)` for cached writes, `RedisError` catch for graceful fallback
 - Plugin cache singleton: `from core.services.plugin_cache import get_plugin_content_cache; cache = get_plugin_content_cache()` — wraps S3 with Redis, falls back to S3 if Redis unavailable
+- Plugin deactivation cascade: bulk-delete WorkspaceEnabledPlugin + AgentAssignedPlugin by plugin_id, count before delete, include counts in PluginSyncHistory details
+- Detail endpoint relaxed filter: GET /{plugin_id} allows deactivated plugins (no is_active filter), list endpoint still filters is_active==True
 
 ---
 
@@ -562,4 +564,30 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - DatabaseCacheService raises ValueError if Redis unavailable; PluginContentCache uses optimistic flag + graceful fallback instead (never blocks S3 access)
   - Singleton pattern with `_plugin_cache` module variable + `get_plugin_content_cache()` function matches DatabaseCacheService pattern
   - Pre-existing syntax error in orchestrator/modules/tools/services/report_generator.py is unrelated — don't block on it
+---
+
+## 2026-02-04 - US-028
+- Implemented plugin deactivation cascade cleanup in admin_plugins.py deactivate endpoint:
+  - Counts and deletes all WorkspaceEnabledPlugin records for the deactivated plugin
+  - Counts and deletes all AgentAssignedPlugin records for the deactivated plugin
+  - Includes workspaces_affected and agents_affected counts in PluginSyncHistory details
+  - Returns deactivation summary with plugin_name, workspaces_affected, agents_affected
+- Updated marketplace_plugins.py:
+  - Added `is_active` field to PluginDetailOut response model
+  - Relaxed detail endpoint filter to allow fetching deactivated plugins (removed is_active==True filter from GET /{plugin_id}), still requires approved status
+  - Added is_active value to detail response construction
+- Updated marketplace-plugin-detail-modal.tsx:
+  - Added `is_active` to PluginDetail interface
+  - Added AlertTriangle icon import
+  - Footer now shows "This plugin has been deactivated" banner instead of enable/disable buttons when is_active is false
+- Files changed:
+  - `orchestrator/api/admin_plugins.py` (updated deactivate endpoint with cascade + imports)
+  - `orchestrator/api/marketplace_plugins.py` (added is_active to PluginDetailOut, relaxed detail filter)
+  - `frontend/components/marketplace/marketplace-plugin-detail-modal.tsx` (added deactivated state display)
+  - `scripts/ralph/prd.json` (marked US-028 passes: true)
+- **Learnings for future iterations:**
+  - Cascade deletes on deactivation: count first with `.count()`, then `.delete(synchronize_session="fetch")` — count before delete since delete clears the rows
+  - Detail endpoint can serve both active and deactivated plugins by relaxing is_active filter — list endpoint still only shows active plugins
+  - Frontend deactivated state: check `plugin.is_active === false` (explicit false check) to distinguish from undefined/missing field for backwards compatibility
+  - WorkspaceEnabledPlugin and AgentAssignedPlugin can be bulk-deleted by plugin_id without needing to enumerate workspace/agent IDs
 ---
