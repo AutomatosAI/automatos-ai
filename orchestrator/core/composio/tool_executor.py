@@ -196,206 +196,207 @@ class ComposioToolExecutor:
         # - The app must be assigned to the agent (agent_app_assignments)
         # - The app must be connected for the workspace (composio_connections)
         # - The action must be mapped in composio_actions_cache (no "discover" calls)
+        # When skip_validation=True (admin/system calls like bug reports), skip all checks.
         # ------------------------------------------------------------------
-        try:
-            from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
-            from core.composio.entity_manager import EntityManager
+        if not skip_validation:
+            try:
+                from core.models.composio_cache import AgentAppAssignment, ComposioActionCache
+                from core.composio.entity_manager import EntityManager
 
-            # Assigned?
-            assigned = (
-                self.db.query(AgentAppAssignment)
-                .filter(
-                    AgentAppAssignment.agent_id == agent_id,
-                    AgentAppAssignment.app_name == app_name,
-                    AgentAppAssignment.is_active == True,  # noqa: E712
-                )
-                .first()
-            )
-            if not assigned:
-                return {
-                    "success": False,
-                    "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",
-                    "error_type": "composio_not_assigned",
-                    "data": None,
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                }
-
-            # Connected?
-            manager = EntityManager(self.db)
-            connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
-            if app_name not in connected_apps:
-                return {
-                    "success": False,
-                    "error": f"'{app_name}' is assigned to agent {agent_id} but is not connected for this workspace. Connect it first, then retry.",
-                    "error_type": "composio_not_connected",
-                    "data": None,
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                }
-
-            # Mapped action?
-            # Normalize incoming action so we can match either action_name or action_slug.
-            raw_action = str(action).strip()
-            action_lower = raw_action.lower()
-            action_lower_snake = action_lower.replace("-", "_")
-            action_lower_slug = action_lower.replace("_", "-")
-
-            mapped = (
-                self.db.query(ComposioActionCache)
-                .filter(
-                    ComposioActionCache.app_name == app_name,
-                    (
-                        (func.lower(ComposioActionCache.action_name).in_([action_lower, action_lower_snake]))
-                        | (func.lower(ComposioActionCache.action_slug).in_([action_lower, action_lower_slug]))
-                    ),
-                )
-                .first()
-            )
-            # Generic fallback: some models emit unprefixed action names (e.g., "send_message").
-            # When app_name is known, try matching by suffix: "*_send_message" or "*-send-message".
-            if not mapped and not action_upper.startswith(f"{app_name}_"):
-                suffix_snake = f"%_{action_lower_snake}"
-                suffix_slug = f"%-{action_lower_slug}"
-                mapped = (
-                    self.db.query(ComposioActionCache)
-                    .filter(ComposioActionCache.app_name == app_name)
+                # Assigned?
+                assigned = (
+                    self.db.query(AgentAppAssignment)
                     .filter(
-                        (func.lower(ComposioActionCache.action_name).like(suffix_snake))
-                        | (func.lower(ComposioActionCache.action_slug).like(suffix_slug))
+                        AgentAppAssignment.agent_id == agent_id,
+                        AgentAppAssignment.app_name == app_name,
+                        AgentAppAssignment.is_active == True,  # noqa: E712
                     )
                     .first()
                 )
-            if not mapped:
-                # Helpful error: tell the user whether cache is empty and suggest safe alternatives.
-                total_for_app = (
-                    self.db.query(func.count(ComposioActionCache.id))
-                    .filter(ComposioActionCache.app_name == app_name)
-                    .scalar()
-                    or 0
-                )
-
-                # Build ranked suggestions from cache (generic, no app-specific mapping).
-                dangerous_tokens = (
-                    "archive",
-                    "delete",
-                    "remove",
-                    "revoke",
-                    "clear",
-                    "close",
-                    "disable",
-                    "ban",
-                    "kick",
-                    "destroy",
-                    "drop",
-                    "purge",
-                    "terminate",
-                )
-
-                def _tokenize(s: str) -> set[str]:
-                    s = (s or "").lower()
-                    # Split on underscores/hyphens too (GMAIL_LIST_EMAILS -> gmail list emails)
-                    s = re.sub(r"[^a-z0-9_\\s\\-]", " ", s)
-                    s = s.replace("-", " ").replace("_", " ")
-                    return {t for t in s.split() if t}
-
-                req_tokens = _tokenize(raw_action)
-                read_verbs = {"list", "get", "fetch", "search", "read", "retrieve", "lookup"}
-                write_verbs = {"send", "post", "create", "update", "delete", "remove", "archive", "add", "set", "invite", "write"}
-                req_kind = "read" if (req_tokens & read_verbs) else ("write" if (req_tokens & write_verbs) else "unknown")
-
-                # Pull a bounded number of candidates for scoring.
-                rows = (
-                    self.db.query(
-                        ComposioActionCache.action_name,
-                        ComposioActionCache.action_slug,
-                        ComposioActionCache.description,
-                    )
-                    .filter(ComposioActionCache.app_name == app_name)
-                    .limit(600)
-                    .all()
-                )
-
-                scored: list[tuple[int, float, str, str]] = []
-                for name, slug, desc in rows:
-                    name = str(name or "")
-                    if not name:
-                        continue
-                    hay = f"{name} {slug or ''} {desc or ''}"
-                    hay_l = hay.lower()
-                    if any(tok in hay_l for tok in dangerous_tokens):
-                        continue
-
-                    # Combined similarity: token overlap + sequence ratio.
-                    hay_tokens = _tokenize(hay)
-                    overlap = len(req_tokens & hay_tokens)
-                    ratio = SequenceMatcher(None, raw_action.lower(), name.lower()).ratio()
-                    scored.append((overlap, ratio, name, (desc or "")[:160]))
-
-                scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
-                suggestions = [
-                    {"action": n, "description": d}
-                    for _, _, n, d in scored[:10]
-                ]
-
-                examples_clause = ""
-                if suggestions:
-                    examples = ", ".join(s.get("action") for s in suggestions[:8] if s.get("action"))
-                    if examples:
-                        examples_clause = f" Examples of mapped actions: {examples}"
-
-                # DISABLED: Auto-mapper was using display names from broken sync
-                # Just use the raw action name from LLM and let Composio validate it
-                auto_mapped_from: Optional[str] = None
-                auto_selected_action: Optional[str] = None
-
-                # Skip auto-mapping entirely - use raw action name
-                if False:  # Disabled
-                    pass
-                else:
+                if not assigned:
                     return {
                         "success": False,
-                        "error": (
-                            f"Action '{raw_action}' is not mapped in composio_actions_cache for {app_name}. "
-                            + (
-                                "The cache appears empty for this app. Run the cache sync."
-                                if total_for_app == 0
-                                else (
-                                    "Use one of the suggested safe actions instead."
-                                    if suggestions
-                                    else "No safe suggestions found in cache; run the cache sync."
-                                )
-                            )
-                            + examples_clause
-                        ),
-                        "error_type": "composio_action_not_mapped",
-                        "data": {
-                            "app_name": app_name,
-                            "requested_action": raw_action,
-                            "suggested_actions": suggestions,
-                        },
+                        "error": f"'{app_name}' is not assigned to agent {agent_id}. Assign it to this agent before using it.",
+                        "error_type": "composio_not_assigned",
+                        "data": None,
                         "execution_time_ms": int((time.time() - start_time) * 1000),
                     }
 
-            # Normalize to canonical action_name
-            original_action = str(mapped.action_name or action_upper).upper()
-            action_upper = original_action
+                # Connected?
+                manager = EntityManager(self.db)
+                connected_apps = {a.upper().strip() for a in manager.get_connected_apps(workspace_id)}
+                if app_name not in connected_apps:
+                    return {
+                        "success": False,
+                        "error": f"'{app_name}' is assigned to agent {agent_id} but is not connected for this workspace. Connect it first, then retry.",
+                        "error_type": "composio_not_connected",
+                        "data": None,
+                        "execution_time_ms": int((time.time() - start_time) * 1000),
+                    }
 
-            # If action_name is a display name (no app prefix), reconstruct proper API format
-            # e.g., "FETCH EMAILS" + app "GMAIL" → "GMAIL_FETCH_EMAILS"
-            if app_name and not action_upper.startswith(f"{app_name}_"):
-                reconstructed = f"{app_name}_{action_upper.replace(' ', '_')}"
-                logger.info(f"Reconstructed Composio action: '{original_action}' -> '{reconstructed}'")
-                action_upper = reconstructed
-        except Exception as exc:
-            return {
-                "success": False,
-                "error": f"Failed to validate Composio prerequisites: {exc}",
-                "error_type": "composio_action_not_allowed",
-                "data": None,
-                "execution_time_ms": int((time.time() - start_time) * 1000),
-            }
-        
-        # Validate access — check both original and reconstructed action names
-        if not skip_validation:
+                # Mapped action?
+                # Normalize incoming action so we can match either action_name or action_slug.
+                raw_action = str(action).strip()
+                action_lower = raw_action.lower()
+                action_lower_snake = action_lower.replace("-", "_")
+                action_lower_slug = action_lower.replace("_", "-")
+
+                mapped = (
+                    self.db.query(ComposioActionCache)
+                    .filter(
+                        ComposioActionCache.app_name == app_name,
+                        (
+                            (func.lower(ComposioActionCache.action_name).in_([action_lower, action_lower_snake]))
+                            | (func.lower(ComposioActionCache.action_slug).in_([action_lower, action_lower_slug]))
+                        ),
+                    )
+                    .first()
+                )
+                # Generic fallback: some models emit unprefixed action names (e.g., "send_message").
+                # When app_name is known, try matching by suffix: "*_send_message" or "*-send-message".
+                if not mapped and not action_upper.startswith(f"{app_name}_"):
+                    suffix_snake = f"%_{action_lower_snake}"
+                    suffix_slug = f"%-{action_lower_slug}"
+                    mapped = (
+                        self.db.query(ComposioActionCache)
+                        .filter(ComposioActionCache.app_name == app_name)
+                        .filter(
+                            (func.lower(ComposioActionCache.action_name).like(suffix_snake))
+                            | (func.lower(ComposioActionCache.action_slug).like(suffix_slug))
+                        )
+                        .first()
+                    )
+                if not mapped:
+                    # Helpful error: tell the user whether cache is empty and suggest safe alternatives.
+                    total_for_app = (
+                        self.db.query(func.count(ComposioActionCache.id))
+                        .filter(ComposioActionCache.app_name == app_name)
+                        .scalar()
+                        or 0
+                    )
+
+                    # Build ranked suggestions from cache (generic, no app-specific mapping).
+                    dangerous_tokens = (
+                        "archive",
+                        "delete",
+                        "remove",
+                        "revoke",
+                        "clear",
+                        "close",
+                        "disable",
+                        "ban",
+                        "kick",
+                        "destroy",
+                        "drop",
+                        "purge",
+                        "terminate",
+                    )
+
+                    def _tokenize(s: str) -> set[str]:
+                        s = (s or "").lower()
+                        # Split on underscores/hyphens too (GMAIL_LIST_EMAILS -> gmail list emails)
+                        s = re.sub(r"[^a-z0-9_\\s\\-]", " ", s)
+                        s = s.replace("-", " ").replace("_", " ")
+                        return {t for t in s.split() if t}
+
+                    req_tokens = _tokenize(raw_action)
+                    read_verbs = {"list", "get", "fetch", "search", "read", "retrieve", "lookup"}
+                    write_verbs = {"send", "post", "create", "update", "delete", "remove", "archive", "add", "set", "invite", "write"}
+                    req_kind = "read" if (req_tokens & read_verbs) else ("write" if (req_tokens & write_verbs) else "unknown")
+
+                    # Pull a bounded number of candidates for scoring.
+                    rows = (
+                        self.db.query(
+                            ComposioActionCache.action_name,
+                            ComposioActionCache.action_slug,
+                            ComposioActionCache.description,
+                        )
+                        .filter(ComposioActionCache.app_name == app_name)
+                        .limit(600)
+                        .all()
+                    )
+
+                    scored: list[tuple[int, float, str, str]] = []
+                    for name, slug, desc in rows:
+                        name = str(name or "")
+                        if not name:
+                            continue
+                        hay = f"{name} {slug or ''} {desc or ''}"
+                        hay_l = hay.lower()
+                        if any(tok in hay_l for tok in dangerous_tokens):
+                            continue
+
+                        # Combined similarity: token overlap + sequence ratio.
+                        hay_tokens = _tokenize(hay)
+                        overlap = len(req_tokens & hay_tokens)
+                        ratio = SequenceMatcher(None, raw_action.lower(), name.lower()).ratio()
+                        scored.append((overlap, ratio, name, (desc or "")[:160]))
+
+                    scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
+                    suggestions = [
+                        {"action": n, "description": d}
+                        for _, _, n, d in scored[:10]
+                    ]
+
+                    examples_clause = ""
+                    if suggestions:
+                        examples = ", ".join(s.get("action") for s in suggestions[:8] if s.get("action"))
+                        if examples:
+                            examples_clause = f" Examples of mapped actions: {examples}"
+
+                    # DISABLED: Auto-mapper was using display names from broken sync
+                    # Just use the raw action name from LLM and let Composio validate it
+                    auto_mapped_from: Optional[str] = None
+                    auto_selected_action: Optional[str] = None
+
+                    # Skip auto-mapping entirely - use raw action name
+                    if False:  # Disabled
+                        pass
+                    else:
+                        return {
+                            "success": False,
+                            "error": (
+                                f"Action '{raw_action}' is not mapped in composio_actions_cache for {app_name}. "
+                                + (
+                                    "The cache appears empty for this app. Run the cache sync."
+                                    if total_for_app == 0
+                                    else (
+                                        "Use one of the suggested safe actions instead."
+                                        if suggestions
+                                        else "No safe suggestions found in cache; run the cache sync."
+                                    )
+                                )
+                                + examples_clause
+                            ),
+                            "error_type": "composio_action_not_mapped",
+                            "data": {
+                                "app_name": app_name,
+                                "requested_action": raw_action,
+                                "suggested_actions": suggestions,
+                            },
+                            "execution_time_ms": int((time.time() - start_time) * 1000),
+                        }
+
+                # Normalize to canonical action_name
+                original_action = str(mapped.action_name or action_upper).upper()
+                action_upper = original_action
+
+                # If action_name is a display name (no app prefix), reconstruct proper API format
+                # e.g., "FETCH EMAILS" + app "GMAIL" → "GMAIL_FETCH_EMAILS"
+                if app_name and not action_upper.startswith(f"{app_name}_"):
+                    reconstructed = f"{app_name}_{action_upper.replace(' ', '_')}"
+                    logger.info(f"Reconstructed Composio action: '{original_action}' -> '{reconstructed}'")
+                    action_upper = reconstructed
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "error": f"Failed to validate Composio prerequisites: {exc}",
+                    "error_type": "composio_action_not_allowed",
+                    "data": None,
+                    "execution_time_ms": int((time.time() - start_time) * 1000),
+                }
+
+            # Validate access — check both original and reconstructed action names
             has_access = self.validate_feature_access(agent_id, action_upper, app_name=app_name)
             if not has_access and original_action != action_upper:
                 has_access = self.validate_feature_access(agent_id, original_action, app_name=app_name)

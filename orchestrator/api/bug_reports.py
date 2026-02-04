@@ -128,6 +128,7 @@ async def create_bug_report(
         "summary": summary,
         "description": description,
         "issue_type": "Bug",
+        "priority": SEVERITY_TO_PRIORITY.get(req.severity, "Medium"),
     }
 
     try:

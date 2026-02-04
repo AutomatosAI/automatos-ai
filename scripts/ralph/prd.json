@@ -1,6 +1,6 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/universal-orchestrator-router",
+  "branchName": "universal-orchestrator",
   "description": "PRD-50: Universal Orchestrator Router — Transform the orchestrator from a workflow-only executor into a universal request router that handles all incoming requests (Chatbot, Jira triggers, APIs) and intelligently routes them to the right pre-configured agent or recipe/workflow.",
   "userStories": [
     {
