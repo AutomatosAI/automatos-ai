@@ -330,7 +330,7 @@
         "Typecheck passes"
       ],
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "Use existing marketplace list patterns. Card-based layout matching marketplace-card.tsx"
     },
     {

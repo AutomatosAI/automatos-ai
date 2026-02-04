@@ -340,3 +340,27 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - glass-card class provides consistent frosted glass card styling matching marketplace pages
   - MainLayout wraps all pages for sidebar + header; no admin-specific layout needed
 ---
+
+## 2026-02-04 - US-018
+- Implemented admin approval queue UI page at frontend/app/admin/plugins/page.tsx
+- Lists all pending plugins from GET /api/admin/plugins/pending with pagination
+- Each plugin card shows: name, version, slug, description, upload date, source type, risk score, static findings count, LLM summary
+- Individual Approve and Reject buttons per plugin card
+- Reject shows inline textarea for rejection reason (not window.prompt) with confirm/cancel
+- "View Scan Details" button expands to show full scan results: risk score bar, overall verdict, LLM summary, static findings list, LLM findings list with severity coloring
+- Batch approve/reject via checkboxes with select-all header
+- Stats bar: pending count, selected count, flagged-for-review count
+- Upload Plugin button links to /admin/plugins/upload
+- Empty state when no pending plugins
+- Calls POST /api/admin/plugins/{id}/approve and /reject endpoints
+- Files changed:
+  - `frontend/app/admin/plugins/page.tsx` (created)
+  - `scripts/ralph/prd.json` (marked US-018 passes: true)
+- **Learnings for future iterations:**
+  - Admin plugin pages share common types (ScanFinding, ScanResult) — could be extracted to a shared types file if more admin pages are added
+  - Checkbox component from @/components/ui/checkbox uses Radix UI pattern: `checked` + `onCheckedChange` (not onChange)
+  - Textarea component from @/components/ui/textarea works with standard React `onChange={(e) => setVal(e.target.value)}` pattern
+  - Inline reject reason input (Textarea) is better UX than window.prompt — allows multiline, preview, and cancel without browser dialog
+  - Batch actions: iterate sequentially with for-of loop (not Promise.all) to avoid overwhelming the backend with concurrent requests
+  - Optimistic removal: remove approved/rejected plugins from local state immediately without refetching, but refetch on batch errors to resync
+---
