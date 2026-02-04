@@ -501,3 +501,22 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Config validation without dotenv installed locally: use `ast.parse()` + attribute inspection as typecheck proxy
   - Pre-existing syntax error in orchestrator/modules/tools/services/report_generator.py (unrelated) — don't block on it
 ---
+
+## 2026-02-04 - US-025
+- Added 14 named API client methods for marketplace plugins to frontend/lib/api-client.ts:
+  - Marketplace plugins: listPlugins(params), getPluginDetail(pluginId), getPluginContent(pluginId), listPluginCategories()
+  - Workspace plugins: getWorkspacePlugins(workspaceId), enablePlugin(workspaceId, pluginId), disablePlugin(workspaceId, pluginId)
+  - Agent plugins: getAgentPlugins(agentId), updateAgentPlugins(agentId, pluginIds)
+  - Admin plugins: uploadPlugin(formData), approvePlugin(pluginId), rejectPlugin(pluginId, reason), getScanResults(pluginId), getPendingPlugins(page, limit)
+- uploadPlugin() uses raw fetch with getAuthHeaders() for multipart FormData (no Content-Type header set)
+- All other methods use this.request() with JSON.stringify for bodies following existing codebase patterns
+- Typecheck passes (esbuild parse validation — no TypeScript compiler installed)
+- Files changed:
+  - `frontend/lib/api-client.ts` (added marketplace plugin + admin plugin methods section)
+  - `scripts/ralph/prd.json` (marked US-025 passes: true)
+- **Learnings for future iterations:**
+  - No TypeScript compiler available locally; esbuild can validate TS syntax: `npx esbuild file.ts --bundle=false --outfile=/dev/null --log-level=error`
+  - Multipart file upload requires raw fetch with getAuthHeaders() — don't use this.request() which sets Content-Type to application/json
+  - listPlugins() uses URLSearchParams for query params with tags as repeated `tags` params (backend expects multiple query params)
+  - Named methods follow the pattern: `async methodName(params): return this.request(endpoint, options)`
+---

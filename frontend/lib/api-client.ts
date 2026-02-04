@@ -2042,6 +2042,112 @@ class ApiClient {
     }
   }
 
+  // ===== MARKETPLACE PLUGINS ENDPOINTS =====
+
+  async listPlugins(params?: {
+    category?: string
+    search?: string
+    tags?: string[]
+    sort?: string
+    page?: number
+    limit?: number
+  }) {
+    const q = new URLSearchParams()
+    if (params?.category) q.append('category', params.category)
+    if (params?.search) q.append('search', params.search)
+    if (params?.tags) params.tags.forEach(t => q.append('tags', t))
+    if (params?.sort) q.append('sort', params.sort)
+    if (params?.page) q.append('page', String(params.page))
+    if (params?.limit) q.append('limit', String(params.limit))
+    const qs = q.toString()
+    return this.request(`/api/marketplace/plugins${qs ? `?${qs}` : ''}`)
+  }
+
+  async getPluginDetail(pluginId: string) {
+    return this.request(`/api/marketplace/plugins/${pluginId}`)
+  }
+
+  async getPluginContent(pluginId: string) {
+    return this.request(`/api/marketplace/plugins/${pluginId}/content`)
+  }
+
+  async listPluginCategories() {
+    return this.request('/api/marketplace/plugins/categories')
+  }
+
+  async getWorkspacePlugins(workspaceId: string) {
+    return this.request(`/api/workspaces/${workspaceId}/plugins`)
+  }
+
+  async enablePlugin(workspaceId: string, pluginId: string) {
+    return this.request(`/api/workspaces/${workspaceId}/plugins`, {
+      method: 'POST',
+      body: JSON.stringify({ plugin_id: pluginId })
+    })
+  }
+
+  async disablePlugin(workspaceId: string, pluginId: string) {
+    return this.request(`/api/workspaces/${workspaceId}/plugins/${pluginId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async getAgentPlugins(agentId: string) {
+    return this.request(`/api/agents/${agentId}/plugins`)
+  }
+
+  async updateAgentPlugins(agentId: string, pluginIds: string[]) {
+    return this.request(`/api/agents/${agentId}/plugins`, {
+      method: 'PUT',
+      body: JSON.stringify({ plugin_ids: pluginIds })
+    })
+  }
+
+  // ===== ADMIN PLUGIN MANAGEMENT ENDPOINTS =====
+
+  async uploadPlugin(formData: FormData) {
+    // Use raw fetch for multipart upload — don't set Content-Type header
+    const headers = await this.getAuthHeaders()
+    const url = `${this.baseUrl}/api/admin/plugins/upload`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData
+    })
+    if (!response.ok) {
+      let detail = response.statusText
+      try {
+        const errorBody = await response.json()
+        if (errorBody?.detail) {
+          detail = typeof errorBody.detail === 'string' ? errorBody.detail : JSON.stringify(errorBody.detail)
+        }
+      } catch { /* not JSON */ }
+      throw new Error(detail || `HTTP ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async approvePlugin(pluginId: string) {
+    return this.request(`/api/admin/plugins/${pluginId}/approve`, {
+      method: 'POST'
+    })
+  }
+
+  async rejectPlugin(pluginId: string, reason: string) {
+    return this.request(`/api/admin/plugins/${pluginId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    })
+  }
+
+  async getScanResults(pluginId: string) {
+    return this.request(`/api/admin/plugins/${pluginId}/scan`)
+  }
+
+  async getPendingPlugins(page: number = 1, limit: number = 20) {
+    return this.request(`/api/admin/plugins/pending?page=${page}&limit=${limit}`)
+  }
+
   // Enhanced Analytics Methods
   // ===== FIELD THEORY ENDPOINTS (All Working ✅) =====
   async getFieldTheoryHealth() {

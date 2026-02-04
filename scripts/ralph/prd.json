@@ -469,7 +469,7 @@
         "Typecheck passes"
       ],
       "priority": 25,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing api-client.ts patterns. Use Clerk token for auth headers."
     },
     {
