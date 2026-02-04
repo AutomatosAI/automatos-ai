@@ -1,0 +1,531 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/plugin-marketplace",
+  "description": "PRD-42: Plugin Marketplace & Agent Personas — Admin-curated plugin marketplace with S3 storage, LLM security scanning, workspace enablement, agent plugin assignment, and database-backed agent persona system.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create plugin marketplace database models",
+      "description": "As a developer, I need SQLAlchemy ORM models for the plugin marketplace so the system can store plugin metadata, categories, and security scan results.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/marketplace_plugins.py with all marketplace models",
+        "PluginCategory SQLAlchemy model: id (UUID PK), slug (unique, varchar 50), name (varchar 100), description (text), icon (varchar 50), sort_order (int default 0), parent_id (FK self-ref), created_at",
+        "MarketplacePlugin SQLAlchemy model: id (UUID PK), slug (unique, varchar 100), name, version, s3_bucket (default 'automatos-marketplace'), s3_path, description, long_description, category_id (FK), tags (ARRAY), skills_count, commands_count, agents_count, hooks_count, source_type, source_url, source_repo, original_author, license, token_estimate, recommended_models (ARRAY), security_scan_id (FK), security_status (default 'pending'), is_active, is_featured, approval_status (default 'pending'), approved_by, approved_at, rejection_reason, enable_count, created_at, updated_at",
+        "PluginSecurityScan SQLAlchemy model: id (UUID PK), plugin_slug, plugin_version, static_scan_status, static_findings (JSONB), blocked_patterns_found (ARRAY), llm_scan_status, llm_risk_score, llm_findings (JSONB), llm_summary, llm_model_used, llm_tokens_used, overall_verdict, scanned_at, scanned_by",
+        "PluginSyncHistory SQLAlchemy model: id (UUID PK), action, plugin_id (FK), plugin_slug, status, started_at, completed_at, details (JSONB), error_message, performed_by",
+        "All models use extend_existing=True pattern matching existing codebase",
+        "Models imported and registered in orchestrator/core/models/__init__.py",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "Follow patterns from core.py — use Column, mapped_column, UUID PK with gen_random_uuid default"
+    },
+    {
+      "id": "US-002",
+      "title": "Create workspace and agent plugin junction models",
+      "description": "As a developer, I need junction table models for workspace plugin enablement and agent plugin assignment.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/core/models/marketplace_plugins.py (or separate file if cleaner)",
+        "WorkspaceEnabledPlugin model: workspace_id (UUID FK workspaces, cascade), plugin_id (UUID FK marketplace_plugins, cascade), enabled_at, enabled_by (UUID FK users). Composite PK (workspace_id, plugin_id)",
+        "AgentAssignedPlugin model: agent_id (UUID FK agents, cascade), plugin_id (UUID FK marketplace_plugins, cascade), priority (int default 0), assigned_at. Composite PK (agent_id, plugin_id)",
+        "Add appropriate indexes: workspace_id on workspace_enabled_plugins, agent_id on agent_assigned_plugins, category_id on marketplace_plugins, (approval_status, is_active) on marketplace_plugins, (is_featured, enable_count DESC) on marketplace_plugins",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Junction tables use composite primary keys. Follow pattern of agent_skills association table in core.py"
+    },
+    {
+      "id": "US-003",
+      "title": "Create persona database model and agent columns",
+      "description": "As a developer, I need the personas table and agent persona columns so agents can adopt personality profiles.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/models/personas.py with Persona SQLAlchemy model",
+        "Persona model: id (UUID PK), slug (unique varchar 100), name (varchar 255), description (text), system_prompt (text), voice_description (varchar 500), category (varchar 100), tags (ARRAY), suggested_temperature (float default 0.7), suggested_models (ARRAY), source (varchar 100), source_url (varchar 500), scope (varchar 20, default 'global'), workspace_id (UUID FK workspaces, nullable), is_active (bool default true), created_at, updated_at",
+        "Add persona columns to Agent model in core.py: persona_id (UUID FK personas, nullable), custom_persona_prompt (Text, nullable), use_custom_persona (Boolean, default false)",
+        "Add indexes: idx_personas_scope (scope, workspace_id), idx_personas_category (category), idx_agents_persona (persona_id)",
+        "Register Persona model in models/__init__.py",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "workspace_id is NULL for global/predefined personas, set for workspace-custom ones"
+    },
+    {
+      "id": "US-004",
+      "title": "Add S3 client service for marketplace",
+      "description": "As a developer, I need an S3 client service to upload, extract, and fetch plugin files from the automatos-marketplace bucket.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/services/marketplace_s3.py with MarketplaceS3Service class",
+        "Constructor reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, MARKETPLACE_S3_BUCKET from config/env",
+        "upload_zip(slug, version, zip_bytes) method — uploads to _uploads/pending/{upload_id}.zip",
+        "extract_plugin(slug, version, zip_bytes) method — extracts zip to plugins/{slug}/{version}/ in S3, uploads each file individually",
+        "get_manifest(slug, version) method — downloads and parses manifest.json from S3",
+        "get_file(s3_path) method — downloads a single file from S3, returns content as string",
+        "list_plugin_files(slug, version) method — lists all files under plugins/{slug}/{version}/",
+        "delete_plugin(slug, version) method — deletes all files under plugins/{slug}/{version}/",
+        "Add MARKETPLACE_S3_BUCKET to orchestrator/config.py (default 'automatos-marketplace')",
+        "Add AWS credential env vars to config.py if not already present",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Use boto3 patterns from bedrock_client.py. Bucket is global, not per-workspace"
+    },
+    {
+      "id": "US-005",
+      "title": "Build static security scanner",
+      "description": "As the system, I need a static analysis scanner that checks plugin files for dangerous code patterns and prompt injections using regex.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/services/plugin_security_scanner.py",
+        "Define pattern lists: BLOCKED_CODE_PATTERNS (import/exec/subprocess), BLOCKED_NETWORK_PATTERNS (requests/urllib/socket), BLOCKED_FS_PATTERNS (file write/delete), PROMPT_INJECTION_PATTERNS (ignore instructions, jailbreak, system prompt override, exfiltrate, hidden instruction)",
+        "StaticScanResult Pydantic model: status (passed/flagged), findings (list of dicts with type, severity, file, line, pattern, matched_text, description)",
+        "async static_scan(plugin_files: dict[str, str]) -> StaticScanResult function",
+        "Scans all text files for all pattern categories with re.IGNORECASE",
+        "Each finding includes: file path, line number, matched pattern, severity (critical/high/medium/low), finding type category",
+        "Returns 'passed' if no findings, 'flagged' otherwise",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "This is Stage 1 of the two-stage scan. Fast and free, runs before LLM scan."
+    },
+    {
+      "id": "US-006",
+      "title": "Build LLM security scanner (Claude Haiku)",
+      "description": "As the system, I need an LLM-based deep security scanner that uses Claude Haiku to detect obfuscated attacks and subtle prompt injections.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/core/services/plugin_security_scanner.py",
+        "LLMScanResult Pydantic model: status (passed/flagged/failed), risk_score (int 0-100), findings (list of dicts with category, severity, description, file, evidence), summary (str), model_used (str), tokens_used (int)",
+        "Define LLM_SECURITY_SCAN_PROMPT constant with detailed instructions for security audit (check for malicious code, prompt injection, data exfiltration, privilege escalation, social engineering, obfuscated code)",
+        "async llm_security_scan(plugin_files: dict[str, str], model: str = 'claude-haiku-4-20250414') -> LLMScanResult function",
+        "Concatenates all plugin files with file path headers",
+        "Calls Anthropic API (use existing ANTHROPIC_API_KEY from config) with the security prompt",
+        "Parses JSON response for risk_score, findings, summary",
+        "Returns status='passed' if risk_score < 20, 'flagged' otherwise",
+        "Handles API errors gracefully (returns failed status on error)",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Stage 2 of two-stage scan. Cost ~$0.001 per scan."
+    },
+    {
+      "id": "US-007",
+      "title": "Build combined scan orchestrator and scan service",
+      "description": "As a developer, I need a combined scan service that runs both static and LLM scans and stores results in the database.",
+      "acceptanceCriteria": [
+        "Add PluginScanService class to plugin_security_scanner.py (or new file plugin_scan_service.py)",
+        "Constructor takes db session",
+        "async scan_plugin(plugin_slug, plugin_version, plugin_files: dict[str, str], scanned_by: str) -> PluginSecurityScan method",
+        "Runs static_scan first — if any critical findings, auto-block (set overall_verdict='blocked')",
+        "If static scan passes or only has warnings, run llm_security_scan",
+        "Determine overall_verdict: risk_score 0-19 = 'safe', 20-69 = 'review_required', 70+ = 'blocked'",
+        "Create PluginSecurityScan database record with all results",
+        "Return the created PluginSecurityScan record",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Orchestrates Stage 1 + Stage 2 and persists results"
+    },
+    {
+      "id": "US-008",
+      "title": "Build plugin upload and processing service",
+      "description": "As a developer, I need a service that handles the full plugin upload flow: validate manifest, extract to S3, run security scans, and create database records.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/services/plugin_upload_service.py with PluginUploadService class",
+        "Constructor takes db session, MarketplaceS3Service, PluginScanService",
+        "async upload_plugin(zip_bytes: bytes, source_type: str, source_url: Optional[str], uploaded_by: str) -> MarketplacePlugin method",
+        "Extract zip to temp directory, validate manifest.json exists at root",
+        "Parse manifest to extract slug, name, version, description, contents counts (skills, commands, agents, hooks)",
+        "Read all text files into dict[filepath, content] for scanning",
+        "Run PluginScanService.scan_plugin() with extracted files",
+        "Upload to S3 via MarketplaceS3Service.extract_plugin()",
+        "Create MarketplacePlugin database record with all metadata, s3_path, security_scan_id, security_status from scan verdict",
+        "Create PluginSyncHistory record with action='upload'",
+        "Return the created MarketplacePlugin",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This is the main orchestrator for the admin upload flow"
+    },
+    {
+      "id": "US-009",
+      "title": "Build admin plugin API endpoints (upload, approve, reject)",
+      "description": "As an admin, I need API endpoints to upload plugins, approve/reject them, and view scan results.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/admin_plugins.py with FastAPI router (prefix=/api/admin/plugins, tags=['Admin Plugins'])",
+        "POST /api/admin/plugins/upload — accepts multipart/form-data with file (UploadFile), source_type (str), source_url (Optional[str]). Calls PluginUploadService. Returns 202 with plugin_id, scan_id, status='scanning'. Auth required via get_request_context_hybrid.",
+        "POST /api/admin/plugins/{plugin_id}/approve — sets approval_status='approved', approved_by, approved_at. Creates PluginSyncHistory record. Auth required.",
+        "POST /api/admin/plugins/{plugin_id}/reject — sets approval_status='rejected', rejection_reason from body. Creates PluginSyncHistory record. Auth required.",
+        "GET /api/admin/plugins/{plugin_id}/scan — returns security scan results (static + LLM). Auth required.",
+        "POST /api/admin/plugins/{plugin_id}/deactivate — sets is_active=False. Auth required.",
+        "GET /api/admin/plugins/pending — list plugins with approval_status='pending'. Paginated. Auth required.",
+        "Register router in orchestrator/main.py",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Admin-only endpoints. Follow existing auth patterns from marketplace.py"
+    },
+    {
+      "id": "US-010",
+      "title": "Build public marketplace plugin API endpoints",
+      "description": "As a workspace user, I need API endpoints to browse approved plugins, view details, and load plugin content.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/marketplace_plugins.py with FastAPI router (prefix=/api/marketplace/plugins, tags=['Marketplace Plugins'])",
+        "GET /api/marketplace/plugins — list approved+active plugins with filters: category (str), search (str), tags (list), sort (popular/newest/name), page, limit. Auth required.",
+        "GET /api/marketplace/plugins/{plugin_id} — full plugin details including contents manifest parsed from S3 manifest.json. Auth required.",
+        "GET /api/marketplace/plugins/{plugin_id}/content — full plugin content (skills text, commands text) loaded from S3. Used by AgentFactory. Auth required.",
+        "GET /api/marketplace/categories — list all plugin categories. Auth required.",
+        "Pydantic response models: PluginSummaryOut, PluginDetailOut, PluginContentOut, CategoryOut",
+        "Register router in orchestrator/main.py",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Public-facing but auth required. Only returns approved+active plugins."
+    },
+    {
+      "id": "US-011",
+      "title": "Build workspace plugin enablement API endpoints",
+      "description": "As a workspace owner, I need API endpoints to enable/disable plugins for my workspace.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/api/marketplace_plugins.py or create orchestrator/api/workspace_plugins.py",
+        "GET /api/workspaces/{workspace_id}/plugins — list enabled plugins for workspace (join with marketplace_plugins for details). Auth required, workspace-scoped.",
+        "POST /api/workspaces/{workspace_id}/plugins — enable a plugin (body: plugin_id UUID). Creates WorkspaceEnabledPlugin junction record. Increments MarketplacePlugin.enable_count. Auth required.",
+        "DELETE /api/workspaces/{workspace_id}/plugins/{plugin_id} — disable a plugin (remove junction record). Decrements enable_count. Also removes any AgentAssignedPlugin records for this workspace's agents. Auth required.",
+        "Validate plugin is approved+active before enabling",
+        "Validate workspace_id matches authenticated user's workspace",
+        "Register router in main.py if separate file",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Junction record only — no data duplication. Follow workspace auth patterns from existing API."
+    },
+    {
+      "id": "US-012",
+      "title": "Build agent plugin assignment API endpoints",
+      "description": "As an agent builder, I need API endpoints to assign plugins to specific agents.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/api/agents.py or create orchestrator/api/agent_plugins.py",
+        "GET /api/agents/{agent_id}/plugins — list plugins assigned to agent (join with marketplace_plugins). Auth required.",
+        "PUT /api/agents/{agent_id}/plugins — update plugin assignments (body: plugin_ids UUID array). Replaces existing assignments. Auth required.",
+        "Validate all plugin_ids are enabled for the agent's workspace before assigning",
+        "Validate agent belongs to authenticated user's workspace",
+        "Register router in main.py if separate file",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Only plugins enabled for the workspace can be assigned to agents in that workspace"
+    },
+    {
+      "id": "US-013",
+      "title": "Build persona API endpoints",
+      "description": "As a developer, I need API endpoints for CRUD operations on personas and agent persona assignment.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/personas.py with FastAPI router (prefix=/api, tags=['Personas'])",
+        "GET /api/personas — list available personas (global + workspace-custom filtered by user's workspace_id). Supports category filter, scope filter (all/global/workspace). Auth required.",
+        "GET /api/personas/{persona_id} — get persona details including full system_prompt. Auth required.",
+        "POST /api/workspaces/{workspace_id}/personas — create custom persona for workspace. Body: name, description, system_prompt, voice_description, category, suggested_temperature. Sets scope='workspace', workspace_id. Auth required.",
+        "PUT /api/workspaces/{workspace_id}/personas/{persona_id} — update workspace persona. Only workspace-scoped personas can be updated. Auth required.",
+        "DELETE /api/workspaces/{workspace_id}/personas/{persona_id} — delete workspace persona. Only workspace-scoped. Auth required.",
+        "PUT /api/agents/{agent_id}/persona — set agent persona. Body: persona_id (UUID, nullable), custom_prompt (str, nullable), use_custom (bool). Auth required.",
+        "GET /api/agents/{agent_id}/persona — get agent's current persona info. Auth required.",
+        "Register router in orchestrator/main.py",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Global personas available to all workspaces. Workspace personas only for that workspace."
+    },
+    {
+      "id": "US-014",
+      "title": "Seed predefined personas",
+      "description": "As the system, I need predefined personas seeded into the database so users have a starting library of agent personalities.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/seeds/seed_personas.py",
+        "Define at least 10 predefined personas across categories: Engineering (Senior Engineer, Code Reviewer, DevOps/SRE), Sales (SDR, Account Executive, Customer Success), Marketing (Content Strategist, SEO Specialist), Support (Technical Support, Customer Advocate)",
+        "Each persona includes: slug, name, description, system_prompt (at least 2-3 sentences), voice_description, category, suggested_temperature, source='manual', scope='global'",
+        "async seed_personas(db) function that upserts (insert or update on slug conflict)",
+        "Import and call from appropriate seed runner (follow pattern from seed_skills.py or seed_models.py)",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Follow seed patterns from core/seeds/. Upsert to be idempotent."
+    },
+    {
+      "id": "US-015",
+      "title": "Seed plugin categories",
+      "description": "As the system, I need predefined plugin categories seeded into the database.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/seeds/seed_plugin_categories.py",
+        "Define categories: Development (code-review, testing, documentation), DevOps (deployment, monitoring, ci-cd), Marketing (seo, content, analytics), Sales (outreach, crm, prospecting), Support (ticketing, knowledge-base), Data (analysis, visualization, etl), Security (scanning, compliance, audit)",
+        "Each category has: slug, name, description, icon (emoji), sort_order",
+        "async seed_plugin_categories(db) function that upserts on slug",
+        "Import and call from seed runner",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Keep categories broad — plugins can use tags for finer granularity"
+    },
+    {
+      "id": "US-016",
+      "title": "Build assembled context endpoint for agents",
+      "description": "As the AgentFactory, I need an endpoint that returns the fully assembled agent context including persona prompt, plugin skills, and tool definitions.",
+      "acceptanceCriteria": [
+        "Add GET /api/agents/{agent_id}/assembled-context endpoint to agents.py or agent_plugins.py",
+        "AssembledContextOut Pydantic model: agent_id, model (str), temperature (float), system_prompt (str), persona (dict with name, source info), plugins_loaded (list of slugs), tools (list), token_estimate (int)",
+        "Build persona section: if agent.use_custom_persona, use custom_persona_prompt. Elif agent.persona_id, load persona.system_prompt. Else empty.",
+        "Load assigned plugin skills from S3 via MarketplaceS3Service: for each assigned plugin, fetch skill SKILL.md files",
+        "Assemble system_prompt = persona section + plugin skills section",
+        "Include tool definitions from existing agent tool assignment",
+        "Estimate token count (rough: len(system_prompt) / 4)",
+        "Auth required, workspace-scoped",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "This is the key integration point — AgentFactory calls this to build the full agent context at runtime"
+    },
+    {
+      "id": "US-017",
+      "title": "Build admin plugin upload UI page",
+      "description": "As an admin, I need a UI page to upload plugins with drag-and-drop zip upload and scan progress display.",
+      "acceptanceCriteria": [
+        "Create frontend/app/admin/plugins/upload/page.tsx",
+        "Upload method selection: zip file upload (drag-and-drop or browse) or GitHub URL input",
+        "File validation: .zip only, max 10MB, show file name and size after selection",
+        "Upload & Scan button that calls POST /api/admin/plugins/upload",
+        "Scan progress display: extracting, validating manifest, static analysis, LLM security scan, upload to S3",
+        "After scan complete, show security scan results: overall verdict, risk score, static findings list, LLM summary",
+        "Approve/Reject buttons visible after scan completes",
+        "Use existing UI patterns: Radix UI components, TailwindCSS, match existing admin page styling",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Admin-only page. Use existing component patterns from marketplace components."
+    },
+    {
+      "id": "US-018",
+      "title": "Build admin approval queue UI page",
+      "description": "As an admin, I need a UI page to see pending plugins and approve or reject them.",
+      "acceptanceCriteria": [
+        "Create frontend/app/admin/plugins/page.tsx (or pending/page.tsx)",
+        "List all pending plugins with: name, version, uploaded by, upload date, risk score, static scan summary, LLM scan summary",
+        "Each item has Approve and Reject buttons",
+        "Reject shows a text input for rejection reason",
+        "Clicking 'View Scan Details' expands to show full findings list",
+        "Clicking 'View Source' shows plugin file listing (from manifest contents)",
+        "Batch approve/reject with checkboxes",
+        "Calls POST /api/admin/plugins/{id}/approve and /reject endpoints",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Use existing marketplace list patterns. Card-based layout matching marketplace-card.tsx"
+    },
+    {
+      "id": "US-019",
+      "title": "Build marketplace plugins browse page",
+      "description": "As a workspace user, I need a marketplace plugins browse page to discover and enable plugins.",
+      "acceptanceCriteria": [
+        "Add Plugins tab to existing marketplace page (frontend/app/marketplace/page.tsx) alongside Agents, Tools, Recipes tabs",
+        "Create frontend/components/marketplace/marketplace-plugins-tab.tsx",
+        "Featured plugins section at top (horizontal card row for is_featured plugins)",
+        "All plugins grid below with cards showing: name, version, description, category, skills_count, commands_count, token_estimate, enable_count",
+        "Category filter pills across top",
+        "Search input with debounced API call",
+        "Sort dropdown: Popular, Newest, Name",
+        "Each card has 'Enable' button if not enabled, 'Enabled' badge if already enabled for workspace",
+        "Calls GET /api/marketplace/plugins and POST /api/workspaces/{id}/plugins for enable",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Follow existing marketplace tab patterns from marketplace-agents-tab.tsx and marketplace-tools-tab.tsx"
+    },
+    {
+      "id": "US-020",
+      "title": "Build plugin detail modal",
+      "description": "As a workspace user, I need a plugin detail modal to see full plugin information before enabling.",
+      "acceptanceCriteria": [
+        "Create frontend/components/marketplace/marketplace-plugin-detail-modal.tsx",
+        "Shows: plugin name, version, full description, long_description",
+        "Stats row: category, token estimate, skills count, commands count, enable count",
+        "Included skills list with name and description for each",
+        "Included commands list",
+        "Recommended models list",
+        "Source info: author, license, source URL",
+        "Security status badge (passed/review_required)",
+        "Enable/Disable button for workspace",
+        "Opens from card click in marketplace-plugins-tab.tsx",
+        "Calls GET /api/marketplace/plugins/{id} for data",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Follow pattern from marketplace-item-modal.tsx and marketplace-app-details-modal.tsx"
+    },
+    {
+      "id": "US-021",
+      "title": "Add Persona tab to create-agent-modal",
+      "description": "As an agent builder, I need a Persona step in the agent creation wizard to select or write a persona for my agent.",
+      "acceptanceCriteria": [
+        "Modify frontend/components/agents/create-agent-modal.tsx to add Persona as Step 2 (shift Model to 3, Tools to 4, Skills/Plugins to 5)",
+        "Three options: No persona (default), Select predefined persona, Write custom persona",
+        "Predefined persona selection: category dropdown filter, list of personas with name, voice_description, suggested_temperature",
+        "Preview Prompt button to expand/collapse the full system_prompt text",
+        "Custom persona: textarea for writing custom prompt",
+        "Tip text: 'Select a predefined persona and switch to custom to pre-fill for editing'",
+        "Store selected persona_id or custom_prompt in agent creation data",
+        "Pass persona data when creating agent via API",
+        "Calls GET /api/personas for persona list",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Existing modal has 4 steps. This adds Step 2 (Persona), renumbering existing steps."
+    },
+    {
+      "id": "US-022",
+      "title": "Add Plugins tab to agent configuration modal",
+      "description": "As an agent builder, I need a Plugins assignment section in the agent configuration to assign marketplace plugins to specific agents.",
+      "acceptanceCriteria": [
+        "Modify frontend/components/agents/agent-configuration-modal.tsx to add Plugins section/tab",
+        "Show list of workspace-enabled plugins available for assignment",
+        "Checkbox or toggle for each plugin to assign/unassign from agent",
+        "For each plugin show: name, description, token_estimate, skills_count",
+        "Running total of estimated tokens for all assigned plugins",
+        "Save calls PUT /api/agents/{id}/plugins with selected plugin_ids",
+        "If no plugins enabled for workspace, show message directing user to marketplace",
+        "Calls GET /api/workspaces/{id}/plugins for available plugins and GET /api/agents/{id}/plugins for current assignments",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Similar pattern to agent-tool-assignment.tsx. Only workspace-enabled plugins shown."
+    },
+    {
+      "id": "US-023",
+      "title": "Add Persona section to agent configuration modal",
+      "description": "As an agent builder, I need to view and change the persona in the existing agent configuration modal.",
+      "acceptanceCriteria": [
+        "Add Persona section to frontend/components/agents/agent-configuration-modal.tsx",
+        "Show current persona: name and preview of system_prompt (truncated)",
+        "Change Persona button opens persona selection (same UI as create-agent-modal Persona step)",
+        "Custom persona edit: if use_custom_persona, show editable textarea with current custom_prompt",
+        "Save calls PUT /api/agents/{id}/persona",
+        "Clear persona option (set to no persona)",
+        "Calls GET /api/agents/{id}/persona for current persona",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Reuse persona selection UI from US-021 as a shared component if practical"
+    },
+    {
+      "id": "US-024",
+      "title": "Add marketplace config env vars and S3 setup",
+      "description": "As a developer, I need configuration variables for the marketplace S3 and security scanner.",
+      "acceptanceCriteria": [
+        "Add to orchestrator/config.py: MARKETPLACE_S3_BUCKET (str, default 'automatos-marketplace'), AWS_ACCESS_KEY_ID (str, from env), AWS_SECRET_ACCESS_KEY (str, from env), AWS_REGION (str, default 'us-east-1'), PLUGIN_MAX_UPLOAD_SIZE_MB (int, default 10), PLUGIN_LLM_SCAN_MODEL (str, default 'claude-haiku-4-20250414')",
+        "Add to orchestrator/.env.example all new env vars with comments",
+        "Validate config loads correctly on startup",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "Follow existing config pattern — only config.py reads os.getenv()"
+    },
+    {
+      "id": "US-025",
+      "title": "Add frontend API client methods for marketplace plugins",
+      "description": "As a frontend developer, I need API client methods for all plugin marketplace endpoints.",
+      "acceptanceCriteria": [
+        "Add to frontend/lib/api-client.ts (or create a new plugin-api.ts hook/lib)",
+        "listPlugins(params) — GET /api/marketplace/plugins with category, search, tags, sort, page, limit",
+        "getPluginDetail(pluginId) — GET /api/marketplace/plugins/{id}",
+        "getPluginContent(pluginId) — GET /api/marketplace/plugins/{id}/content",
+        "listCategories() — GET /api/marketplace/categories",
+        "getWorkspacePlugins(workspaceId) — GET /api/workspaces/{id}/plugins",
+        "enablePlugin(workspaceId, pluginId) — POST /api/workspaces/{id}/plugins",
+        "disablePlugin(workspaceId, pluginId) — DELETE /api/workspaces/{id}/plugins/{pid}",
+        "getAgentPlugins(agentId) — GET /api/agents/{id}/plugins",
+        "updateAgentPlugins(agentId, pluginIds) — PUT /api/agents/{id}/plugins",
+        "uploadPlugin(formData) — POST /api/admin/plugins/upload (multipart)",
+        "approvePlugin(pluginId) — POST /api/admin/plugins/{id}/approve",
+        "rejectPlugin(pluginId, reason) — POST /api/admin/plugins/{id}/reject",
+        "getScanResults(pluginId) — GET /api/admin/plugins/{id}/scan",
+        "getPendingPlugins() — GET /api/admin/plugins/pending",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": "Follow existing api-client.ts patterns. Use Clerk token for auth headers."
+    },
+    {
+      "id": "US-026",
+      "title": "Add frontend API client methods for personas",
+      "description": "As a frontend developer, I need API client methods for persona endpoints.",
+      "acceptanceCriteria": [
+        "Add to frontend/lib/api-client.ts or persona-specific hook",
+        "listPersonas(params) — GET /api/personas with category and scope filters",
+        "getPersona(personaId) — GET /api/personas/{id}",
+        "createWorkspacePersona(workspaceId, data) — POST /api/workspaces/{id}/personas",
+        "updateWorkspacePersona(workspaceId, personaId, data) — PUT /api/workspaces/{id}/personas/{pid}",
+        "deleteWorkspacePersona(workspaceId, personaId) — DELETE /api/workspaces/{id}/personas/{pid}",
+        "getAgentPersona(agentId) — GET /api/agents/{id}/persona",
+        "setAgentPersona(agentId, data) — PUT /api/agents/{id}/persona",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": "Follow existing api-client.ts patterns"
+    },
+    {
+      "id": "US-027",
+      "title": "Add Redis caching for plugin content",
+      "description": "As the system, I need Redis caching for frequently accessed plugin content from S3 to reduce latency.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/services/plugin_cache.py or add to marketplace_s3.py",
+        "PluginContentCache class that wraps MarketplaceS3Service with Redis caching",
+        "get_plugin_content(slug, version) method — check Redis first, fall back to S3, cache result",
+        "Cache key format: plugin_content:{slug}:{version}",
+        "Cache TTL: 1 hour default, configurable via PLUGIN_CACHE_TTL_SECONDS env var",
+        "invalidate_plugin(slug, version) method — clear cached content when plugin is updated",
+        "Use existing Redis connection from config (REDIS_URL)",
+        "Graceful fallback: if Redis unavailable, fetch directly from S3",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": "Plugin content doesn't change often — caching reduces S3 reads significantly"
+    },
+    {
+      "id": "US-028",
+      "title": "Handle plugin deactivation cascade",
+      "description": "As the system, I need proper handling when a plugin is deactivated by an admin, including notifying affected workspaces and agents.",
+      "acceptanceCriteria": [
+        "When admin deactivates a plugin (POST /api/admin/plugins/{id}/deactivate), also:",
+        "Query all WorkspaceEnabledPlugin records for the plugin and remove them",
+        "Query all AgentAssignedPlugin records for the plugin and remove them",
+        "Create PluginSyncHistory record with action='deactivate' and details including affected workspace count and agent count",
+        "Return deactivation summary: plugin name, workspaces affected, agents affected",
+        "Plugin detail page should show 'This plugin has been deactivated' instead of enable button",
+        "Typecheck passes"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": "Cascade cleanup to prevent orphaned references when admin removes a plugin"
+    }
+  ]
+}
