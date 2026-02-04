@@ -76,4 +76,20 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - S3 `delete_objects` accepts max 1000 keys per call — batch if needed
   - Config follows simple class attribute pattern with `os.getenv()` — no properties needed for static values
   - Lambda default arg trick (`lambda k=s3_key: ...`) needed in loops to capture iteration variable
+- Static scanner uses `async def` but is CPU-bound (regex); keeps consistent async interface for orchestrator
+- Pydantic models in services use `from pydantic import BaseModel, Field` (same as routing.py / enhanced.py)
+---
+
+## 2026-02-04 - US-005
+- Implemented static security scanner with 4 pattern categories: code execution, network access, filesystem operations, prompt injection
+- Created Pydantic models: StaticFinding and StaticScanResult
+- Async `static_scan(plugin_files)` function scans all text files line-by-line against all pattern groups
+- Files changed:
+  - `orchestrator/core/services/plugin_security_scanner.py` (created)
+- **Learnings for future iterations:**
+  - Pattern definitions use `List[Dict[str, str]]` for easy iteration; each dict has pattern, type, severity, description
+  - `ALL_PATTERN_GROUPS` list enables iterating all categories without repetition
+  - `re.IGNORECASE` flag on all pattern matches as required by AC
+  - Module will be extended by US-006 (LLM scan) and US-007 (scan orchestrator) — structured to allow appending
+  - pydantic not installed locally; syntax/AST check is the verification proxy
 ---
