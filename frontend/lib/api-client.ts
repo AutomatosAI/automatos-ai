@@ -2148,6 +2148,69 @@ class ApiClient {
     return this.request(`/api/admin/plugins/pending?page=${page}&limit=${limit}`)
   }
 
+  // ===== PERSONA ENDPOINTS =====
+
+  async listPersonas(params?: { category?: string; scope?: string }) {
+    const q = new URLSearchParams()
+    if (params?.category) q.append('category', params.category)
+    if (params?.scope) q.append('scope', params.scope)
+    const qs = q.toString()
+    return this.request(`/api/personas${qs ? '?' + qs : ''}`)
+  }
+
+  async getPersona(personaId: string) {
+    return this.request(`/api/personas/${personaId}`)
+  }
+
+  async createWorkspacePersona(workspaceId: string, data: {
+    name: string
+    description?: string
+    system_prompt: string
+    voice_description?: string
+    category?: string
+    suggested_temperature?: number
+  }) {
+    return this.request(`/api/workspaces/${workspaceId}/personas`, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async updateWorkspacePersona(workspaceId: string, personaId: string, data: {
+    name?: string
+    description?: string
+    system_prompt?: string
+    voice_description?: string
+    category?: string
+    suggested_temperature?: number
+  }) {
+    return this.request(`/api/workspaces/${workspaceId}/personas/${personaId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteWorkspacePersona(workspaceId: string, personaId: string) {
+    return this.request(`/api/workspaces/${workspaceId}/personas/${personaId}`, {
+      method: 'DELETE'
+    })
+  }
+
+  async getAgentPersona(agentId: number) {
+    return this.request(`/api/agents/${agentId}/persona`)
+  }
+
+  async setAgentPersona(agentId: number, data: {
+    persona_id?: string | null
+    custom_prompt?: string | null
+    use_custom?: boolean
+  }) {
+    return this.request(`/api/agents/${agentId}/persona`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
   // Enhanced Analytics Methods
   // ===== FIELD THEORY ENDPOINTS (All Working ✅) =====
   async getFieldTheoryHealth() {

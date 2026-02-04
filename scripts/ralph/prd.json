@@ -488,7 +488,7 @@
         "Typecheck passes"
       ],
       "priority": 26,
-      "passes": false,
+      "passes": true,
       "notes": "Follow existing api-client.ts patterns"
     },
     {

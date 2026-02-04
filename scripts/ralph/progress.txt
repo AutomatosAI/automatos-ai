@@ -520,3 +520,21 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - listPlugins() uses URLSearchParams for query params with tags as repeated `tags` params (backend expects multiple query params)
   - Named methods follow the pattern: `async methodName(params): return this.request(endpoint, options)`
 ---
+
+## 2026-02-04 - US-026
+- Added 7 named API client methods for personas to frontend/lib/api-client.ts:
+  - Persona list/detail: listPersonas(params), getPersona(personaId)
+  - Workspace personas: createWorkspacePersona(workspaceId, data), updateWorkspacePersona(workspaceId, personaId, data), deleteWorkspacePersona(workspaceId, personaId)
+  - Agent persona: getAgentPersona(agentId), setAgentPersona(agentId, data)
+- listPersonas() uses URLSearchParams for optional category and scope filters
+- Agent persona methods use `agentId: number` (Agent PK is Integer, not UUID)
+- setAgentPersona() accepts nullable persona_id and custom_prompt for clear-persona support
+- Typecheck passes (esbuild parse validation)
+- Files changed:
+  - `frontend/lib/api-client.ts` (added persona endpoints section after marketplace plugin methods)
+  - `scripts/ralph/prd.json` (marked US-026 passes: true)
+- **Learnings for future iterations:**
+  - Persona methods follow identical pattern to marketplace plugin methods — this.request() for JSON, URLSearchParams for query filters
+  - Agent persona agentId is `number` (Integer PK), workspace/persona IDs are `string` (UUID)
+  - setAgentPersona data types allow `null` for persona_id and custom_prompt to support clearing persona
+---
