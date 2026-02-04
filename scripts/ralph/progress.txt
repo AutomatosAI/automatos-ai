@@ -30,6 +30,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Import services inside endpoint functions to avoid circular import at module load time
 - FastAPI route ordering: fixed-path routes (e.g., `/categories`) must be defined before parameterized routes (e.g., `/{plugin_id}`) in the same router
 - ARRAY contains-element filter: `Model.array_col.any(value)` for PostgreSQL ARRAY columns
+- Workspace auth scoping: compare `ctx.workspace_id` with path param, raise 403 on mismatch
+- Cascade deletes on disable: query Agent.id by workspace_id, then bulk delete junction rows with `.delete(synchronize_session="fetch")`
 
 ---
 
@@ -189,4 +191,24 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - S3 manifest loading in detail endpoint uses try/except — gracefully returns null manifest if S3 is unavailable
   - Plugin content endpoint strips S3 prefix to return relative file paths in the response dict
   - Category name resolved via separate query per plugin in list endpoint (acceptable for paginated results with default limit 20)
+---
+
+## 2026-02-04 - US-011
+- Implemented 3 workspace plugin enablement API endpoints in orchestrator/api/workspace_plugins.py:
+  - GET /api/workspaces/{workspace_id}/plugins — list enabled plugins (joined with marketplace_plugins for details)
+  - POST /api/workspaces/{workspace_id}/plugins — enable a plugin (validates approved+active, creates junction, increments enable_count)
+  - DELETE /api/workspaces/{workspace_id}/plugins/{plugin_id} — disable a plugin (removes junction, decrements enable_count, cascades to remove AgentAssignedPlugin records for workspace agents)
+- Pydantic models: EnablePluginBody, WorkspacePluginOut
+- Workspace auth: validates ctx.workspace_id == path workspace_id (403 on mismatch)
+- Registered router in main.py
+- Files changed:
+  - `orchestrator/api/workspace_plugins.py` (created)
+  - `orchestrator/main.py` (added import + include_router)
+  - `scripts/ralph/prd.json` (marked US-011 passes: true)
+- **Learnings for future iterations:**
+  - Workspace scoping pattern: compare `ctx.workspace_id` (from auth) with path `workspace_id` param, raise 403 on mismatch
+  - enabled_by FK is Integer (FK to users.id) — Clerk user IDs are strings, so use try/except int() conversion with None fallback
+  - Disable cascade: query Agent.id for workspace agents, then delete AgentAssignedPlugin rows matching those agent_ids + the plugin_id
+  - enable_count increment/decrement on MarketplacePlugin must handle None default (use `(plugin.enable_count or 0) + 1`)
+  - Separate router file (workspace_plugins.py) keeps prefix `/api/workspaces` clean and avoids conflicts with marketplace_plugins.py prefix `/api/marketplace/plugins`
 ---

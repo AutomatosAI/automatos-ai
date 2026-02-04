@@ -204,7 +204,7 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Junction record only — no data duplication. Follow workspace auth patterns from existing API."
     },
     {
