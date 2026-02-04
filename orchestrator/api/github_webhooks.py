@@ -90,13 +90,15 @@ async def github_webhook(
             
             logger.info(f"🔍 PR #{pr_number} {action}: {pr_title}")
             
-            # Find the PR Review workflow by name
+            # Find the PR Review workflow by name - scoped to configured workspace
             from core.models import Workflow
             import os
             pr_workflow_name = os.getenv("GITHUB_PR_WORKFLOW_NAME", "PR Code Review")
-            pr_workflow = db.query(Workflow).filter(
-                Workflow.name == pr_workflow_name
-            ).first()
+            webhook_workspace_id = os.getenv("GITHUB_WEBHOOK_WORKSPACE_ID") or os.getenv("DEFAULT_WORKSPACE_ID")
+            query = db.query(Workflow).filter(Workflow.name == pr_workflow_name)
+            if webhook_workspace_id:
+                query = query.filter(Workflow.workspace_id == webhook_workspace_id)
+            pr_workflow = query.first()
             
             if not pr_workflow:
                 logger.warning("PR Code Review workflow not found - creating from template")

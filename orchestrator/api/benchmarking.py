@@ -36,8 +36,9 @@ async def get_performance_summary(
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Get all executions in time window
+        # Get all executions in time window - scoped to workspace
         executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.started_at >= cutoff_date)\
             .order_by(WorkflowExecution.started_at)\
             .all()
@@ -167,6 +168,7 @@ async def get_workflow_performance_trend(
     """
     try:
         executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
             .filter(WorkflowExecution.status == "completed")\
             .order_by(WorkflowExecution.started_at)\
@@ -259,8 +261,8 @@ async def get_agent_performance_metrics(
     try:
         cutoff_date = datetime.now() - timedelta(days=days)
         
-        # Get all agents
-        agents = db.query(Agent).filter(Agent.status == 'active').all()
+        # Get all agents - scoped to workspace
+        agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').all()
         
         agent_metrics = []
         for agent in agents:
@@ -336,8 +338,9 @@ async def get_learning_effectiveness(
     Shows how patterns and memory improve performance.
     """
     try:
-        # Get recent executions with learning data
+        # Get recent executions with learning data - scoped to workspace
         recent_executions = db.query(WorkflowExecution)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.input_data.isnot(None))\
             .order_by(desc(WorkflowExecution.started_at))\
             .limit(100)\

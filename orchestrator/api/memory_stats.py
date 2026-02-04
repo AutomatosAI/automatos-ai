@@ -26,41 +26,42 @@ async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_contex
     Get REAL memory statistics from database
     """
     try:
-        # Total memories
-        total_memories = db.query(func.count(MemoryItem.id)).scalar() or 0
-        
+        # Total memories - scoped to workspace
+        ws_filter = MemoryItem.workspace_id == ctx.workspace_id
+        total_memories = db.query(func.count(MemoryItem.id)).filter(ws_filter).scalar() or 0
+
         # Memories by type
         memory_by_type = db.query(
             MemoryItem.memory_type,
             func.count(MemoryItem.id).label('count')
-        ).group_by(MemoryItem.memory_type).all()
-        
+        ).filter(ws_filter).group_by(MemoryItem.memory_type).all()
+
         # Memories by level
         memory_by_level = db.query(
             MemoryItem.memory_level,
             func.count(MemoryItem.id).label('count')
-        ).group_by(MemoryItem.memory_level).all()
-        
+        ).filter(ws_filter).group_by(MemoryItem.memory_level).all()
+
         # Agents with memories
         agents_with_memories = db.query(
             func.count(func.distinct(MemoryItem.agent_id))
-        ).scalar() or 0
-        
+        ).filter(ws_filter).scalar() or 0
+
         # Average importance
         avg_importance = db.query(
             func.avg(MemoryItem.importance)
-        ).scalar() or 0.0
-        
+        ).filter(ws_filter).scalar() or 0.0
+
         # Recent memories (last 24h)
         yesterday = datetime.utcnow() - timedelta(hours=24)
         recent_memories = db.query(
             func.count(MemoryItem.id)
-        ).filter(MemoryItem.created_at >= yesterday).scalar() or 0
-        
+        ).filter(ws_filter, MemoryItem.created_at >= yesterday).scalar() or 0
+
         # Access count stats
         total_accesses = db.query(
             func.sum(MemoryItem.access_count)
-        ).scalar() or 0
+        ).filter(ws_filter).scalar() or 0
         
         return {
             "system_stats": {
@@ -100,7 +101,7 @@ async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_conte
             func.count(MemoryItem.id).label('memory_count'),
             func.avg(MemoryItem.importance).label('avg_importance'),
             func.sum(MemoryItem.access_count).label('total_accesses')
-        ).group_by(MemoryItem.agent_id).all()
+        ).filter(MemoryItem.workspace_id == ctx.workspace_id).group_by(MemoryItem.agent_id).all()
         
         return [
             {
@@ -126,7 +127,9 @@ async def get_recent_memories(
     Get most recent memories
     """
     try:
-        recent = db.query(MemoryItem).order_by(
+        recent = db.query(MemoryItem).filter(
+            MemoryItem.workspace_id == ctx.workspace_id
+        ).order_by(
             desc(MemoryItem.created_at)
         ).limit(limit).all()
         

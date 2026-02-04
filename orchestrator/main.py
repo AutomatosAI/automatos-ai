@@ -372,6 +372,7 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     if os.getenv("ENVIRONMENT", "development") == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
     return response
@@ -412,26 +413,29 @@ async def api_tracking_middleware(request, call_next):
         response_time = (time.time() - start_time) * 1000  # in ms
         # Use route template (e.g. /api/agents/{agent_id}) instead of raw path
         # to avoid unbounded memory growth from path parameters
-        route = request.scope.get("route")
-        endpoint = f"{request.method} {route.path}" if route else f"{request.method} {request.url.path}"
+        try:
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", None) if route else None
+            endpoint = f"{request.method} {route_path or request.url.path}"
 
-        # Cap stats dict size to prevent unbounded memory growth
-        if endpoint not in api_call_stats and len(api_call_stats) > 500:
-            return
+            # Cap stats dict size to prevent unbounded memory growth
+            if endpoint not in api_call_stats and len(api_call_stats) > 500:
+                pass  # Skip tracking but don't suppress the response
+            else:
+                stats = api_call_stats[endpoint]
+                stats["call_count"] += 1
+                stats["total_time"] += response_time
+                stats["avg_time"] = stats["total_time"] / stats["call_count"]
+                stats["min_time"] = min(stats["min_time"], response_time)
+                stats["max_time"] = max(stats["max_time"], response_time)
+                stats["recent_times"].append(response_time)
+                stats["last_called"] = datetime.now().isoformat()
+                stats["status_codes"][status_code] += 1
 
-        # Update stats
-        stats = api_call_stats[endpoint]
-        stats["call_count"] += 1
-        stats["total_time"] += response_time
-        stats["avg_time"] = stats["total_time"] / stats["call_count"]
-        stats["min_time"] = min(stats["min_time"], response_time)
-        stats["max_time"] = max(stats["max_time"], response_time)
-        stats["recent_times"].append(response_time)
-        stats["last_called"] = datetime.now().isoformat()
-        stats["status_codes"][status_code] += 1
-        
-        if status_code >= 400:
-            stats["error_count"] += 1
+                if status_code >= 400:
+                    stats["error_count"] += 1
+        except Exception:
+            pass  # Never let stats tracking break the response
 
 
 # Include API routers
