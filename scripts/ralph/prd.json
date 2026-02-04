@@ -241,7 +241,7 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Global personas available to all workspaces. Workspace personas only for that workspace."
     },
     {

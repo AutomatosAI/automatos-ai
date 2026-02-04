@@ -235,3 +235,27 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Workspace-enabled plugin validation: query WorkspaceEnabledPlugin.plugin_id as a set, then check each requested plugin_id against it
   - Separate router file (agent_plugins.py) with prefix `/api/agents` keeps endpoints under agent namespace without polluting agents.py
 ---
+
+## 2026-02-04 - US-013
+- Implemented 7 persona API endpoints in orchestrator/api/personas.py:
+  - GET /api/personas — list available personas (global + workspace-custom) with category and scope filters
+  - GET /api/personas/{persona_id} — get persona details including full system_prompt
+  - POST /api/workspaces/{workspace_id}/personas — create custom workspace persona (auto-generates slug from name)
+  - PUT /api/workspaces/{workspace_id}/personas/{persona_id} — update workspace persona (partial update)
+  - DELETE /api/workspaces/{workspace_id}/personas/{persona_id} — delete workspace persona (clears agent persona refs)
+  - PUT /api/agents/{agent_id}/persona — set agent persona (predefined, custom prompt, or clear)
+  - GET /api/agents/{agent_id}/persona — get agent's current persona info
+- Pydantic models: PersonaOut, PersonaSummaryOut, CreatePersonaBody, UpdatePersonaBody, SetAgentPersonaBody, AgentPersonaOut
+- Registered router in main.py
+- Files changed:
+  - `orchestrator/api/personas.py` (created)
+  - `orchestrator/main.py` (added import + include_router)
+  - `scripts/ralph/prd.json` (marked US-013 passes: true)
+- **Learnings for future iterations:**
+  - Router prefix `/api` with mixed sub-paths (`/personas`, `/workspaces/{id}/personas`, `/agents/{id}/persona`) keeps all persona endpoints in one file under one tag
+  - Slug generation from name: slugify + check uniqueness, append short uuid hex on conflict
+  - Delete persona cascade: update Agent rows to clear persona_id and use_custom_persona where workspace matches
+  - Workspace persona visibility: scope=='workspace' personas filtered to ctx.workspace_id in list, 403 in detail view
+  - Agent persona has 3 modes: (1) predefined persona_id, (2) custom_prompt with use_custom=true, (3) no persona (both null)
+  - agent_id path param is `int` (Agent PK is Integer), persona_id is `UUID`
+---
