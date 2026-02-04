@@ -424,3 +424,23 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Disable handler needs to close the modal after success to avoid stale isEnabled state
   - selectedPluginId state was already present in plugins tab from US-019 but wasn't wired to a modal — integration was the missing piece
 ---
+
+## 2026-02-04 - US-021
+- Added Persona step (Step 2) to create-agent-modal.tsx, renumbering Model to Step 3, Tools to Step 4, Skills to Step 5
+- Three persona modes: No persona (default), Predefined (from API), Custom (textarea)
+- Predefined persona selection with category filter dropdown, expandable system prompt preview, and "Selected" badge
+- Custom persona with textarea, pre-fill from predefined when switching modes
+- Persona data saved after agent creation via PUT /api/agents/{id}/persona endpoint
+- Fetches personas from GET /api/personas when modal opens
+- Full form reset including persona state on close/success
+- Files changed:
+  - `frontend/components/agents/create-agent-modal.tsx` (modified — persona step added)
+  - `scripts/ralph/prd.json` (marked US-021 passes: true)
+- **Learnings for future iterations:**
+  - apiClient.request() is a public method on ApiClient that handles auth headers, workspace ID injection, and body serialization automatically — use for direct API calls not covered by named methods
+  - apiClient.request() body auto-stringifies objects (not FormData) — pass plain JS objects for JSON body
+  - Create-agent modal already had "Step X of 5" text in navigation but only 4 tabs — was pre-planned for a 5th step
+  - Persona is set as a post-creation call (like model config) since the create_agent endpoint doesn't accept persona fields directly
+  - Pre-fill custom prompt from predefined: useEffect watches personaMode + selectedPersonaId, only fills if customPersonaPrompt is empty to avoid overwriting user edits
+  - TabsList grid-cols-5 with shortened label "Config" instead of "Configuration" to fit 5 tabs
+---
