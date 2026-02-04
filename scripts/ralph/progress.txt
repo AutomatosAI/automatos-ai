@@ -44,6 +44,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Workspace ID in frontend components: `localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')`
 - Marketplace homepage dual Tabs pattern: one `<Tabs>` for TabsList triggers, separate `<Tabs value={selectedTab}>` for TabsContent — both share state
 - Select dropdown: import `Select, SelectTrigger, SelectValue, SelectContent, SelectItem` from `@/components/ui/select`
+- Agent persona API: GET `/api/agents/{id}/persona` returns `{persona_id, persona_name, use_custom_persona, custom_persona_prompt, system_prompt}`; PUT accepts `{persona_id?, custom_prompt?, use_custom: bool}`
+- Persona save is independent per-section — use separate save handler rather than coupling with main config save
 
 ---
 
@@ -463,4 +465,26 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Agent plugins fetched via GET /api/agents/{agent_id}/plugins also returns plugin_id field for consistency
   - TabsList grid-cols-6 fits 6 short labels well at max-w-5xl modal width
   - Checkbox disabled state during pluginsSaving prevents double-toggling during API roundtrip
+---
+
+## 2026-02-04 - US-023
+- Added Persona tab (7th tab) to agent-configuration-modal.tsx for viewing and changing agent persona
+- Three persona modes: No persona (default), Predefined (from API), Custom (textarea)
+- Fetches personas list from GET /api/personas and current agent persona from GET /api/agents/{id}/persona on modal open
+- Predefined persona selection: category dropdown filter, expandable system prompt preview, "Selected" badge
+- Custom persona editing: textarea with monospace font, pre-fill from predefined when switching modes
+- Save Persona button calls PUT /api/agents/{id}/persona with persona_id, custom_prompt, or clear
+- Current persona state summary shown in footer with character count for custom prompts
+- Clear persona option via "No Persona" mode selector
+- Grid updated from 6 to 7 tabs (General, Persona, Resources, Skills, Plugins, Model, Tools) with space-x-1 for tighter label spacing
+- Files changed:
+  - `frontend/components/agents/agent-configuration-modal.tsx` (modified — added Persona tab, persona state, fetch logic, save handler)
+  - `scripts/ralph/prd.json` (marked US-023 passes: true)
+- **Learnings for future iterations:**
+  - Persona tab reuses same UI patterns from create-agent-modal Step 2 (US-021) — mode cards, category filter, expandable prompt preview, custom textarea
+  - Agent persona API returns: persona_id, persona_name, use_custom_persona, custom_persona_prompt, system_prompt — check use_custom_persona first to determine mode
+  - Persona save is independent of the main "Save Changes" button — uses separate handleSavePersona to avoid coupling with general config save flow
+  - TabsList grid-cols-7 fits 7 short labels at max-w-5xl with space-x-1 (reduced from space-x-2) for tighter spacing
+  - Pre-fill custom prompt from predefined: useEffect watches personaMode + selectedPersonaId, only fills if customPersonaPrompt is empty
+  - PersonaMode type defined inline in component since it's only used in this modal (not worth extracting to shared types)
 ---

@@ -22,6 +22,10 @@ import {
   Terminal,
   Coins,
   ExternalLink,
+  User,
+  PenLine,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -129,6 +133,20 @@ export function AgentConfigurationModal({
   const [pluginsLoading, setPluginsLoading] = useState(false)
   const [pluginsSaving, setPluginsSaving] = useState(false)
 
+  // US-023: Persona state
+  type PersonaMode = 'none' | 'predefined' | 'custom'
+  const [personaMode, setPersonaMode] = useState<PersonaMode>('none')
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null)
+  const [currentPersonaName, setCurrentPersonaName] = useState<string | null>(null)
+  const [currentPersonaPrompt, setCurrentPersonaPrompt] = useState<string | null>(null)
+  const [customPersonaPrompt, setCustomPersonaPrompt] = useState('')
+  const [personas, setPersonas] = useState<any[]>([])
+  const [personasLoading, setPersonasLoading] = useState(false)
+  const [personaCategoryFilter, setPersonaCategoryFilter] = useState<string>('all')
+  const [expandedPersonaId, setExpandedPersonaId] = useState<string | null>(null)
+  const [personaSaving, setPersonaSaving] = useState(false)
+  const [personaLoaded, setPersonaLoaded] = useState(false)
+
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
 
@@ -190,6 +208,71 @@ export function AgentConfigurationModal({
     })()
     return () => { mounted = false }
   }, [open, agentId])
+
+  // US-023: Fetch personas list and current agent persona when modal opens
+  useEffect(() => {
+    if (!open || !agentId) return
+    let mounted = true
+
+    // Fetch personas list
+    setPersonasLoading(true)
+    apiClient.request<any>('/api/personas')
+      .then((data) => {
+        if (!mounted) return
+        const list = Array.isArray(data) ? data : (data?.personas || data?.data || [])
+        setPersonas(list)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch personas:', err)
+        if (mounted) setPersonas([])
+      })
+      .finally(() => { if (mounted) setPersonasLoading(false) })
+
+    // Fetch current agent persona
+    apiClient.request<any>(`/api/agents/${agentId}/persona`)
+      .then((data) => {
+        if (!mounted) return
+        setPersonaLoaded(true)
+        if (data?.use_custom_persona && data?.custom_persona_prompt) {
+          setPersonaMode('custom')
+          setCustomPersonaPrompt(data.custom_persona_prompt)
+          setCurrentPersonaName(null)
+          setCurrentPersonaPrompt(data.custom_persona_prompt)
+          setSelectedPersonaId(null)
+        } else if (data?.persona_id) {
+          setPersonaMode('predefined')
+          setSelectedPersonaId(data.persona_id)
+          setCurrentPersonaName(data.persona_name || data.name || null)
+          setCurrentPersonaPrompt(data.system_prompt || null)
+          setCustomPersonaPrompt('')
+        } else {
+          setPersonaMode('none')
+          setSelectedPersonaId(null)
+          setCurrentPersonaName(null)
+          setCurrentPersonaPrompt(null)
+          setCustomPersonaPrompt('')
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch agent persona:', err)
+        if (mounted) {
+          setPersonaLoaded(true)
+          setPersonaMode('none')
+        }
+      })
+
+    return () => { mounted = false }
+  }, [open, agentId])
+
+  // US-023: Pre-fill custom prompt when switching from predefined to custom
+  useEffect(() => {
+    if (personaMode === 'custom' && selectedPersonaId && !customPersonaPrompt) {
+      const persona = personas.find((p: any) => p.id === selectedPersonaId)
+      if (persona?.system_prompt) {
+        setCustomPersonaPrompt(persona.system_prompt)
+      }
+    }
+  }, [personaMode, selectedPersonaId, personas, customPersonaPrompt])
 
   useEffect(() => {
     if (agentConfig && agent && typeof agent === 'object') {
@@ -342,6 +425,45 @@ export function AgentConfigurationModal({
   const assignedTokenEstimate = workspacePlugins
     .filter((p: any) => assignedPluginIds.has(p.plugin_id))
     .reduce((sum: number, p: any) => sum + (p.token_estimate || 0), 0)
+
+  // US-023: Save persona assignment
+  const handleSavePersona = async () => {
+    if (!agentId) return
+    setPersonaSaving(true)
+    try {
+      const payload: any = { use_custom: false }
+      if (personaMode === 'predefined' && selectedPersonaId) {
+        payload.persona_id = selectedPersonaId
+      } else if (personaMode === 'custom' && customPersonaPrompt) {
+        payload.custom_prompt = customPersonaPrompt
+        payload.use_custom = true
+      } else {
+        // Clear persona
+        payload.persona_id = null
+        payload.custom_prompt = null
+      }
+      await apiClient.request(`/api/agents/${agentId}/persona`, {
+        method: 'PUT',
+        body: payload,
+      })
+      // Update current display state
+      if (personaMode === 'predefined' && selectedPersonaId) {
+        const persona = personas.find((p: any) => p.id === selectedPersonaId)
+        setCurrentPersonaName(persona?.name || null)
+        setCurrentPersonaPrompt(persona?.system_prompt || null)
+      } else if (personaMode === 'custom') {
+        setCurrentPersonaName(null)
+        setCurrentPersonaPrompt(customPersonaPrompt)
+      } else {
+        setCurrentPersonaName(null)
+        setCurrentPersonaPrompt(null)
+      }
+    } catch (err) {
+      console.error('Failed to save persona:', err)
+    } finally {
+      setPersonaSaving(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!agentId) {
@@ -513,28 +635,32 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
-                  <TabsTrigger value="general" className="flex items-center space-x-2">
+                <TabsList className="grid w-full grid-cols-7 bg-secondary/50">
+                  <TabsTrigger value="general" className="flex items-center space-x-1">
                     <Info className="w-4 h-4" />
                     <span>General</span>
                   </TabsTrigger>
-                  <TabsTrigger value="resources" className="flex items-center space-x-2">
+                  <TabsTrigger value="persona" className="flex items-center space-x-1">
+                    <User className="w-4 h-4" />
+                    <span>Persona</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="resources" className="flex items-center space-x-1">
                     <Database className="w-4 h-4" />
                     <span>Resources</span>
                   </TabsTrigger>
-                  <TabsTrigger value="skills" className="flex items-center space-x-2">
+                  <TabsTrigger value="skills" className="flex items-center space-x-1">
                     <Brain className="w-4 h-4" />
                     <span>Skills</span>
                   </TabsTrigger>
-                  <TabsTrigger value="plugins" className="flex items-center space-x-2">
+                  <TabsTrigger value="plugins" className="flex items-center space-x-1">
                     <Puzzle className="w-4 h-4" />
                     <span>Plugins</span>
                   </TabsTrigger>
-                  <TabsTrigger value="model" className="flex items-center space-x-2">
+                  <TabsTrigger value="model" className="flex items-center space-x-1">
                     <Bot className="w-4 h-4" />
                     <span>Model</span>
                   </TabsTrigger>
-                  <TabsTrigger value="tools" className="flex items-center space-x-2">
+                  <TabsTrigger value="tools" className="flex items-center space-x-1">
                     <Wrench className="w-4 h-4" />
                     <span>Tools</span>
                   </TabsTrigger>
@@ -619,6 +745,232 @@ export function AgentConfigurationModal({
                             })}
                           </SelectContent>
                         </Select>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* US-023: Persona Tab */}
+                <TabsContent value="persona" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <User className="h-5 w-5 text-violet-400" />
+                        Agent Persona
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Give your agent a personality and voice
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Persona Mode Selection */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                            personaMode === 'none'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                          }`}
+                          onClick={() => {
+                            setPersonaMode('none')
+                            setSelectedPersonaId(null)
+                            setCustomPersonaPrompt('')
+                          }}
+                        >
+                          <Bot className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                          <div className="font-medium text-sm">No Persona</div>
+                          <div className="text-xs text-muted-foreground mt-1">Default behavior</div>
+                        </div>
+
+                        <div
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                            personaMode === 'predefined'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                          }`}
+                          onClick={() => setPersonaMode('predefined')}
+                        >
+                          <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                          <div className="font-medium text-sm">Predefined</div>
+                          <div className="text-xs text-muted-foreground mt-1">Choose a persona</div>
+                        </div>
+
+                        <div
+                          className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                            personaMode === 'custom'
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border/50 hover:border-primary/30'
+                          }`}
+                          onClick={() => setPersonaMode('custom')}
+                        >
+                          <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                          <div className="font-medium text-sm">Custom</div>
+                          <div className="text-xs text-muted-foreground mt-1">Write your own</div>
+                        </div>
+                      </div>
+
+                      {/* Predefined Persona Selection */}
+                      {personaMode === 'predefined' && (
+                        <div className="space-y-4">
+                          {/* Category Filter */}
+                          <div>
+                            <Label>Filter by Category</Label>
+                            <Select
+                              value={personaCategoryFilter}
+                              onValueChange={setPersonaCategoryFilter}
+                            >
+                              <SelectTrigger className="bg-secondary/50">
+                                <SelectValue placeholder="All categories" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Categories</SelectItem>
+                                {[...new Set(personas.map((p: any) => p.category).filter(Boolean))].map((cat: string) => (
+                                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Persona List */}
+                          {personasLoading ? (
+                            <div className="space-y-2">
+                              {[1, 2, 3].map(i => (
+                                <div key={i} className="h-16 bg-secondary/20 animate-pulse rounded-lg" />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                              {personas
+                                .filter((p: any) => personaCategoryFilter === 'all' || p.category === personaCategoryFilter)
+                                .map((persona: any) => (
+                                  <div
+                                    key={persona.id}
+                                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                      selectedPersonaId === persona.id
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border/50 hover:border-primary/30'
+                                    }`}
+                                    onClick={() => setSelectedPersonaId(persona.id)}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-medium">{persona.name}</span>
+                                          {persona.category && (
+                                            <Badge variant="outline" className="text-xs">{persona.category}</Badge>
+                                          )}
+                                        </div>
+                                        {persona.voice_description && (
+                                          <p className="text-xs text-muted-foreground mt-1 truncate">
+                                            {persona.voice_description}
+                                          </p>
+                                        )}
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                          Temperature: {persona.suggested_temperature}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2 ml-2">
+                                        {selectedPersonaId === persona.id && (
+                                          <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                        )}
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setExpandedPersonaId(
+                                              expandedPersonaId === persona.id ? null : persona.id
+                                            )
+                                          }}
+                                        >
+                                          {expandedPersonaId === persona.id ? (
+                                            <ChevronUp className="w-4 h-4" />
+                                          ) : (
+                                            <ChevronDown className="w-4 h-4" />
+                                          )}
+                                        </Button>
+                                      </div>
+                                    </div>
+
+                                    {/* Expandable System Prompt Preview */}
+                                    {expandedPersonaId === persona.id && persona.system_prompt && (
+                                      <div className="mt-3 pt-3 border-t border-border/30">
+                                        <Label className="text-xs">System Prompt</Label>
+                                        <pre className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap bg-secondary/30 rounded p-2 max-h-[150px] overflow-y-auto">
+                                          {persona.system_prompt}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              {personas.filter((p: any) => personaCategoryFilter === 'all' || p.category === personaCategoryFilter).length === 0 && (
+                                <div className="text-center py-6 text-muted-foreground">
+                                  No personas found{personaCategoryFilter !== 'all' ? ` in category "${personaCategoryFilter}"` : ''}.
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Tip */}
+                          {selectedPersonaId && (
+                            <p className="text-xs text-muted-foreground italic">
+                              Tip: Select a predefined persona and switch to &quot;Custom&quot; to pre-fill for editing.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Custom Persona */}
+                      {personaMode === 'custom' && (
+                        <div className="space-y-3">
+                          <div>
+                            <Label htmlFor="custom-persona-config">Custom Persona Prompt</Label>
+                            <Textarea
+                              id="custom-persona-config"
+                              placeholder="Describe the agent's personality, communication style, expertise, and behavioral guidelines..."
+                              value={customPersonaPrompt}
+                              onChange={(e) => setCustomPersonaPrompt(e.target.value)}
+                              className="bg-secondary/50 min-h-[200px] font-mono text-sm"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              This prompt will be prepended to the agent&apos;s system message.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Current Status & Save */}
+                      <div className="flex justify-between items-center pt-4 border-t border-border/30">
+                        <div>
+                          <p className="font-medium text-sm">
+                            {personaMode === 'none' && 'No persona selected'}
+                            {personaMode === 'predefined' && (selectedPersonaId
+                              ? `Persona: ${personas.find((p: any) => p.id === selectedPersonaId)?.name || 'Selected'}`
+                              : 'Select a persona above')}
+                            {personaMode === 'custom' && (customPersonaPrompt
+                              ? `Custom persona (${customPersonaPrompt.length} chars)`
+                              : 'Write a custom persona above')}
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSavePersona}
+                          disabled={personaSaving}
+                          className="hover:border-violet-500/50"
+                        >
+                          {personaSaving ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4 mr-2" />
+                              Save Persona
+                            </>
+                          )}
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>

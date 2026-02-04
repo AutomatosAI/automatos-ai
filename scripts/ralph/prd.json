@@ -429,7 +429,7 @@
         "Typecheck passes"
       ],
       "priority": 23,
-      "passes": false,
+      "passes": true,
       "notes": "Reuse persona selection UI from US-021 as a shared component if practical"
     },
     {
