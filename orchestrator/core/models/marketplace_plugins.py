@@ -172,3 +172,63 @@ class PluginSyncHistory(Base):
 
     # Relationships
     plugin = relationship("MarketplacePlugin", back_populates="sync_history")
+
+
+# ============================================================================
+# Workspace Plugin Enablement (Junction)
+# ============================================================================
+
+class WorkspaceEnabledPlugin(Base):
+    """Junction table: which plugins are enabled for which workspaces."""
+    __tablename__ = "workspace_enabled_plugins"
+    __table_args__ = (
+        Index("idx_workspace_enabled_plugins_workspace", "workspace_id"),
+        Index("idx_workspace_enabled_plugins_plugin", "plugin_id"),
+        {"extend_existing": True},
+    )
+
+    workspace_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    plugin_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("marketplace_plugins.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    enabled_at = Column(DateTime, server_default=func.now(), nullable=False)
+    enabled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    # Relationships
+    plugin = relationship("MarketplacePlugin")
+
+
+# ============================================================================
+# Agent Plugin Assignment (Junction)
+# ============================================================================
+
+class AgentAssignedPlugin(Base):
+    """Junction table: which plugins are assigned to which agents."""
+    __tablename__ = "agent_assigned_plugins"
+    __table_args__ = (
+        Index("idx_agent_assigned_plugins_agent", "agent_id"),
+        Index("idx_agent_assigned_plugins_plugin", "plugin_id"),
+        {"extend_existing": True},
+    )
+
+    agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    plugin_id = Column(
+        PGUUID(as_uuid=True),
+        ForeignKey("marketplace_plugins.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    priority = Column(Integer, default=0)
+    assigned_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    # Relationships
+    plugin = relationship("MarketplacePlugin")
