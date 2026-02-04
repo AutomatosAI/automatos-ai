@@ -108,7 +108,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Stage 2 of two-stage scan. Cost ~$0.001 per scan."
     },
     {

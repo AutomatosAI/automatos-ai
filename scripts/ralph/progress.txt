@@ -21,6 +21,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - AWS/boto3 pattern: use `try/except ImportError` guard, `boto3.client()` with `BotoConfig` for retries, wrap sync calls with `asyncio.run_in_executor()` for async
 - S3 service reads creds from config singleton — `config.AWS_ACCESS_KEY_ID`, `config.AWS_SECRET_ACCESS_KEY`, `config.AWS_REGION`, `config.MARKETPLACE_S3_BUCKET`
 - boto3 not installed locally; service guards with try/except and raises ImportError at instantiation time
+- Pydantic v2 `model_` prefix is reserved; fields like `model_used` need `model_config = {"protected_namespaces": ()}` on the BaseModel class
+- LLM JSON responses may have markdown code fences — strip before `json.loads()`
 
 ---
 
@@ -92,4 +94,19 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - `re.IGNORECASE` flag on all pattern matches as required by AC
   - Module will be extended by US-006 (LLM scan) and US-007 (scan orchestrator) — structured to allow appending
   - pydantic not installed locally; syntax/AST check is the verification proxy
+---
+
+## 2026-02-04 - US-006
+- Implemented LLM security scanner (Stage 2) using Claude Haiku via Anthropic API
+- Added Pydantic models: LLMFinding and LLMScanResult (with `model_config = {"protected_namespaces": ()}` to avoid Pydantic warning on `model_used` field)
+- Defined LLM_SECURITY_SCAN_PROMPT constant covering 6 threat categories: malicious code, prompt injection, data exfiltration, privilege escalation, social engineering, obfuscated code
+- Implemented `async llm_security_scan()` function with full error handling and JSON response parsing
+- Files changed:
+  - `orchestrator/core/services/plugin_security_scanner.py` (appended LLM scan code)
+- **Learnings for future iterations:**
+  - Pydantic v2 reserves `model_` prefix as protected namespace; fields like `model_used` need `model_config = {"protected_namespaces": ()}` in the BaseModel class to suppress warnings
+  - Anthropic API pattern: `client.messages.create()` with `system` as separate param (not a message), wrap with `run_in_executor` for async
+  - LLM responses may include markdown code fences around JSON — strip ```` ```json `` `` ``` ```` before parsing
+  - Config import inside function (`from config import config`) with fallback to `os.getenv()` for flexibility when module is loaded outside orchestrator context
+  - Default model `claude-haiku-4-20250414` matches `PLUGIN_LLM_SCAN_MODEL` in config.py
 ---
