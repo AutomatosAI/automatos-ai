@@ -149,7 +149,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "This is the main orchestrator for the admin upload flow"
     },
     {

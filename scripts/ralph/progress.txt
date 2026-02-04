@@ -125,3 +125,18 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Static findings with severity='critical' trigger auto-block — no need to spend LLM tokens on obviously malicious plugins
   - Service classes follow constructor injection: `__init__(self, db)` with `self.db = db`, then `self.db.add()` / `self.db.commit()` / `self.db.refresh()`
 ---
+
+## 2026-02-04 - US-008
+- Implemented PluginUploadService class with full upload workflow: validate zip, parse manifest, read files, run security scan, upload to S3, create DB records
+- Constructor takes db session, MarketplaceS3Service, PluginScanService (dependency injection)
+- `upload_plugin()` method handles: zip extraction, manifest validation (slug/name/version required), text file reading for scanning, scan orchestration, S3 upload, MarketplacePlugin record creation, PluginSyncHistory audit record
+- Maps scan verdict directly to security_status on the plugin record
+- Files changed:
+  - `orchestrator/core/services/plugin_upload_service.py` (created)
+- **Learnings for future iterations:**
+  - zipfile.ZipFile can be initialized from `io.BytesIO(zip_bytes)` — no need for temp files on disk
+  - Binary files in zip archives raise `UnicodeDecodeError` on `.decode("utf-8")` — catch and skip for text-only scanning
+  - Manifest `contents` dict expected to have keys: skills, commands, agents, hooks (each a list) for count extraction
+  - `datetime.utcnow()` used for `completed_at` on PluginSyncHistory — matches the `server_default=func.now()` pattern for started_at
+  - Service composes MarketplaceS3Service + PluginScanService via constructor — keeps upload orchestration separate from storage and scanning concerns
+---
