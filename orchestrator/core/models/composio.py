@@ -57,6 +57,11 @@ class ComposioConnection(Base):
     connection_metadata = Column("connection_metadata", JSONB, default=dict)
     last_synced_at = Column(DateTime)
 
+    # PRD-42: Cloud Document Sync fields
+    sync_enabled = Column(Boolean, default=False, server_default="false")
+    total_documents_synced = Column(Integer, default=0, server_default="0")
+    last_successful_sync = Column(DateTime)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

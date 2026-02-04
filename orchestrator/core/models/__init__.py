@@ -25,6 +25,11 @@ except ImportError:
     pass
 
 try:
+    from .cloud_sync import *  # PRD-42: Cloud Document Sync
+except ImportError:
+    pass
+
+try:
     from core.workspaces.models import *  # PRD-37: Workspaces
     from core.workspaces import *  # Import all workspace module components
 except ImportError:

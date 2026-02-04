@@ -152,6 +152,14 @@ class Config:
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
+
+    # =============================================================================
+    # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
+    # =============================================================================
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
     
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
