@@ -18,6 +18,10 @@ import {
   Network,
   Clock,
   Wrench,
+  Puzzle,
+  Terminal,
+  Coins,
+  ExternalLink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -43,6 +47,7 @@ import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useTools } from '@/hooks/use-tools-api'
+import { apiClient } from '@/lib/api-client'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -118,6 +123,12 @@ export function AgentConfigurationModal({
   const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsData?.data || []
 
+  // PRD-42: Plugin assignment state
+  const [workspacePlugins, setWorkspacePlugins] = useState<any[]>([])
+  const [assignedPluginIds, setAssignedPluginIds] = useState<Set<string>>(new Set())
+  const [pluginsLoading, setPluginsLoading] = useState(false)
+  const [pluginsSaving, setPluginsSaving] = useState(false)
+
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
 
@@ -139,6 +150,46 @@ export function AgentConfigurationModal({
     return () => { mounted = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]) // Re-fetch when modal opens
+
+  // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
+  useEffect(() => {
+    if (!open || !agentId) return
+    let mounted = true
+    ;(async () => {
+      setPluginsLoading(true)
+      try {
+        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (!workspaceId) {
+          if (mounted) setPluginsLoading(false)
+          return
+        }
+
+        // Fetch workspace-enabled plugins and agent's assigned plugins in parallel
+        const [wpRes, apRes] = await Promise.all([
+          apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
+          apiClient.request<any>(`/api/agents/${agentId}/plugins`, { method: 'GET' }),
+        ])
+
+        if (!mounted) return
+
+        const wpItems = wpRes?.items || wpRes || []
+        const apItems = apRes?.items || apRes || []
+        setWorkspacePlugins(Array.isArray(wpItems) ? wpItems : [])
+        setAssignedPluginIds(new Set(
+          (Array.isArray(apItems) ? apItems : []).map((p: any) => p.plugin_id)
+        ))
+      } catch (err) {
+        console.error('Failed to fetch plugins:', err)
+        if (mounted) {
+          setWorkspacePlugins([])
+          setAssignedPluginIds(new Set())
+        }
+      } finally {
+        if (mounted) setPluginsLoading(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [open, agentId])
 
   useEffect(() => {
     if (agentConfig && agent && typeof agent === 'object') {
@@ -257,6 +308,40 @@ export function AgentConfigurationModal({
 
     updateFormData('assigned_tools', newTools)
   }
+
+  // PRD-42: Toggle plugin assignment and persist via API
+  const togglePluginAssignment = async (pluginId: string) => {
+    if (!agentId) return
+    const wasAssigned = assignedPluginIds.has(pluginId)
+    const newIds = new Set(assignedPluginIds)
+    if (wasAssigned) {
+      newIds.delete(pluginId)
+    } else {
+      newIds.add(pluginId)
+    }
+
+    // Optimistic update
+    setAssignedPluginIds(newIds)
+    setPluginsSaving(true)
+
+    try {
+      await apiClient.request(`/api/agents/${agentId}/plugins`, {
+        method: 'PUT',
+        body: { plugin_ids: Array.from(newIds) } as any,
+      })
+    } catch (err) {
+      // Revert on error
+      console.error('Failed to update plugin assignment:', err)
+      setAssignedPluginIds(assignedPluginIds)
+    } finally {
+      setPluginsSaving(false)
+    }
+  }
+
+  // PRD-42: Compute total token estimate for assigned plugins
+  const assignedTokenEstimate = workspacePlugins
+    .filter((p: any) => assignedPluginIds.has(p.plugin_id))
+    .reduce((sum: number, p: any) => sum + (p.token_estimate || 0), 0)
 
   const handleSave = async () => {
     if (!agentId) {
@@ -428,7 +513,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-2">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -440,6 +525,10 @@ export function AgentConfigurationModal({
                   <TabsTrigger value="skills" className="flex items-center space-x-2">
                     <Brain className="w-4 h-4" />
                     <span>Skills</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="plugins" className="flex items-center space-x-2">
+                    <Puzzle className="w-4 h-4" />
+                    <span>Plugins</span>
                   </TabsTrigger>
                   <TabsTrigger value="model" className="flex items-center space-x-2">
                     <Bot className="w-4 h-4" />
@@ -681,6 +770,125 @@ export function AgentConfigurationModal({
                           <p className="text-muted-foreground">
                             No skills are available for assignment at this time.
                           </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* PRD-42: Plugins Tab */}
+                <TabsContent value="plugins" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Puzzle className="h-5 w-5 text-orange-400" />
+                        Plugin Assignment
+                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-muted-foreground">
+                          Select marketplace plugins to assign to this agent
+                        </p>
+                        {assignedPluginIds.size > 0 && (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              <Coins className="w-3 h-3 mr-1" />
+                              ~{assignedTokenEstimate.toLocaleString()} tokens
+                            </Badge>
+                            <Badge variant="outline" className="text-xs">
+                              {assignedPluginIds.size} assigned
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {pluginsLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                        </div>
+                      ) : workspacePlugins.length > 0 ? (
+                        <div className="space-y-3">
+                          {workspacePlugins.map((plugin: any) => {
+                            const isAssigned = assignedPluginIds.has(plugin.plugin_id)
+                            return (
+                              <div
+                                key={plugin.plugin_id}
+                                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
+                                  isAssigned
+                                    ? 'bg-orange-500/5 border-orange-500/30'
+                                    : 'bg-background/50 border-border/50'
+                                }`}
+                              >
+                                <Checkbox
+                                  id={`plugin-${plugin.plugin_id}`}
+                                  checked={isAssigned}
+                                  onCheckedChange={() => togglePluginAssignment(plugin.plugin_id)}
+                                  disabled={pluginsSaving}
+                                  className="mt-1"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <Label htmlFor={`plugin-${plugin.plugin_id}`} className="cursor-pointer">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="font-medium truncate">{plugin.name}</span>
+                                        <Badge variant="outline" className="text-xs shrink-0">
+                                          v{plugin.version}
+                                        </Badge>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        {plugin.security_status === 'safe' && (
+                                          <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                            <Shield className="w-3 h-3 mr-1" />
+                                            Verified
+                                          </Badge>
+                                        )}
+                                        {plugin.category_name && (
+                                          <Badge variant="secondary" className="text-xs">
+                                            {plugin.category_name}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                      {plugin.description || 'No description available'}
+                                    </p>
+                                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                      <span className="flex items-center gap-1">
+                                        <Terminal className="w-3 h-3" />
+                                        {plugin.skills_count} skills
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Zap className="w-3 h-3" />
+                                        {plugin.commands_count} commands
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Coins className="w-3 h-3" />
+                                        ~{(plugin.token_estimate || 0).toLocaleString()} tokens
+                                      </span>
+                                    </div>
+                                  </Label>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8">
+                          <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                          <p className="text-muted-foreground text-sm mb-4">
+                            No plugins are enabled for this workspace yet.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              window.location.href = '/marketplace'
+                            }}
+                          >
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Browse Marketplace
+                          </Button>
                         </div>
                       )}
                     </CardContent>

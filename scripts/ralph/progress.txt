@@ -444,3 +444,23 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Pre-fill custom prompt from predefined: useEffect watches personaMode + selectedPersonaId, only fills if customPersonaPrompt is empty to avoid overwriting user edits
   - TabsList grid-cols-5 with shortened label "Config" instead of "Configuration" to fit 5 tabs
 ---
+
+## 2026-02-04 - US-022
+- Added Plugins tab to agent-configuration-modal.tsx for assigning marketplace plugins to agents
+- Tab shows workspace-enabled plugins with checkbox toggles for assignment/unassignment
+- Each plugin card displays: name, version, description, security badge, category, skills count, commands count, token estimate
+- Running total token estimate badge shown in header when plugins are assigned
+- Empty state with "Browse Marketplace" link when no workspace plugins enabled
+- Optimistic UI: assignment changes persisted immediately via PUT /api/agents/{id}/plugins
+- Grid updated from 5 to 6 tabs (General, Resources, Skills, Plugins, Model, Tools)
+- Files changed:
+  - `frontend/components/agents/agent-configuration-modal.tsx` (modified — added Plugins tab, plugin state, fetch logic, toggle handler)
+  - `scripts/ralph/prd.json` (marked US-022 passes: true)
+- **Learnings for future iterations:**
+  - apiClient.request() handles auth headers + workspace ID + body serialization — preferred over raw fetch for API calls in modal components
+  - Plugin assignment uses PUT-replace pattern: sends full array of plugin_ids, backend replaces all assignments (same as US-012 backend pattern)
+  - Workspace plugins fetched via GET /api/workspaces/{workspace_id}/plugins returns items with plugin_id (string UUID), not id — use plugin_id for Set tracking
+  - Agent plugins fetched via GET /api/agents/{agent_id}/plugins also returns plugin_id field for consistency
+  - TabsList grid-cols-6 fits 6 short labels well at max-w-5xl modal width
+  - Checkbox disabled state during pluginsSaving prevents double-toggling during API roundtrip
+---
