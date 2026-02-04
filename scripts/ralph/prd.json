@@ -70,7 +70,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Use boto3 patterns from bedrock_client.py. Bucket is global, not per-workspace"
     },
     {

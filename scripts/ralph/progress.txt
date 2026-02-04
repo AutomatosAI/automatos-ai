@@ -18,6 +18,9 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Router registration in `main.py`: import router, `app.include_router(router)`, optional routers use try/except
 - Frontend has no TypeScript compiler installed; `next.config.js` has `ignoreBuildErrors: true`
 - Python has no type checker (mypy/pyright) configured; verify imports work as typecheck proxy
+- AWS/boto3 pattern: use `try/except ImportError` guard, `boto3.client()` with `BotoConfig` for retries, wrap sync calls with `asyncio.run_in_executor()` for async
+- S3 service reads creds from config singleton — `config.AWS_ACCESS_KEY_ID`, `config.AWS_SECRET_ACCESS_KEY`, `config.AWS_REGION`, `config.MARKETPLACE_S3_BUCKET`
+- boto3 not installed locally; service guards with try/except and raises ImportError at instantiation time
 
 ---
 
@@ -56,4 +59,21 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Adding `index=True` inline on a column is equivalent to creating a named Index in `__table_args__` — simpler for single-column indexes
   - String FK references (e.g., `ForeignKey('personas.id')`) resolve lazily, so import order in `__init__.py` doesn't matter for FK resolution
   - Agent model already has many columns — persona columns added after marketplace fields, before evaluation fields
+---
+
+## 2026-02-04 - US-004
+- Implemented MarketplaceS3Service with all required methods: upload_zip, extract_plugin, get_manifest, get_file, list_plugin_files, delete_plugin
+- Added marketplace config vars to config.py: MARKETPLACE_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, PLUGIN_MAX_UPLOAD_SIZE_MB, PLUGIN_LLM_SCAN_MODEL
+- Updated .env.example with new env vars
+- Files changed:
+  - `orchestrator/core/services/marketplace_s3.py` (created)
+  - `orchestrator/config.py` (added marketplace/S3 config section)
+  - `orchestrator/.env.example` (added marketplace env vars)
+- **Learnings for future iterations:**
+  - boto3 is not installed in local dev env — use `try/except ImportError` guard pattern (same as bedrock_client.py)
+  - Async S3 calls: wrap synchronous boto3 calls with `asyncio.get_running_loop().run_in_executor(None, lambda: ...)`
+  - S3 `list_objects_v2` is paginated — handle `IsTruncated`/`NextContinuationToken` for large plugin directories
+  - S3 `delete_objects` accepts max 1000 keys per call — batch if needed
+  - Config follows simple class attribute pattern with `os.getenv()` — no properties needed for static values
+  - Lambda default arg trick (`lambda k=s3_key: ...`) needed in loops to capture iteration variable
 ---
