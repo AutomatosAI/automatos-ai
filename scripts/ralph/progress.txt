@@ -276,3 +276,19 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - load_seed_data.py already imports `get_db_session` at top for system settings; persona section uses aliased import `_get_db_session` to avoid shadowing
   - Persona model has no `is_active` default in ORM definition that differs from True, so no need to set it explicitly in seed data
 ---
+
+## 2026-02-04 - US-015
+- Implemented seed_plugin_categories.py with 20 predefined categories across 7 groups: Development (code-review, testing, documentation), DevOps (deployment, monitoring, ci-cd), Marketing (seo, content, analytics), Sales (outreach, crm, prospecting), Support (ticketing, knowledge-base), Data (analysis, visualization, etl), Security (scanning, compliance, audit)
+- Each category has: slug, name, description, icon (emoji), sort_order (increments of 10 for easy reordering)
+- Upsert logic: queries by slug, updates changed fields on existing records, creates new ones
+- Registered in load_seed_data.py seed runner after personas section
+- Files changed:
+  - `orchestrator/core/seeds/seed_plugin_categories.py` (created)
+  - `orchestrator/core/database/load_seed_data.py` (added plugin categories seed call)
+  - `scripts/ralph/prd.json` (marked US-015 passes: true)
+- **Learnings for future iterations:**
+  - load_seed_data.py uses progressively more underscored aliases for get_db_session imports to avoid shadowing: `get_db_session`, `_get_db_session`, `__get_db_session`
+  - sort_order in increments of 10 allows inserting new categories between existing ones without renumbering
+  - PluginCategory has no parent_id set in seeds — all seeded categories are top-level; subcategories can be added later via API
+  - 20 categories (not 7) — the PRD listed 7 groups but meant subcategories within each group
+---

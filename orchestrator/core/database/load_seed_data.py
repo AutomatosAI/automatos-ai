@@ -154,7 +154,19 @@ def load_seed_data(load_credentials: bool = True, load_platform_defaults: bool =
                     print(f"  ✅ Personas: {created} created, {updated} updated")
             except Exception as e:
                 print(f"  ⚠️  Error loading personas: {e}")
-        
+
+            # Load Plugin Categories
+            print("\n📂 Loading plugin categories...")
+            try:
+                from seeds.seed_plugin_categories import seed_plugin_categories
+                from database.database import get_db_session as __get_db_session
+
+                with __get_db_session() as db:
+                    created, updated = seed_plugin_categories(db)
+                    print(f"  ✅ Plugin categories: {created} created, {updated} updated")
+            except Exception as e:
+                print(f"  ⚠️  Error loading plugin categories: {e}")
+
         print("\n" + "=" * 60)
         print("✅ SEED DATA LOADED SUCCESSFULLY!")
         print(f"   {cred_count} credential types + system settings + models + skills")
