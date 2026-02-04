@@ -70,6 +70,7 @@ const PAGE_MOCK_CONFIG: Record<string, boolean> = {
   'tools': false,            // ✅ Use real APIs - tools endpoints working
   'credentials': false,      // ✅ Use real APIs - credentials system ready
   'marketplace': false,      // ✅ Use real APIs - marketplace/composio endpoints working
+  'admin': false,            // ✅ Use real APIs - admin plugin management
 
   // Testing/Development
   'test': true,              // 🧪 Always use mocks for testing

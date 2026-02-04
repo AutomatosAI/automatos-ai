@@ -38,6 +38,9 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Agent.model_config is a JSON column (not a Pydantic `model_config` attr); access via `agent.model_config` returns dict with keys: provider, model_id, temperature, max_tokens
 - ComposioAppCache + AgentAppAssignment are the tool assignment models; import from `core.models.composio_cache`
 - S3 MarketplaceS3Service instantiation inside endpoint: `from core.services.marketplace_s3 import MarketplaceS3Service; s3 = MarketplaceS3Service()`
+- Frontend file upload: use `apiClient.getAuthHeaders()` for auth, then raw `fetch()` with `FormData` body — don't set Content-Type header
+- Admin pages use `usePageAPI('admin')` and follow standard page pattern: `MainLayout` wrapper, `glass-card` styling
+- No admin directory existed before US-017; `frontend/app/admin/` is the established path for admin pages
 
 ---
 
@@ -313,4 +316,27 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Persona.suggested_temperature can override the agent's model_config temperature when a predefined persona is assigned
   - Plugin SKILL.md file detection: check `key.lower().endswith("skill.md")` for naming convention
   - No new router registration needed — endpoint added to existing agent_plugins.py router already in main.py
+---
+
+## 2026-02-04 - US-017
+- Implemented admin plugin upload UI page at frontend/app/admin/plugins/upload/page.tsx
+- Upload method selection: zip file drag-and-drop (via react-dropzone) or GitHub URL input
+- File validation: .zip only, max 10MB, shows file name and size after selection
+- Upload & Scan button calls POST /api/admin/plugins/upload with multipart FormData
+- Scan progress display with 7 phases: uploading, extracting, validating, static analysis, LLM scan, S3 upload, complete
+- Security scan results display: overall verdict badge, risk score with color-coded progress bar, LLM analysis summary
+- Expandable static findings and LLM findings lists with severity coloring
+- Approve/Reject buttons after scan completes; reject prompts for reason
+- Added 'admin' page to PAGE_MOCK_CONFIG in api-client.ts
+- Files changed:
+  - `frontend/app/admin/plugins/upload/page.tsx` (created)
+  - `frontend/lib/api-client.ts` (added admin page mock config entry)
+  - `scripts/ralph/prd.json` (marked US-017 passes: true)
+- **Learnings for future iterations:**
+  - No existing admin pages in frontend/app/admin/ — this is the first admin page, establishing the pattern
+  - File upload pattern: use `apiClient.getAuthHeaders()` for auth headers, then `fetch()` directly with FormData body (don't set Content-Type — browser sets multipart boundary)
+  - react-dropzone accept: `{ 'application/zip': ['.zip'] }` for zip-only validation
+  - Progress component supports custom bar color via `[&>div]:bg-color-500` Tailwind arbitrary selector
+  - glass-card class provides consistent frosted glass card styling matching marketplace pages
+  - MainLayout wraps all pages for sidebar + header; no admin-specific layout needed
 ---
