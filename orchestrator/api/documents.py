@@ -104,7 +104,7 @@ async def handle_request(
         content_hash = hashlib.sha256(content).hexdigest()
         
         # Check for duplicate
-        existing = db.query(Document).filter(Document.content_hash == content_hash).first()
+        existing = db.query(Document).filter(Document.content_hash == content_hash, Document.workspace_id == ctx.workspace_id).first()
         if existing:
             return DocumentUploadResponse(
                 document_id=existing.id,
@@ -965,7 +965,10 @@ async def semantic_search(
 
 
 @router.get("/queue/status")
-async def get_queue_status(db: Session = Depends(get_db)):
+async def get_queue_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get real-time processing queue status
     
@@ -980,14 +983,17 @@ async def get_queue_status(db: Session = Depends(get_db)):
         
         # Get documents by status
         pending_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'pending'
         ).order_by(Document.upload_date.desc()).all()
-        
+
         processing_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'processing'
         ).order_by(Document.upload_date.desc()).all()
-        
+
         failed_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'failed'
         ).order_by(Document.upload_date.desc()).limit(10).all()
         
@@ -1060,12 +1066,14 @@ async def get_queue_status(db: Session = Depends(get_db)):
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         
         processed_today = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'completed',
             Document.processed_date >= today_start
         ).count()
         
         # Calculate average processing time (last 100 completed docs)
         recent_completed = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'completed',
             Document.processed_date.isnot(None),
             Document.upload_date.isnot(None)
@@ -1082,6 +1090,7 @@ async def get_queue_status(db: Session = Depends(get_db)):
         
         # Calculate success rate (last 100 attempts)
         recent_all = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status.in_(['completed', 'failed'])
         ).order_by(Document.upload_date.desc()).limit(100).all()
         
@@ -1116,6 +1125,7 @@ async def rag_retrieve(
     max_tokens: Optional[int] = Query(None, ge=100, le=8000, description="Maximum tokens (uses system_settings if not provided)"),
     diversity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Diversity parameter (uses system_settings if not provided)"),
     min_similarity: Optional[float] = Query(None, ge=0.0, le=1.0, description="Minimum similarity (uses system_settings if not provided)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1257,6 +1267,7 @@ async def track_usage_event(
     document_id: Optional[int] = Query(None, description="Document ID (if applicable)"),
     query: Optional[str] = Query(None, description="Search query (if applicable)"),
     metadata: Optional[str] = Query(None, description="Additional metadata as JSON string"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1331,6 +1342,7 @@ async def track_usage_event(
 @router.get("/analytics/usage")
 async def get_usage_analytics(
     period: str = Query("7d", description="Time period (24h, 7d, 30d)"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1361,23 +1373,24 @@ async def get_usage_analytics(
         
         # Most accessed documents (by view count or recent activity)
         popular_docs_query = text("""
-            SELECT 
+            SELECT
                 id,
                 filename,
                 file_type,
                 upload_date,
                 processed_date,
-                CASE 
+                CASE
                     WHEN processed_date IS NOT NULL THEN 1
                     ELSE 0
                 END as access_count
             FROM documents
             WHERE status = 'completed'
+                AND workspace_id = :workspace_id
             ORDER BY processed_date DESC NULLS LAST
             LIMIT 10
         """)
         
-        popular_docs_result = db.execute(popular_docs_query)
+        popular_docs_result = db.execute(popular_docs_query, {"workspace_id": str(ctx.workspace_id)})
         popular_documents = [
             {
                 "document_id": row.id,
@@ -1390,14 +1403,15 @@ async def get_usage_analytics(
         
         # Get document statistics
         stats_query = text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_documents,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as processed_documents,
                 COUNT(CASE WHEN upload_date >= :start_time THEN 1 END) as documents_this_period
             FROM documents
+            WHERE workspace_id = :workspace_id
         """)
-        
-        stats_result = db.execute(stats_query, {"start_time": start_time}).fetchone()
+
+        stats_result = db.execute(stats_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)}).fetchone()
         
         # Get REAL popular search terms from document_usage table (if it exists)
         popular_search_terms = []
@@ -1427,16 +1441,17 @@ async def get_usage_analytics(
         
         # Time series data (documents uploaded per day)
         time_series_query = text("""
-            SELECT 
+            SELECT
                 DATE(upload_date) as date,
                 COUNT(*) as count
             FROM documents
             WHERE upload_date >= :start_time
+                AND workspace_id = :workspace_id
             GROUP BY DATE(upload_date)
             ORDER BY date
         """)
-        
-        time_series_result = db.execute(time_series_query, {"start_time": start_time})
+
+        time_series_result = db.execute(time_series_query, {"start_time": start_time, "workspace_id": str(ctx.workspace_id)})
         time_series = [
             {
                 "date": row.date.isoformat() if row.date else None,
@@ -1478,16 +1493,22 @@ async def get_usage_analytics(
 @router.post("/{document_id}/reprocess")
 async def reprocess_document(
     document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
     Re-process a document with semantic chunking.
-    
+
     Use after changing embedding models or to improve chunk quality.
     """
     try:
+        # Verify document belongs to this workspace
+        document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
         from modules.rag import get_rag_service
-        
+
         rag_service = get_rag_service()
         result = await rag_service.reprocess_document(document_id)
         
@@ -1513,6 +1534,7 @@ async def reprocess_document(
 @router.post("/reprocess-all")
 async def reprocess_all_documents(
     background_tasks: BackgroundTasks,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1549,7 +1571,10 @@ async def reprocess_all_documents(
 
 
 @router.get("/reprocess-status")
-async def get_reprocess_status(db: Session = Depends(get_db)):
+async def get_reprocess_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get status of document re-processing.
     
@@ -1559,14 +1584,15 @@ async def get_reprocess_status(db: Session = Depends(get_db)):
         from sqlalchemy import text
         
         status_query = text("""
-            SELECT 
+            SELECT
                 status,
                 COUNT(*) as count
             FROM documents
+            WHERE workspace_id = :workspace_id
             GROUP BY status
         """)
         
-        result = db.execute(status_query)
+        result = db.execute(status_query, {"workspace_id": str(ctx.workspace_id)})
         status_counts = {row.status: row.count for row in result}
         
         total = sum(status_counts.values())

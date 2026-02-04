@@ -102,69 +102,6 @@ async def create_specialized_agent_endpoint(
         )
 
 
-@router.post("/{agent_id}/execute")
-async def execute_agent_task(
-    agent_id: int,
-    request: Dict[str, Any],
-    ctx: RequestContext = Depends(get_request_context_hybrid)
-):
-    """
-    Execute a task using a specific agent's LLM.
-    
-    Request body:
-    {
-        "task": {
-            "description": "Task description",
-            "context": {...},
-            "use_memory": true
-        },
-        "execution_mode": "thorough|quick",
-        "use_tools": false
-    }
-    
-    Returns real LLM execution results.
-    """
-    try:
-        factory = get_agent_factory()
-        
-        # Extract task details
-        task_data = request.get("task", {})
-        task_description = task_data.get("description")
-        context = task_data.get("context")
-        use_memory = task_data.get("use_memory", True)
-        
-        if not task_description:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Task description is required"
-            )
-        
-        # Execute with real LLM
-        result = await factory.execute_task(
-            agent=agent_id,
-            task_description=task_description,
-            context=context,
-            use_memory=use_memory
-        )
-        
-        if result["status"] == "error":
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Task execution failed")
-            )
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Task execution error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
-
-
 @router.post("/{agent_id}/learn")
 async def update_agent_learning(
     agent_id: int,
@@ -254,14 +191,14 @@ async def get_agent_performance(
     """
     try:
         # Get agent from database
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
-        
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
+
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Get agent runtime status if active (with error handling)
         factory = get_agent_factory()
         agent_status = {}
@@ -339,13 +276,13 @@ async def get_agent_logs(
         from sqlalchemy import desc
         
         # Verify agent exists
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Get recent workflow executions (check all, filter by agent in subtasks)
         executions = db.query(WorkflowExecution).order_by(
             desc(WorkflowExecution.started_at)
@@ -386,35 +323,6 @@ async def get_agent_logs(
         raise
     except Exception as e:
         logger.error(f"Logs query error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
-
-
-@router.get("/{agent_id}/status")
-async def get_agent_status_endpoint(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid)):
-    """
-    Get detailed agent status including LLM connection info.
-    
-    Returns real-time agent status and configuration.
-    """
-    try:
-        factory = get_agent_factory()
-        agent_status = await factory.get_agent_status(agent_id)
-        
-        if agent_status["status"] == "not_found":
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=agent_status.get("error")
-            )
-        
-        return agent_status
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Status query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
@@ -665,13 +573,13 @@ async def get_agent_model_config(
     and all generation parameters.
     """
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         return {
             "agent_id": agent_id,
             "agent_name": agent.name,
@@ -717,13 +625,13 @@ async def update_agent_model_config(
         from core.llm.model_registry import ModelRegistry
         from sqlalchemy import update
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Validate model exists
         model_id = model_config.get("model_id")
         if model_id:
@@ -777,13 +685,13 @@ async def get_agent_model_usage(
     Returns token usage, costs, and request counts.
     """
     try:
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         usage_stats = agent.model_usage_stats or {
             "total_tokens": 0,
             "total_cost": 0.0,
@@ -843,13 +751,13 @@ async def switch_agent_model(
         from core.llm.model_registry import ModelRegistry
         from sqlalchemy.orm import attributes
         
-        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        agent = db.query(Agent).filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id).first()
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Agent {agent_id} not found"
             )
-        
+
         # Validate new model
         new_model_id = request.get("model_id")
         if not new_model_id:

@@ -66,20 +66,16 @@ def _get_workspace_id_from_request(request: Request) -> Optional[UUID]:
     return None
 
 
-def _workspace_exists(workspace_id: UUID) -> bool:
+def _workspace_exists(db, workspace_id: UUID) -> bool:
     """Return True if workspace exists (and is active)."""
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
-            {"id": str(workspace_id)},
-        ).fetchone()
-        return bool(row)
-    finally:
-        db.close()
+    row = db.execute(
+        text("SELECT 1 FROM workspaces WHERE id = :id AND is_active = true LIMIT 1"),
+        {"id": str(workspace_id)},
+    ).fetchone()
+    return bool(row)
 
 
-def _resolve_workspace_for_clerk_user(clerk_user_id: Optional[str], org_id: Optional[str]) -> Optional[UUID]:
+def _resolve_workspace_for_clerk_user(db, clerk_user_id: Optional[str], org_id: Optional[str]) -> Optional[UUID]:
     """
     Resolve a user's workspace from the DB when the client didn't send X-Workspace-ID.
 
@@ -88,50 +84,46 @@ def _resolve_workspace_for_clerk_user(clerk_user_id: Optional[str], org_id: Opti
     - personal workspace owned by mapped user (users.clerk_user_id -> workspaces.owner_id)
     - if exactly one active workspace exists globally, use it (dev-friendly)
     """
-    db = SessionLocal()
-    try:
-        if org_id:
-            row = db.execute(
+    if org_id:
+        row = db.execute(
+            text(
+                "SELECT id FROM workspaces "
+                "WHERE clerk_org_id = :org_id AND is_active = true "
+                "ORDER BY updated_at DESC NULLS LAST "
+                "LIMIT 1"
+            ),
+            {"org_id": org_id},
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+
+    if clerk_user_id:
+        user_row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": clerk_user_id},
+        ).fetchone()
+        if user_row and user_row[0]:
+            uid = user_row[0]
+            ws_row = db.execute(
                 text(
                     "SELECT id FROM workspaces "
-                    "WHERE clerk_org_id = :org_id AND is_active = true "
-                    "ORDER BY updated_at DESC NULLS LAST "
+                    "WHERE owner_id = :uid AND is_active = true "
+                    "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
                     "LIMIT 1"
                 ),
-                {"org_id": org_id},
+                {"uid": uid},
             ).fetchone()
-            if row and row[0]:
-                return row[0]
+            if ws_row and ws_row[0]:
+                return ws_row[0]
 
-        if clerk_user_id:
-            user_row = db.execute(
-                text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-                {"cid": clerk_user_id},
-            ).fetchone()
-            if user_row and user_row[0]:
-                uid = user_row[0]
-                ws_row = db.execute(
-                    text(
-                        "SELECT id FROM workspaces "
-                        "WHERE owner_id = :uid AND is_active = true "
-                        "ORDER BY is_personal DESC, updated_at DESC NULLS LAST "
-                        "LIMIT 1"
-                    ),
-                    {"uid": uid},
-                ).fetchone()
-                if ws_row and ws_row[0]:
-                    return ws_row[0]
+    # Dev fallback (but still a real workspace from DB): only if unambiguous.
+    rows = db.execute(
+        text("SELECT id FROM workspaces WHERE is_active = true ORDER BY updated_at DESC NULLS LAST LIMIT 2")
+    ).fetchall()
+    if len(rows) == 1 and rows[0] and rows[0][0]:
+        return rows[0][0]
 
-        # Dev fallback (but still a real workspace from DB): only if unambiguous.
-        rows = db.execute(
-            text("SELECT id FROM workspaces WHERE is_active = true ORDER BY updated_at DESC NULLS LAST LIMIT 2")
-        ).fetchall()
-        if len(rows) == 1 and rows[0] and rows[0][0]:
-            return rows[0][0]
-
-        return None
-    finally:
-        db.close()
+    return None
 
 
 def _get_api_key(request: Request) -> Optional[str]:
@@ -184,89 +176,92 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
     _require_auth_raw = os.getenv("REQUIRE_AUTH", "true").strip().lower()
     require_auth = _require_auth_raw not in {"0", "false", "no", "off"}
 
-    # 1) Clerk JWT
-    bearer = _get_bearer_token(request)
-    if bearer:
-        clerk = get_clerk_auth()
-        claims = clerk.verify_token(bearer)
-        if claims:
-            # ... (successful resolution logic)
-            info = clerk.extract_user_info(claims)
-            resolved = workspace_id or _resolve_workspace_for_clerk_user(
-                clerk_user_id=info.get("clerk_user_id"),
-                org_id=info.get("org_id"),
-            )
-            if not resolved:
-                 logger.warning(f"Auth failed: Workspace not resolved for user {info.get('email')}")
-                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
+    # Single DB session for all workspace resolution queries in this request
+    db = SessionLocal()
+    try:
+        # 1) Clerk JWT
+        bearer = _get_bearer_token(request)
+        if bearer:
+            clerk = get_clerk_auth()
+            claims = clerk.verify_token(bearer)
+            if claims:
+                info = clerk.extract_user_info(claims)
+                resolved = workspace_id or _resolve_workspace_for_clerk_user(
+                    db,
+                    clerk_user_id=info.get("clerk_user_id"),
+                    org_id=info.get("org_id"),
                 )
-            if not _workspace_exists(resolved):
-                logger.warning(f"Auth failed: Workspace {resolved} does not exist")
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-            
-            user = UserContext(
-                id=info.get("clerk_user_id") or info.get("email"),
-                email=info.get("email"),
-                role=info.get("role") or "user",
-                system_role=info.get("system_role") or info.get("role") or "user",
-                clerk_user_id=info.get("clerk_user_id"),
-                org_id=info.get("org_id"),
-                raw_claims=claims,
-            )
-            return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+                if not resolved:
+                    logger.warning(f"Auth failed: Workspace not resolved for user {info.get('email')}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Workspace not resolved. Ensure client sends X-Workspace-ID or user has a workspace.",
+                    )
+                if not _workspace_exists(db, resolved):
+                    logger.warning(f"Auth failed: Workspace {resolved} does not exist")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
 
-        # If a bearer token is present but invalid, treat as unauthorized.
-        logger.warning("Auth failed: Invalid or expired Clerk token")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
-
-    # 2) API key
-    provided_key = _get_api_key(request)
-    if provided_key:
-        expected = (
-            os.getenv("ORCHESTRATOR_API_KEY")
-            or os.getenv("AUTOMATOS_API_KEY")
-            or os.getenv("API_KEY")
-        )
-        import hmac as _hmac
-        if expected and _hmac.compare_digest(provided_key, expected):
-            # ... (success logic)
-            user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
-            resolved = workspace_id
-            if not resolved:
-                # Prefer env default if provided; otherwise use unambiguous DB workspace.
-                resolved = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID")) or _resolve_workspace_for_clerk_user(
-                    clerk_user_id=None, org_id=None
+                user = UserContext(
+                    id=info.get("clerk_user_id") or info.get("email"),
+                    email=info.get("email"),
+                    role=info.get("role") or "user",
+                    system_role=info.get("system_role") or info.get("role") or "user",
+                    clerk_user_id=info.get("clerk_user_id"),
+                    org_id=info.get("org_id"),
+                    raw_claims=claims,
                 )
-            if not resolved:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
-            if not _workspace_exists(resolved):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
-            return RequestContext(
-                workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
+                return RequestContext(workspace_id=resolved, user=user, auth_type="clerk")
+
+            # If a bearer token is present but invalid, treat as unauthorized.
+            logger.warning("Auth failed: Invalid or expired Clerk token")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+        # 2) API key
+        provided_key = _get_api_key(request)
+        if provided_key:
+            expected = (
+                os.getenv("ORCHESTRATOR_API_KEY")
+                or os.getenv("AUTOMATOS_API_KEY")
+                or os.getenv("API_KEY")
             )
-        
-        logger.warning("Auth failed: Invalid API key provided")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+            import hmac as _hmac
+            if expected and _hmac.compare_digest(provided_key, expected):
+                user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
+                resolved = workspace_id
+                if not resolved:
+                    resolved = _parse_uuid(os.getenv("DEFAULT_WORKSPACE_ID")) or _resolve_workspace_for_clerk_user(
+                        db, clerk_user_id=None, org_id=None
+                    )
+                if not resolved:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace not resolved")
+                if not _workspace_exists(db, resolved):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                return RequestContext(
+                    workspace_id=resolved, user=user, auth_type="api_key", api_key_id="env"
+                )
 
-    # 3) Dev fallback
-    if require_auth:
-        logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+            logger.warning("Auth failed: Invalid API key provided")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
-    # Keep noisy warnings down unless explicitly enabled
-    if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
-        logger.info(
-            "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
-        )
+        # 3) Dev fallback
+        if require_auth:
+            logger.warning("Auth failed: Authentication required but no credentials provided (REQUIRE_AUTH=true)")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
-    # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
-    resolved = workspace_id or _resolve_workspace_for_clerk_user(clerk_user_id=None, org_id=None)
-    if not resolved:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
-        )
-    return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+        # Keep noisy warnings down unless explicitly enabled
+        if os.getenv("AUTH_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
+            logger.info(
+                "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
+            )
+
+        # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
+        resolved = workspace_id or _resolve_workspace_for_clerk_user(db, clerk_user_id=None, org_id=None)
+        if not resolved:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
+            )
+        return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
+    finally:
+        db.close()
 

@@ -52,8 +52,9 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
     """Get agent success rate percentage with trend"""
     try:
         # Calculate from workflow executions
-        total_executions = db.query(WorkflowExecution).count()
+        total_executions = db.query(WorkflowExecution).filter(WorkflowExecution.workspace_id == ctx.workspace_id).count()
         successful = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.status == 'completed'
         ).count()
         
@@ -62,10 +63,12 @@ async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_conte
         # Calculate 7-day trend
         week_ago = datetime.now() - timedelta(days=7)
         week_total = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= week_ago
         ).count()
         week_successful = db.query(WorkflowExecution).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.status == 'completed',
                 WorkflowExecution.started_at >= week_ago
             )
@@ -156,7 +159,7 @@ async def get_error_rate_by_agent_type(ctx: RequestContext = Depends(get_request
     """Get error rate breakdown by agent type"""
     try:
         # Get agent types and their error rates
-        agent_types = db.query(Agent.agent_type, func.count().label('total')).group_by(Agent.agent_type).all()
+        agent_types = db.query(Agent.agent_type, func.count().label('total')).filter(Agent.workspace_id == ctx.workspace_id).group_by(Agent.agent_type).all()
         
         error_rates = {}
         for agent_type, total in agent_types:
@@ -185,12 +188,14 @@ async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybr
     try:
         # Count pending/queued workflows
         pending_workflows = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.status.in_(['pending', 'queued', 'running'])
         ).count()
-        
+
         # Get queue breakdown by priority
         high_priority = db.query(WorkflowExecution).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.status.in_(['pending', 'queued']),
                 WorkflowExecution.started_at >= datetime.now() - timedelta(hours=1)
             )
@@ -230,16 +235,18 @@ async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context
         memory_efficiency = min(100, memory.percent * 1.1)
         
         # Agent utilization
-        total_agents = db.query(Agent).count()
-        active_agents = db.query(Agent).filter(Agent.status == 'active').count()
+        total_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).count()
+        active_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').count()
         agent_efficiency = (active_agents / total_agents * 100) if total_agents > 0 else 0
-        
+
         # Workflow completion efficiency
         recent_executions = db.query(WorkflowExecution).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
         ).count()
         completed = db.query(WorkflowExecution).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.status == 'completed',
                 WorkflowExecution.started_at >= datetime.now() - timedelta(hours=24)
             )
@@ -448,8 +455,8 @@ async def get_predictive_alerts(ctx: RequestContext = Depends(get_request_contex
             })
         
         # Predict agent capacity
-        active_agents = db.query(Agent).filter(Agent.status == 'active').count()
-        total_agents = db.query(Agent).count()
+        active_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').count()
+        total_agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).count()
         utilization = (active_agents / total_agents * 100) if total_agents > 0 else 0
         
         if utilization > 85:
@@ -491,7 +498,7 @@ async def get_agent_ranking(ctx: RequestContext = Depends(get_request_context_hy
     """Get agent performance ranking leaderboard"""
     try:
         # Get agents with mock performance data
-        agents = db.query(Agent).filter(Agent.status == 'active').all()
+        agents = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id, Agent.status == 'active').all()
         
         agent_rankings = []
         for agent in agents:
@@ -614,12 +621,12 @@ async def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_co
     """Get all enhanced dashboard metrics in one call for efficiency"""
     try:
         # Call individual metric endpoints
-        success_rate = await get_agent_success_rate(db)
-        completion_time = await get_avg_task_completion_time(db)
-        system_load = await get_system_load_trend(db)
-        error_rates = await get_error_rate_by_agent_type(db)
-        queue_depth = await get_queue_depth(db)
-        efficiency = await get_efficiency_score(db)
+        success_rate = await get_agent_success_rate(ctx, db)
+        completion_time = await get_avg_task_completion_time(ctx, db)
+        system_load = await get_system_load_trend(ctx, db)
+        error_rates = await get_error_rate_by_agent_type(ctx, db)
+        queue_depth = await get_queue_depth(ctx, db)
+        efficiency = await get_efficiency_score(ctx, db)
         
         return DashboardMetrics(
             agent_success_rate=success_rate["value"],
@@ -640,12 +647,12 @@ async def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_co
 async def get_all_performance_enhancements(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get all performance analytics enhancements in one call"""
     try:
-        cost_per_execution = await get_cost_per_execution(db)
-        peak_usage = await get_peak_usage_hours(db)
-        bottlenecks = await get_bottleneck_detection(db)
-        alerts = await get_predictive_alerts(db)
-        ranking = await get_agent_ranking(db)
-        sla = await get_sla_compliance(db)
+        cost_per_execution = await get_cost_per_execution(ctx, db)
+        peak_usage = await get_peak_usage_hours(ctx, db)
+        bottlenecks = await get_bottleneck_detection(ctx, db)
+        alerts = await get_predictive_alerts(ctx, db)
+        ranking = await get_agent_ranking(ctx, db)
+        sla = await get_sla_compliance(ctx, db)
         
         return {
             "cost_analysis": cost_per_execution,

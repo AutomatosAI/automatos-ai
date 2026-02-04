@@ -711,20 +711,27 @@ async def get_credential_stats(
             CredentialType.is_active == True
         ).scalar()
         
-        total_creds = db.query(func.count(Credential.id)).scalar()
-        active_creds = db.query(func.count(Credential.id)).filter(
-            Credential.is_active == True
+        total_creds = db.query(func.count(Credential.id)).filter(
+            Credential.workspace_id == ctx.workspace_id
         ).scalar()
-        
+        active_creds = db.query(func.count(Credential.id)).filter(
+            Credential.is_active == True,
+            Credential.workspace_id == ctx.workspace_id
+        ).scalar()
+
         by_env = db.query(
             Credential.environment,
             func.count(Credential.id)
+        ).filter(
+            Credential.workspace_id == ctx.workspace_id
         ).group_by(Credential.environment).all()
-        
+
         by_type = db.query(
             CredentialType.display_name,
             func.count(Credential.id)
-        ).join(Credential).group_by(CredentialType.display_name).all()
+        ).join(Credential).filter(
+            Credential.workspace_id == ctx.workspace_id
+        ).group_by(CredentialType.display_name).all()
         
         return {
             "credential_types": {

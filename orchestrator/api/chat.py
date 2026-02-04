@@ -479,7 +479,7 @@ async def get_available_agents(
     """Get list of available agents for chat selection."""
     from core.models import Agent
     
-    query = db.query(Agent).filter(Agent.status == status)
+    query = db.query(Agent).filter(Agent.status == status, Agent.workspace_id == ctx.workspace_id)
     agents = query.all()
     
     return {
@@ -527,7 +527,7 @@ async def switch_agent(
     if chat.user_id != user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId).first()
+    new_agent = db.query(Agent).filter(Agent.id == request.newAgentId, Agent.workspace_id == ctx.workspace_id).first()
     if not new_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     

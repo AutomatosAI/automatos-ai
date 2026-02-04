@@ -37,6 +37,7 @@ async def get_workflow_executions(
     try:
         executions = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .order_by(desc(WorkflowExecution.started_at))\
             .limit(limit)\
             .offset(offset)\
@@ -79,6 +80,7 @@ async def get_execution_details(
     try:
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.id == execution_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .first()
         
         if not execution:
@@ -150,10 +152,11 @@ async def get_live_progress(
         # Get the most recent execution for this workflow
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
             .order_by(desc(WorkflowExecution.started_at))\
             .first()
-        
+
         if not execution:
             # No active execution, return empty progress
             return {
@@ -240,10 +243,11 @@ async def store_orchestration_event(
         # Get the active execution
         execution = db.query(WorkflowExecution)\
             .filter(WorkflowExecution.workflow_id == workflow_id)\
+            .filter(WorkflowExecution.workspace_id == ctx.workspace_id)\
             .filter(WorkflowExecution.status.in_(["started", "running", "in_progress"]))\
             .order_by(desc(WorkflowExecution.started_at))\
             .first()
-        
+
         if not execution:
             raise HTTPException(status_code=404, detail="No active execution found")
         

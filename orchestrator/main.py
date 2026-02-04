@@ -30,7 +30,7 @@ load_dotenv(env_path)
 from config import config
 
 # Import database and models
-from core.database.database import init_database, get_db
+from core.database.database import init_database, get_db, SessionLocal
 from core.models import Base
 
 # Import API routers
@@ -67,7 +67,6 @@ from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
 from api.templates import router as templates_router
-from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
@@ -76,6 +75,19 @@ try:
     from api.bug_reports import router as bug_reports_router
 except ImportError:
     bug_reports_router = None
+# PRD-37: SaaS Foundation stubs (optional — may not exist in all branches)
+try:
+    from api.auth import router as auth_router
+except ImportError:
+    auth_router = None
+try:
+    from api.api_keys import router as api_keys_router
+except ImportError:
+    api_keys_router = None
+try:
+    from api.evaluation import router as evaluation_router
+except ImportError:
+    evaluation_router = None
 
 # Import MISSING API routers
 from api.orchestrator import router as orchestrator_router
@@ -398,8 +410,15 @@ async def api_tracking_middleware(request, call_next):
     finally:
         # Calculate response time
         response_time = (time.time() - start_time) * 1000  # in ms
-        endpoint = f"{request.method} {request.url.path}"
-        
+        # Use route template (e.g. /api/agents/{agent_id}) instead of raw path
+        # to avoid unbounded memory growth from path parameters
+        route = request.scope.get("route")
+        endpoint = f"{request.method} {route.path}" if route else f"{request.method} {request.url.path}"
+
+        # Cap stats dict size to prevent unbounded memory growth
+        if endpoint not in api_call_stats and len(api_call_stats) > 500:
+            return
+
         # Update stats
         stats = api_call_stats[endpoint]
         stats["call_count"] += 1
@@ -477,6 +496,12 @@ app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+if auth_router is not None:
+    app.include_router(auth_router)  # PRD-37: Auth endpoints
+if api_keys_router is not None:
+    app.include_router(api_keys_router)  # PRD-37: API key management
+if evaluation_router is not None:
+    app.include_router(evaluation_router)  # Evaluation methodologies
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)
@@ -516,90 +541,63 @@ async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)
          response_description="Detailed system health information")
 async def health_check():
     """
-    ## 🏥 Comprehensive System Health Check
-    
-    Returns detailed health information for all system components:
-    - API server status
-    - Database connectivity  
-    - WebSocket connections
-    - Service component health
-    - Performance metrics
-    
+    System health check with real probes for database, config, and resources.
+
     **Status Values:**
     - `healthy`: All systems operational
     - `degraded`: Some issues but functional
     - `unhealthy`: Critical issues detected
     """
+    import psutil
+    from sqlalchemy import text as _text
+
+    components = {"api_server": "healthy"}
+
+    # Database probe
     try:
-        # Check system components
-        # Note: WebSocket manager removed - using AI SDK SSE streaming instead
-        components = {
-            "api_server": "healthy",
-            "streaming": "healthy (AI SDK SSE)",
-            "multi_agent_systems": "healthy",
-            "field_theory": "healthy",
-            "context_engineering": "healthy",
-            "workflow_engine": "healthy",
-            "document_processor": "healthy",
-            "memory_systems": "healthy"
-        }
-        
-        # Overall status
-        overall_status = "healthy" if all(status == "healthy" for status in components.values()) else "degraded"
-        
-        return {
-            "status": overall_status,
-            "service": "automatos-ai-api",
-            "version": "1.0.0",
-            "timestamp": datetime.utcnow().isoformat(),
-            
-            "🔧 components": components,
-            
-            "📊 metrics": {
-                "streaming_connections": "SSE-based",
-                "uptime": "operational",
-                "memory_usage": "optimal",
-                "cpu_usage": "normal",
-                "response_time": "< 100ms"
-            },
-            
-            "🎯 endpoints": {
-                "total_endpoints": 50,
-                "healthy_endpoints": 50,
-                "deprecated_endpoints": 0
-            },
-            
-            "🔌 connectivity": {
-                "streaming": "✅ Active (AI SDK SSE)",
-                "http": "✅ Active",
-                "cors": "✅ Enabled"
-            },
-            
-            "📈 performance": {
-                "average_response_time": "50ms",
-                "requests_per_second": "stable",
-                "error_rate": "< 0.1%",
-                "success_rate": "> 99.9%"
-            },
-            
-            "🛡️ security": {
-                "cors_enabled": True,
-                "rate_limiting": "configured", 
-                "input_validation": "active",
-                "error_handling": "comprehensive"
-            }
-        }
-        
+        db = SessionLocal()
+        try:
+            db.execute(_text("SELECT 1"))
+            components["database"] = "healthy"
+        finally:
+            db.close()
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "service": "automotas-ai-api",
-            "version": "1.0.0",
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": "Service check failed",
-            "message": "System experiencing issues. Check logs for details."
+        logger.error(f"Health: database check failed: {e}")
+        components["database"] = "unhealthy"
+
+    # Critical config check
+    has_db_url = bool(os.getenv("DATABASE_URL") or config.DATABASE_URL)
+    components["config"] = "healthy" if has_db_url else "degraded"
+
+    # Real system metrics via psutil
+    try:
+        cpu_pct = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        metrics = {
+            "cpu_percent": round(cpu_pct, 1),
+            "memory_used_percent": round(mem.percent, 1),
+            "memory_available_mb": round(mem.available / (1024 * 1024), 0),
         }
+    except Exception:
+        metrics = {}
+
+    # Derive overall status
+    statuses = list(components.values())
+    if "unhealthy" in statuses:
+        overall_status = "unhealthy"
+    elif "degraded" in statuses:
+        overall_status = "degraded"
+    else:
+        overall_status = "healthy"
+
+    return {
+        "status": overall_status,
+        "service": "automatos-ai-api",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": components,
+        "metrics": metrics,
+    }
 
 @app.get("/api/health/endpoints",
          summary="📡 API Endpoint Health",

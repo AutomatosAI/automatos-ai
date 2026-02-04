@@ -28,7 +28,8 @@ async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db), 
     """Get the most recent execution for a workflow with full details"""
     try:
         execution = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workflow_id == workflow_id
+            WorkflowExecution.workflow_id == workflow_id,
+            WorkflowExecution.workspace_id == ctx.workspace_id
         ).order_by(desc(WorkflowExecution.started_at)).first()
         
         if not execution:
@@ -52,11 +53,13 @@ async def get_all_executions(
     """Get all executions for a workflow with pagination"""
     try:
         executions = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workflow_id == workflow_id
+            WorkflowExecution.workflow_id == workflow_id,
+            WorkflowExecution.workspace_id == ctx.workspace_id
         ).order_by(desc(WorkflowExecution.started_at)).offset(skip).limit(limit).all()
         
         total = db.query(WorkflowExecution).filter(
-            WorkflowExecution.workflow_id == workflow_id
+            WorkflowExecution.workflow_id == workflow_id,
+            WorkflowExecution.workspace_id == ctx.workspace_id
         ).count()
         
         return {
@@ -76,14 +79,15 @@ async def get_execution_details(execution_id: int, db: Session = Depends(get_db)
     """Get detailed information about a specific execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
-            WorkflowExecution.id == execution_id
+            WorkflowExecution.id == execution_id,
+            WorkflowExecution.workspace_id == ctx.workspace_id
         ).first()
-        
+
         if not execution:
             raise HTTPException(status_code=404, detail="Execution not found")
-        
+
         return format_execution_details(execution, db)
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -96,7 +100,8 @@ async def get_execution_stages(execution_id: int, db: Session = Depends(get_db),
     """Get the 9-stage pipeline details for an execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
-            WorkflowExecution.id == execution_id
+            WorkflowExecution.id == execution_id,
+            WorkflowExecution.workspace_id == ctx.workspace_id
         ).first()
         
         if not execution:

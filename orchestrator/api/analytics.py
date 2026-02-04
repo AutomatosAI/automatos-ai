@@ -15,6 +15,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
 from sqlalchemy.orm import Session
 from consumers.workflows.analytics import WorkflowAnalyticsService
+from core.models import Workflow, WorkflowExecution as WorkflowExecutionModel, Agent as AgentModel
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 logger = logging.getLogger(__name__)
@@ -28,8 +29,15 @@ async def get_workflow_trends(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get performance trends for a specific workflow"""
-    
+
     try:
+        workflow = db.query(Workflow).filter(
+            Workflow.id == workflow_id,
+            Workflow.workspace_id == ctx.workspace_id
+        ).first()
+        if not workflow:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
         analytics_service = WorkflowAnalyticsService(db)
         trends = analytics_service.get_workflow_performance_trends(workflow_id, days)
         
@@ -38,6 +46,8 @@ async def get_workflow_trends(
             "data": trends
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting workflow trends: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -51,8 +61,16 @@ async def get_agent_performance(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get agent performance statistics"""
-    
+
     try:
+        if agent_id is not None:
+            agent = db.query(AgentModel).filter(
+                AgentModel.id == agent_id,
+                AgentModel.workspace_id == ctx.workspace_id
+            ).first()
+            if not agent:
+                raise HTTPException(status_code=404, detail="Agent not found")
+
         analytics_service = WorkflowAnalyticsService(db)
         stats = analytics_service.get_agent_performance_stats(agent_id, days)
         
@@ -61,6 +79,8 @@ async def get_agent_performance(
             "data": stats
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting agent performance: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -95,8 +115,15 @@ async def get_execution_report(
     ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get comprehensive report for a specific execution"""
-    
+
     try:
+        execution = db.query(WorkflowExecutionModel).filter(
+            WorkflowExecutionModel.id == execution_id,
+            WorkflowExecutionModel.workspace_id == ctx.workspace_id
+        ).first()
+        if not execution:
+            raise HTTPException(status_code=404, detail="Execution not found")
+
         analytics_service = WorkflowAnalyticsService(db)
         report = analytics_service.generate_execution_report(execution_id)
         
@@ -131,30 +158,35 @@ async def get_dashboard_summary(
         
         # Get execution statistics
         total_executions = db.query(func.count(WorkflowExecution.id)).filter(
+            WorkflowExecution.workspace_id == ctx.workspace_id,
             WorkflowExecution.started_at >= since_date
         ).scalar() or 0
-        
+
         completed_executions = db.query(func.count(WorkflowExecution.id)).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.started_at >= since_date,
                 WorkflowExecution.status == ExecutionStatus.COMPLETED.value
             )
         ).scalar() or 0
-        
+
         failed_executions = db.query(func.count(WorkflowExecution.id)).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.started_at >= since_date,
                 WorkflowExecution.status == ExecutionStatus.FAILED.value
             )
         ).scalar() or 0
-        
+
         # Get active agents
         active_agents = db.query(func.count(Agent.id)).filter(
+            Agent.workspace_id == ctx.workspace_id,
             Agent.status == "active"
         ).scalar() or 0
-        
+
         # Get total workflows
         total_workflows = db.query(func.count(Workflow.id)).filter(
+            Workflow.workspace_id == ctx.workspace_id,
             Workflow.status == "active"
         ).scalar() or 0
         
@@ -164,6 +196,7 @@ async def get_dashboard_summary(
         # Get recent executions for cost calculation
         recent_executions = db.query(WorkflowExecution).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.started_at >= since_date,
                 WorkflowExecution.status == ExecutionStatus.COMPLETED.value
             )
@@ -231,6 +264,7 @@ async def analyze_agent_selection(
         # Get completed executions
         executions = db.query(WorkflowExecution).filter(
             and_(
+                WorkflowExecution.workspace_id == ctx.workspace_id,
                 WorkflowExecution.started_at >= since_date,
                 WorkflowExecution.status == ExecutionStatus.COMPLETED.value
             )

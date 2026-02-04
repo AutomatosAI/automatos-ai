@@ -201,7 +201,8 @@ async def get_skill_suggestions(
         category_values = [cat.value for cat in suggested_categories]
         suggested_skills = db.query(Skill).filter(
             Skill.category.in_(category_values),
-            Skill.is_active == True
+            Skill.is_active == True,
+            Skill.workspace_id == ctx.workspace_id
         ).all()
         
         # Group by category
