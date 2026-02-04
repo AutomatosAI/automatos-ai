@@ -12,6 +12,8 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Agent model uses Integer PK (id), Workspace uses UUID PK — FK references must match
 - Users model uses Integer PK
 - Model registration in `__init__.py` — import order matters for FK resolution
+- Junction tables with composite PKs: set `primary_key=True` on each FK column, no separate `id` needed
+- FK type must match target PK: Agent(Integer), Workspace(UUID), User(Integer), MarketplacePlugin(UUID)
 - Config pattern: `Config` class in `orchestrator/config.py` with `os.getenv()` calls, singleton `config` instance
 - Router registration in `main.py`: import router, `app.include_router(router)`, optional routers use try/except
 - Frontend has no TypeScript compiler installed; `next.config.js` has `ignoreBuildErrors: true`
@@ -29,4 +31,29 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - PluginSecurityScan table must be defined before MarketplacePlugin in the file since MarketplacePlugin has FK to it — but SQLAlchemy resolves string FK references lazily, so ordering doesn't matter in practice
   - Self-referential FK (PluginCategory.parent_id) needs `remote_side` in relationship
   - Composite indexes go in `__table_args__` tuple before the dict
+---
+
+## 2026-02-04 - US-002
+- Implemented WorkspaceEnabledPlugin and AgentAssignedPlugin junction models
+- Files changed:
+  - `orchestrator/core/models/marketplace_plugins.py` (appended junction models)
+- **Learnings for future iterations:**
+  - Agent model uses Integer PK, Workspace uses UUID PK — FK types must match accordingly
+  - Users model uses Integer PK — `enabled_by` FK is Integer, not UUID
+  - Junction models with composite PKs: set `primary_key=True` on both FK columns, no separate `id` column needed
+  - `ondelete="CASCADE"` on FKs ensures cleanup when parent records are removed
+  - No changes needed in `__init__.py` since the file already imports `from .marketplace_plugins import *`
+---
+
+## 2026-02-04 - US-003
+- Implemented Persona database model and added persona columns to Agent model
+- Files changed:
+  - `orchestrator/core/models/personas.py` (created)
+  - `orchestrator/core/models/core.py` (added persona_id, custom_persona_prompt, use_custom_persona columns + persona relationship to Agent)
+  - `orchestrator/core/models/__init__.py` (added `from .personas import *`)
+- **Learnings for future iterations:**
+  - core.py imports `UUID` (not `PGUUID`); marketplace_plugins.py imports `UUID as PGUUID` — both work for `as_uuid=True` pattern
+  - Adding `index=True` inline on a column is equivalent to creating a named Index in `__table_args__` — simpler for single-column indexes
+  - String FK references (e.g., `ForeignKey('personas.id')`) resolve lazily, so import order in `__init__.py` doesn't matter for FK resolution
+  - Agent model already has many columns — persona columns added after marketplace fields, before evaluation fields
 ---

@@ -121,6 +121,11 @@ class Agent(Base):
     marketplace_icon = Column(String(500), nullable=True)
     version = Column(String(50), default='1.0.0', server_default='1.0.0')
 
+    # PRD-42: Persona assignment
+    persona_id = Column(UUID(as_uuid=True), ForeignKey('personas.id'), nullable=True, index=True)
+    custom_persona_prompt = Column(Text, nullable=True)
+    use_custom_persona = Column(Boolean, default=False, server_default='false')
+
     # Evaluation fields for enhanced assessment
     quality_score = Column(Float, nullable=True)  # Quality metric
     emergence_score = Column(Float, nullable=True)  # Emergence metric
@@ -162,6 +167,9 @@ class Agent(Base):
     # Marketplace relationships
     cloned_from = relationship("Agent", remote_side=[id], foreign_keys=[cloned_from_id], backref="clones")
     original_creator = relationship("User", foreign_keys=[original_creator_id])
+
+    # PRD-42: Persona relationship
+    persona = relationship("Persona", foreign_keys=[persona_id])
 
     @property
     def is_marketplace_item(self) -> bool:

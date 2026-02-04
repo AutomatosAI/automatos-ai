@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Junction tables use composite primary keys. Follow pattern of agent_skills association table in core.py"
     },
     {
@@ -49,7 +49,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "workspace_id is NULL for global/predefined personas, set for workspace-custom ones"
     },
     {
