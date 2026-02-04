@@ -17,6 +17,7 @@ from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
 from .composio_cache import *  # Redesign: Composio metadata cache
 from .routing import *  # PRD-50: Universal Orchestrator Router
+from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 
 # Optional model packs (may not exist in all deployments/branches)
 try:
