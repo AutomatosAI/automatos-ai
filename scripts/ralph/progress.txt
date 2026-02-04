@@ -393,3 +393,34 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - framer-motion AnimatePresence wraps the grid items for staggered entrance animation (delay capped at 0.5s for large lists)
   - Select component from @/components/ui/select uses Radix UI: Select, SelectTrigger, SelectValue, SelectContent, SelectItem
 ---
+
+## 2026-02-04 - US-020
+- Implemented marketplace plugin detail modal at frontend/components/marketplace/marketplace-plugin-detail-modal.tsx
+- Modal shows full plugin details fetched from GET /api/marketplace/plugins/{id}:
+  - Header with plugin name, version, featured badge, author, category
+  - Security status badge (Verified Safe / Review Required / Pending)
+  - Full description + long_description
+  - Stats grid: skills count, commands count, token estimate, enable count
+  - Included skills list from manifest.contents.skills
+  - Included commands list from manifest.contents.commands
+  - Recommended models badges
+  - Tags display
+  - Source information section: author, license, source URL, source type
+  - Enable/Disable button in sticky footer
+- Integrated modal into marketplace-plugins-tab.tsx:
+  - Opens on card click (selectedPluginId state was already wired)
+  - Enable action delegates to existing handleEnable function
+  - Added handleDisable function for workspace plugin removal
+  - Disable closes modal after success
+- Follows AnimatePresence overlay pattern from marketplace-app-details-modal.tsx
+- Files changed:
+  - `frontend/components/marketplace/marketplace-plugin-detail-modal.tsx` (created)
+  - `frontend/components/marketplace/marketplace-plugins-tab.tsx` (added import, disable handler, modal render)
+  - `scripts/ralph/prd.json` (marked US-020 passes: true)
+- **Learnings for future iterations:**
+  - Modal follows the AnimatePresence overlay pattern (backdrop + centered Card), not the Dialog/DialogContent pattern — both patterns exist in codebase
+  - PluginDetailOut from backend includes `manifest` field (nullable dict) — contents.skills and contents.commands are arrays of {name, description} parsed from manifest.json in S3
+  - apiClient.delete() exists and handles auth headers automatically
+  - Disable handler needs to close the modal after success to avoid stale isEnabled state
+  - selectedPluginId state was already present in plugins tab from US-019 but wasn't wired to a modal — integration was the missing piece
+---

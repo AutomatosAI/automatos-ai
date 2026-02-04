@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { apiClient } from '@/lib/api-client'
+import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
 
 // ===================================================================
 // Types
@@ -224,6 +225,51 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
     }
   }
 
+  // Disable plugin for workspace
+  const handleDisable = async (pluginId: string, pluginName: string) => {
+    const wsId = getWorkspaceId()
+    if (!wsId) return
+
+    try {
+      await apiClient.delete(`/api/workspaces/${wsId}/plugins/${pluginId}`)
+
+      // Update local state
+      setEnabledPluginIds((prev) => {
+        const next = new Set(prev)
+        next.delete(pluginId)
+        return next
+      })
+
+      // Decrement enable_count in local data
+      setPlugins((prev) =>
+        prev.map((p) =>
+          p.id === pluginId ? { ...p, enable_count: Math.max(0, p.enable_count - 1) } : p
+        )
+      )
+      setFeaturedPlugins((prev) =>
+        prev.map((p) =>
+          p.id === pluginId ? { ...p, enable_count: Math.max(0, p.enable_count - 1) } : p
+        )
+      )
+
+      toast({
+        title: 'Plugin Disabled',
+        description: `${pluginName} has been disabled for your workspace.`,
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err?.message || 'Failed to disable plugin',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Get selected plugin name for disable handler
+  const selectedPlugin = selectedPluginId
+    ? plugins.find((p) => p.id === selectedPluginId) || featuredPlugins.find((p) => p.id === selectedPluginId)
+    : null
+
   // Loading skeleton
   if (isLoading) {
     return (
@@ -378,6 +424,26 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           </AnimatePresence>
         </div>
       )}
+
+      {/* Plugin Detail Modal */}
+      <MarketplacePluginDetailModal
+        open={!!selectedPluginId}
+        pluginId={selectedPluginId}
+        onClose={() => setSelectedPluginId(null)}
+        isEnabled={selectedPluginId ? enabledPluginIds.has(selectedPluginId) : false}
+        isEnabling={selectedPluginId ? enablingId === selectedPluginId : false}
+        onEnable={() => {
+          if (selectedPluginId && selectedPlugin) {
+            handleEnable(selectedPluginId, selectedPlugin.name)
+          }
+        }}
+        onDisable={() => {
+          if (selectedPluginId && selectedPlugin) {
+            handleDisable(selectedPluginId, selectedPlugin.name)
+            setSelectedPluginId(null)
+          }
+        }}
+      />
     </div>
   )
 }
