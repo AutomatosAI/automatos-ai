@@ -127,7 +127,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Orchestrates Stage 1 + Stage 2 and persists results"
     },
     {

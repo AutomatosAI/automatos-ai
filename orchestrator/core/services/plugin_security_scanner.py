@@ -359,3 +359,128 @@ async def llm_security_scan(
             model_used=model,
             tokens_used=0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Combined scan orchestrator (US-007)
+# ---------------------------------------------------------------------------
+
+class PluginScanService:
+    """Orchestrates static + LLM scans and persists results to the database."""
+
+    def __init__(self, db):
+        """
+        Args:
+            db: SQLAlchemy Session instance.
+        """
+        if db is None:
+            raise ValueError("PluginScanService requires an injected DB session")
+        self.db = db
+
+    async def scan_plugin(
+        self,
+        plugin_slug: str,
+        plugin_version: str,
+        plugin_files: Dict[str, str],
+        scanned_by: str,
+    ):
+        """Run full two-stage security scan and persist results.
+
+        Stage 1: Static pattern scan — if any critical findings, auto-block.
+        Stage 2: LLM deep scan — determines risk score and final verdict.
+
+        Args:
+            plugin_slug: Plugin slug identifier.
+            plugin_version: Plugin version string.
+            plugin_files: Mapping of file path -> file content.
+            scanned_by: Identifier of who/what initiated the scan.
+
+        Returns:
+            PluginSecurityScan database record with all results.
+        """
+        from core.models.marketplace_plugins import PluginSecurityScan
+
+        # Stage 1: Static scan
+        static_result = await static_scan(plugin_files)
+
+        has_critical = any(
+            f.severity == "critical" for f in static_result.findings
+        )
+
+        blocked_patterns = list({
+            f.pattern for f in static_result.findings
+        })
+
+        # Determine if we should skip LLM scan (auto-block on critical static findings)
+        if has_critical:
+            logger.warning(
+                "Plugin %s@%s has critical static findings — auto-blocking",
+                plugin_slug,
+                plugin_version,
+            )
+            scan_record = PluginSecurityScan(
+                plugin_slug=plugin_slug,
+                plugin_version=plugin_version,
+                static_scan_status=static_result.status,
+                static_findings=[f.model_dump() for f in static_result.findings],
+                blocked_patterns_found=blocked_patterns,
+                llm_scan_status=None,
+                llm_risk_score=None,
+                llm_findings=None,
+                llm_summary="Skipped — blocked by critical static findings",
+                llm_model_used=None,
+                llm_tokens_used=None,
+                overall_verdict="blocked",
+                scanned_by=scanned_by,
+            )
+            self.db.add(scan_record)
+            self.db.commit()
+            self.db.refresh(scan_record)
+            logger.info(
+                "Scan record created for %s@%s: verdict=blocked (static critical)",
+                plugin_slug,
+                plugin_version,
+            )
+            return scan_record
+
+        # Stage 2: LLM scan
+        llm_result = await llm_security_scan(plugin_files)
+
+        # Determine overall verdict based on risk score
+        if llm_result.status == "failed":
+            # LLM scan failed — fall back to static result
+            overall_verdict = "review_required"
+        elif llm_result.risk_score >= 70:
+            overall_verdict = "blocked"
+        elif llm_result.risk_score >= 20:
+            overall_verdict = "review_required"
+        else:
+            overall_verdict = "safe"
+
+        scan_record = PluginSecurityScan(
+            plugin_slug=plugin_slug,
+            plugin_version=plugin_version,
+            static_scan_status=static_result.status,
+            static_findings=[f.model_dump() for f in static_result.findings],
+            blocked_patterns_found=blocked_patterns,
+            llm_scan_status=llm_result.status,
+            llm_risk_score=llm_result.risk_score,
+            llm_findings=[f.model_dump() for f in llm_result.findings],
+            llm_summary=llm_result.summary,
+            llm_model_used=llm_result.model_used,
+            llm_tokens_used=llm_result.tokens_used,
+            overall_verdict=overall_verdict,
+            scanned_by=scanned_by,
+        )
+        self.db.add(scan_record)
+        self.db.commit()
+        self.db.refresh(scan_record)
+
+        logger.info(
+            "Scan record created for %s@%s: verdict=%s, risk_score=%s",
+            plugin_slug,
+            plugin_version,
+            overall_verdict,
+            llm_result.risk_score,
+        )
+        return scan_record

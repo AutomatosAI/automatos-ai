@@ -110,3 +110,18 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Config import inside function (`from config import config`) with fallback to `os.getenv()` for flexibility when module is loaded outside orchestrator context
   - Default model `claude-haiku-4-20250414` matches `PLUGIN_LLM_SCAN_MODEL` in config.py
 ---
+
+## 2026-02-04 - US-007
+- Implemented PluginScanService class that orchestrates Stage 1 (static) + Stage 2 (LLM) scans and persists results
+- Constructor accepts db session (standard constructor injection pattern)
+- `scan_plugin()` method: runs static_scan first, auto-blocks on critical findings (skips LLM scan), otherwise runs llm_security_scan
+- Verdict logic: risk_score 0-19 = 'safe', 20-69 = 'review_required', 70+ = 'blocked'; LLM failure falls back to 'review_required'
+- Creates PluginSecurityScan database record with all static + LLM results, commits and refreshes
+- Files changed:
+  - `orchestrator/core/services/plugin_security_scanner.py` (appended PluginScanService class)
+- **Learnings for future iterations:**
+  - PluginSecurityScan model import done inside method (`from core.models.marketplace_plugins import PluginSecurityScan`) to avoid circular imports at module load time
+  - Pydantic `model_dump()` converts finding objects to dicts for JSONB column storage
+  - Static findings with severity='critical' trigger auto-block — no need to spend LLM tokens on obviously malicious plugins
+  - Service classes follow constructor injection: `__init__(self, db)` with `self.db = db`, then `self.db.add()` / `self.db.commit()` / `self.db.refresh()`
+---
