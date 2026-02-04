@@ -257,7 +257,7 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Follow seed patterns from core/seeds/. Upsert to be idempotent."
     },
     {

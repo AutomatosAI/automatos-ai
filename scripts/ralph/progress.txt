@@ -34,6 +34,7 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - Cascade deletes on disable: query Agent.id by workspace_id, then bulk delete junction rows with `.delete(synchronize_session="fetch")`
 - PUT-replace pattern for junction tables: delete all existing rows first, then add new ones (simpler than diffing)
 - Agent PK is Integer; path param hint is `agent_id: int` (not UUID)
+- Seed functions that take `db: Session` param (like seed_system_settings, seed_personas) integrate cleanly with load_seed_data.py via `with get_db_session() as db`
 
 ---
 
@@ -258,4 +259,20 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - Workspace persona visibility: scope=='workspace' personas filtered to ctx.workspace_id in list, 403 in detail view
   - Agent persona has 3 modes: (1) predefined persona_id, (2) custom_prompt with use_custom=true, (3) no persona (both null)
   - agent_id path param is `int` (Agent PK is Integer), persona_id is `UUID`
+---
+
+## 2026-02-04 - US-014
+- Implemented seed_personas.py with 10 predefined personas across 4 categories: Engineering (3), Sales (3), Marketing (2), Support (2)
+- Each persona has: slug, name, description, system_prompt (2-3 sentences), voice_description, category, tags, suggested_temperature, suggested_models, source='manual', scope='global'
+- Upsert logic: queries by slug, updates changed fields on existing records, creates new ones
+- Registered in load_seed_data.py seed runner alongside existing seeds
+- Files changed:
+  - `orchestrator/core/seeds/seed_personas.py` (created)
+  - `orchestrator/core/database/load_seed_data.py` (added personas seed call)
+  - `scripts/ralph/prd.json` (marked US-014 passes: true)
+- **Learnings for future iterations:**
+  - Seed pattern for ORM upsert: query by unique field (slug), update fields if changed, add new if not found, commit at end
+  - seed_system_settings.py pattern (takes db session) is preferred over seed_models.py pattern (manages own session) for composability with load_seed_data.py
+  - load_seed_data.py already imports `get_db_session` at top for system settings; persona section uses aliased import `_get_db_session` to avoid shadowing
+  - Persona model has no `is_active` default in ORM definition that differs from True, so no need to set it explicitly in seed data
 ---
