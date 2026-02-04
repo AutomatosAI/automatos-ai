@@ -292,7 +292,7 @@
         "Typecheck passes"
       ],
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "This is the key integration point — AgentFactory calls this to build the full agent context at runtime"
     },
     {

@@ -35,6 +35,9 @@ Started: Wed  4 Feb 2026 09:58:03 WET
 - PUT-replace pattern for junction tables: delete all existing rows first, then add new ones (simpler than diffing)
 - Agent PK is Integer; path param hint is `agent_id: int` (not UUID)
 - Seed functions that take `db: Session` param (like seed_system_settings, seed_personas) integrate cleanly with load_seed_data.py via `with get_db_session() as db`
+- Agent.model_config is a JSON column (not a Pydantic `model_config` attr); access via `agent.model_config` returns dict with keys: provider, model_id, temperature, max_tokens
+- ComposioAppCache + AgentAppAssignment are the tool assignment models; import from `core.models.composio_cache`
+- S3 MarketplaceS3Service instantiation inside endpoint: `from core.services.marketplace_s3 import MarketplaceS3Service; s3 = MarketplaceS3Service()`
 
 ---
 
@@ -291,4 +294,23 @@ Started: Wed  4 Feb 2026 09:58:03 WET
   - sort_order in increments of 10 allows inserting new categories between existing ones without renumbering
   - PluginCategory has no parent_id set in seeds — all seeded categories are top-level; subcategories can be added later via API
   - 20 categories (not 7) — the PRD listed 7 groups but meant subcategories within each group
+---
+
+## 2026-02-04 - US-016
+- Implemented GET /api/agents/{agent_id}/assembled-context endpoint in agent_plugins.py
+- AssembledContextOut Pydantic model with: agent_id, model, temperature, system_prompt, persona, plugins_loaded, tools, token_estimate
+- Persona section: checks use_custom_persona first, then persona_id lookup, else empty
+- Plugin skills loaded from S3 SKILL.md files for each assigned plugin (graceful fallback on S3 errors)
+- Tool definitions loaded from AgentAppAssignment + ComposioAppCache (same pattern as _build_agent_response in agents.py)
+- Token estimate: len(system_prompt) // 4
+- Files changed:
+  - `orchestrator/api/agent_plugins.py` (added AssembledContextOut model + assembled-context endpoint)
+  - `scripts/ralph/prd.json` (marked US-016 passes: true)
+- **Learnings for future iterations:**
+  - Agent.model_config is a JSON column returning dict — access keys via `.get()` with isinstance check for safety
+  - ComposioAppCache and AgentAppAssignment models hold tool assignments — import from `core.models.composio_cache`
+  - S3 service can be instantiated per-request inside endpoint functions (constructor reads from config singleton)
+  - Persona.suggested_temperature can override the agent's model_config temperature when a predefined persona is assigned
+  - Plugin SKILL.md file detection: check `key.lower().endswith("skill.md")` for naming convention
+  - No new router registration needed — endpoint added to existing agent_plugins.py router already in main.py
 ---
