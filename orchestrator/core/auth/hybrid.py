@@ -180,7 +180,9 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
 
     workspace_id = _get_workspace_id_from_request(request)
 
-    require_auth = os.getenv("REQUIRE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+    # Secure-by-default: auth is required unless explicitly disabled
+    _require_auth_raw = os.getenv("REQUIRE_AUTH", "true").strip().lower()
+    require_auth = _require_auth_raw not in {"0", "false", "no", "off"}
 
     # 1) Clerk JWT
     bearer = _get_bearer_token(request)
@@ -227,7 +229,8 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             or os.getenv("AUTOMATOS_API_KEY")
             or os.getenv("API_KEY")
         )
-        if expected and provided_key == expected:
+        import hmac as _hmac
+        if expected and _hmac.compare_digest(provided_key, expected):
             # ... (success logic)
             user = UserContext(id="api_key", email=None, role="admin", system_role="admin")
             resolved = workspace_id
@@ -258,9 +261,12 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
             "Auth note: No credentials, using anonymous context (REQUIRE_AUTH=false)."
         )
 
-    # Anonymous requests
+    # Anonymous requests (only reachable when REQUIRE_AUTH is explicitly disabled)
     resolved = workspace_id or _resolve_workspace_for_clerk_user(clerk_user_id=None, org_id=None)
     if not resolved:
-        resolved = UUID("00000000-0000-0000-0000-000000000001")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workspace not resolved. Send X-Workspace-ID header or configure DEFAULT_WORKSPACE_ID.",
+        )
     return RequestContext(workspace_id=resolved, user=UserContext(), auth_type="anonymous")
 

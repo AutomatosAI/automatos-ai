@@ -19,6 +19,8 @@ from core.models import (
 import logging
 import psutil
 import time
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system", tags=["statistics"])
@@ -27,7 +29,7 @@ router = APIRouter(prefix="/api/system", tags=["statistics"])
 SYSTEM_START_TIME = time.time()
 
 @router.get("/agents/statistics", response_model=AgentStatistics)
-async def get_agent_statistics(db: Session = Depends(get_db)):
+async def get_agent_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get comprehensive agent statistics for dashboard"""
     try:
         # Basic agent counts
@@ -72,10 +74,10 @@ async def get_agent_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting agent statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/metrics", response_model=SystemMetrics)
-async def get_system_metrics():
+async def get_system_metrics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get system performance metrics"""
     try:
         # Calculate uptime
@@ -105,10 +107,10 @@ async def get_system_metrics():
         
     except Exception as e:
         logger.error(f"Error getting system metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/skills/statistics")
-async def get_skill_statistics(db: Session = Depends(get_db)):
+async def get_skill_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get skill-related statistics"""
     try:
         # Skills by category
@@ -159,10 +161,10 @@ async def get_skill_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting skill statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/patterns/statistics")
-async def get_pattern_statistics(db: Session = Depends(get_db)):
+async def get_pattern_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get pattern-related statistics"""
     try:
         # Patterns by type
@@ -208,10 +210,10 @@ async def get_pattern_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting pattern statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/performance/statistics")
-async def get_performance_statistics(db: Session = Depends(get_db)):
+async def get_performance_statistics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get performance-related statistics"""
     try:
         # Recent executions (last 24 hours)
@@ -274,4 +276,4 @@ async def get_performance_statistics(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting performance statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

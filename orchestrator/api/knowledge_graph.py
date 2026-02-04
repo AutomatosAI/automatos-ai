@@ -137,7 +137,7 @@ async def list_entities(
         
     except Exception as e:
         logger.error(f"Error listing entities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/entities/search")
@@ -180,7 +180,7 @@ async def search_entities(
     
     except Exception as e:
         logger.error(f"Error searching entities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/api/knowledge/entities/{entity_id}", response_model=EntitySearchResult)
@@ -572,5 +572,5 @@ async def get_entity_stats(db: Session = Depends(get_db)):
     
     except Exception as e:
         logger.error(f"Error getting entity stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

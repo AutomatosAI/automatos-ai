@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from core.database.database import get_db
 from modules.search.policies import ContextPolicy, SlotName
 from modules.search.services.context_assembler import ContextAssembler
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 
 router = APIRouter(prefix="/api/policy", tags=["context-policy"])
@@ -21,7 +23,7 @@ class PolicyUpsertRequest(BaseModel):
 
 
 @router.get("/{policy_id}")
-def read_policy(policy_id: str, tenant_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+def read_policy(policy_id: str, tenant_id: Optional[str] = Query(None), ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     assembler = ContextAssembler(db)
     policy = assembler.get_policy(policy_id=policy_id, tenant_id=tenant_id)
     if not policy:
@@ -30,7 +32,7 @@ def read_policy(policy_id: str, tenant_id: Optional[str] = Query(None), db: Sess
 
 
 @router.put("/{policy_id}")
-def upsert_policy(policy_id: str, body: PolicyUpsertRequest, db: Session = Depends(get_db)):
+def upsert_policy(policy_id: str, body: PolicyUpsertRequest, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     if body.policy.policy_id != policy_id:
         raise HTTPException(status_code=400, detail="policy_id mismatch")
     assembler = ContextAssembler(db)
@@ -45,7 +47,7 @@ class AssembleRequest(BaseModel):
 
 
 @router.post("/{policy_id}/assemble")
-def assemble(policy_id: str, body: AssembleRequest, db: Session = Depends(get_db)):
+def assemble(policy_id: str, body: AssembleRequest, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     assembler = ContextAssembler(db)
     policy = assembler.get_policy(policy_id=policy_id, tenant_id=body.tenant_id)
     if not policy:
@@ -64,7 +66,7 @@ class ABSetRequest(BaseModel):
 
 
 @router.post("/abtest/set")
-def set_abtest(body: ABSetRequest):
+def set_abtest(body: ABSetRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     if body.active not in ("A", "B"):
         raise HTTPException(status_code=400, detail="active must be 'A' or 'B'")
     _active_variants[f"{body.policy_a}|{body.policy_b}"] = body.active
@@ -72,7 +74,7 @@ def set_abtest(body: ABSetRequest):
 
 
 @router.get("/abtest/get")
-def get_abtest(policy_a: str, policy_b: str):
+def get_abtest(policy_a: str, policy_b: str, ctx: RequestContext = Depends(get_request_context_hybrid)):
     active = _active_variants.get(f"{policy_a}|{policy_b}", "A")
     return {"active": active}
 

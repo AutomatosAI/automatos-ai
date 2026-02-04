@@ -71,7 +71,7 @@ class EncryptionService:
                 return key_bytes
             except Exception as e:
                 logger.error(f"❌ Invalid encryption key in CREDENTIAL_ENCRYPTION_KEY environment variable: {e}")
-                logger.error(f"   Key value (first 20 chars): {key_str[:20] if key_str else 'None'}...")
+                logger.error("   Key value redacted for security")
                 raise EncryptionKeyError("Invalid CREDENTIAL_ENCRYPTION_KEY in environment")
         
         # Try key file

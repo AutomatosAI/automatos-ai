@@ -22,6 +22,8 @@ import psutil
 import time
 import json
 from pydantic import BaseModel
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -46,7 +48,7 @@ class PerformanceEnhancements(BaseModel):
 # ==== NEW DASHBOARD METRICS ====
 
 @router.get("/dashboard/success-rate")
-async def get_agent_success_rate(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_agent_success_rate(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get agent success rate percentage with trend"""
     try:
         # Calculate from workflow executions
@@ -84,7 +86,7 @@ async def get_agent_success_rate(db: Session = Depends(get_db)) -> Dict[str, Any
         return {"value": 95.2, "trend": 2.1, "total_executions": 1247, "successful_executions": 1187}
 
 @router.get("/dashboard/task-completion-time")
-async def get_avg_task_completion_time(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_avg_task_completion_time(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get average task completion time with 24h average"""
     try:
         # Mock calculation - in real system, would calculate from execution times
@@ -105,7 +107,7 @@ async def get_avg_task_completion_time(db: Session = Depends(get_db)) -> Dict[st
         return {"value": 3.2, "daily_average": 3.8, "improvement": -0.6, "unit": "minutes"}
 
 @router.get("/dashboard/system-load-trend")
-async def get_system_load_trend(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_system_load_trend(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get system load trend for 24h with color coding"""
     try:
         # Get system metrics
@@ -150,7 +152,7 @@ async def get_system_load_trend(db: Session = Depends(get_db)) -> Dict[str, Any]
         }
 
 @router.get("/dashboard/error-rate-by-type")
-async def get_error_rate_by_agent_type(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_error_rate_by_agent_type(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get error rate breakdown by agent type"""
     try:
         # Get agent types and their error rates
@@ -178,7 +180,7 @@ async def get_error_rate_by_agent_type(db: Session = Depends(get_db)) -> Dict[st
         }
 
 @router.get("/dashboard/queue-depth")
-async def get_queue_depth(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_queue_depth(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get real-time queue depth for pending tasks"""
     try:
         # Count pending/queued workflows
@@ -215,7 +217,7 @@ async def get_queue_depth(db: Session = Depends(get_db)) -> Dict[str, Any]:
         }
 
 @router.get("/dashboard/efficiency-score")
-async def get_efficiency_score(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_efficiency_score(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get resource utilization efficiency score (0-100)"""
     try:
         # Calculate composite efficiency score
@@ -292,7 +294,7 @@ async def get_efficiency_score(db: Session = Depends(get_db)) -> Dict[str, Any]:
 # ==== NEW PERFORMANCE ANALYTICS ENHANCEMENTS ====
 
 @router.get("/performance/cost-per-execution")
-async def get_cost_per_execution(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_cost_per_execution(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get cost per successful execution metrics"""
     try:
         # Mock cost calculation - in real system would integrate with billing
@@ -331,7 +333,7 @@ async def get_cost_per_execution(db: Session = Depends(get_db)) -> Dict[str, Any
         }
 
 @router.get("/performance/peak-usage-hours")
-async def get_peak_usage_hours(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_peak_usage_hours(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get peak usage hours identification"""
     try:
         # Generate hourly usage pattern
@@ -369,7 +371,7 @@ async def get_peak_usage_hours(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return {"hourly_pattern": [], "peak_hours": [9, 10, 11, 14, 15, 16], "peak_period": "9 AM - 5 PM"}
 
 @router.get("/performance/bottlenecks")
-async def get_bottleneck_detection(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_bottleneck_detection(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get resource bottleneck detection with recommendations"""
     try:
         bottlenecks = []
@@ -425,7 +427,7 @@ async def get_bottleneck_detection(db: Session = Depends(get_db)) -> Dict[str, A
         return {"bottlenecks_detected": 0, "bottlenecks": [], "overall_health": "good"}
 
 @router.get("/performance/predictive-alerts")
-async def get_predictive_alerts(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_predictive_alerts(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get predictive capacity alerts"""
     try:
         alerts = []
@@ -485,7 +487,7 @@ async def get_predictive_alerts(db: Session = Depends(get_db)) -> Dict[str, Any]
         return {"predictive_alerts": [], "alerts_count": 0}
 
 @router.get("/performance/agent-ranking")
-async def get_agent_ranking(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_agent_ranking(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get agent performance ranking leaderboard"""
     try:
         # Get agents with mock performance data
@@ -535,7 +537,7 @@ async def get_agent_ranking(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return {"agent_rankings": [], "total_agents": 0}
 
 @router.get("/performance/sla-compliance")
-async def get_sla_compliance(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_sla_compliance(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get SLA compliance tracking"""
     try:
         # Mock SLA compliance data
@@ -608,7 +610,7 @@ async def get_sla_compliance(db: Session = Depends(get_db)) -> Dict[str, Any]:
 # ==== COMBINED DASHBOARD METRICS ENDPOINT ====
 
 @router.get("/dashboard/all-metrics")
-async def get_all_dashboard_metrics(db: Session = Depends(get_db)) -> DashboardMetrics:
+async def get_all_dashboard_metrics(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> DashboardMetrics:
     """Get all enhanced dashboard metrics in one call for efficiency"""
     try:
         # Call individual metric endpoints
@@ -630,12 +632,12 @@ async def get_all_dashboard_metrics(db: Session = Depends(get_db)) -> DashboardM
         
     except Exception as e:
         logger.error(f"Error getting all dashboard metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ==== COMBINED PERFORMANCE ANALYTICS ENDPOINT ====
 
 @router.get("/performance/all-enhancements")
-async def get_all_performance_enhancements(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_all_performance_enhancements(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """Get all performance analytics enhancements in one call"""
     try:
         cost_per_execution = await get_cost_per_execution(db)
@@ -656,4 +658,4 @@ async def get_all_performance_enhancements(db: Session = Depends(get_db)) -> Dic
         
     except Exception as e:
         logger.error(f"Error getting performance enhancements: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

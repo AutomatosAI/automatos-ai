@@ -8,11 +8,13 @@ Compresses raw context into hierarchical summaries for efficient long-term stora
 Based on Section 5.4 of "Context Engineering 2.0" (Hua et al., 2025)
 """
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import Depends, APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class SummarizationResponse(BaseModel):
     summary="Summarize Session Context",
     description="Compress session context using hierarchical summarization (Context Engineering 2.0 'self-baking')"
 )
-async def summarize_context(request: SummarizationRequest):
+async def summarize_context(request: SummarizationRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Implement hierarchical context summarization (self-baking).
     
@@ -168,7 +170,7 @@ Format your response as JSON:
         raise
     except Exception as e:
         logger.error(f"Error summarizing context: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
@@ -176,7 +178,7 @@ Format your response as JSON:
     summary="Get Memory Statistics",
     description="Retrieve comprehensive memory system statistics"
 )
-async def get_memory_statistics():
+async def get_memory_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get statistics about the hierarchical memory system.
     
@@ -213,4 +215,4 @@ async def get_memory_statistics():
         
     except Exception as e:
         logger.error(f"Error getting memory stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

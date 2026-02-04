@@ -14,6 +14,8 @@ import statistics
 import logging
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models import WorkflowExecution, Workflow, Agent
 from modules.orchestrator import orchestration_tracker
 
@@ -24,7 +26,8 @@ router = APIRouter(prefix="/api/v1/benchmarking", tags=["benchmarking"])
 @router.get("/performance-summary")
 async def get_performance_summary(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get comprehensive performance summary showing system improvements.
@@ -149,13 +152,14 @@ async def get_performance_summary(
         
     except Exception as e:
         logger.error(f"Error calculating performance summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/workflow/{workflow_id}/performance-trend")
 async def get_workflow_performance_trend(
     workflow_id: int,
     limit: int = 20,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get performance trend for a specific workflow over time.
@@ -241,12 +245,13 @@ async def get_workflow_performance_trend(
         
     except Exception as e:
         logger.error(f"Error getting workflow performance trend: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agent-performance")
 async def get_agent_performance_metrics(
     days: int = 30,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Get agent performance metrics showing specialization and improvement.
@@ -319,11 +324,12 @@ async def get_agent_performance_metrics(
         
     except Exception as e:
         logger.error(f"Error getting agent performance metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/learning-effectiveness")
 async def get_learning_effectiveness(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """
     Measure the effectiveness of the learning system.
@@ -425,7 +431,7 @@ async def get_learning_effectiveness(
         
     except Exception as e:
         logger.error(f"Error getting learning effectiveness: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Helper functions
 

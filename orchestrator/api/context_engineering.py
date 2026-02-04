@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 # Import mathematical foundations from shared
 from core.math import (
@@ -79,7 +81,7 @@ optimization = OptimizationAlgorithms()
              response_model=EntropyResponse,
              summary="Calculate Text Entropy",
              description="Calculate Shannon entropy of input text for information content analysis")
-async def calculate_entropy(request: EntropyRequest):
+async def calculate_entropy(request: EntropyRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Calculate Shannon entropy for text analysis"""
     try:
         entropy = info_theory.calculate_entropy(request.text)
@@ -92,12 +94,12 @@ async def calculate_entropy(request: EntropyRequest):
         )
     except Exception as e:
         logger.error(f"Error calculating entropy: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/mutual-information",
              summary="Calculate Mutual Information", 
              description="Calculate mutual information between two text sequences")
-async def calculate_mutual_information(text1: str, text2: str):
+async def calculate_mutual_information(text1: str, text2: str, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Calculate mutual information between two texts"""
     try:
         mi = info_theory.mutual_information(text1, text2)
@@ -109,14 +111,14 @@ async def calculate_mutual_information(text1: str, text2: str):
         }
     except Exception as e:
         logger.error(f"Error calculating mutual information: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Vector Operations Endpoints
 @router.post("/similarity",
              response_model=SimilarityResponse,
              summary="Calculate Vector Similarity",
              description="Calculate similarity between two vectors using various distance metrics")
-async def calculate_similarity(request: SimilarityRequest):
+async def calculate_similarity(request: SimilarityRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Calculate similarity between two vectors"""
     try:
         if request.metric == "cosine":
@@ -139,12 +141,12 @@ async def calculate_similarity(request: SimilarityRequest):
         )
     except Exception as e:
         logger.error(f"Error calculating similarity: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/normalize-vectors",
              summary="Normalize Vectors",
              description="Normalize a list of vectors to unit length")
-async def normalize_vectors(request: VectorRequest):
+async def normalize_vectors(request: VectorRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Normalize vectors to unit length"""
     try:
         normalized = [vector_ops.normalize_vector(vec) for vec in request.vectors]
@@ -155,14 +157,14 @@ async def normalize_vectors(request: VectorRequest):
         }
     except Exception as e:
         logger.error(f"Error normalizing vectors: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Statistical Analysis Endpoints
 @router.post("/statistics",
              response_model=StatsResponse,
              summary="Statistical Analysis",
              description="Perform comprehensive statistical analysis on numerical data")
-async def analyze_statistics(request: StatsRequest):
+async def analyze_statistics(request: StatsRequest, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Perform statistical analysis on data"""
     try:
         mean = stats_analysis.calculate_mean(request.data)
@@ -182,7 +184,7 @@ async def analyze_statistics(request: StatsRequest):
         )
     except Exception as e:
         logger.error(f"Error analyzing statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Graph Theory Endpoints
 @router.post("/graph/centrality",
@@ -247,6 +249,7 @@ async def analyze_statistics(request: StatsRequest):
              summary="Semantic Text Chunking",
              description="Chunk text using advanced semantic algorithms with multiple strategies")
 async def chunk_text(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     text: str = Body(..., description="Text to chunk"),
     strategy: str = Body("semantic_similarity", description="Chunking strategy"),
     target_size: int = Body(1000, description="Target chunk size"),
@@ -302,12 +305,13 @@ async def chunk_text(
         
     except Exception as e:
         logger.error(f"Error in semantic chunking: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/process-query",
              summary="Advanced Query Processing",
              description="Process and expand queries with intent classification and semantic expansion")
 async def process_query(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     query_text: str = Body(..., description="Query text to process"),
     context: Optional[Dict[str, Any]] = Body(None, description="Additional context information")
 ):
@@ -352,12 +356,13 @@ async def process_query(
         
     except Exception as e:
         logger.error(f"Error in query processing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/process-content",
              summary="Multi-Modal Content Processing", 
              description="Process content with automatic modality detection and specialized processing")
 async def process_content(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     content: str = Body(..., description="Content to process"),
     source_info: Optional[Dict[str, Any]] = Body(None, description="Source information"),
     force_modality: Optional[str] = Body(None, description="Force specific modality")
@@ -399,12 +404,12 @@ async def process_content(
         
     except Exception as e:
         logger.error(f"Error in content processing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/retrieval-stats",
             summary="Context Retrieval Statistics",
             description="Get statistics about context retrieval operations")
-async def get_retrieval_stats():
+async def get_retrieval_stats(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get context retrieval statistics"""
     try:
         # This would integrate with actual retrieval engine instances
@@ -422,7 +427,7 @@ async def get_retrieval_stats():
         }
     except Exception as e:
         logger.error(f"Error getting retrieval stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Health check for context engineering
 @router.get("/health",

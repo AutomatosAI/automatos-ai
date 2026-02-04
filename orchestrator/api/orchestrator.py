@@ -89,13 +89,7 @@ async def submit_complex_task(
         db.commit()
         db.refresh(workflow)
         
-        # Send real-time update
-        await manager.broadcast({
-            "type": "task_submitted",
-            "task_id": task_id,
-            "workflow_id": workflow.id,
-            "status": "submitted"
-        })
+        logger.info(f"Task submitted: task_id={task_id}, workflow_id={workflow.id}")
         
         return {
             "status": "success",
@@ -107,7 +101,7 @@ async def submit_complex_task(
         
     except Exception as e:
         logger.error(f"Error submitting complex task: {e}")
-        raise HTTPException(status_code=500, detail=f"Error submitting task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/task/analyze")
 async def analyze_task(
@@ -209,14 +203,7 @@ async def analyze_task(
         
         db.commit()
         
-        # Send real-time update
-        await manager.broadcast({
-            "type": "task_analyzed",
-            "task_id": task_id,
-            "subtasks_count": len(subtasks),
-            "status": "analyzed",
-            "is_real": True  # Indicate this is REAL decomposition
-        })
+        logger.info(f"Task analyzed: task_id={task_id}, subtasks_count={len(subtasks)}")
         
         return {
             "status": "success",
@@ -237,7 +224,7 @@ async def analyze_task(
         raise
     except Exception as e:
         logger.error(f"Error analyzing task: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing task: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/execute-phase")
 async def execute_workflow_phase(
@@ -286,14 +273,7 @@ async def execute_workflow_phase(
             }
         }
         
-        # Send real-time update
-        await manager.broadcast({
-            "type": "phase_executed",
-            "execution_id": execution_id,
-            "phase": phase,
-            "status": "completed",
-            "session_id": session_id
-        })
+        logger.info(f"Phase executed: execution_id={execution_id}, phase={phase}")
         
         return {
             "status": "success",
@@ -305,7 +285,7 @@ async def execute_workflow_phase(
         raise
     except Exception as e:
         logger.error(f"Error executing workflow phase: {e}")
-        raise HTTPException(status_code=500, detail=f"Error executing phase: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/{task_id}/status")
 async def get_task_status(
@@ -347,7 +327,7 @@ async def get_task_status(
         raise
     except Exception as e:
         logger.error(f"Error getting task status: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting task status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/tasks/active")
 async def get_active_tasks(
@@ -388,4 +368,4 @@ async def get_active_tasks(
         
     except Exception as e:
         logger.error(f"Error getting active tasks: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting active tasks: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

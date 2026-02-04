@@ -1,274 +1,654 @@
 {
   "project": "Automatos AI Platform",
-  "branchName": "ralph/universal-orchestrator-router",
-  "description": "PRD-50: Universal Orchestrator Router — Transform the orchestrator from a workflow-only executor into a universal request router that handles all incoming requests (Chatbot, Jira triggers, APIs) and intelligently routes them to the right pre-configured agent or recipe/workflow.",
+  "branchName": "ralph/security-hardening",
+  "description": "PRD-43: Platform Security Hardening & Architecture Remediation — Fix 3 critical, 7 high, 7 medium, 5 low severity vulnerabilities and 12 architectural issues. OWASP API Security Top 10 compliance, auth on all endpoints, SQL injection elimination, runtime crash fixes, rate limiting, security headers, and architecture decomposition.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Create RequestEnvelope and RoutingDecision models",
-      "description": "As a developer, I need standard data models for the universal request envelope and routing decision so that all channels produce consistent input and the router produces consistent output.",
+      "title": "Flip REQUIRE_AUTH default to secure-by-default",
+      "description": "As a platform operator, I want authentication required by default so that deployments are secure without manual configuration.",
       "acceptanceCriteria": [
-        "Create orchestrator/core/models/routing.py with all models",
-        "RequestEnvelope Pydantic model with fields: id (UUID), source (ChannelSource), content (str), raw_payload (Dict), user (RequestUser), workspace_id (UUID), metadata (Dict), override_agent_id (Optional[int]), override_workflow_id (Optional[int]), conversation_id (Optional[UUID]), timestamp (datetime)",
-        "RoutingDecision Pydantic model with fields: route_type (str: agent|workflow|orchestrate), agent_id (Optional[int]), workflow_id (Optional[int]), confidence (float), reasoning (str), cached (bool), intent_category (str)",
-        "ChannelSource enum with values: chatbot, jira_trigger, slack, whatsapp, api, workflow",
-        "RequestUser model with fields: id (Optional[str]), email (Optional[str]), name (Optional[str]), auth_type (str), clerk_user_id (Optional[str])",
-        "RoutingDecisionRecord SQLAlchemy ORM model for routing_decisions table with fields: id, request_id, envelope_hash, source, route_type, agent_id, workflow_id, confidence, cached, was_corrected, corrected_agent_id, created_at",
-        "RoutingRule SQLAlchemy ORM model for routing_rules table with fields: id, workspace_id, source_pattern, intent_keywords, target_agent_id, target_workflow_id, priority, is_active, created_at",
-        "UnroutedEvent SQLAlchemy ORM model for unrouted_events table with fields: id, workspace_id, source, content, raw_payload, reason, created_at",
+        "In orchestrator/core/auth/hybrid.py, change REQUIRE_AUTH default from empty string (falsy) to True",
+        "Anonymous fallback only activates when REQUIRE_AUTH is explicitly set to false/0/off",
+        "The hardcoded fallback UUID 00000000-0000-0000-0000-000000000001 is removed or only used in explicit dev mode",
+        "Add REQUIRE_AUTH=false to orchestrator/.env for local development",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-002",
-      "title": "Build routing cache with TTL and workspace scoping",
-      "description": "As the system, I need to cache routing decisions per workspace so repeated patterns resolve instantly without LLM calls.",
+      "title": "Add auth to system-settings router",
+      "description": "As a security engineer, I want the system-settings endpoints protected so that unauthorized users cannot modify platform configuration.",
       "acceptanceCriteria": [
-        "Create orchestrator/core/routing/__init__.py (empty)",
-        "Create orchestrator/core/routing/cache.py with RoutingCache class",
-        "In-memory cache using dict keyed by (workspace_id, hash(normalized_content + source))",
-        "Cache TTL: 24 hours default, configurable via ROUTING_CACHE_TTL_HOURS env var",
-        "get(workspace_id, content, source) method — returns cached RoutingDecision or None",
-        "put(workspace_id, content, source, decision) method — stores decision with timestamp",
-        "record_correction(workspace_id, content, source, correct_agent_id) method — updates cached entry if same correction made 2+ times",
-        "clear(workspace_id) method — clear all cache for a workspace",
-        "stats() method — returns cache size, hit rate, top cached routes",
-        "Expired entries cleaned up on access (lazy eviction)",
+        "All endpoints in the system-settings router use get_request_context_hybrid dependency",
+        "Requests without valid auth receive 401",
+        "Workspace scoping applied where applicable",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-003",
-      "title": "Build routing engine — Tier 0 and Tier 2 (override and rules)",
-      "description": "As the orchestrator, I need the core routing engine that handles user overrides (Tier 0) and rule-based matching (Tier 2) without LLM calls.",
+      "title": "Add auth to permissions router",
+      "description": "As a security engineer, I want permission management endpoints protected so that unauthorized users cannot assign/revoke agent tool permissions.",
       "acceptanceCriteria": [
-        "Create orchestrator/core/routing/engine.py with UniversalRouter class",
-        "Constructor takes db session and optional RoutingCache instance",
-        "async route(envelope: RequestEnvelope) -> RoutingDecision method",
-        "Tier 0: If envelope.override_agent_id set, return RoutingDecision with route_type='agent', confidence=1.0, reasoning='User override'",
-        "Tier 0: If envelope.override_workflow_id set, return RoutingDecision with route_type='workflow', confidence=1.0, reasoning='User override'",
-        "Tier 1: Check RoutingCache — if hit, return cached decision with cached=True",
-        "Tier 2: Query routing_rules table for matching workspace_id + source_pattern. If match, return decision.",
-        "Tier 2b: Query TriggerSubscription table if source is jira_trigger — if matching trigger has agent_id/workflow_id, use it",
-        "Tier 2c: Use existing IntentClassifier from core/services/intent_classifier.py for keyword-based matching",
-        "If no match at any tier, return None (caller handles LLM fallback)",
-        "Log every routing decision to routing_decisions table",
+        "All endpoints in the permissions router use get_request_context_hybrid dependency",
+        "Requests without valid auth receive 401",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "Tier 3 (LLM classification) added in next story"
+      "passes": false,
+      "notes": ""
     },
     {
       "id": "US-004",
-      "title": "Add Tier 3 LLM classification to routing engine",
-      "description": "As the orchestrator, I need LLM-based intent classification as a fallback when cache and rules don't match.",
+      "title": "Add auth to memory router",
+      "description": "As a security engineer, I want memory storage/retrieval endpoints protected.",
       "acceptanceCriteria": [
-        "Add _classify_with_llm(envelope: RequestEnvelope) async method to UniversalRouter",
-        "Query database for all active agents in the workspace with their names, descriptions, and assigned app names",
-        "Build a lightweight prompt: 'Given this request: {content}. Route to the best agent from: {agent_list}. Return agent_id and confidence.'",
-        "Use workspace's configured LLM provider/model via existing LLM manager",
-        "Parse LLM response to extract agent_id and confidence score",
-        "If confidence < 0.5, return route_type='orchestrate' (full decomposition needed)",
-        "Cache the LLM result via RoutingCache.put() for future Tier 1 hits",
-        "Update route() method: after Tier 2 returns None, call _classify_with_llm()",
-        "If LLM also fails or returns low confidence, store in unrouted_events table",
+        "All endpoints in /api/v1/memory use get_request_context_hybrid dependency",
+        "Requests without valid auth receive 401",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-005",
-      "title": "Create base ingestor and chatbot ingestor",
-      "description": "As the chatbot, I need to normalize ChatRequest into a RequestEnvelope so it flows through the universal router.",
+      "title": "Add auth to analytics, benchmarking, and evaluation routers",
+      "description": "As a security engineer, I want analytics, benchmarking, and evaluation endpoints protected.",
       "acceptanceCriteria": [
-        "Create orchestrator/core/routing/ingestors/__init__.py (empty)",
-        "Create orchestrator/core/routing/ingestors/base.py with abstract BaseIngestor class",
-        "BaseIngestor has abstract method: ingest(**kwargs) -> RequestEnvelope",
-        "Create orchestrator/core/routing/ingestors/chatbot.py with ChatbotIngestor",
-        "ChatbotIngestor.ingest(message, agent_id, session_id, request_context) -> RequestEnvelope",
-        "Sets source='chatbot', content=message text",
-        "Populates RequestUser from RequestContext (clerk_user_id, email, role)",
-        "If agent_id provided, sets override_agent_id (manual override preserved)",
-        "If agent_id NOT provided, override_agent_id=None (router decides)",
-        "Sets workspace_id from RequestContext",
-        "Sets conversation_id from session_id",
+        "All endpoints in /analytics, /api/v1/benchmarking, /api/evaluation, /api/analytics use get_request_context_hybrid",
+        "Requests without valid auth receive 401",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-006",
-      "title": "Create Jira trigger ingestor",
-      "description": "As the system, when a Jira trigger webhook fires, I need to normalize the event into a RequestEnvelope.",
+      "title": "Add auth to remaining unprotected routers",
+      "description": "As a security engineer, I want all remaining unprotected routers secured: templates, playbooks, chatbot, execution-history, field-theory, database analytics.",
       "acceptanceCriteria": [
-        "Create orchestrator/core/routing/ingestors/jira_trigger.py with JiraTriggerIngestor",
-        "JiraTriggerIngestor.ingest(trigger_name, entity_id, event_data, db) -> RequestEnvelope",
-        "Sets source='jira_trigger'",
-        "Extracts from event_data: issue key, summary, description, issue type, priority, reporter, project",
-        "Sets content to: '[{issue_key}] {summary}\\n\\n{description}'",
-        "Populates metadata dict with all Jira fields",
-        "Sets user from Jira reporter field (email/name) or system user if unavailable",
-        "Resolves workspace_id from entity_id via composio_entities table lookup",
+        "All endpoints in /api/templates, /api/playbooks, /api/chatbot, /api/execution-history, /api/field-theory, /api/database/analytics use get_request_context_hybrid",
+        "Requests without valid auth receive 401",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-007",
-      "title": "Integrate router into chat endpoint",
-      "description": "As a chatbot user, when I send a message without selecting an agent, the router should auto-select the best agent.",
+      "title": "Lock down credential resolve endpoint to admin-only",
+      "description": "As a security engineer, I want the credential resolve endpoint restricted to admin-only access so that decrypted secrets cannot be accessed by regular users.",
       "acceptanceCriteria": [
-        "Modify orchestrator/api/chat.py stream_chat endpoint (around line 253)",
-        "Before agent selection, create RequestEnvelope via ChatbotIngestor",
-        "Call UniversalRouter.route(envelope) to get RoutingDecision",
-        "If decision.route_type == 'agent', use decision.agent_id as effective_agent_id",
-        "If request.agentId is set (user override), skip routing and use it directly",
-        "Replace get_default_agent_id() fallback with router decision",
-        "If router returns None (no route), fall back to get_default_agent_id() as safety net",
-        "Conversation history maintained regardless of which agent responds",
-        "Add routing_decision info to response metadata if available",
+        "POST /api/credentials/resolve requires authenticated admin role",
+        "GET /api/credentials/{credential_id} that returns decrypted data requires admin role",
+        "Non-admin users receive 403 Forbidden",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-008",
-      "title": "Complete webhook → router dispatch",
-      "description": "As a developer, I need to replace the TODO at api/composio.py:509 with actual routing logic that dispatches webhook events.",
+      "title": "Fix SQL injection in documents embedding query",
+      "description": "As a security engineer, I want the embedding vector query in documents.py to use parameterized queries instead of f-string interpolation.",
       "acceptanceCriteria": [
-        "Modify orchestrator/api/composio.py handle_webhook endpoint (around line 509)",
-        "Remove TODO comment",
-        "After parsing webhook payload, determine ingestor by trigger_name prefix (JIRA_ → JiraTriggerIngestor)",
-        "Create RequestEnvelope via appropriate ingestor",
-        "Call UniversalRouter.route(envelope) to get RoutingDecision",
-        "If route_type == 'agent': create asyncio.create_task() to execute agent with envelope content",
-        "If route_type == 'workflow': create asyncio.create_task() to call execute_workflow() with envelope as context",
-        "If no route found: store in unrouted_events table",
-        "Return 200 immediately with routing decision summary (async dispatch in background)",
+        "orchestrator/api/documents.py lines 736-756: replace f-string embedding interpolation with text().bindparams()",
+        "Query results remain functionally identical",
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-009",
-      "title": "Add routing config and env vars",
-      "description": "As a developer, I need configuration variables for the routing system.",
+      "title": "Fix SQL injection in database knowledge module",
+      "description": "As a security engineer, I want SQL injection vectors in database_knowledge.py fixed.",
       "acceptanceCriteria": [
-        "Add to orchestrator/config.py: COMPOSIO_WEBHOOK_SECRET (str, from env), ROUTING_CACHE_TTL_HOURS (int, default 24), ROUTING_LLM_CONFIDENCE_THRESHOLD (float, default 0.5)",
-        "Add to orchestrator/.env.example: COMPOSIO_WEBHOOK_SECRET, ROUTING_CACHE_TTL_HOURS, ROUTING_LLM_CONFIDENCE_THRESHOLD",
+        "orchestrator/api/database_knowledge.py line 537: SET LOCAL statement_timeout uses parameterized value",
+        "All other f-string SQL patterns in this file converted to parameterized queries",
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-010",
-      "title": "Register routing API endpoints",
-      "description": "As an admin, I need API endpoints to manage routing rules, view decisions, and record corrections.",
+      "title": "Fix SQL injection in codegraph service",
+      "description": "As a security engineer, I want SQL injection vectors in codegraph_service.py fixed.",
       "acceptanceCriteria": [
-        "Create orchestrator/api/routing.py with FastAPI router (prefix=/api/routing, tags=['Routing'])",
-        "GET /api/routing/decisions — list recent routing decisions with optional filters: source, agent_id, was_corrected. Paginated. Auth required via get_request_context_hybrid.",
-        "POST /api/routing/rules — create a routing rule: source_pattern (str), intent_keywords (List[str]), target_agent_id or target_workflow_id, priority (int). Auth required.",
-        "GET /api/routing/rules — list all active routing rules for the workspace. Auth required.",
-        "DELETE /api/routing/rules/{rule_id} — soft delete a routing rule. Auth required.",
-        "POST /api/routing/corrections — record user correction: request_id (UUID), correct_agent_id (int). Updates RoutingCache. Auth required.",
-        "GET /api/routing/cache/stats — return cache size, hit count, miss count, top 10 cached routes. Auth required.",
-        "Register router in orchestrator/main.py",
+        "orchestrator/modules/codegraph/codegraph_service.py lines 727, 733, 1010, 1204: all f-string SQL converted to parameterized queries",
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-011",
-      "title": "Set up Jira trigger subscription",
-      "description": "As an admin, I need to register JIRA_NEW_ISSUE_TRIGGER for the PILOT project so new tickets fire webhooks.",
+      "title": "Fix SQL injection in knowledge multimodal and NL2SQL",
+      "description": "As a security engineer, I want SQL injection vectors in knowledge_multimodal.py and introspection.py fixed.",
       "acceptanceCriteria": [
-        "Create orchestrator/scripts/setup_jira_trigger.py management script",
-        "Script reads COMPOSIO_KEY from env or .env file",
-        "Script calls Composio SDK to create JIRA_NEW_ISSUE_TRIGGER with trigger_config: {project_key: 'PILOT'}",
-        "Script creates TriggerSubscription record in database linking trigger to a configurable agent_id or workflow_id",
-        "Script prints trigger ID and confirms subscription created",
-        "Add POST /api/routing/triggers/setup endpoint as alternative to script (auth required)",
-        "Document webhook URL configuration step (Composio dashboard → Project Settings)",
+        "orchestrator/modules/rag/services/knowledge_multimodal.py lines 576, 597: parameterized queries",
+        "orchestrator/modules/nl2sql/schema/introspection.py lines 105, 122, 204, 216: table/column names properly escaped or parameterized",
+        "orchestrator/api/skills.py line 659: parameterized query",
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-012",
-      "title": "Build Jira Bug Triage workflow — Read and Analyze steps",
-      "description": "As the system, I need the first half of the autonomous Bug Triage workflow: read the Jira ticket and analyze the codebase.",
+      "title": "Remove browser-exposed API key",
+      "description": "As a security engineer, I want the API key removed from the browser bundle so that it cannot be extracted by end users.",
       "acceptanceCriteria": [
-        "Create orchestrator/modules/workflows/recipes/jira_bug_triage.py",
-        "Define JiraBugTriageRecipe class with async execute(envelope: RequestEnvelope, db, workspace_id) method",
-        "Step 1 — Read Ticket: Use ComposioToolExecutor to call JIRA_GET_ISSUE with issue key from envelope.metadata",
-        "Step 2 — Analyze: Parse issue description, extract keywords, use CodeGraph search to find relevant files in the indexed codebase",
-        "Step 3 — Plan: Use LLM to generate a fix plan based on ticket description + relevant code snippets",
-        "Post the fix plan as a Jira comment via JIRA_ADD_COMMENT",
-        "Log progress at each step for observability",
-        "If any step fails, post failure summary as Jira comment and return error result",
+        "Remove NEXT_PUBLIC_API_KEY from frontend/.env.local",
+        "Remove hardcoded fallback key test_api_key_for_backend_validation_2025 from frontend/app/api/chat/route.ts",
+        "Frontend authenticates exclusively via Clerk JWT tokens for API requests",
+        "Verify API calls still work with Clerk auth only",
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-013",
-      "title": "Build Jira Bug Triage workflow — Fix, PR, and Update steps",
-      "description": "As the system, I need the second half of the Bug Triage workflow: clone repo, apply fix, open PR, update Jira.",
+      "title": "Fix NameError in update_workflow endpoint",
+      "description": "As a developer, I want the update_workflow endpoint to work without crashing so that workflows can be updated.",
       "acceptanceCriteria": [
-        "Extend JiraBugTriageRecipe with Steps 4-6",
-        "Step 4 — Clone & Fix: Use GITHUB_CREATE_BRANCH to create fix/{issue_key} branch, use GITHUB_CREATE_OR_UPDATE_FILE to apply code changes based on the plan",
-        "Step 5 — Open PR: Use GITHUB_CREATE_PULL_REQUEST with title referencing Jira ticket, description containing the fix plan",
-        "Step 6 — Update Jira: Use JIRA_UPDATE_ISSUE to transition ticket status. Add PR link as Jira comment via JIRA_ADD_COMMENT.",
-        "If any step fails, post failure summary as Jira comment and stop (no partial PRs)",
-        "Full workflow linked to TriggerSubscription so it can be dispatched by the router",
-        "Register recipe in a recipe registry so UniversalRouter can reference it by workflow_id",
+        "orchestrator/api/workflows.py line 360: add ctx: RequestContext = Depends(get_request_context_hybrid) parameter",
+        "Endpoint uses ctx.workspace_id for workspace-scoped query",
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": true,
+      "passes": false,
       "notes": ""
     },
     {
       "id": "US-014",
-      "title": "Update chatbot UI for auto-routing indicator",
-      "description": "As a chatbot user, I want to see which agent was auto-selected and have the option to override.",
+      "title": "Fix NameError in duplicate_workflow endpoint",
+      "description": "As a developer, I want the duplicate_workflow endpoint to work without crashing.",
       "acceptanceCriteria": [
-        "Add 'Auto' option to agent dropdown in frontend chatbot as first/default option",
-        "When 'Auto' selected, send request without agentId (let router decide)",
-        "After message sent, show subtle indicator below the message: 'Routed to: {Agent Name}'",
-        "If user selects a different agent from dropdown after auto-route, trigger correction via POST /api/routing/corrections",
-        "Agent dropdown still works as before for manual pinning",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "orchestrator/api/workflows.py line 617: add ctx: RequestContext = Depends(get_request_context_hybrid) parameter",
+        "Endpoint uses ctx.workspace_id for workspace-scoped query",
+        "Typecheck passes"
       ],
       "priority": 14,
-      "passes": true,
-      "notes": "Browser verification needed — no dev-browser tool available"
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Remove dead manager.broadcast() calls",
+      "description": "As a developer, I want the dead WebSocket manager references removed so that orchestrator endpoints don't crash on success.",
+      "acceptanceCriteria": [
+        "orchestrator/api/orchestrator.py lines 93, 213, 290: remove await manager.broadcast(...) calls",
+        "Replace with appropriate logging or SSE event if needed",
+        "Endpoints complete successfully without NameError",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Fix undefined websocket_connections in health check",
+      "description": "As a developer, I want the health check endpoint to work without crashing.",
+      "acceptanceCriteria": [
+        "orchestrator/api/main.py lines 488, 502: remove or replace websocket_connections references",
+        "Health check returns valid response",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-017",
+      "title": "Implement rate limiting with slowapi",
+      "description": "As a platform operator, I want rate limiting on API endpoints to prevent brute-force attacks and cost abuse on LLM endpoints.",
+      "acceptanceCriteria": [
+        "Configure slowapi.Limiter in orchestrator/main.py with sensible defaults",
+        "Add rate limit exception handler",
+        "Apply rate limits to auth-related endpoints (stricter: 10/min)",
+        "Apply rate limits to LLM/chat endpoints (moderate: 30/min)",
+        "Apply default rate limit to all other endpoints (generous: 100/min)",
+        "Fix health check to report actual rate limiting status",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-018",
+      "title": "Restrict CORS configuration",
+      "description": "As a security engineer, I want CORS restricted to only the methods and headers actually needed.",
+      "acceptanceCriteria": [
+        "orchestrator/main.py: change allow_methods from [\"*\"] to [\"GET\", \"POST\", \"PUT\", \"DELETE\", \"PATCH\", \"OPTIONS\"]",
+        "Change allow_headers from [\"*\"] to explicit list: [\"Content-Type\", \"Authorization\", \"X-API-Key\", \"X-Workspace-ID\", \"X-Request-ID\"]",
+        "Verify frontend requests still work with restricted headers",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-019",
+      "title": "Add security headers middleware",
+      "description": "As a security engineer, I want security headers on all HTTP responses.",
+      "acceptanceCriteria": [
+        "Add middleware to orchestrator/main.py that sets on every response: X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy: strict-origin-when-cross-origin, Permissions-Policy: camera=(), microphone=(), geolocation=()",
+        "HSTS header added when ENVIRONMENT=production",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-020",
+      "title": "Make GitHub webhook signature verification mandatory",
+      "description": "As a security engineer, I want GitHub webhook signature verification to be required, not optional.",
+      "acceptanceCriteria": [
+        "orchestrator/api/github_webhooks.py: if GITHUB_WEBHOOK_SECRET is not set, return 500 Webhook secret not configured",
+        "If signature header is missing, return 401 Missing signature",
+        "Signature verification always runs when both are present",
+        "Typecheck passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-021",
+      "title": "Add workspace membership verification",
+      "description": "As a security engineer, I want the platform to verify that an authenticated user belongs to the workspace they're requesting, preventing cross-workspace data access via header manipulation.",
+      "acceptanceCriteria": [
+        "In orchestrator/core/auth/hybrid.py: after resolving workspace ID from headers, verify the authenticated user is a member of that workspace",
+        "Return 403 if user is not a member of the requested workspace",
+        "Skip check for API key auth (service-to-service)",
+        "Typecheck passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "Sanitize error responses",
+      "description": "As a security engineer, I want error responses to return generic messages instead of leaking internal details.",
+      "acceptanceCriteria": [
+        "Create a utility function safe_error_response(status_code, default_message, exception, logger) that logs details server-side and returns generic message to client",
+        "Replace raise HTTPException(status_code=500, detail=str(e)) patterns across: credentials.py, permissions endpoints, system settings, and other affected files",
+        "Internal details (table names, file paths, stack traces) never appear in HTTP response bodies",
+        "Typecheck passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "Disable Swagger docs in production",
+      "description": "As a security engineer, I want API documentation hidden in production to reduce attack surface.",
+      "acceptanceCriteria": [
+        "orchestrator/main.py: set docs_url, redoc_url, openapi_url to None when ENVIRONMENT is production",
+        "Docs remain available in development",
+        "Typecheck passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "Add file upload MIME type validation",
+      "description": "As a security engineer, I want uploaded files validated by actual content type, not just file extension.",
+      "acceptanceCriteria": [
+        "orchestrator/api/documents.py: use python-magic to validate MIME type matches expected content",
+        "Reject files where extension doesn't match detected MIME type",
+        "Generate random filenames instead of using {hash}_{original_filename} pattern",
+        "Typecheck passes"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "Remove auto-admin domain logic",
+      "description": "As a security engineer, I want admin role assignment managed explicitly, not auto-granted by email domain.",
+      "acceptanceCriteria": [
+        "orchestrator/core/auth/clerk.py lines 197-200: remove the @automatos.app auto-admin check",
+        "Admin roles managed through Clerk public metadata or database role table",
+        "Existing admin users retain their role through the new mechanism",
+        "Typecheck passes"
+      ],
+      "priority": 25,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "Extract user_id from auth context instead of query params",
+      "description": "As a security engineer, I want user_id sourced from the authenticated context, not from client-provided query parameters.",
+      "acceptanceCriteria": [
+        "orchestrator/api/credentials.py line 159: remove user_id query parameter, use ctx.user.id instead",
+        "Same fix in permissions endpoints (lines 353, 453, 575)",
+        "Audit all other endpoints accepting user_id as input",
+        "Typecheck passes"
+      ],
+      "priority": 26,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-027",
+      "title": "Remove credential data logging",
+      "description": "As a security engineer, I want credential values and encryption key fragments removed from log output.",
+      "acceptanceCriteria": [
+        "orchestrator/api/credentials.py line 172: remove logging of credential.credential_data value",
+        "orchestrator/core/credentials/encryption.py line 74: remove logging of encryption key characters",
+        "Replace with safe log messages that indicate the operation without exposing values",
+        "Typecheck passes"
+      ],
+      "priority": 27,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-028",
+      "title": "Add auth to /exports static file mount",
+      "description": "As a security engineer, I want the /exports directory protected from unauthenticated access.",
+      "acceptanceCriteria": [
+        "orchestrator/main.py line 464: replace static file mount with an authenticated endpoint that serves files",
+        "Or add middleware that checks auth before serving from /exports",
+        "Typecheck passes"
+      ],
+      "priority": 28,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-029",
+      "title": "Enable TypeScript build error checking",
+      "description": "As a developer, I want TypeScript build errors caught during build so that type-safety issues don't reach production.",
+      "acceptanceCriteria": [
+        "frontend/next.config.js: remove or set ignoreBuildErrors: false",
+        "Fix any TypeScript errors that surface",
+        "Build completes successfully",
+        "Typecheck passes"
+      ],
+      "priority": 29,
+      "passes": false,
+      "notes": "This story may be larger than expected if many TS errors exist. If more than ~20 errors, split into a follow-up story."
+    },
+    {
+      "id": "US-030",
+      "title": "Update outdated dependencies",
+      "description": "As a developer, I want dependencies updated to address known CVEs and get security patches.",
+      "acceptanceCriteria": [
+        "Update anthropic from 0.8.1 to latest stable",
+        "Update fastapi from 0.104.1 to latest stable",
+        "Replace PyPDF2==3.0.1 with pypdf (PyPDF2 is deprecated with known CVEs)",
+        "Update cryptography minimum to >=43.0.0",
+        "Run pip audit and address any remaining vulnerabilities",
+        "All existing functionality still works after updates",
+        "Typecheck passes"
+      ],
+      "priority": 30,
+      "passes": false,
+      "notes": "Do one package at a time. If breakage occurs, revert that package and note in progress."
+    },
+    {
+      "id": "US-031",
+      "title": "Remove hardcoded Docker Compose defaults",
+      "description": "As a developer, I want docker-compose to require explicit credentials rather than falling back to hardcoded defaults.",
+      "acceptanceCriteria": [
+        "docker-compose.yml: remove default values from POSTGRES_PASSWORD, REDIS_PASSWORD, API_KEY",
+        "Add a .env.example with placeholder values and instructions",
+        "Docker compose fails with clear error if required vars are not set",
+        "Typecheck passes"
+      ],
+      "priority": 31,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "Fix hardcoded tenant_id in database knowledge",
+      "description": "As a developer, I want tenant_id sourced from the auth context instead of hardcoded to 1.",
+      "acceptanceCriteria": [
+        "orchestrator/api/database_knowledge.py lines 85, 135, 173, 462: replace tenant_id=1 with value from RequestContext",
+        "Add get_request_context_hybrid dependency to affected endpoints",
+        "Typecheck passes"
+      ],
+      "priority": 32,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-033",
+      "title": "Decompose workflows.py — extract CRUD operations",
+      "description": "As a developer, I want workflow CRUD operations in their own module so that workflows.py is not a 2,777-line god file.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/workflow_crud.py containing: create, read, update, delete, list, duplicate workflow endpoints",
+        "Move relevant imports and helper functions",
+        "Register the new router in main.py",
+        "All moved endpoints still function correctly",
+        "Typecheck passes"
+      ],
+      "priority": 33,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "Decompose workflows.py — extract execution logic",
+      "description": "As a developer, I want workflow execution logic in its own module.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/workflow_execution.py containing: create_execution, cancel_execution, execution status, live progress, SSE streaming endpoints",
+        "Move relevant imports and helper functions",
+        "Register the new router in main.py",
+        "All moved endpoints still function correctly",
+        "Typecheck passes"
+      ],
+      "priority": 34,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "Decompose workflows.py — extract analytics and templates",
+      "description": "As a developer, I want workflow analytics and template endpoints in their own module.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/workflow_analytics.py containing: dashboard stats, execution history, template recommendations",
+        "Move relevant imports and helper functions",
+        "Register the new router in main.py",
+        "Original workflows.py reduced to under 500 lines (or removed entirely)",
+        "Typecheck passes"
+      ],
+      "priority": 35,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036a",
+      "title": "Create schemas directory and extract enums from core.py",
+      "description": "As a developer, I want enums separated from the mixed-concern core.py file as the first step of ORM/schema separation.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/schemas/ directory",
+        "Create orchestrator/core/enums.py for all enum classes currently in core/models/core.py",
+        "Move all enum classes out of core.py into enums.py",
+        "Update all imports across the codebase that reference the moved enums",
+        "Typecheck passes"
+      ],
+      "priority": 36,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-036b",
+      "title": "Extract Pydantic schemas from core.py into schemas directory",
+      "description": "As a developer, I want Pydantic schemas separated from SQLAlchemy ORM models in core.py.",
+      "acceptanceCriteria": [
+        "Move Pydantic schemas out of core/models/core.py into core/schemas/ with domain-specific files",
+        "core/models/core.py contains only SQLAlchemy ORM models",
+        "Update all imports across the codebase",
+        "Typecheck passes"
+      ],
+      "priority": 37,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "Replace star imports in core/models/__init__.py",
+      "description": "As a developer, I want explicit imports instead of 11 wildcard imports so that symbol origins are traceable.",
+      "acceptanceCriteria": [
+        "orchestrator/core/models/__init__.py: replace all from .module import * with explicit named imports",
+        "Only export symbols that are actually used by consumers",
+        "Add __all__ to each sub-module to control exports",
+        "Typecheck passes"
+      ],
+      "priority": 38,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "Introduce WorkflowService layer",
+      "description": "As a developer, I want a service layer between API handlers and ORM queries so that business logic is reusable and testable.",
+      "acceptanceCriteria": [
+        "Create orchestrator/services/workflow_service.py with methods for core workflow operations",
+        "API handlers delegate to service methods instead of containing inline ORM queries",
+        "Service methods accept typed parameters (not raw Request objects)",
+        "At minimum, extract the get_active_workflows logic (currently 148 lines inline)",
+        "Typecheck passes"
+      ],
+      "priority": 39,
+      "passes": false,
+      "notes": "Depends on US-033/034/035 decomposition being done first"
+    },
+    {
+      "id": "US-039",
+      "title": "Fix N+1 query in active workflows endpoint",
+      "description": "As a developer, I want the active workflows endpoint to use efficient queries instead of N+1 patterns.",
+      "acceptanceCriteria": [
+        "Replace per-workflow count queries with a single aggregation query using subquery or window functions",
+        "Endpoint returns identical data",
+        "Query count reduced from 3N+1 to constant (2-3 queries max)",
+        "Typecheck passes"
+      ],
+      "priority": 40,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-040",
+      "title": "Standardize JSON column types to JSONB",
+      "description": "As a developer, I want all JSON columns using JSONB for consistent indexing and query support.",
+      "acceptanceCriteria": [
+        "Audit all SQLAlchemy models for Column(JSON) usage",
+        "Create Alembic migration to convert JSON columns to JSONB",
+        "Verify no queries break after conversion",
+        "Typecheck passes"
+      ],
+      "priority": 41,
+      "passes": false,
+      "notes": "Test migration on staging copy first"
+    },
+    {
+      "id": "US-041",
+      "title": "Remove mock/simulated data from production handlers",
+      "description": "As a developer, I want all simulated/mock data removed from API handlers so that endpoints return real data or explicit 501 Not Implemented.",
+      "acceptanceCriteria": [
+        "orchestrator/api/workflows.py: remove # Simulate progress patterns, replace with real progress tracking or 501",
+        "orchestrator/api/orchestrator.py: remove # Simulate phase execution block, implement or return 501",
+        "orchestrator/api/agent_endpoints.py: remove # Simulate learning",
+        "orchestrator/api/memory.py: remove mock search results",
+        "All affected endpoints either return real data or HTTP 501 with clear message",
+        "Typecheck passes"
+      ],
+      "priority": 42,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "Resolve circular dependency chain",
+      "description": "As a developer, I want the circular dependency between core and modules resolved so that lazy imports are no longer needed.",
+      "acceptanceCriteria": [
+        "Identify all places where core imports from modules (reverse dependency)",
+        "Introduce interfaces/protocols in core that modules implements",
+        "Remove at least 50% of the 32 lazy import workarounds",
+        "No new circular import errors introduced",
+        "Typecheck passes"
+      ],
+      "priority": 43,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "Unify frontend API client",
+      "description": "As a developer, I want a single API access pattern in the frontend instead of two competing systems.",
+      "acceptanceCriteria": [
+        "Deprecate or remove the apiClient singleton class in frontend/lib/api-client.ts",
+        "All API calls route through the useAuthenticatedApi hook pattern",
+        "Clerk token injection happens in one place",
+        "Remove PAGE_MOCK_CONFIG system (or move to a dev-only context)",
+        "Typecheck passes"
+      ],
+      "priority": 44,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "Standardize API response shapes",
+      "description": "As a developer, I want all API endpoints to use a consistent response envelope so that frontend parsing is predictable.",
+      "acceptanceCriteria": [
+        "Define a standard response envelope: { data: T, meta?: { total?: number, page?: number } }",
+        "Create Pydantic generic response model",
+        "Migrate at minimum: workflows list, active workflows, agents list endpoints to new format",
+        "Document the response convention",
+        "Typecheck passes"
+      ],
+      "priority": 45,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "Remove MockProvider from production provider tree",
+      "description": "As a developer, I want the MockProvider removed from the production component tree to reduce overhead.",
+      "acceptanceCriteria": [
+        "frontend/components/providers.tsx: remove MockProvider from the provider chain",
+        "Move mock functionality to dev-only conditional rendering if needed",
+        "No runtime errors when MockProvider is absent",
+        "Typecheck passes"
+      ],
+      "priority": 46,
+      "passes": false,
+      "notes": ""
     }
   ]
 }

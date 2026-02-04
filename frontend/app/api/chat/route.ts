@@ -4,11 +4,11 @@ export const runtime = 'edge'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// Get API key helper
+// Get API key from server-side env (never expose to browser via NEXT_PUBLIC_)
 function getApiKey(request: NextRequest): string {
-  return process.env.NEXT_PUBLIC_API_KEY || 
+  return process.env.API_KEY ||
          request.headers.get('x-api-key') ||
-         'test_api_key_for_backend_validation_2025' // Fallback for Railway
+         ''
 }
 
 export async function POST(request: NextRequest) {
@@ -22,9 +22,8 @@ export async function POST(request: NextRequest) {
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
     
-    // Log for debugging (remove in production)
-    if (!process.env.NEXT_PUBLIC_API_KEY) {
-      console.warn('[Chat Proxy] Using fallback API key - set NEXT_PUBLIC_API_KEY in Railway')
+    if (!process.env.API_KEY && !authHeader) {
+      console.warn('[Chat Proxy] No API_KEY env var and no Authorization header')
     }
     
     // Forward to Python backend
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error('Chat proxy error:', error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Chat proxy failed' }),
+      JSON.stringify({ error: 'Chat proxy failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
@@ -123,7 +122,7 @@ export async function PATCH(request: NextRequest) {
   } catch (error: any) {
     console.error('Chat PATCH proxy error:', error)
     return new Response(
-      JSON.stringify({ error: error.message || 'Chat PATCH proxy failed' }),
+      JSON.stringify({ error: 'Chat PATCH proxy failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }

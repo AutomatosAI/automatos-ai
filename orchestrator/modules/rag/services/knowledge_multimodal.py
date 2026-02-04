@@ -173,7 +173,7 @@ async def get_knowledge_types(
         
     except Exception as e:
         logger.error(f"Error fetching knowledge types: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/items", response_model=KnowledgeItemResponse)
@@ -242,7 +242,7 @@ async def create_knowledge_item(
     except Exception as e:
         logger.error(f"Error creating knowledge item: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -540,7 +540,7 @@ async def upload_document_multimodal(
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/search", response_model=List[KnowledgeSearchResult])
@@ -570,7 +570,10 @@ async def search_knowledge(
             conditions.append("ki.quality_score >= :min_quality")
         
         where_clause = " AND ".join(conditions)
-        
+
+        # SAFETY: where_clause is built from static SQL fragments with parameterized values
+        # (e.g. :workspace_id, :min_quality, :kb_types). No user input is interpolated directly.
+
         # Use full-text search
         if search.use_fulltext:
             query = text(f"""
@@ -628,7 +631,7 @@ async def search_knowledge(
         
     except Exception as e:
         logger.error(f"Error searching knowledge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/items/{item_id}")
@@ -743,7 +746,7 @@ async def get_knowledge_item(
         raise
     except Exception as e:
         logger.error(f"Error fetching knowledge item {item_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -795,5 +798,5 @@ async def get_knowledge_stats(
         
     except Exception as e:
         logger.error(f"Error getting knowledge stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 

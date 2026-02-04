@@ -1,4 +1,3 @@
-
 """
 Knowledge API Endpoints
 ======================
@@ -6,24 +5,18 @@ Knowledge API Endpoints
 REST API endpoints for knowledge sharing and management.
 """
 
-import os
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 class KnowledgeShareRequest(BaseModel):
     """Request model for knowledge sharing"""
@@ -36,9 +29,10 @@ class KnowledgeShareRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/knowledge", tags=["📚 Knowledge"])
 
-@router.post("/share", dependencies=[Depends(require_api_key)])
+@router.post("/share")
 async def share_knowledge(
     request: KnowledgeShareRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -64,4 +58,4 @@ async def share_knowledge(
         
     except Exception as e:
         logger.error(f"Error sharing knowledge: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to share knowledge: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

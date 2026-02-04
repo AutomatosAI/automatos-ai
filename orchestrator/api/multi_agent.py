@@ -16,6 +16,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 # Import database and dependencies
 from core.database.database import get_db
@@ -214,6 +216,7 @@ def get_orchestrator_service():
              })
 async def perform_collaborative_reasoning(
     request: CollaborativeReasoningRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -270,11 +273,12 @@ async def perform_collaborative_reasoning(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Collaborative reasoning failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Collaborative reasoning failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/coordination/coordinate", response_model=Dict[str, Any], )
 async def coordinate_agents(
     request: AgentCoordinationRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -303,11 +307,12 @@ async def coordinate_agents(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Agent coordination failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Agent coordination failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/behavior/monitor", response_model=Dict[str, Any], )
 async def monitor_emergent_behavior(
-    request: BehaviorMonitoringRequest
+    request: BehaviorMonitoringRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Monitor and analyze emergent behaviors in agent interactions
@@ -331,11 +336,12 @@ async def monitor_emergent_behavior(
         
     except Exception as e:
         logger.error(f"Behavior monitoring failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Behavior monitoring failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/optimization/optimize", response_model=Dict[str, Any], )
 async def optimize_multi_agent_system(
     request: OptimizationRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -364,11 +370,12 @@ async def optimize_multi_agent_system(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Multi-agent optimization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Multi-agent optimization failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/coordination/rebalance", response_model=Dict[str, Any], )
 async def rebalance_agents(
     request: AgentRebalanceRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -392,10 +399,10 @@ async def rebalance_agents(
         
     except Exception as e:
         logger.error(f"Agent rebalancing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Agent rebalancing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/reasoning/statistics", response_model=Dict[str, Any], )
-async def get_reasoning_statistics():
+async def get_reasoning_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get collaborative reasoning statistics and performance metrics"""
     try:
         stats = get_orchestrator_service().collaborative_reasoning.get_reasoning_statistics()
@@ -408,10 +415,10 @@ async def get_reasoning_statistics():
         
     except Exception as e:
         logger.error(f"Failed to get reasoning statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/coordination/statistics", response_model=Dict[str, Any], )
-async def get_coordination_statistics():
+async def get_coordination_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get coordination management statistics and performance metrics"""
     try:
         stats = get_orchestrator_service().coordination_manager.get_coordination_statistics()
@@ -424,10 +431,10 @@ async def get_coordination_statistics():
         
     except Exception as e:
         logger.error(f"Failed to get coordination statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/behavior/statistics", response_model=Dict[str, Any], )
-async def get_behavior_statistics():
+async def get_behavior_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get behavior monitoring statistics and performance metrics"""
     try:
         stats = get_orchestrator_service().behavior_monitor.get_monitoring_statistics()
@@ -440,10 +447,10 @@ async def get_behavior_statistics():
         
     except Exception as e:
         logger.error(f"Failed to get behavior statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/optimization/statistics", response_model=Dict[str, Any], )
-async def get_optimization_statistics():
+async def get_optimization_statistics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get optimization statistics and performance metrics"""
     try:
         stats = get_orchestrator_service().multi_agent_optimizer.get_optimization_statistics()
@@ -456,7 +463,7 @@ async def get_optimization_statistics():
         
     except Exception as e:
         logger.error(f"Failed to get optimization statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/health", response_model=Dict[str, Any], )
 async def multi_agent_health_check():

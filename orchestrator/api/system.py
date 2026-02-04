@@ -7,21 +7,14 @@ REST API endpoints for system configuration, health monitoring, and RAG manageme
 """
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import datetime
 import psutil
-import os
 
 from core.database.database import get_db
 
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 from core.models import (
     SystemConfiguration, RAGConfiguration,
     SystemConfigCreate, SystemConfigResponse,
@@ -37,7 +30,7 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 
 # System Configuration endpoints
 @router.post("/config", response_model=SystemConfigResponse)
-async def create_system_config(config_data: SystemConfigCreate, db: Session = Depends(get_db)):
+async def create_system_config(config_data: SystemConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create or update system configuration"""
     try:
         # Check if config already exists
@@ -79,10 +72,11 @@ async def create_system_config(config_data: SystemConfigCreate, db: Session = De
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating system config: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating system config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/config", response_model=List[SystemConfigResponse])
 async def list_system_configs(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: Optional[str] = None,
@@ -121,10 +115,10 @@ async def list_system_configs(
         
     except Exception as e:
         logger.error(f"Error listing system configs: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing system configs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/config/{config_key}", response_model=SystemConfigResponse)
-async def get_system_config(config_key: str, db: Session = Depends(get_db)):
+async def get_system_config(config_key: str, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get system configuration by key"""
     try:
         config = db.query(SystemConfiguration).filter(
@@ -149,12 +143,13 @@ async def get_system_config(config_key: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error(f"Error getting system config {config_key}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting system config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/config/{config_key}", response_model=SystemConfigResponse)
 async def update_system_config(
     config_key: str, 
     config_data: SystemConfigCreate, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Update system configuration"""
@@ -189,11 +184,11 @@ async def update_system_config(
     except Exception as e:
         db.rollback()
         logger.error(f"Error updating system config {config_key}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating system config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # RAG Configuration endpoints
 @router.post("/rag", response_model=RAGConfigResponse)
-async def create_rag_config(rag_data: RAGConfigCreate, db: Session = Depends(get_db)):
+async def create_rag_config(rag_data: RAGConfigCreate, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Create RAG configuration"""
     try:
         rag_config = RAGConfiguration(
@@ -231,10 +226,11 @@ async def create_rag_config(rag_data: RAGConfigCreate, db: Session = Depends(get
     except Exception as e:
         db.rollback()
         logger.error(f"Error creating RAG config: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating RAG config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag", response_model=List[RAGConfigResponse])
 async def list_rag_configs(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     active_only: bool = Query(True),
@@ -269,10 +265,10 @@ async def list_rag_configs(
         
     except Exception as e:
         logger.error(f"Error listing RAG configs: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing RAG configs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/rag/{config_id}", response_model=RAGConfigResponse)
-async def get_rag_config(config_id: int, db: Session = Depends(get_db)):
+async def get_rag_config(config_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get RAG configuration by ID"""
     try:
         config = db.query(RAGConfiguration).filter(RAGConfiguration.id == config_id).first()
@@ -299,11 +295,12 @@ async def get_rag_config(config_id: int, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error(f"Error getting RAG config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting RAG config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/rag/{config_id}/test")
 async def test_rag_config(
     config_id: int, 
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     query: str = Query(..., description="Test query for RAG system"),
     db: Session = Depends(get_db)
 ):
@@ -320,14 +317,14 @@ async def test_rag_config(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     except Exception as e:
         logger.error(f"Error testing RAG config {config_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error testing RAG config: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # System Health endpoints
 @router.get("/health", response_model=SystemHealthResponse)
-async def get_system_health(db: Session = Depends(get_db)):
+async def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """Get system health status"""
     try:
         # Get system metrics
@@ -343,7 +340,7 @@ async def get_system_health(db: Session = Depends(get_db)):
             db_metrics = {"connection": "active"}
         except Exception as e:
             db_status = "unhealthy"
-            db_metrics = {"connection": "failed", "error": str(e)}
+            db_metrics = {"connection": "failed", "error": "Service check failed"}
         
         # Check Redis connection
         redis_status = "healthy"
@@ -369,7 +366,7 @@ async def get_system_health(db: Session = Depends(get_db)):
                 redis_metrics = {"ping": "failed", "error": "PING returned false"}
         except Exception as e:
             redis_status = "unhealthy"
-            redis_metrics = {"ping": "failed", "error": str(e), "connection": "failed"}
+            redis_metrics = {"ping": "failed", "error": "Service check failed", "connection": "failed"}
         
         # Check API health (internal readiness)
         api_status = "healthy"
@@ -398,7 +395,7 @@ async def get_system_health(db: Session = Depends(get_db)):
             api_status = "unhealthy"
             api_metrics = {
                 "readiness": "not_ready",
-                "error": str(e),
+                "error": "Service check failed",
                 "core_modules": "failed"
             }
         
@@ -433,7 +430,7 @@ async def get_system_health(db: Session = Depends(get_db)):
             doc_processor_status = "unhealthy"
             doc_processor_metrics = {
                 "status": "error",
-                "error": str(e),
+                "error": "Service check failed",
                 "worker": "unavailable"
             }
         
@@ -471,7 +468,7 @@ async def get_system_health(db: Session = Depends(get_db)):
             rag_status = "unhealthy"
             rag_metrics = {
                 "status": "error",
-                "error": str(e),
+                "error": "Service check failed",
                 "service": "unavailable"
             }
         
@@ -532,7 +529,7 @@ async def get_system_health(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 def _store_current_metrics(db: Session):
     """Store current system metrics to database"""
@@ -577,6 +574,7 @@ def _store_current_metrics(db: Session):
 
 @router.get("/metrics")
 async def get_system_metrics(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
     timeRange: Optional[str] = Query(None, description="Include time-series data: 1h, 24h, 7d, 30d")
 ):
@@ -772,9 +770,9 @@ async def get_system_metrics(
         
     except Exception as e:
         logger.error(f"Error getting system metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting system metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 @router.get("/test-route")
-async def test_route():
+async def test_route(ctx: RequestContext = Depends(get_request_context_hybrid)):
     return {"message": "Test route works"}
 
 # ========================================
@@ -782,7 +780,7 @@ async def test_route():
 # ========================================
 
 @router.get("/agent-types")
-async def get_agent_types():
+async def get_agent_types(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get available agent types"""
     return {
         "types": [
@@ -838,7 +836,7 @@ async def get_item(
         }
     except Exception as e:
         logger.error(f"Error getting agent stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agent/{agent_id}/status")
 async def get_agent_status(
@@ -870,7 +868,7 @@ async def get_agent_status(
         raise
     except Exception as e:
         logger.error(f"Error getting agent status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/agent/{agent_id}/execute")
 async def execute_agent(
@@ -908,10 +906,10 @@ async def execute_agent(
         raise  
     except Exception as e:
         logger.error(f"Error executing agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/performance-baseline", dependencies=[Depends(require_api_key)])
-async def get_performance_baseline(db: Session = Depends(get_db)):
+@router.get("/performance-baseline")
+async def get_performance_baseline(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     ## 📊 Get Performance Baseline
     
@@ -942,11 +940,12 @@ async def get_performance_baseline(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting performance baseline: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get performance baseline: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/learning-state/update", dependencies=[Depends(require_api_key)])
+@router.post("/learning-state/update")
 async def update_learning_state(
     request: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -972,11 +971,12 @@ async def update_learning_state(
         
     except Exception as e:
         logger.error(f"Error updating learning state: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update learning state: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/performance-test", dependencies=[Depends(require_api_key)])
+@router.post("/performance-test")
 async def run_performance_test(
     request: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -1017,10 +1017,11 @@ async def run_performance_test(
         
     except Exception as e:
         logger.error(f"Error running performance test: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to run performance test: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/performance-comparison", dependencies=[Depends(require_api_key)])
+@router.get("/performance-comparison")
 async def get_performance_comparison(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     baseline_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
@@ -1060,10 +1061,10 @@ async def get_performance_comparison(
         
     except Exception as e:
         logger.error(f"Error getting performance comparison: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get performance comparison: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/state/summary", dependencies=[Depends(require_api_key)])
-async def get_system_state_summary(db: Session = Depends(get_db)):
+@router.get("/state/summary")
+async def get_system_state_summary(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
     """
     ## 📋 Get System State Summary
     
@@ -1109,4 +1110,4 @@ async def get_system_state_summary(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting system state summary: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get system state summary: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

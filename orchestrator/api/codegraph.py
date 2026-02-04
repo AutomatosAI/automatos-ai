@@ -150,7 +150,7 @@ async def index_github_repository(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error indexing GitHub repository: {e}")
-        raise HTTPException(status_code=500, detail=f"Indexing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/search/symbols", response_model=SearchResponse)
@@ -190,7 +190,7 @@ async def search_symbols(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error searching symbols: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/search/semantic", response_model=SearchResponse)
@@ -233,7 +233,7 @@ async def search_semantic(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/projects", response_model=List[ProjectResponse])
@@ -256,7 +256,7 @@ async def get_item(
         
     except Exception as e:
         logger.error(f"Error listing projects: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list projects: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -279,7 +279,7 @@ async def get_project(
         raise
     except Exception as e:
         logger.error(f"Error getting project: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get project: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/projects/{project_id}")
@@ -307,7 +307,7 @@ async def delete_project(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error deleting project: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/projects/{project_id}/reindex")
@@ -395,7 +395,7 @@ async def reindex_project(
         raise
     except Exception as e:
         logger.error(f"Error starting re-indexing: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start re-indexing: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health")
@@ -431,6 +431,6 @@ async def get_call_graph_api(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Call graph error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve call graph: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 

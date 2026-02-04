@@ -1,4 +1,3 @@
-
 """
 Learning API Endpoints
 =====================
@@ -6,24 +5,18 @@ Learning API Endpoints
 REST API endpoints for learning, feedback, and adaptation systems.
 """
 
-import os
 import logging
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Body, Header
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
-
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 class FeedbackRequest(BaseModel):
     """Request model for learning feedback"""
@@ -40,9 +33,10 @@ class FeedbackProcessRequest(BaseModel):
 # Create router
 router = APIRouter(prefix="/api/learning", tags=["🧠 Learning"])
 
-@router.post("/feedback", dependencies=[Depends(require_api_key)])
+@router.post("/feedback")
 async def submit_feedback(
     request: FeedbackRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -66,11 +60,12 @@ async def submit_feedback(
         
     except Exception as e:
         logger.error(f"Error submitting feedback: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.post("/feedback/process", dependencies=[Depends(require_api_key)])
+@router.post("/feedback/process")
 async def process_feedback(
     request: FeedbackProcessRequest,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -92,10 +87,11 @@ async def process_feedback(
         
     except Exception as e:
         logger.error(f"Error processing feedback: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process feedback: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/insights/aggregate", dependencies=[Depends(require_api_key)])
+@router.get("/insights/aggregate")
 async def aggregate_insights(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     period: Optional[str] = "last_30_days",
     db: Session = Depends(get_db)
 ):
@@ -131,10 +127,11 @@ async def aggregate_insights(
         
     except Exception as e:
         logger.error(f"Error aggregating insights: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to aggregate insights: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.get("/effectiveness-report", dependencies=[Depends(require_api_key)])
+@router.get("/effectiveness-report")
 async def effectiveness_report(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -170,4 +167,4 @@ async def effectiveness_report(
         
     except Exception as e:
         logger.error(f"Error generating effectiveness report: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate report: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

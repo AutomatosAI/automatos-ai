@@ -150,7 +150,7 @@ async def list_decisions(
         ]
     except Exception as e:
         logger.error("Error listing routing decisions: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ async def create_rule(
     except Exception as e:
         logger.error("Error creating routing rule: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ async def list_rules(
         ]
     except Exception as e:
         logger.error("Error listing routing rules: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ async def delete_rule(
     except Exception as e:
         logger.error("Error deleting routing rule: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +333,7 @@ async def record_correction(
     except Exception as e:
         logger.error("Error recording routing correction: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ async def get_cache_stats(
         return get_routing_cache().stats()
     except Exception as e:
         logger.error("Error getting cache stats: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ---------------------------------------------------------------------------
@@ -436,4 +436,4 @@ async def setup_trigger(
     except Exception as e:
         logger.error("Error setting up trigger: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

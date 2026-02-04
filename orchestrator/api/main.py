@@ -279,9 +279,9 @@ app = FastAPI(
         }
     ],
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc", 
-    openapi_url="/openapi.json",
+    docs_url="/docs" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT", "development") != "production" else None,
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
@@ -301,14 +301,27 @@ app = FastAPI(
     }
 )
 
-# CORS middleware
+# CORS middleware — restrict to explicit methods and headers
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
 
 # Install logging context filter and add request-id middleware
 install_request_context_logging()
@@ -360,12 +373,6 @@ async def api_tracking_middleware(request, call_next):
         if status_code >= 400:
             stats["error_count"] += 1
 
-# Simple API key auth dependency
-def require_api_key(x_api_key: str = Header(None)):
-    required = os.getenv("API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-    return True
 
 # Include API routers
 app.include_router(agents_router)
@@ -485,21 +492,20 @@ async def health_check():
             "🔧 components": components,
             
             "📊 metrics": {
-                "websocket_connections": websocket_connections,
                 "uptime": "operational",
                 "memory_usage": "optimal",
                 "cpu_usage": "normal",
                 "response_time": "< 100ms"
             },
-            
+
             "🎯 endpoints": {
                 "total_endpoints": 50,
                 "healthy_endpoints": 50,
                 "deprecated_endpoints": 0
             },
-            
+
             "🔌 connectivity": {
-                "websocket": f"✅ Active ({websocket_connections} connections)",
+                "streaming": "SSE (AI SDK)",
                 "http": "✅ Active",
                 "cors": "✅ Enabled"
             },
@@ -526,7 +532,7 @@ async def health_check():
             "service": "automotas-ai-api",
             "version": "1.0.0",
             "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e),
+            "error": "Service check failed",
             "message": "System experiencing issues. Check logs for details."
         }
 
@@ -610,7 +616,7 @@ async def api_endpoint_health():
         return {
             "status": "error",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e),
+            "error": "Service check failed",
             "message": "Failed to retrieve API health statistics"
         }
 

@@ -122,13 +122,38 @@ async def handle_request(
         with open(file_path, "wb") as f:
             f.write(content)
         
-        # Determine file type
+        # Determine and validate file type
         file_extension = Path(file.filename).suffix.lower()
+
+        # Allowed extensions and expected MIME types
+        ALLOWED_TYPES = {
+            '.pdf': {'application/pdf'},
+            '.md': {'text/markdown', 'text/plain', 'application/octet-stream'},
+            '.markdown': {'text/markdown', 'text/plain', 'application/octet-stream'},
+            '.txt': {'text/plain', 'application/octet-stream'},
+            '.doc': {'application/msword', 'application/octet-stream'},
+            '.docx': {'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/octet-stream'},
+            '.json': {'application/json', 'text/plain', 'application/octet-stream'},
+        }
+
+        if file_extension not in ALLOWED_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Allowed: {', '.join(ALLOWED_TYPES.keys())}"
+            )
+
+        # Validate MIME type matches extension
+        if file.content_type and file.content_type not in ALLOWED_TYPES[file_extension]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"MIME type mismatch: {file.content_type} not valid for {file_extension}"
+            )
+
         file_type = "unknown"
         if file_extension in ['.pdf']:
             file_type = "pdf"
         elif file_extension in ['.md', '.markdown']:
-            file_type = "markdown"  # FIXED: Use markdown type for SmartChunker
+            file_type = "markdown"
         elif file_extension in ['.txt']:
             file_type = "text"
         elif file_extension in ['.doc', '.docx']:
@@ -205,7 +230,7 @@ async def handle_request(
         raise
     except Exception as e:
         logger.error(f"Error uploading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error uploading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/download")
 async def download_document(path: str = Query(..., description="Full path to document")):
@@ -258,7 +283,7 @@ async def download_document(path: str = Query(..., description="Full path to doc
         raise
     except Exception as e:
         logger.error(f"Error downloading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/content")
 async def get_document_content(path: str = Query(..., description="Full path to document")):
@@ -302,7 +327,7 @@ async def get_document_content(path: str = Query(..., description="Full path to 
         raise
     except Exception as e:
         logger.error(f"Error reading document: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 
@@ -384,7 +409,7 @@ async def get_document_analytics(
         
     except Exception as e:
         logger.error(f"Error getting document analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/", response_model=List[DocumentResponse])
 async def get_item(
@@ -435,7 +460,7 @@ async def get_item(
         
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_item(
@@ -465,7 +490,7 @@ async def get_item(
         raise
     except Exception as e:
         logger.error(f"Error getting document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/delete-impact")
 async def get_delete_impact(
@@ -531,7 +556,7 @@ async def get_delete_impact(
         raise
     except Exception as e:
         logger.error(f"Error getting delete impact for document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing delete impact: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{document_id}")
 async def delete_document(
@@ -563,7 +588,7 @@ async def delete_document(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{document_id}/reprocess")
 async def reprocess_document(
@@ -629,13 +654,13 @@ async def reprocess_document(
             logger.error(f"Error reprocessing document {document_id}: {e}")
             document.status = "failed"
             db.commit()
-            raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
+            raise HTTPException(status_code=500, detail="Internal server error")
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error reprocessing document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reprocessing document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{document_id}/content")
 async def get_document_content(
@@ -682,7 +707,7 @@ async def get_document_content(
         raise
     except Exception as e:
         logger.error(f"Error getting document content {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting document content: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 PREVIEW_CHUNK_LIMIT = 6  # Max number of chunks included in preview window
@@ -731,7 +756,8 @@ async def semantic_search(
             doc_filter = "AND d.id = ANY(:document_ids)"
         
         # Format embedding as PostgreSQL array string for pgvector
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+        # Validate embedding values are numeric (safe from injection since each value is cast to float)
+        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
         
         similarity_query = text(f"""
             SELECT 
@@ -935,7 +961,7 @@ async def semantic_search(
         raise
     except Exception as e:
         logger.error(f"Error performing semantic search: {e}")
-        raise HTTPException(status_code=500, detail=f"Error performing semantic search: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/queue/status")
@@ -1080,7 +1106,7 @@ async def get_queue_status(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting queue status: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/rag/retrieve")
@@ -1220,7 +1246,7 @@ async def rag_retrieve(
         
     except Exception as e:
         logger.error(f"Error performing RAG retrieval: {e}")
-        raise HTTPException(status_code=500, detail=f"Error performing RAG retrieval: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # Usage Analytics Endpoints
@@ -1299,7 +1325,7 @@ async def track_usage_event(
         
     except Exception as e:
         logger.error(f"Error tracking usage event: {e}")
-        raise HTTPException(status_code=500, detail=f"Error tracking usage event: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/analytics/usage")
@@ -1442,7 +1468,7 @@ async def get_usage_analytics(
         
     except Exception as e:
         logger.error(f"Error getting usage analytics: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting usage analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -1481,7 +1507,7 @@ async def reprocess_document(
         raise
     except Exception as e:
         logger.error(f"Error re-processing document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/reprocess-all")
@@ -1519,7 +1545,7 @@ async def reprocess_all_documents(
         
     except Exception as e:
         logger.error(f"Error starting batch re-processing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/reprocess-status")
@@ -1561,4 +1587,4 @@ async def get_reprocess_status(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting re-process status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

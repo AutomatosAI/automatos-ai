@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from core.services.analytics_engine import AnalyticsEngine
 # dashboard_realtime removed - using AI SDK SSE streaming
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ def get_analytics_engine() -> AnalyticsEngine:
     return analytics_engine
 
 @router.get("/dashboard/overview")
-async def get_dashboard_overview():
+async def get_dashboard_overview(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get comprehensive dashboard overview data
     """
@@ -37,12 +39,13 @@ async def get_dashboard_overview():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting dashboard overview: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agents/{agent_id}")
 async def get_agent_analytics(
     agent_id: int,
-    period: str = Query("7d", description="Time period: 1h, 24h, 7d, 30d")
+    period: str = Query("7d", description="Time period: 1h, 24h, 7d, 30d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Get detailed analytics for a specific agent
@@ -53,10 +56,10 @@ async def get_agent_analytics(
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting agent analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/agents")
-async def get_all_agents_analytics():
+async def get_all_agents_analytics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get analytics for all agents
     """
@@ -67,10 +70,10 @@ async def get_all_agents_analytics():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting all agents analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/context")
-async def get_context_analytics():
+async def get_context_analytics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get context optimization analytics
     """
@@ -80,10 +83,10 @@ async def get_context_analytics():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting context analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/learning")
-async def get_learning_analytics():
+async def get_learning_analytics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get learning and memory analytics
     """
@@ -93,10 +96,10 @@ async def get_learning_analytics():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting learning analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/system/health")
-async def get_system_health():
+async def get_system_health(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get real-time system health metrics
     """
@@ -106,10 +109,10 @@ async def get_system_health():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting system health: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/realtime")
-async def get_realtime_metrics():
+async def get_realtime_metrics(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get real-time metrics for WebSocket updates
     """
@@ -119,7 +122,7 @@ async def get_realtime_metrics():
         return JSONResponse(content=data)
     except Exception as e:
         logger.error(f"Error getting real-time metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/track/agent-execution")
 async def track_agent_execution(
@@ -131,7 +134,8 @@ async def track_agent_execution(
     error_message: Optional[str] = None,
     context_optimization_applied: bool = False,
     memory_items_created: int = 0,
-    collaboration_sessions: int = 0
+    collaboration_sessions: int = 0,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Track agent execution for analytics
@@ -152,7 +156,7 @@ async def track_agent_execution(
         return JSONResponse(content={"status": "success"})
     except Exception as e:
         logger.error(f"Error tracking agent execution: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/track/context-optimization")
 async def track_context_optimization(
@@ -160,7 +164,8 @@ async def track_context_optimization(
     optimized_tokens: int,
     optimization_type: str,
     pattern_used: Optional[str] = None,
-    execution_time: Optional[float] = None
+    execution_time: Optional[float] = None,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Track context optimization for analytics
@@ -177,7 +182,7 @@ async def track_context_optimization(
         return JSONResponse(content={"status": "success"})
     except Exception as e:
         logger.error(f"Error tracking context optimization: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/track/learning-progress")
 async def track_learning_progress(
@@ -185,7 +190,8 @@ async def track_learning_progress(
     knowledge_items: int = 0,
     memory_consolidations: int = 0,
     performance_improvement: float = 0.0,
-    knowledge_transfers: int = 0
+    knowledge_transfers: int = 0,
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Track learning progress for analytics
@@ -202,10 +208,10 @@ async def track_learning_progress(
         return JSONResponse(content={"status": "success"})
     except Exception as e:
         logger.error(f"Error tracking learning progress: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/websocket/status")
-async def get_websocket_status():
+async def get_websocket_status(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get WebSocket connection status
     """
@@ -218,4 +224,4 @@ async def get_websocket_status():
         })
     except Exception as e:
         logger.error(f"Error getting WebSocket status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

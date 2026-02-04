@@ -13,13 +13,15 @@ from datetime import datetime, timedelta
 
 from core.database.database import get_db
 from modules.memory.storage.knowledge_system import MemoryItem
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/memory", tags=["Real Memory Stats"])
 
 @router.get("/stats/real")
-async def get_real_memory_stats(db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_real_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Get REAL memory statistics from database
     """
@@ -85,10 +87,10 @@ async def get_real_memory_stats(db: Session = Depends(get_db)) -> Dict[str, Any]
         
     except Exception as e:
         logger.error(f"Failed to get real memory stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get memory stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/agents")
-async def get_agent_memory_stats(db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+async def get_agent_memory_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """
     Get memory stats per agent
     """
@@ -112,11 +114,12 @@ async def get_agent_memory_stats(db: Session = Depends(get_db)) -> List[Dict[str
         
     except Exception as e:
         logger.error(f"Failed to get agent memory stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get agent stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/recent")
 async def get_recent_memories(
     limit: int = 10,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ) -> List[Dict[str, Any]]:
     """
@@ -142,5 +145,5 @@ async def get_recent_memories(
         
     except Exception as e:
         logger.error(f"Failed to get recent memories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get recent memories: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 

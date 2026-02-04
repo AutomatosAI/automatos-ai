@@ -386,7 +386,7 @@ async def connect_app(
             callback_url=payload.callback_url,
         )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to initiate OAuth: {str(e)}")
+        raise HTTPException(status_code=503, detail="Failed to initiate OAuth connection")
 
     # Store pending connection in DB
     entity_manager.add_connection(entity_id=entity["id"], app_name=app_name, status="pending")

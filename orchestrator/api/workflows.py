@@ -328,7 +328,7 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
 
     except Exception as e:
         logger.error(f"Error getting active workflows: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting active workflows: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -355,12 +355,13 @@ async def get_workflow(workflow_id: int, ctx: RequestContext = Depends(get_reque
         raise
     except Exception as e:
         logger.error(f"Error getting workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.put("/{workflow_id}")
 async def update_workflow(
     workflow_id: int,
     workflow_data: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Update workflow"""
@@ -410,7 +411,7 @@ async def update_workflow(
     except Exception as e:
         logger.error(f"Error updating workflow {workflow_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error updating workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/{workflow_id}")
 async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -452,7 +453,7 @@ async def delete_workflow(workflow_id: int, ctx: RequestContext = Depends(get_re
     except Exception as e:
         logger.error(f"Error deleting workflow {workflow_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error deleting workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.delete("/cleanup/old")
 async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
@@ -504,7 +505,7 @@ async def cleanup_old_workflows(days: int = 30, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error cleaning up old workflows: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error cleaning up workflows: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("")
 async def create_workflow(
@@ -612,12 +613,13 @@ async def create_workflow(
     except Exception as e:
         logger.error(f"Error creating workflow: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error creating workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{workflow_id}/duplicate")
 async def duplicate_workflow(
     workflow_id: int,
     duplicate_data: Dict[str, Any] = Body(None),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """Duplicate an existing workflow with optional modifications"""
@@ -683,7 +685,7 @@ async def duplicate_workflow(
     except Exception as e:
         logger.error(f"Error duplicating workflow {workflow_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error duplicating workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats/dashboard")
 async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -809,7 +811,7 @@ async def get_workflow_dashboard_stats(ctx: RequestContext = Depends(get_request
         
     except Exception as e:
         logger.error(f"Error getting workflow dashboard stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting dashboard stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/{workflow_id}/live-progress")
 async def get_workflow_live_progress(workflow_id: int, db: Session = Depends(get_db)):
@@ -901,7 +903,7 @@ async def get_workflow_live_progress(workflow_id: int, db: Session = Depends(get
         raise
     except Exception as e:
         logger.error(f"Error getting live progress for workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting live progress: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/{workflow_id}/execute-advanced")
 async def execute_workflow_advanced(
@@ -968,7 +970,7 @@ async def execute_workflow_advanced(
     except Exception as e:
         db.rollback()
         logger.error(f"Error executing workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error executing workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Additional endpoints for user journey tests
 @router.post("/{workflow_id}/execute")
@@ -1060,7 +1062,7 @@ async def execute_workflow(
         raise
     except Exception as e:
         logger.error(f"Error executing workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error executing workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/execute")
 async def execute_workflow_general(execution_data: Dict[str, Any], ctx: RequestContext = Depends(get_request_context_hybrid), db: Session = Depends(get_db)):
@@ -1074,7 +1076,7 @@ async def execute_workflow_general(execution_data: Dict[str, Any], ctx: RequestC
         
     except Exception as e:
         logger.error(f"Error in general workflow execution: {e}")
-        raise HTTPException(status_code=500, detail=f"Error executing workflow: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/executions/")
 async def list_executions(
@@ -1117,7 +1119,7 @@ async def list_executions(
         }
     except Exception as e:
         logger.error(f"Error listing executions: {e}")
-        raise HTTPException(status_code=500, detail=f"Error listing executions: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/executions/")
 async def create_execution(execution_data: Dict[str, Any], db: Session = Depends(get_db)):
@@ -1127,7 +1129,7 @@ async def create_execution(execution_data: Dict[str, Any], db: Session = Depends
         return await execute_workflow(workflow_id, execution_data, db)
     except Exception as e:
         logger.error(f"Error creating execution: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating execution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/executions/{execution_id}")
 async def get_execution_status(execution_id: int, db: Session = Depends(get_db)):
@@ -1151,7 +1153,7 @@ async def get_execution_status(execution_id: int, db: Session = Depends(get_db))
         raise
     except Exception as e:
         logger.error(f"Error getting execution status {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting execution status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/executions/{execution_id}/cancel")
 async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
@@ -1198,7 +1200,7 @@ async def cancel_execution(execution_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error cancelling execution {execution_id}: {e}")
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error cancelling execution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/executions/{execution_id}/stream")
@@ -1245,7 +1247,7 @@ async def stream_execution_updates(execution_id: int, db: Session = Depends(get_
         )
     except Exception as e:
         logger.error(f"❌ Error creating SSE stream for execution {execution_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/executions/{execution_id}/stream/aisdk")
@@ -1302,7 +1304,7 @@ async def stream_execution_aisdk(execution_id: int, db: Session = Depends(get_db
         )
     except Exception as e:
         logger.error(f"❌ Error creating AI SDK stream for execution {execution_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/stream")
@@ -1372,7 +1374,7 @@ async def stream_workflow_chat(request: Dict[str, Any] = Body(...), db: Session 
         )
     except Exception as e:
         logger.error(f"❌ Error creating AI SDK chat stream for execution {execution_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to create stream: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 
@@ -1396,7 +1398,7 @@ async def get_execution_results(execution_id: int, db: Session = Depends(get_db)
         raise
     except Exception as e:
         logger.error(f"Error getting execution results {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting execution results: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 async def execute_workflow_with_progress(execution_id: int, options: Dict[str, Any]):
     """Execute workflow with COMPLETE pipeline: decompose, select, enhance, execute, score, learn, remember"""
@@ -2670,7 +2672,7 @@ async def get_execution_results_files(execution_id: int, db: Session = Depends(g
         raise
     except Exception as e:
         logger.error(f"Error getting execution results {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting execution results: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/executions/{execution_id}/results/{file_path:path}")
 async def download_execution_result_file(execution_id: int, file_path: str, db: Session = Depends(get_db)):
@@ -2713,7 +2715,7 @@ async def download_execution_result_file(execution_id: int, file_path: str, db: 
         raise
     except Exception as e:
         logger.error(f"Error downloading file {file_path} from execution {execution_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/templates/recommended")
 async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
@@ -2773,4 +2775,4 @@ async def get_recommended_workflow_templates(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting recommended templates: {e}")
-        raise HTTPException(status_code=500, detail=f"Error getting templates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

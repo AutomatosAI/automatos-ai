@@ -56,14 +56,19 @@ async def github_webhook(
     # Get raw body for signature verification
     body = await request.body()
     payload = await request.json()
-    
-    # Verify signature (optional but recommended)
+
+    # Verify signature — mandatory when secret is configured
     import os
     webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
-    if webhook_secret and x_hub_signature_256:
-        if not verify_github_signature(body, x_hub_signature_256, webhook_secret):
-            logger.warning("Invalid GitHub webhook signature")
-            raise HTTPException(status_code=401, detail="Invalid signature")
+    if not webhook_secret:
+        logger.error("GITHUB_WEBHOOK_SECRET not configured — rejecting webhook")
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+    if not x_hub_signature_256:
+        logger.warning("Missing GitHub webhook signature header")
+        raise HTTPException(status_code=401, detail="Missing signature")
+    if not verify_github_signature(body, x_hub_signature_256, webhook_secret):
+        logger.warning("Invalid GitHub webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
     
     logger.info(f"📥 GitHub webhook: {x_github_event}")
     
@@ -142,7 +147,7 @@ async def github_webhook(
                 
             except Exception as e:
                 logger.error(f"Failed to trigger PR review: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                raise HTTPException(status_code=500, detail="Internal server error")
     
     # Health check / ping event
     elif x_github_event == "ping":

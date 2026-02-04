@@ -19,6 +19,8 @@ from core.models import (
 from modules.agents import (
     AgentFactory, AgentLifecycle, create_specialized_agent
 )
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -37,6 +39,7 @@ def get_agent_factory():
 @router.post("/create-specialized", response_model=Dict[str, Any])
 async def create_specialized_agent_endpoint(
     request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -95,14 +98,15 @@ async def create_specialized_agent_endpoint(
         logger.error(f"Failed to create agent: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/execute")
 async def execute_agent_task(
     agent_id: int,
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Execute a task using a specific agent's LLM.
@@ -157,14 +161,15 @@ async def execute_agent_task(
         logger.error(f"Task execution error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/learn")
 async def update_agent_learning(
     agent_id: int,
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Provide feedback for agent learning.
@@ -228,7 +233,7 @@ async def update_agent_learning(
         logger.error(f"Learning update error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -236,6 +241,7 @@ async def update_agent_learning(
 async def get_agent_performance(
     agent_id: int,
     period: str = "all",
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -312,7 +318,7 @@ async def get_agent_performance(
         logger.error(f"Performance query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -320,6 +326,7 @@ async def get_agent_performance(
 async def get_agent_logs(
     agent_id: int,
     limit: int = 50,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -381,12 +388,12 @@ async def get_agent_logs(
         logger.error(f"Logs query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.get("/{agent_id}/status")
-async def get_agent_status_endpoint(agent_id: int):
+async def get_agent_status_endpoint(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Get detailed agent status including LLM connection info.
     
@@ -410,12 +417,12 @@ async def get_agent_status_endpoint(agent_id: int):
         logger.error(f"Status query error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/test-capabilities")
-async def test_agent_capabilities_endpoint(agent_id: int):
+async def test_agent_capabilities_endpoint(agent_id: int, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     Run comprehensive capability tests on an agent.
     
@@ -443,13 +450,14 @@ async def test_agent_capabilities_endpoint(agent_id: int):
         logger.error(f"Capability test error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/batch-create")
 async def create_agent_batch(
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Create multiple agents in batch.
@@ -513,12 +521,12 @@ async def create_agent_batch(
         logger.error(f"Batch creation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.get("/active")
-async def list_active_agents():
+async def list_active_agents(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """
     List all active agents in runtime.
     
@@ -541,14 +549,15 @@ async def list_active_agents():
         logger.error(f"List agents error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.post("/{agent_id}/add-skills")
 async def add_agent_skills(
     agent_id: int,
-    request: Dict[str, Any]
+    request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """
     Add new skills to an existing agent.
@@ -596,7 +605,7 @@ async def add_agent_skills(
         logger.error(f"Add skills error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -646,6 +655,7 @@ async def agent_system_health():
 @router.get("/{agent_id}/model-config")
 async def get_agent_model_config(
     agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -675,7 +685,7 @@ async def get_agent_model_config(
         logger.error(f"Get model config error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -683,6 +693,7 @@ async def get_agent_model_config(
 async def update_agent_model_config(
     agent_id: int,
     model_config: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -750,13 +761,14 @@ async def update_agent_model_config(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
 @router.get("/{agent_id}/model-usage")
 async def get_agent_model_usage(
     agent_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -801,7 +813,7 @@ async def get_agent_model_usage(
         logger.error(f"Get model usage error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -809,6 +821,7 @@ async def get_agent_model_usage(
 async def switch_agent_model(
     agent_id: int,
     request: Dict[str, Any],
+    ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db)
 ):
     """
@@ -896,5 +909,5 @@ async def switch_agent_model(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )

@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models import WorkflowExecution, Workflow, Agent
 from consumers.workflows.analytics import WorkflowAnalyticsService
 
@@ -22,7 +24,7 @@ router = APIRouter(prefix="/api/execution-history", tags=["execution-history"])
 
 
 @router.get("/workflow/{workflow_id}/latest")
-async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db)):
+async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get the most recent execution for a workflow with full details"""
     try:
         execution = db.query(WorkflowExecution).filter(
@@ -36,7 +38,7 @@ async def get_latest_execution(workflow_id: int, db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error getting latest execution: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/workflow/{workflow_id}/all")
@@ -44,7 +46,8 @@ async def get_all_executions(
     workflow_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get all executions for a workflow with pagination"""
     try:
@@ -65,11 +68,11 @@ async def get_all_executions(
         
     except Exception as e:
         logger.error(f"Error getting executions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/execution/{execution_id}/details")
-async def get_execution_details(execution_id: int, db: Session = Depends(get_db)):
+async def get_execution_details(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get detailed information about a specific execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
@@ -85,11 +88,11 @@ async def get_execution_details(execution_id: int, db: Session = Depends(get_db)
         raise
     except Exception as e:
         logger.error(f"Error getting execution details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/execution/{execution_id}/stages")
-async def get_execution_stages(execution_id: int, db: Session = Depends(get_db)):
+async def get_execution_stages(execution_id: int, db: Session = Depends(get_db), ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get the 9-stage pipeline details for an execution"""
     try:
         execution = db.query(WorkflowExecution).filter(
@@ -202,7 +205,7 @@ async def get_execution_stages(execution_id: int, db: Session = Depends(get_db))
         raise
     except Exception as e:
         logger.error(f"Error getting execution stages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def format_execution_summary(execution: WorkflowExecution, db: Session) -> Dict[str, Any]:

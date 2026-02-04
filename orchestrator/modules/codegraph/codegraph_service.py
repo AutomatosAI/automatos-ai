@@ -724,7 +724,7 @@ class CodeGraphService:
                 
                 # Alter the column
                 self.db.execute(
-                    text(f"ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector({current_dim})")
+                    text(f"ALTER TABLE codegraph_symbols ALTER COLUMN embedding TYPE vector({int(current_dim)})")
                 )
                 
                 # Recreate the index
@@ -1005,8 +1005,9 @@ class CodeGraphService:
         project_id = project.id
         
         # Build search query
+        # type_filter is safe: it's a static SQL fragment from a boolean check, not user-controlled input
         type_filter = "AND symbol_type = :symbol_type" if symbol_type else ""
-        
+
         search_query = text(f"""
             SELECT
                 id,
@@ -1198,7 +1199,8 @@ class CodeGraphService:
         
         # FALLBACK: Original SQL-based implementation (kept for rollback)
         logger.info("Using fallback SQL-based semantic search")
-        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
+        # Validate embedding values are numeric (safe from injection since each value is cast to float)
+        embedding_str = '[' + ','.join(str(float(v)) for v in query_embedding) + ']'
         
         # Semantic search
         search_query = text(f"""

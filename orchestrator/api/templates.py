@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from core.models import AgentTemplate, AgentType, PriorityLevel, SkillCategory
 import logging
 
@@ -125,7 +127,7 @@ AGENT_TEMPLATES = [
 ]
 
 @router.get("/", response_model=List[AgentTemplate])
-async def get_agent_templates():
+async def get_agent_templates(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get all available agent templates for the creation wizard"""
     try:
         templates = []
@@ -145,10 +147,10 @@ async def get_agent_templates():
         
     except Exception as e:
         logger.error(f"Error getting agent templates: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/templates/{agent_type}")
-async def get_template_by_type(agent_type: AgentType):
+async def get_template_by_type(agent_type: AgentType, ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get a specific template by agent type"""
     try:
         for template_data in AGENT_TEMPLATES:
@@ -169,12 +171,13 @@ async def get_template_by_type(agent_type: AgentType):
         raise
     except Exception as e:
         logger.error(f"Error getting template by type: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/templates/skills/suggestions")
 async def get_skill_suggestions(
     agent_type: AgentType,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ):
     """Get skill suggestions based on agent type"""
     try:
@@ -223,10 +226,10 @@ async def get_skill_suggestions(
         
     except Exception as e:
         logger.error(f"Error getting skill suggestions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/creation-wizard/config")
-async def get_creation_wizard_config():
+async def get_creation_wizard_config(ctx: RequestContext = Depends(get_request_context_hybrid)):
     """Get configuration options for the agent creation wizard"""
     try:
         return {
@@ -267,4 +270,4 @@ async def get_creation_wizard_config():
         
     except Exception as e:
         logger.error(f"Error getting creation wizard config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

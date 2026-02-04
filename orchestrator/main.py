@@ -15,6 +15,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from core.auth.hybrid import get_request_context_hybrid
 import uvicorn
 import uuid
 import time
@@ -299,9 +300,9 @@ app = FastAPI(
         }
     ],
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc", 
-    openapi_url="/openapi.json",
+    docs_url="/docs" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    redoc_url="/redoc" if os.getenv("ENVIRONMENT", "development") != "production" else None,
+    openapi_url="/openapi.json" if os.getenv("ENVIRONMENT", "development") != "production" else None,
     swagger_ui_parameters={
         "deepLinking": True,
         "displayRequestDuration": True,
@@ -330,9 +331,38 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Workspace-ID", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "X-Routing-Agent-ID", "X-Routing-Confidence", "X-Routing-Type", "X-Routing-Reasoning", "X-Routing-Request-ID"],
 )
+
+# Rate limiting (US-017)
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+def _get_real_client_ip(request) -> str:
+    """Extract real client IP, respecting X-Forwarded-For behind reverse proxy."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=_get_real_client_ip, default_limits=["60/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    return response
 
 # Install logging context filter and add request-id middleware
 install_request_context_logging()
@@ -384,17 +414,6 @@ async def api_tracking_middleware(request, call_next):
         if status_code >= 400:
             stats["error_count"] += 1
 
-# Simple API key auth dependency - use centralized config
-# Note: OPTIONS requests (CORS preflight) are handled by CORS middleware before this
-def require_api_key(x_api_key: str = Header(None)):
-    # Skip API key check if not required
-    if not config.REQUIRE_API_KEY:
-        return True
-    # Allow if API key matches
-    if x_api_key == config.API_KEY:
-        return True
-    # Reject if API key is required but missing/invalid
-    raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 # Include API routers
 app.include_router(agents_router)
@@ -469,8 +488,22 @@ try:
 except Exception as e:
     logger.warning(f"Could not mount legacy routes: {e}")
 
-# Mount exports directory for static file serving (charts, etc.)
-app.mount("/exports", StaticFiles(directory="exports"), name="exports")
+# Exports directory served through authenticated endpoint instead of open StaticFiles mount.
+# See api/exports.py (or serve via pre-signed URLs in production).
+from fastapi.responses import FileResponse
+
+@app.get("/exports/{file_path:path}", tags=["Exports"])
+async def serve_export(file_path: str, ctx = Depends(get_request_context_hybrid)):
+    """Serve exported files (charts, etc.) with authentication."""
+    from pathlib import Path as _Path
+    safe_base = _Path("exports").resolve()
+    requested = (safe_base / file_path).resolve()
+    # Prevent path traversal
+    if not str(requested).startswith(str(safe_base)):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(requested)
 
 # WebSocket endpoint removed - using AI SDK SSE streaming instead
 # See consumers/workflows/streaming.py and consumers/chatbot/streaming.py
@@ -564,7 +597,7 @@ async def health_check():
             "service": "automotas-ai-api",
             "version": "1.0.0",
             "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e),
+            "error": "Service check failed",
             "message": "System experiencing issues. Check logs for details."
         }
 
@@ -648,7 +681,7 @@ async def api_endpoint_health():
         return {
             "status": "error",
             "timestamp": datetime.now().isoformat(),
-            "error": str(e),
+            "error": "Service check failed",
             "message": "Failed to retrieve API health statistics"
         }
 
@@ -783,6 +816,6 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=config.IS_DEVELOPMENT,
         log_level="info"
     )

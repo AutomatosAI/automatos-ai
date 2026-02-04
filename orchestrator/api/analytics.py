@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import logging
 
 from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 from sqlalchemy.orm import Session
 from consumers.workflows.analytics import WorkflowAnalyticsService
 
@@ -22,7 +24,8 @@ logger = logging.getLogger(__name__)
 async def get_workflow_trends(
     workflow_id: int,
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get performance trends for a specific workflow"""
     
@@ -37,14 +40,15 @@ async def get_workflow_trends(
         
     except Exception as e:
         logger.error(f"Error getting workflow trends: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/agents/performance")
 async def get_agent_performance(
     agent_id: Optional[int] = Query(None, description="Specific agent ID (optional)"),
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get agent performance statistics"""
     
@@ -59,13 +63,14 @@ async def get_agent_performance(
         
     except Exception as e:
         logger.error(f"Error getting agent performance: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/skills/demand")
 async def get_skill_demand(
     days: int = Query(30, ge=1, le=180, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Analyze skill demand and coverage"""
     
@@ -80,13 +85,14 @@ async def get_skill_demand(
         
     except Exception as e:
         logger.error(f"Error analyzing skill demand: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/executions/{execution_id}/report")
 async def get_execution_report(
     execution_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get comprehensive report for a specific execution"""
     
@@ -106,13 +112,14 @@ async def get_execution_report(
         raise
     except Exception as e:
         logger.error(f"Error generating execution report: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(
     days: int = Query(7, ge=1, le=90, description="Number of days for summary"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Get summary statistics for dashboard"""
     
@@ -204,13 +211,14 @@ async def get_dashboard_summary(
         
     except Exception as e:
         logger.error(f"Error getting dashboard summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/agent-selection/analysis")
 async def analyze_agent_selection(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context_hybrid)
 ) -> Dict[str, Any]:
     """Analyze agent selection patterns and effectiveness"""
     
@@ -293,4 +301,4 @@ async def analyze_agent_selection(
         
     except Exception as e:
         logger.error(f"Error analyzing agent selection: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
