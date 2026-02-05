@@ -557,7 +557,9 @@ class UniversalRouter:
             record = RoutingDecisionRecord(
                 request_id=envelope.id,
                 envelope_hash=env_hash,
+                workspace_id=envelope.workspace_id,
                 source=envelope.source.value,
+                content=envelope.content[:2000],
                 route_type=decision.route_type,
                 agent_id=decision.agent_id,
                 workflow_id=decision.workflow_id,

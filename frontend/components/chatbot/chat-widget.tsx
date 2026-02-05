@@ -241,7 +241,7 @@ export function PilotHelperWidget({
   const helpItems = PAGE_HELP_CONTENT[context.currentPage] || PAGE_HELP_CONTENT.dashboard
 
   return (
-    <div className={`fixed ${positionClasses[position]} z-50`}>
+    <div className={`fixed ${positionClasses[position]} z-[60]`}>
       <AnimatePresence mode="wait">
         {isOpen && (
           <motion.div
@@ -465,7 +465,7 @@ export function PilotHelperWidget({
           className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-xl hover:shadow-2xl transition-all duration-300 group relative"
           size="lg"
         >
-          <Bug className="w-8 h-8 text-white group-hover:scale-110 transition-transform" />
+          <HelpCircle className="w-8 h-8 text-white group-hover:scale-110 transition-transform" />
           <motion.div
             className="absolute inset-0 rounded-full bg-gradient-to-br from-orange-400/50 to-red-400/50"
             animate={{ scale: [1, 1.2, 1] }}

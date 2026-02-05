@@ -22,6 +22,7 @@ from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.composio import TriggerSubscription
 from core.models.routing import (
+    ChannelSource,
     RoutingDecisionRecord,
     RoutingRule,
 )
@@ -315,13 +316,19 @@ async def record_correction(
         decision.corrected_agent_id = body.correct_agent_id
         db.commit()
 
-        # Feed correction into cache (the cache tracks repeated corrections)
-        # We need the original content/source to update the cache entry.
-        # Since we stored envelope_hash + source, we pass those through.
-        # Note: the cache uses content + source for key lookup — without the
-        # original content we cannot update the cache precisely. For now, we
-        # record the DB correction; the cache will auto-update when the same
-        # request is sent again and the user re-corrects.
+        # Feed correction into cache so routing improves immediately.
+        # The cache tracks repeated corrections and auto-updates after 2+.
+        if decision.content and decision.workspace_id and decision.source:
+            try:
+                source = ChannelSource(decision.source)
+                get_routing_cache().record_correction(
+                    workspace_id=decision.workspace_id,
+                    content=decision.content,
+                    source=source,
+                    correct_agent_id=body.correct_agent_id,
+                )
+            except (ValueError, Exception) as e:
+                logger.warning("Cache correction failed (non-blocking): %s", e)
 
         return {
             "status": "corrected",
