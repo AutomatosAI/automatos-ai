@@ -75,6 +75,12 @@ class PluginUploadService:
         except zipfile.BadZipFile:
             raise ValueError("Uploaded file is not a valid zip archive")
 
+        # Safety limits for zip extraction
+        MAX_FILE_COUNT = 500
+        MAX_FILE_UNCOMPRESSED_SIZE = 10 * 1024 * 1024  # 10 MB per file
+        MAX_TOTAL_UNCOMPRESSED_SIZE = 50 * 1024 * 1024  # 50 MB total
+        MAX_COMPRESSION_RATIO = 100  # reject suspiciously high ratios (zip bomb)
+
         with zf:
             names = zf.namelist()
 
@@ -82,6 +88,37 @@ class PluginUploadService:
             if "manifest.json" not in names:
                 raise ValueError(
                     "manifest.json not found at root of zip archive"
+                )
+
+            # ------------------------------------------------------------------
+            # 1b. Validate zip contents before reading any data
+            # ------------------------------------------------------------------
+            info_list = [i for i in zf.infolist() if not i.filename.endswith("/")]
+            if len(info_list) > MAX_FILE_COUNT:
+                raise ValueError(
+                    f"Zip contains too many files ({len(info_list)}), max {MAX_FILE_COUNT}"
+                )
+
+            total_uncompressed = 0
+            for info in info_list:
+                if info.file_size > MAX_FILE_UNCOMPRESSED_SIZE:
+                    raise ValueError(
+                        f"File '{info.filename}' uncompressed size ({info.file_size} bytes) "
+                        f"exceeds limit ({MAX_FILE_UNCOMPRESSED_SIZE} bytes)"
+                    )
+                total_uncompressed += info.file_size
+                if info.compress_size > 0:
+                    ratio = info.file_size / info.compress_size
+                    if ratio > MAX_COMPRESSION_RATIO:
+                        raise ValueError(
+                            f"File '{info.filename}' has suspicious compression ratio "
+                            f"({ratio:.0f}x), possible zip bomb"
+                        )
+
+            if total_uncompressed > MAX_TOTAL_UNCOMPRESSED_SIZE:
+                raise ValueError(
+                    f"Total uncompressed size ({total_uncompressed} bytes) exceeds "
+                    f"limit ({MAX_TOTAL_UNCOMPRESSED_SIZE} bytes)"
                 )
 
             manifest_raw = zf.read("manifest.json").decode("utf-8")
@@ -147,7 +184,20 @@ class PluginUploadService:
         security_status = scan_record.overall_verdict  # safe, review_required, blocked
 
         # ------------------------------------------------------------------
-        # 5. Upload to S3
+        # 5. Pre-check zip total uncompressed size before S3 extraction
+        # ------------------------------------------------------------------
+        from config import config as app_config
+        s3_max_bytes = app_config.PLUGIN_MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as pre_zf:
+            pre_total = sum(i.file_size for i in pre_zf.infolist() if not i.filename.endswith("/"))
+            if pre_total > s3_max_bytes:
+                raise ValueError(
+                    f"Total uncompressed size ({pre_total} bytes) exceeds "
+                    f"S3 upload limit ({s3_max_bytes} bytes)"
+                )
+
+        # ------------------------------------------------------------------
+        # 6. Upload to S3
         # ------------------------------------------------------------------
         logger.info("Uploading plugin %s@%s to S3", slug, version)
         s3_prefix = await self.s3_service.extract_plugin(

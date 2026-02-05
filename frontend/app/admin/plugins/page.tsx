@@ -191,6 +191,8 @@ export default function AdminPluginsPendingPage() {
       }>(`/api/admin/plugins/pending?page=${page}&limit=${limit}`)
       setPlugins(data.items)
       setTotal(data.total)
+      // Clear selections when page data changes so batch actions only affect visible items
+      setSelectedIds(new Set())
     } catch (err: any) {
       setError(err?.message || 'Failed to load pending plugins')
     } finally {

@@ -11,7 +11,7 @@
  * - Enable/Disable button for workspace
  */
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -112,21 +112,27 @@ export function MarketplacePluginDetailModal({
   const [plugin, setPlugin] = useState<PluginDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
 
   const fetchPluginDetail = useCallback(async () => {
     if (!pluginId) return
 
+    const currentRequestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
     try {
       const data = await apiClient.get(`/api/marketplace/plugins/${pluginId}`)
+      if (requestIdRef.current !== currentRequestId) return // stale response
       setPlugin(data as PluginDetail)
     } catch (err: any) {
+      if (requestIdRef.current !== currentRequestId) return // stale response
       const msg = err?.message || 'Failed to load plugin details'
       console.error('Failed to fetch plugin details:', err)
       setError(msg)
     } finally {
-      setLoading(false)
+      if (requestIdRef.current === currentRequestId) {
+        setLoading(false)
+      }
     }
   }, [pluginId])
 
@@ -135,6 +141,8 @@ export function MarketplacePluginDetailModal({
       fetchPluginDetail()
     }
     if (!open) {
+      // Invalidate any in-flight requests when modal closes
+      requestIdRef.current++
       setPlugin(null)
       setError(null)
     }

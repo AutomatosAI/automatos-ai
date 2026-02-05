@@ -176,9 +176,9 @@ async def upload_plugin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error uploading plugin: %s", e)
+        logger.exception("Error uploading plugin: %s", e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to upload plugin: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload plugin")
 
 
 @router.post("/{plugin_id}/approve")
@@ -230,9 +230,9 @@ async def approve_plugin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error approving plugin %s: %s", plugin_id, e)
+        logger.exception("Error approving plugin %s: %s", plugin_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to approve plugin: {e}")
+        raise HTTPException(status_code=500, detail="Failed to approve plugin")
 
 
 @router.post("/{plugin_id}/reject")
@@ -284,9 +284,9 @@ async def reject_plugin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error rejecting plugin %s: %s", plugin_id, e)
+        logger.exception("Error rejecting plugin %s: %s", plugin_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to reject plugin: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reject plugin")
 
 
 @router.get("/{plugin_id}/scan", response_model=ScanResultOut)
@@ -337,8 +337,8 @@ async def get_scan_results(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error fetching scan for plugin %s: %s", plugin_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch scan results: {e}")
+        logger.exception("Error fetching scan for plugin %s: %s", plugin_id, e)
+        raise HTTPException(status_code=500, detail="Failed to fetch scan results")
 
 
 @router.post("/{plugin_id}/deactivate")
@@ -407,9 +407,9 @@ async def deactivate_plugin(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error deactivating plugin %s: %s", plugin_id, e)
+        logger.exception("Error deactivating plugin %s: %s", plugin_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to deactivate plugin: {e}")
+        raise HTTPException(status_code=500, detail="Failed to deactivate plugin")
 
 
 @router.get("/pending")
@@ -470,5 +470,5 @@ async def list_pending_plugins(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error listing pending plugins: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to list pending plugins: {e}")
+        logger.exception("Error listing pending plugins: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to list pending plugins")

@@ -9,6 +9,7 @@ from the automatos-marketplace bucket.
 import io
 import json
 import logging
+import pathlib
 import zipfile
 import asyncio
 from uuid import uuid4
@@ -86,14 +87,33 @@ class MarketplaceS3Service:
         """
         prefix = f"plugins/{slug}/{version}/"
         loop = asyncio.get_running_loop()
+        max_uncompressed = config.PLUGIN_MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for member in zf.namelist():
-                # Skip directories
-                if member.endswith("/"):
+            # Pre-check: validate paths and total uncompressed size
+            total_uncompressed = 0
+            for info in zf.infolist():
+                if info.filename.endswith("/"):
                     continue
-                data = zf.read(member)
-                s3_key = f"{prefix}{member}"
+                member_path = pathlib.PurePosixPath(info.filename)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    raise ValueError(
+                        f"Unsafe path in zip archive: {info.filename}"
+                    )
+                total_uncompressed += info.file_size
+
+            if total_uncompressed > max_uncompressed:
+                raise ValueError(
+                    f"Total uncompressed size ({total_uncompressed} bytes) exceeds "
+                    f"limit ({max_uncompressed} bytes)"
+                )
+
+            # All checks passed — now extract and upload
+            for info in zf.infolist():
+                if info.filename.endswith("/"):
+                    continue
+                data = zf.read(info.filename)
+                s3_key = f"{prefix}{info.filename}"
                 await loop.run_in_executor(
                     None,
                     lambda k=s3_key, d=data: self.client.put_object(
@@ -169,14 +189,25 @@ class MarketplaceS3Service:
         deleted = 0
         for i in range(0, len(keys), 1000):
             batch = keys[i : i + 1000]
-            await loop.run_in_executor(
+            response = await loop.run_in_executor(
                 None,
                 lambda b=batch: self.client.delete_objects(
                     Bucket=self.bucket,
                     Delete={"Objects": [{"Key": k} for k in b], "Quiet": True},
                 ),
             )
-            deleted += len(batch)
+            errors = response.get("Errors", [])
+            if errors:
+                failed_keys = [e.get("Key", "unknown") for e in errors]
+                logger.error(
+                    "Failed to delete %d/%d objects for %s@%s: %s",
+                    len(errors), len(batch), slug, version, failed_keys,
+                )
+                raise RuntimeError(
+                    f"S3 partial delete failure: {len(errors)} of {len(batch)} "
+                    f"objects failed for {slug}@{version}"
+                )
+            deleted += len(response.get("Deleted", batch))
 
         logger.info("Deleted %d objects for %s@%s", deleted, slug, version)
         return deleted

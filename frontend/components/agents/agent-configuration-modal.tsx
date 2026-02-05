@@ -764,8 +764,11 @@ export function AgentConfigurationModal({
                     </CardHeader>
                     <CardContent className="space-y-6">
                       {/* Persona Mode Selection */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div
+                      <div role="radiogroup" aria-label="Persona mode" className="grid grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={personaMode === 'none'}
                           className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
                             personaMode === 'none'
                               ? 'border-primary bg-primary/10'
@@ -780,9 +783,12 @@ export function AgentConfigurationModal({
                           <Bot className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
                           <div className="font-medium text-sm">No Persona</div>
                           <div className="text-xs text-muted-foreground mt-1">Default behavior</div>
-                        </div>
+                        </button>
 
-                        <div
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={personaMode === 'predefined'}
                           className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
                             personaMode === 'predefined'
                               ? 'border-primary bg-primary/10'
@@ -793,9 +799,12 @@ export function AgentConfigurationModal({
                           <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
                           <div className="font-medium text-sm">Predefined</div>
                           <div className="text-xs text-muted-foreground mt-1">Choose a persona</div>
-                        </div>
+                        </button>
 
-                        <div
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={personaMode === 'custom'}
                           className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
                             personaMode === 'custom'
                               ? 'border-primary bg-primary/10'
@@ -806,7 +815,7 @@ export function AgentConfigurationModal({
                           <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
                           <div className="font-medium text-sm">Custom</div>
                           <div className="text-xs text-muted-foreground mt-1">Write your own</div>
-                        </div>
+                        </button>
                       </div>
 
                       {/* Predefined Persona Selection */}

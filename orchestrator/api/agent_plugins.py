@@ -120,8 +120,8 @@ async def list_agent_plugins(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error listing agent plugins for agent %s: %s", agent_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to list agent plugins: {e}")
+        logger.exception("Error listing agent plugins for agent %s: %s", agent_id, e)
+        raise HTTPException(status_code=500, detail="Failed to list agent plugins")
 
 
 @router.put("/{agent_id}/plugins", response_model=None)
@@ -150,8 +150,16 @@ async def update_agent_plugins(
 
         workspace_id = agent.workspace_id or ctx.workspace_id
 
+        # Deduplicate plugin_ids while preserving order
+        seen: set = set()
+        unique_plugin_ids: list = []
+        for pid in body.plugin_ids:
+            if pid not in seen:
+                seen.add(pid)
+                unique_plugin_ids.append(pid)
+
         # Validate all plugin_ids are enabled for the agent's workspace
-        if body.plugin_ids:
+        if unique_plugin_ids:
             enabled_plugin_ids = {
                 row.plugin_id
                 for row in db.query(WorkspaceEnabledPlugin.plugin_id).filter(
@@ -160,7 +168,7 @@ async def update_agent_plugins(
             }
 
             not_enabled = [
-                str(pid) for pid in body.plugin_ids if pid not in enabled_plugin_ids
+                str(pid) for pid in unique_plugin_ids if pid not in enabled_plugin_ids
             ]
 
             if not_enabled:
@@ -175,7 +183,7 @@ async def update_agent_plugins(
         ).delete(synchronize_session="fetch")
 
         # Create new assignments with priority based on list order
-        for priority, plugin_id in enumerate(body.plugin_ids):
+        for priority, plugin_id in enumerate(unique_plugin_ids):
             assignment = AgentAssignedPlugin(
                 agent_id=agent_id,
                 plugin_id=plugin_id,
@@ -187,17 +195,17 @@ async def update_agent_plugins(
 
         return {
             "success": True,
-            "message": f"Agent plugins updated ({len(body.plugin_ids)} assigned)",
+            "message": f"Agent plugins updated ({len(unique_plugin_ids)} assigned)",
             "agent_id": agent_id,
-            "plugin_ids": [str(pid) for pid in body.plugin_ids],
+            "plugin_ids": [str(pid) for pid in unique_plugin_ids],
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error updating plugins for agent %s: %s", agent_id, e)
+        logger.exception("Error updating plugins for agent %s: %s", agent_id, e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update agent plugins: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update agent plugins")
 
 
 @router.get("/{agent_id}/assembled-context", response_model=None)
@@ -359,5 +367,5 @@ async def get_assembled_context(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error assembling context for agent %s: %s", agent_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to assemble agent context: {e}")
+        logger.exception("Error assembling context for agent %s: %s", agent_id, e)
+        raise HTTPException(status_code=500, detail="Failed to assemble agent context")
