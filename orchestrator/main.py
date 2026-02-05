@@ -39,6 +39,7 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router
 from api.marketplace import router as marketplace_router
 from api.documents import router as documents_router
+from api.cache import router as cache_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
@@ -62,6 +63,11 @@ try:
     from api.composio import router as composio_router
 except ImportError:
     composio_router = None
+# PRD-42: Cloud Document Sync with S3 Vectors (optional module)
+try:
+    from api.cloud_documents import router as cloud_documents_router
+except ImportError:
+    cloud_documents_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -404,6 +410,7 @@ app.include_router(workflow_templates_router)  # Legacy - backward compatibility
 app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(documents_router)
+app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
@@ -425,6 +432,8 @@ app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 if composio_router is not None:
     app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
+if cloud_documents_router is not None:
+    app.include_router(cloud_documents_router)  # PRD-42: Cloud Document Sync
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)

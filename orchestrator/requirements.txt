@@ -102,3 +102,6 @@ slowapi>=0.1.9
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
 composio-core>=0.6.0
 composio-openai>=0.6.0
+
+# PRD-42: Cloud Document Sync with S3 Vectors
+boto3>=1.39.5

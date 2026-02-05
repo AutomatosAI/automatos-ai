@@ -71,8 +71,17 @@ db_config = {
     "port": int(postgres_creds.get('port', 5432))
 }
 
-# Document manager uses centralized embedding manager
-doc_manager = DocumentManager(db_config)
+# Document manager factory - creates instance per request with workspace context
+def get_document_manager(workspace_id: str) -> DocumentManager:
+    """Get DocumentManager configured for the workspace"""
+    use_s3_vectors = os.getenv('S3_VECTORS_ENABLED', 'false').lower() == 'true'
+    s3_bucket = os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
+    return DocumentManager(
+        db_config=db_config,
+        workspace_id=workspace_id,
+        use_s3_vectors=use_s3_vectors,
+        s3_bucket=s3_bucket
+    )
 
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def handle_request(
@@ -182,7 +191,10 @@ async def handle_request(
             # Process document directly
             document.status = "processing"
             db.commit()
-            
+
+            # Get workspace-specific DocumentManager
+            doc_manager = get_document_manager(str(ctx.workspace_id))
+
             # Call processing method directly
             await doc_manager._process_document(document.id, str(file_path), file_type_enum)
             
@@ -387,9 +399,9 @@ async def get_document_analytics(
         raise HTTPException(status_code=500, detail=f"Error getting analytics: {str(e)}")
 
 @router.get("/", response_model=List[DocumentResponse])
-async def get_item(
+async def list_documents(
     ctx: RequestContext = Depends(get_request_context_hybrid),
-    
+
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     status: Optional[str] = None,
@@ -438,8 +450,11 @@ async def get_item(
         raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
 
 @router.get("/{document_id}", response_model=DocumentResponse)
-async def get_item(
-    ctx: RequestContext = Depends(get_request_context_hybrid),  db: Session = Depends(get_db)):
+async def get_document(
+    document_id: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """Get document by ID"""
     try:
         document = db.query(Document).filter(Document.id == document_id, Document.workspace_id == ctx.workspace_id).first()
@@ -604,6 +619,9 @@ async def reprocess_document(
         
         # Reprocess document
         try:
+            # Get workspace-specific DocumentManager
+            doc_manager = get_document_manager(str(ctx.workspace_id))
+
             result = await doc_manager.upload_document(
                 file_path=document.file_path,
                 filename=document.filename,
@@ -939,10 +957,13 @@ async def semantic_search(
 
 
 @router.get("/queue/status")
-async def get_queue_status(db: Session = Depends(get_db)):
+async def get_queue_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
     """
     Get real-time processing queue status
-    
+
     Returns information about documents in various processing states:
     - Pending: Documents queued for processing
     - Processing: Currently being processed
@@ -951,17 +972,20 @@ async def get_queue_status(db: Session = Depends(get_db)):
     """
     try:
         from datetime import datetime, timedelta
-        
-        # Get documents by status
+
+        # Get documents by status (filtered by workspace)
         pending_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'pending'
         ).order_by(Document.upload_date.desc()).all()
         
         processing_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'processing'
         ).order_by(Document.upload_date.desc()).all()
-        
+
         failed_docs = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'failed'
         ).order_by(Document.upload_date.desc()).limit(10).all()
         
@@ -1032,14 +1056,16 @@ async def get_queue_status(db: Session = Depends(get_db)):
         
         # Calculate stats for today
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         processed_today = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'completed',
             Document.processed_date >= today_start
         ).count()
-        
+
         # Calculate average processing time (last 100 completed docs)
         recent_completed = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status == 'completed',
             Document.processed_date.isnot(None),
             Document.upload_date.isnot(None)
@@ -1056,6 +1082,7 @@ async def get_queue_status(db: Session = Depends(get_db)):
         
         # Calculate success rate (last 100 attempts)
         recent_all = db.query(Document).filter(
+            Document.workspace_id == ctx.workspace_id,
             Document.status.in_(['completed', 'failed'])
         ).order_by(Document.upload_date.desc()).limit(100).all()
         
@@ -1448,40 +1475,7 @@ async def get_usage_analytics(
 # =============================================================================
 # DOCUMENT RE-PROCESSING ENDPOINTS (Phase 4 - Better RAG)
 # =============================================================================
-
-@router.post("/{document_id}/reprocess")
-async def reprocess_document(
-    document_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Re-process a document with semantic chunking.
-    
-    Use after changing embedding models or to improve chunk quality.
-    """
-    try:
-        from modules.rag import get_rag_service
-        
-        rag_service = get_rag_service()
-        result = await rag_service.reprocess_document(document_id)
-        
-        if result.get("success"):
-            return {
-                "status": "success",
-                "message": f"Document {document_id} re-processed successfully",
-                "chunk_count": result.get("chunk_count", 0)
-            }
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=result.get("error", "Re-processing failed")
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error re-processing document {document_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Note: Single document reprocessing is already defined above (line 571)
 
 
 @router.post("/reprocess-all")

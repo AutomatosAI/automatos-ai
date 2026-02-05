@@ -58,25 +58,15 @@ export function useProcessingQueue(options?: {
   return useQuery({
     queryKey: ['documents', 'queue', 'status'],
     queryFn: async () => {
-      const response = await fetch(
-        `/api/documents/queue/status`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch queue status: ${response.statusText}`)
-      }
-
-      return response.json() as Promise<QueueStatus>
+      // Use apiClient for proper auth headers and base URL
+      return await apiClient.get<QueueStatus>('/api/documents/queue/status')
     },
     enabled: options?.enabled !== false,
-    refetchInterval: options?.refetchInterval || 5000, // Refetch every 5 seconds
-    staleTime: 2000, // Consider data stale after 2 seconds
-    retry: 3,
+    refetchInterval: options?.refetchInterval || 10000, // Refetch every 10 seconds (reduced API calls)
+    staleTime: 8000, // Consider data stale after 8 seconds
+    retry: 2,
+    refetchOnWindowFocus: false, // Don't refetch when switching browser tabs
+    refetchOnMount: false, // Don't refetch on every mount
   })
 }
 
