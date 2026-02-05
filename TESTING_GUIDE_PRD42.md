@@ -188,7 +188,7 @@ curl -X POST http://localhost:8000/api/cloud-documents/rag/query \
 ### **Backend Checks**
 ```bash
 # Check database
-psql "postgresql://postgres:alrckxcy2fgvy7zxzhhv0wa37gtc690w@shortline.proxy.rlwy.net:47906/railway" -c "
+psql "$DATABASE_URL" -c "
 SELECT
   app_name,
   COUNT(*) as doc_count,

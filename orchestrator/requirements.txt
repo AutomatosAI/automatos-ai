@@ -104,4 +104,4 @@ composio-core>=0.6.0
 composio-openai>=0.6.0
 
 # PRD-42: Cloud Document Sync with S3 Vectors
-boto3>=1.34.0
+boto3>=1.39.5

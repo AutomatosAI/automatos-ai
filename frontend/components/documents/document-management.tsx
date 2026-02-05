@@ -130,36 +130,6 @@ export function DocumentManagement() {
   const triggerSyncMutation = useTriggerSync()
   const selectRootFolderMutation = useSelectRootFolder()
 
-  // Debug cloud connections
-  console.log('[DocumentManagement] Cloud Connections:', {
-    data: cloudConnections,
-    loading: cloudConnectionsLoading,
-    error: cloudConnectionsError,
-    count: cloudConnections.length,
-    currentWorkspace: typeof window !== 'undefined' ? localStorage.getItem('last_active_workspace') : 'N/A'
-  })
-
-  // Auto-fix workspace ID if needed
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const currentWorkspace = localStorage.getItem('last_active_workspace')
-      const correctWorkspace = 'ae8320bc-95e1-4de1-bbe9-396bef19cbf8'
-
-      console.log('[DocumentManagement] Workspace Check:', {
-        current: currentWorkspace,
-        correct: correctWorkspace,
-        match: currentWorkspace === correctWorkspace
-      })
-
-      if (currentWorkspace !== correctWorkspace) {
-        console.warn('⚠️ FIXING WORKSPACE ID...')
-        localStorage.setItem('last_active_workspace', correctWorkspace)
-        console.log('✅ Workspace fixed, reloading...')
-        setTimeout(() => window.location.reload(), 1000)
-      }
-    }
-  }, [])
-  
   // Type the documents array properly
   const typedDocuments = documents as BackendDocument[]
   
