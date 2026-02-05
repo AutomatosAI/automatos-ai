@@ -62,6 +62,12 @@ class CloudDocument(Base):
         nullable=False,
         index=True,
     )
+    document_id = Column(
+        Integer,
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,  # Nullable until document is processed
+        index=True,
+    )
 
     # Cloud storage identifiers
     app_name = Column(String(100), nullable=False, index=True)

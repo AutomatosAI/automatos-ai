@@ -27,16 +27,31 @@ class S3VectorsBackend:
 
     Implements search, add_documents, and delete_documents using the
     S3 Vectors API (boto3 s3vectors client).
-    """
 
-    INDEX_NAME = "documents-index"
-    INDEX_DIMENSION = 1024
-    DISTANCE_METRIC = "cosine"
+    Configuration loaded from config.py (which reads from .env):
+    - S3_VECTORS_BUCKET: Bucket name (supports {workspace_id} template)
+    - S3_VECTORS_INDEX_NAME: Index name within bucket
+    - S3_VECTORS_DIMENSION: Embedding dimension (must match embedding model)
+    - S3_VECTORS_METRIC: Distance metric (cosine, euclidean, dot_product)
+    - AWS_REGION: AWS region where S3 Vectors is deployed
+    """
 
     def __init__(self, workspace_id: str, region: str = None):
         self.workspace_id = str(workspace_id)
-        self.bucket_name = f"automatos-vectors-{self.workspace_id}"
-        self.region = region or config.AWS_REGION or "us-east-1"
+
+        # Get bucket name from config (supports {workspace_id} template for multi-tenant)
+        bucket_template = config.S3_VECTORS_BUCKET
+        if not bucket_template:
+            raise ValueError("S3_VECTORS_BUCKET not configured in .env")
+        self.bucket_name = bucket_template.replace("{workspace_id}", self.workspace_id)
+
+        # Get index configuration from config
+        self.index_name = config.S3_VECTORS_INDEX_NAME
+        self.index_dimension = config.S3_VECTORS_DIMENSION
+        self.distance_metric = config.S3_VECTORS_METRIC
+
+        # Get region from config
+        self.region = region or config.AWS_REGION
 
         self.client = boto3.client(
             "s3vectors",
@@ -57,7 +72,7 @@ class S3VectorsBackend:
         """Create bucket and index if they don't already exist."""
         # Create bucket
         try:
-            self.client.create_vector_bucket(bucketName=self.bucket_name)
+            self.client.create_vector_bucket(vectorBucketName=self.bucket_name)
             logger.info(f"Created S3 vector bucket: {self.bucket_name}")
         except ClientError as e:
             code = e.response["Error"]["Code"]
@@ -69,16 +84,17 @@ class S3VectorsBackend:
         # Create index
         try:
             self.client.create_index(
-                bucketName=self.bucket_name,
-                indexName=self.INDEX_NAME,
-                dimension=self.INDEX_DIMENSION,
-                distanceMetric=self.DISTANCE_METRIC,
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+                dimension=self.index_dimension,
+                dataType="float32",
+                distanceMetric=self.distance_metric,
             )
-            logger.info(f"Created S3 vector index: {self.INDEX_NAME}")
+            logger.info(f"Created S3 vector index: {self.index_name}")
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("ConflictException", "ResourceAlreadyExistsException"):
-                logger.debug(f"S3 vector index already exists: {self.INDEX_NAME}")
+                logger.debug(f"S3 vector index already exists: {self.index_name}")
             else:
                 raise
 
@@ -100,9 +116,10 @@ class S3VectorsBackend:
 
         try:
             response = self.client.query_vectors(
-                bucketName=self.bucket_name,
-                indexName=self.INDEX_NAME,
-                queryVector={"float32": query_embedding},
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
+                queryVector=query_embedding,
+                queryVectorDataType="float32",
                 topK=limit,
             )
 
@@ -183,18 +200,18 @@ class S3VectorsBackend:
         try:
             # S3 Vectors supports batch puts
             self.client.put_vectors(
-                bucketName=self.bucket_name,
-                indexName=self.INDEX_NAME,
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
                 vectors=vector_objects,
             )
             logger.info(
-                f"Stored {len(vector_objects)} vectors in {self.bucket_name}/{self.INDEX_NAME}"
+                f"Stored {len(vector_objects)} vectors in {self.bucket_name}/{self.index_name}"
             )
             return keys
 
         except ClientError as e:
             logger.error(f"S3 Vectors put failed: {e}")
-            return []
+            raise  # Re-raise to propagate error to caller
 
     def delete_documents(self, external_file_id: str) -> int:
         """
@@ -210,8 +227,8 @@ class S3VectorsBackend:
         try:
             # List vectors with prefix to find all chunks
             response = self.client.list_vectors(
-                bucketName=self.bucket_name,
-                indexName=self.INDEX_NAME,
+                vectorBucketName=self.bucket_name,
+                indexName=self.index_name,
                 keyPrefix=f"doc_{external_file_id}_chunk_",
             )
 
@@ -219,8 +236,8 @@ class S3VectorsBackend:
 
             if keys_to_delete:
                 self.client.delete_vectors(
-                    bucketName=self.bucket_name,
-                    indexName=self.INDEX_NAME,
+                    vectorBucketName=self.bucket_name,
+                    indexName=self.index_name,
                     keys=keys_to_delete,
                 )
                 deleted = len(keys_to_delete)
@@ -249,8 +266,8 @@ class S3VectorsBackend:
             paginator_token = None
             while True:
                 kwargs = {
-                    "bucketName": self.bucket_name,
-                    "indexName": self.INDEX_NAME,
+                    "vectorBucketName": self.bucket_name,
+                    "indexName": self.index_name,
                 }
                 if paginator_token:
                     kwargs["nextToken"] = paginator_token
@@ -260,8 +277,8 @@ class S3VectorsBackend:
 
                 if keys_to_delete:
                     self.client.delete_vectors(
-                        bucketName=self.bucket_name,
-                        indexName=self.INDEX_NAME,
+                        vectorBucketName=self.bucket_name,
+                        indexName=self.index_name,
                         keys=keys_to_delete,
                     )
                     deleted += len(keys_to_delete)

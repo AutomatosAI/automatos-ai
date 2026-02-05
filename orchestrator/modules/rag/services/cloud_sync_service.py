@@ -9,6 +9,7 @@ Orchestrates cloud document syncing:
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from uuid import UUID
@@ -19,7 +20,7 @@ from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.cloud_sync import CloudDocument, CloudSyncConfig, CloudSyncJob
 from core.models.composio import ComposioConnection
-from modules.rag.ingestion.pipeline import IngestionPipeline
+from modules.rag.ingestion.manager import DocumentManager
 from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Composio actions for listing files/folders per provider
 _LIST_ACTIONS = {
     "GOOGLEDRIVE": "GOOGLEDRIVE_LIST_FILES",
-    "DROPBOX": "DROPBOX_LIST_FOLDER",
+    "DROPBOX": "DROPBOX_LIST_FILES_IN_FOLDER",
     "ONEDRIVE": "ONEDRIVE_LIST_FILES",
     "BOX": "BOX_LIST_FOLDER_ITEMS",
 }
@@ -60,10 +61,19 @@ class CloudSyncService:
         path: str = "/",
     ) -> List[Dict[str, Any]]:
         """
-        List folders at the given path in cloud storage.
+        List folders at the given path in cloud storage (with caching).
 
         Returns list of dicts: {name, path, has_children}
         """
+        # Try cache first (reduce Composio API calls)
+        from core.cache import get_cache_service
+        cache = get_cache_service()
+
+        cached_folders = cache.get_cloud_listing(connection_id, path, "folders")
+        if cached_folders is not None:
+            logger.info(f"✅ Using cached folder listing for {path} (saved Composio API call)")
+            return cached_folders
+
         connection = self._get_connection(connection_id)
         app_name = connection.app_name.upper()
         workspace_id = self._workspace_id_for_connection(connection)
@@ -87,7 +97,16 @@ class CloudSyncService:
             logger.error(f"list_folders failed: {result.get('error')}")
             return []
 
-        return self._parse_folder_list(result.get("data", {}), app_name)
+        # Composio wraps response in nested "data" key
+        outer_data = result.get("data", {})
+        data = outer_data.get("data", {}) if isinstance(outer_data, dict) and "data" in outer_data else outer_data
+        logger.info(f"list_folders parsed data: {data}")
+        folders = self._parse_folder_list(data, app_name)
+
+        # Cache the result
+        cache.set_cloud_listing(connection_id, path, folders, "folders")
+
+        return folders
 
     # ------------------------------------------------------------------
     # File listing with sync status
@@ -100,32 +119,49 @@ class CloudSyncService:
         recursive: bool = False,
     ) -> List[Dict[str, Any]]:
         """
-        List files at the given path, enriched with sync status from DB.
+        List files at the given path, enriched with sync status from DB (with caching).
         """
-        connection = self._get_connection(connection_id)
-        app_name = connection.app_name.upper()
-        workspace_id = self._workspace_id_for_connection(connection)
+        # Try cache first (reduce Composio API calls)
+        from core.cache import get_cache_service
+        cache = get_cache_service()
 
-        action = _LIST_ACTIONS.get(app_name)
-        if not action:
-            raise ValueError(f"Unsupported app for file listing: {app_name}")
+        cache_key_suffix = f"{path}:recursive={recursive}"
+        cached_files = cache.get_cloud_listing(connection_id, cache_key_suffix, "files")
+        if cached_files is not None:
+            logger.info(f"✅ Using cached file listing for {path} (saved Composio API call)")
+            # Note: sync status will still be fetched fresh from DB below
+            cloud_files = cached_files
+        else:
+            connection = self._get_connection(connection_id)
+            app_name = connection.app_name.upper()
+            workspace_id = self._workspace_id_for_connection(connection)
 
-        params = self._build_list_params(app_name, path, folders_only=False)
+            action = _LIST_ACTIONS.get(app_name)
+            if not action:
+                raise ValueError(f"Unsupported app for file listing: {app_name}")
 
-        result = await self.executor.execute(
-            action=action,
-            params=params,
-            agent_id=0,
-            workspace_id=workspace_id,
-            app_name=app_name,
-            skip_validation=True,
-        )
+            params = self._build_list_params(app_name, path, folders_only=False)
 
-        if not result.get("success"):
-            logger.error(f"list_files failed: {result.get('error')}")
-            return []
+            result = await self.executor.execute(
+                action=action,
+                params=params,
+                agent_id=0,
+                workspace_id=workspace_id,
+                app_name=app_name,
+                skip_validation=True,
+            )
 
-        cloud_files = self._parse_file_list(result.get("data", {}), app_name)
+            if not result.get("success"):
+                logger.error(f"list_files failed: {result.get('error')}")
+                return []
+
+            # Composio wraps response in nested "data" key
+            outer_data = result.get("data", {})
+            data = outer_data.get("data", {}) if isinstance(outer_data, dict) and "data" in outer_data else outer_data
+            cloud_files = self._parse_file_list(data, app_name)
+
+            # Cache the result
+            cache.set_cloud_listing(connection_id, cache_key_suffix, cloud_files, "files")
 
         # Enrich with sync status from cloud_documents table
         external_ids = [f["external_file_id"] for f in cloud_files]
@@ -210,12 +246,58 @@ class CloudSyncService:
                 recursive=True,
             )
 
-            pipeline = IngestionPipeline()
+            # Initialize DocumentManager (uses existing multimodal processing)
+            # Configure for S3 vectors if enabled
+            # Try DATABASE_URL first (includes port), fallback to individual env vars
+            database_url = os.getenv('DATABASE_URL')
+            if database_url:
+                from urllib.parse import urlparse
+                parsed = urlparse(database_url)
+                db_config = {
+                    'host': parsed.hostname,
+                    'port': parsed.port or 5432,
+                    'database': parsed.path.lstrip('/'),
+                    'user': parsed.username,
+                    'password': parsed.password
+                }
+            else:
+                db_config = {
+                    'host': os.getenv('POSTGRES_HOST', '127.0.0.1'),
+                    'port': int(os.getenv('POSTGRES_PORT', '5432')),
+                    'database': os.getenv('POSTGRES_DB', 'orchestrator_db'),
+                    'user': os.getenv('POSTGRES_USER', 'postgres'),
+                    'password': os.getenv('POSTGRES_PASSWORD', 'postgres')
+                }
+
+            # Check if S3 vectors is enabled
+            use_s3_vectors = os.getenv('S3_VECTORS_ENABLED', 'false').lower() == 'true'
+            s3_bucket = os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
+
+            doc_manager = DocumentManager(
+                db_config=db_config,
+                workspace_id=str(workspace_id),
+                use_s3_vectors=use_s3_vectors,
+                s3_bucket=s3_bucket
+            )
+            logger.info(
+                f"✅ Using DocumentManager for workspace {workspace_id} "
+                f"(S3 storage: {s3_bucket}, S3 vectors: {use_s3_vectors})"
+            )
+
+            # Supported file extensions for RAG processing
+            SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md', '.py', '.js', '.ts', '.java', '.json', '.csv'}
 
             for cf in cloud_files:
                 ext_id = cf["external_file_id"]
                 file_name = cf.get("name", "unknown")
                 modified_at = cf.get("modified_at")
+
+                # Skip unsupported file types (fonts, images, etc.)
+                file_ext = os.path.splitext(file_name)[1].lower()
+                if file_ext not in SUPPORTED_EXTENSIONS:
+                    logger.info(f"⏭️  Skipping unsupported file type: {file_name} ({file_ext})")
+                    files_skipped += 1
+                    continue
 
                 # Check existing cloud_documents record
                 existing = (
@@ -234,31 +316,63 @@ class CloudSyncService:
                             files_skipped += 1
                             continue
 
-                # Download + ingest
+                # Download + ingest using DocumentManager (full multimodal processing)
                 try:
-                    result = await pipeline.ingest_from_cloud(
+                    from modules.rag.services.cloud_file_downloader import CloudFileDownloader
+
+                    downloader = CloudFileDownloader(self.db)
+                    tmp_path = await downloader.download_file(
                         app_name=app_name,
                         external_file_id=ext_id,
-                        file_name=file_name,
                         workspace_id=workspace_id,
-                        db_session=self.db,
-                        metadata={
-                            "source": "cloud",
-                            "app_name": app_name,
-                            "file_path": cf.get("path", ""),
-                        },
+                        file_name=file_name
                     )
+                    logger.info(f"✅ Downloaded {file_name} to {tmp_path}")
 
-                    if result.success:
-                        # Upsert cloud_documents record
+                    # Use DocumentManager for full processing (multimodal + S3 vectors)
+                    logger.info(f"🔄 Starting upload_document() for {file_name}")
+                    document_id = await doc_manager.upload_document(
+                        file_path=tmp_path,
+                        filename=file_name,
+                        tags=["cloud_sync", app_name],
+                        description=f"Synced from {app_name}: {cf.get('path', '')}",
+                        created_by=f"cloud_sync_{app_name}"
+                    )
+                    logger.info(f"✅ upload_document() returned document_id={document_id} for {file_name}")
+
+                    # Clean up temp file
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+
+                    if document_id:
+                        # Get chunk count and status from documents table
+                        from core.models import Document
+                        doc = self.db.query(Document).get(document_id)
+                        chunk_count = doc.chunk_count if doc else 0
+                        doc_status = doc.status if doc else "failed"
+                        logger.info(f"📊 Checking document {document_id} status: {doc_status}, chunks: {chunk_count}")
+
+                        # Only mark as synced if processing completed successfully
+                        if doc_status != "completed":
+                            logger.error(f"Document {document_id} processing failed with status: {doc_status}")
+                            if existing:
+                                existing.sync_status = "error"
+                                existing.sync_error = f"Document processing failed: {doc_status}"
+                                self.db.commit()
+                            files_errored += 1
+                            continue
+
+                        # Upsert cloud_documents record for tracking
                         if existing:
+                            existing.document_id = document_id
                             existing.sync_status = "synced"
                             existing.last_synced_at = datetime.now(timezone.utc)
+                            logger.info(f"✅ Marked cloud_document as 'synced' for {file_name} (doc_id={document_id})")
                             existing.cloud_modified_at = (
                                 datetime.fromisoformat(modified_at)
                                 if modified_at else None
                             )
-                            existing.chunk_count = result.chunk_count
+                            existing.chunk_count = chunk_count
                             existing.sync_error = None
                         else:
                             new_doc = CloudDocument(
@@ -266,12 +380,13 @@ class CloudSyncService:
                                 connection_id=connection_id,
                                 app_name=app_name,
                                 external_file_id=ext_id,
+                                document_id=document_id,
                                 file_name=file_name,
                                 file_path=cf.get("path", ""),
                                 mime_type=cf.get("mime_type"),
                                 file_size=cf.get("size"),
                                 s3_vector_bucket=f"automatos-vectors-{workspace_id}",
-                                chunk_count=result.chunk_count,
+                                chunk_count=chunk_count,
                                 cloud_modified_at=(
                                     datetime.fromisoformat(modified_at)
                                     if modified_at else None
@@ -282,18 +397,18 @@ class CloudSyncService:
                             self.db.add(new_doc)
 
                         files_synced += 1
-                        total_chunks += result.chunk_count
+                        total_chunks += chunk_count
+                        self.db.commit()
                     else:
-                        # Mark error
+                        # Upload failed
                         if existing:
                             existing.sync_status = "error"
-                            existing.sync_error = result.error
+                            existing.sync_error = "Document upload failed"
+                            self.db.commit()
                         files_errored += 1
 
-                    self.db.commit()
-
                 except Exception as e:
-                    logger.error(f"Sync failed for {file_name}: {e}")
+                    logger.error(f"Sync failed for {file_name}: {e}", exc_info=True)
                     files_errored += 1
                     if existing:
                         existing.sync_status = "error"
@@ -363,7 +478,9 @@ class CloudSyncService:
         app_name: str, path: str, folders_only: bool = False,
     ) -> dict:
         if app_name == "GOOGLEDRIVE":
-            q = f"'{path}' in parents and trashed = false"
+            # Google Drive uses "root" as the folder ID for the root directory
+            folder_id = "root" if path == "/" else path
+            q = f"'{folder_id}' in parents and trashed = false"
             if folders_only:
                 q += " and mimeType = 'application/vnd.google-apps.folder'"
             return {"q": q}
@@ -390,9 +507,17 @@ class CloudSyncService:
             )
             if not is_folder:
                 continue
+
+            # For Google Drive, use the folder ID as the path (required for API queries)
+            # For other providers, use path_display or path
+            if app_name == "GOOGLEDRIVE":
+                path = item.get("id", "")
+            else:
+                path = item.get("path_display") or item.get("path") or item.get("name", "")
+
             folders.append({
                 "name": item.get("name") or item.get("title") or "",
-                "path": item.get("path_display") or item.get("path") or item.get("name", ""),
+                "path": path,
                 "has_children": True,  # assume expandable
             })
         return folders

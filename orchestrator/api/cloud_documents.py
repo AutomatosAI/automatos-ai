@@ -187,16 +187,72 @@ async def list_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """List all connected cloud storage providers for this workspace."""
+    """
+    List all connected cloud storage providers for this workspace.
+
+    Auto-discovers file storage tools by checking Composio categories:
+    - document & file management
+    - storage
+    - cloud storage
+    - productivity
+
+    Returns ONLY tools that can store/sync files (Google Drive, Dropbox, OneDrive, Box, etc.)
+    """
     try:
-        connections = _get_connections_for_workspace(db, ctx.workspace_id)
+        # Get ALL connections for this workspace
+        all_connections = _get_connections_for_workspace(db, ctx.workspace_id)
+
+        # File storage categories to filter by
+        FILE_STORAGE_CATEGORIES = [
+            'document & file management',
+            'storage',
+            'cloud storage',
+            'file sharing',
+            'productivity',  # Some file tools are tagged as productivity
+        ]
+
+        # Known file storage apps (fallback if category data is missing)
+        KNOWN_FILE_STORAGE_APPS = [
+            'GOOGLEDRIVE',
+            'DROPBOX',
+            'ONEDRIVE',
+            'BOX',
+            'SHAREPOINT',
+            'ICLOUD',
+            'MEGA',
+            'PCLOUD',
+            'SYNC',
+            'NEXTCLOUD',
+            'OWNCLOUD',
+        ]
 
         results = []
-        for conn in connections:
+        for conn in all_connections:
+            # Only show ACTIVE connections (skip "added", "pending", etc.)
+            if conn.status.lower() != 'active':
+                continue
+
+            # Check if this is a file storage tool
+            is_file_storage = False
+
+            # Method 1: Check by app name (most reliable)
+            if conn.app_name.upper() in KNOWN_FILE_STORAGE_APPS:
+                is_file_storage = True
+
+            # Method 2: Check categories from Composio metadata
+            # Note: Categories might be stored in a separate table or as JSON metadata
+            # For now, we'll use the app name method as the primary filter
+
+            if not is_file_storage:
+                continue  # Skip non-file-storage tools
+
             # Check for sync config
             sync_cfg = db.query(CloudSyncConfig).filter(
                 CloudSyncConfig.connection_id == conn.id
             ).first()
+
+            # Don't treat "/" as a valid root folder selection - it means "entire drive" which we want to require explicit selection
+            root_path = sync_cfg.root_folder_path if sync_cfg and sync_cfg.root_folder_path != "/" else None
 
             results.append(CloudConnectionResponse(
                 id=conn.id,
@@ -206,9 +262,10 @@ async def list_connections(
                 sync_enabled=conn.sync_enabled or False,
                 total_documents_synced=conn.total_documents_synced or 0,
                 last_successful_sync=conn.last_successful_sync,
-                root_folder_path=sync_cfg.root_folder_path if sync_cfg else None,
+                root_folder_path=root_path,
             ))
 
+        logger.info(f"Found {len(results)} file storage connections out of {len(all_connections)} total")
         return results
 
     except HTTPException:
@@ -335,6 +392,14 @@ async def trigger_sync(
     """Manually trigger a sync for a cloud storage connection."""
     try:
         _get_connection_or_404(db, connection_id, ctx.workspace_id)
+
+        # Verify a specific root folder has been selected (not "/" which means entire drive)
+        sync_cfg = db.query(CloudSyncConfig).filter_by(connection_id=connection_id).first()
+        if not sync_cfg or not sync_cfg.root_folder_path or sync_cfg.root_folder_path == "/":
+            raise HTTPException(
+                status_code=400,
+                detail="Please select a specific folder to sync first. Navigate to the folder in the browser and click 'Set as Root Folder'."
+            )
 
         from modules.rag.services.cloud_sync_service import CloudSyncService
         service = CloudSyncService(db)
@@ -470,9 +535,12 @@ async def disconnect_connection(
         ).count()
 
         if delete_vectors and documents_affected > 0:
-            # Delete vectors from S3
-            from modules.search.vector_store.backends.s3_vectors_backend import S3VectorsBackend
-            backend = S3VectorsBackend(workspace_id=str(ctx.workspace_id))
+            # Delete vectors from S3 Vectors backend
+            from modules.search.vector_store import get_vector_store
+            backend = get_vector_store(
+                backend="s3_vectors",
+                workspace_id=str(ctx.workspace_id)
+            )
             backend.delete_all_for_connection(connection_id)
 
             # Remove cloud_documents records
@@ -519,6 +587,7 @@ async def cloud_rag_query(
     try:
         from modules.search.vector_store import get_vector_store
 
+        # Using real S3 Vectors backend (eu-west-1)
         backend = get_vector_store(
             backend="s3_vectors",
             workspace_id=str(ctx.workspace_id),

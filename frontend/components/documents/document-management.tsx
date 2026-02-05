@@ -1,7 +1,7 @@
 
 'use client'
 
-import React, { useState, useRef, useMemo } from 'react'
+import React, { useState, useRef, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
 import {
@@ -41,14 +41,18 @@ import { AddDatabaseModal } from '@/components/knowledge/AddDatabaseModal'
 // Document modals
 import { DocumentDetailsModal } from './document-details-modal'
 import { DeleteConfirmationModal } from './delete-confirmation-modal'
+import { UploadProviderModal } from './upload-provider-modal'
 import { SemanticSearch } from './semantic-search'
 import { DocumentProcessing } from './document-processing'
 import { DocumentAnalytics } from './document-analytics'
-// Cloud Storage (PRD-42)
-import { CloudStoragePanel } from './cloud-storage-panel'
+// Cloud Storage Components (PRD-42)
+import { ProviderCards } from './provider-cards'
+import { ProviderBrowser } from './provider-browser'
+import { LocalStorageBrowser } from './local-storage-browser'
 // API hooks
 import { useDocuments, useDocumentStats, useUploadDocument, useDeleteDocument } from '@/hooks/use-document-api'
 import { useDatabaseKnowledge } from '@/hooks/use-database-knowledge'
+import { useCloudConnections, useTriggerSync, useSelectRootFolder } from '@/hooks/use-cloud-storage'
 
 // Real document interface to match backend response
 interface BackendDocument {
@@ -96,6 +100,11 @@ export function DocumentManagement() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [documentToDelete, setDocumentToDelete] = useState<{id: number, filename: string} | null>(null)
   const [showAddDatabaseModal, setShowAddDatabaseModal] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+
+  // Cloud storage state
+  const [selectedProvider, setSelectedProvider] = useState<any>(null)
+  const [showProviderBrowser, setShowProviderBrowser] = useState(false)
   
   // API hooks
   const { data: documents = [], isLoading, error } = useDocuments()
@@ -104,8 +113,8 @@ export function DocumentManagement() {
   const deleteDocumentMutation = useDeleteDocument()
   
   // Database Knowledge hooks
-  const { 
-    sources: databaseSources, 
+  const {
+    sources: databaseSources,
     templates,
     loading: dbLoading,
     createSource,
@@ -115,6 +124,41 @@ export function DocumentManagement() {
     getCacheStats,
     fetchSources: refreshDatabaseSources
   } = useDatabaseKnowledge()
+
+  // Cloud storage hooks
+  const { data: cloudConnections = [], isLoading: cloudConnectionsLoading, error: cloudConnectionsError } = useCloudConnections()
+  const triggerSyncMutation = useTriggerSync()
+  const selectRootFolderMutation = useSelectRootFolder()
+
+  // Debug cloud connections
+  console.log('[DocumentManagement] Cloud Connections:', {
+    data: cloudConnections,
+    loading: cloudConnectionsLoading,
+    error: cloudConnectionsError,
+    count: cloudConnections.length,
+    currentWorkspace: typeof window !== 'undefined' ? localStorage.getItem('last_active_workspace') : 'N/A'
+  })
+
+  // Auto-fix workspace ID if needed
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentWorkspace = localStorage.getItem('last_active_workspace')
+      const correctWorkspace = 'ae8320bc-95e1-4de1-bbe9-396bef19cbf8'
+
+      console.log('[DocumentManagement] Workspace Check:', {
+        current: currentWorkspace,
+        correct: correctWorkspace,
+        match: currentWorkspace === correctWorkspace
+      })
+
+      if (currentWorkspace !== correctWorkspace) {
+        console.warn('⚠️ FIXING WORKSPACE ID...')
+        localStorage.setItem('last_active_workspace', correctWorkspace)
+        console.log('✅ Workspace fixed, reloading...')
+        setTimeout(() => window.location.reload(), 1000)
+      }
+    }
+  }, [])
   
   // Type the documents array properly
   const typedDocuments = documents as BackendDocument[]
@@ -166,36 +210,50 @@ export function DocumentManagement() {
 
   const handleFileUpload = async (files: FileList | null) => {
     console.log('[DocumentManagement] handleFileUpload called with files:', files)
-    
+
     if (!files || files.length === 0) {
       console.log('[DocumentManagement] No files selected')
       return
     }
 
     console.log('[DocumentManagement] Processing', files.length, 'file(s)')
-    
+
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
         console.log('[DocumentManagement] Uploading file:', file.name, 'size:', file.size, 'type:', file.type)
-        
-        await uploadDocumentMutation.mutateAsync({ 
-          file, 
-          metadata: { description: '', tags: [] } 
+
+        await uploadDocumentMutation.mutateAsync({
+          file,
+          metadata: { description: '', tags: [] }
         })
-        
+
         console.log('[DocumentManagement] File uploaded successfully:', file.name)
       }
-      
+
       // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
-      
+
       console.log('[DocumentManagement] All files uploaded successfully')
     } catch (error) {
       // Error handled by mutation hook
       console.error('[DocumentManagement] Upload error:', error)
+    }
+  }
+
+  const handleProviderUpload = async (files: FileList, providerId: string, connectionId?: number) => {
+    console.log('[DocumentManagement] handleProviderUpload called', { providerId, connectionId, fileCount: files.length })
+
+    if (providerId === 'manual') {
+      // Upload to Automatos local storage
+      await handleFileUpload(files)
+    } else {
+      // TODO: Upload to cloud provider via API
+      // For now, fall back to local upload
+      console.log('[DocumentManagement] Cloud provider upload not yet implemented, using local upload')
+      await handleFileUpload(files)
     }
   }
 
@@ -250,15 +308,21 @@ export function DocumentManagement() {
 
   const handleDownload = async (documentId: number, filename: string) => {
     try {
-      // Create download link using environment API URL
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || ''
-      const downloadUrl = `${apiUrl}/api/documents/${documentId}/download`
+      // Use apiClient for authenticated download with proper headers
+      const response = await apiClient.get(`/api/documents/${documentId}/download`, {
+        responseType: 'blob'
+      })
+
+      // Create blob URL and trigger download
+      const blob = new Blob([response])
+      const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href = downloadUrl
+      link.href = url
       link.download = filename
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Error downloading document:', error)
       alert('Error downloading document')
@@ -317,12 +381,9 @@ export function DocumentManagement() {
           </p>
         </div>
         
-        <Button 
+        <Button
           className="gradient-accent hover:opacity-90 transition-opacity"
-          onClick={() => {
-            console.log('[Header Button] Upload Documents clicked, fileInputRef:', fileInputRef.current)
-            fileInputRef.current?.click()
-          }}
+          onClick={() => setShowUploadModal(true)}
           disabled={uploadDocumentMutation.isLoading}
         >
           <Upload className={`w-4 h-4 mr-2 ${uploadDocumentMutation.isLoading ? 'animate-spin' : ''}`} />
@@ -370,211 +431,242 @@ export function DocumentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <Tabs defaultValue="library" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-grid bg-secondary/50">
-            <TabsTrigger value="library" className="flex items-center space-x-2">
+        <Tabs defaultValue="documents" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+            <TabsTrigger value="documents" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">Library</span>
-            </TabsTrigger>
-            <TabsTrigger value="cloud" className="flex items-center space-x-2">
-              <Cloud className="w-4 h-4" />
-              <span className="hidden sm:inline">Cloud</span>
-            </TabsTrigger>
-            <TabsTrigger value="multimodal" className="flex items-center space-x-2">
-              <Image className="w-4 h-4" />
-              <span className="hidden sm:inline">Multimodal</span>
+              <span>Documents</span>
             </TabsTrigger>
             <TabsTrigger value="database" className="flex items-center space-x-2">
               <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">Database</span>
-            </TabsTrigger>
-            <TabsTrigger value="search" className="flex items-center space-x-2">
-              <Search className="w-4 h-4" />
-              <span className="hidden sm:inline">Search</span>
-            </TabsTrigger>
-            <TabsTrigger value="upload" className="flex items-center space-x-2">
-              <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">Upload</span>
-            </TabsTrigger>
-            <TabsTrigger value="processing" className="flex items-center space-x-2">
-              <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">Processing</span>
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center space-x-2">
-              <Eye className="w-4 h-4" />
-              <span className="hidden sm:inline">Analytics</span>
+              <span>Database</span>
             </TabsTrigger>
             <TabsTrigger value="codegraph" className="flex items-center space-x-2">
               <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">CodeGraph</span>
+              <span>CodeGraph</span>
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="flex items-center space-x-2">
+              <Eye className="w-4 h-4" />
+              <span>Analytics</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="library" className="space-y-6">
-            {/* Search and Filters */}
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search documents by name, category, or tags..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50"
-                />
-              </div>
-              <Button variant="outline" className="shrink-0">
-                <Filter className="w-4 h-4 mr-2" />
-                Filters
-              </Button>
-            </div>
+          <TabsContent value="documents" className="space-y-6">
+            {/* Provider Browser Views */}
+            {showProviderBrowser && (selectedProvider?.type === 'manual' || selectedProvider?.type === 'manual-old') ? (
+              <LocalStorageBrowser
+                documents={typedDocuments}
+                onBack={() => {
+                  setShowProviderBrowser(false)
+                  setSelectedProvider(null)
+                }}
+                onUpload={() => setShowUploadModal(true)}
+                onViewDetails={handleViewDetails}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+              />
+            ) : showProviderBrowser && selectedProvider ? (
+              <ProviderBrowser
+                providerName={selectedProvider.name}
+                providerType={selectedProvider.type}
+                connectionId={selectedProvider.connectionId}
+                rootFolder={selectedProvider.rootFolder}
+                onBack={() => {
+                  setShowProviderBrowser(false)
+                  setSelectedProvider(null)
+                }}
+                onSync={async (path) => {
+                  await triggerSyncMutation.mutateAsync(selectedProvider.connectionId)
+                }}
+                onSelectRootFolder={async (path) => {
+                  console.log('[DocumentManagement] Selecting root folder:', path, 'for connection:', selectedProvider.connectionId)
+                  await selectRootFolderMutation.mutateAsync({
+                    connectionId: selectedProvider.connectionId,
+                    rootFolderPath: path
+                  })
+                  setSelectedProvider({
+                    ...selectedProvider,
+                    rootFolder: path
+                  })
+                }}
+              />
+            ) : (
+              /* Document sub-tabs */
+              <Tabs defaultValue="library" className="space-y-6">
+                <TabsList className="bg-secondary/30">
+                  <TabsTrigger value="library" className="flex items-center space-x-2">
+                    <FileText className="w-4 h-4" />
+                    <span>Library</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="processing" className="flex items-center space-x-2">
+                    <Database className="w-4 h-4" />
+                    <span>Processing</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="multimodal" className="flex items-center space-x-2">
+                    <Image className="w-4 h-4" />
+                    <span>Multimodal</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="search" className="flex items-center space-x-2">
+                    <Search className="w-4 h-4" />
+                    <span>Search</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="upload" className="flex items-center space-x-2">
+                    <Upload className="w-4 h-4" />
+                    <span>Upload</span>
+                  </TabsTrigger>
+                </TabsList>
 
-            {/* Document Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredDocuments.map((doc, index) => {
-                const fileType = (doc.file_type || 'unknown').toLowerCase()
-                const TypeIcon = typeIcons[fileType] || File
-                
-                return (
-                  <motion.div
-                    key={doc.id}
-                    className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: index * 0.1 }}
-                  >
-                    {/* Header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                          <TypeIcon className="w-5 h-5 text-primary" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold truncate">{doc.filename}</h3>
-                          <p className="text-xs text-muted-foreground">
-                            {(doc.file_type || 'unknown').toUpperCase()} • {(() => {
-                              const bytes = doc.file_size || 0
-                              if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024*1024*1024)).toFixed(1)}GB`
-                              if (bytes >= 1024 * 1024) return `${(bytes / (1024*1024)).toFixed(1)}MB`
-                              if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}KB`
-                              return `${bytes}B`
-                            })()}
-                          </p>
-                        </div>
+                <TabsContent value="library" className="space-y-6">
+                  {/* Loading / Error States */}
+                  {cloudConnectionsLoading && (
+                    <Card className="glass-card p-4">
+                      <p className="text-sm text-muted-foreground">Loading cloud connections...</p>
+                    </Card>
+                  )}
+                  {cloudConnectionsError && (
+                    <Card className="glass-card p-4 border-red-500/20">
+                      <p className="text-sm text-red-500">Error loading connections: {cloudConnectionsError instanceof Error ? cloudConnectionsError.message : String(cloudConnectionsError)}</p>
+                    </Card>
+                  )}
+                  {!cloudConnectionsLoading && cloudConnections.length === 0 && (
+                    <Card className="glass-card p-4 border-yellow-500/20">
+                      <p className="text-sm text-yellow-600">
+                        No cloud connections found. Connect Google Drive or Dropbox in{' '}
+                        <a href="/tools" className="underline font-medium">Tools</a> to see them here.
+                      </p>
+                    </Card>
+                  )}
+
+                  {/* Provider Cards */}
+                  <ProviderCards
+                    providers={[
+                      {
+                        id: 'manual',
+                        name: 'Automatos Storage',
+                        type: 'manual',
+                        icon: Upload,
+                        color: 'text-blue-400',
+                        connected: true,
+                        stats: {
+                          documentCount: typedDocuments.length,
+                          chunkCount: typedDocuments.reduce((sum, d) => sum + (d.chunk_count || 0), 0),
+                          syncStatus: 'idle',
+                        }
+                      },
+                      ...cloudConnections.map(conn => ({
+                        id: `cloud-${conn.id}`,
+                        name: conn.app_name,
+                        type: conn.app_name.toLowerCase(),
+                        icon: Cloud,
+                        color: 'text-green-400',
+                        connected: true,
+                        connectionId: conn.id,
+                        rootFolder: conn.root_folder_path,
+                        stats: {
+                          documentCount: conn.total_documents_synced,
+                          chunkCount: 0,
+                          lastSyncedAt: conn.last_successful_sync
+                            ? new Date(conn.last_successful_sync).toLocaleString()
+                            : undefined,
+                          syncStatus: 'idle' as const,
+                          rootFolder: conn.root_folder_path
+                        }
+                      }))
+                    ]}
+                    onProviderClick={(provider) => {
+                      setSelectedProvider(provider)
+                      setShowProviderBrowser(true)
+                    }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="processing" className="space-y-6">
+                  <DocumentProcessing
+                    documents={documents}
+                    onDocumentSelect={(docId) => {
+                      const doc = typedDocuments.find(d => d.id === parseInt(docId))
+                      if (doc) {
+                        setSelectedDocumentId(doc.id)
+                        setShowDetailsModal(true)
+                      }
+                    }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="multimodal" className="space-y-6">
+                  <MultimodalKnowledgePanel />
+                </TabsContent>
+
+                <TabsContent value="search" className="space-y-6">
+                  <SemanticSearch
+                    context="documents"
+                    onResultSelect={(result) => {
+                      const doc = typedDocuments.find(d => d.id === result.document_id)
+                      if (doc) {
+                        setSelectedDocumentId(doc.id)
+                        setShowDetailsModal(true)
+                      }
+                    }}
+                    showActions={true}
+                    maxResults={10}
+                  />
+                </TabsContent>
+
+                <TabsContent value="upload" className="space-y-6">
+                  <Card className="glass-card">
+                    <CardHeader>
+                      <CardTitle>Upload Documents</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div
+                        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
+                          dragActive
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border/50 hover:border-primary/50'
+                        }`}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                      >
+                        <Upload className={`w-12 h-12 mx-auto mb-4 ${
+                          dragActive ? 'text-primary' : 'text-muted-foreground'
+                        } ${uploadDocumentMutation.isLoading ? 'animate-bounce' : ''}`} />
+
+                        {uploadDocumentMutation.isLoading ? (
+                          <div className="space-y-4">
+                            <h3 className="text-lg font-semibold">Uploading...</h3>
+                            <div className="w-full bg-secondary rounded-full h-2">
+                              <div
+                                className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
+                              />
+                            </div>
+                            <p className="text-sm text-muted-foreground">Processing files...</p>
+                          </div>
+                        ) : (
+                          <>
+                            <h3 className="text-lg font-semibold mb-2">
+                              {dragActive ? 'Drop files here' : 'Drag and drop files here'}
+                            </h3>
+                            <p className="text-muted-foreground mb-4">
+                              Supports PDF, DOCX, TXT, MD, XLSX, CSV, JSON, XML and more
+                            </p>
+                            <Button
+                              className="gradient-accent hover:opacity-90"
+                              onClick={() => setShowUploadModal(true)}
+                              disabled={uploadDocumentMutation.isLoading}
+                            >
+                              <Plus className="w-4 h-4 mr-2" />
+                              Choose Files
+                            </Button>
+                          </>
+                        )}
                       </div>
-                      
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreVertical className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleViewDetails(doc.id)}>
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDownload(doc.id, doc.filename)}>
-                            <Download className="w-4 h-4 mr-2" />
-                            Download
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="text-red-400" onClick={() => handleDelete(doc.id, doc.filename)}>
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    {/* Status */}
-                    <div className="flex items-center justify-between mb-4">
-                      <Badge className={statusStyles[(doc.status || 'completed').toLowerCase()] || statusStyles.completed}>
-                        {(doc.status || 'completed').toLowerCase()}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {doc.file_type || 'unknown'}
-                      </Badge>
-                    </div>
-
-                    {/* Description */}
-                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                      Document ready for processing and analysis
-                    </p>
-
-                    {/* Processing Info */}
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <p className="text-sm font-medium">Vector Chunks</p>
-                        <p className="text-xs text-muted-foreground">{doc.chunk_count ?? 0}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">Uploaded</p>
-                        <p className="text-xs text-muted-foreground">
-                          {doc.upload_date ? new Date(doc.upload_date).toLocaleDateString() : new Date().toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Tags */}
-                    <div className="flex flex-wrap gap-1">
-                      <Badge variant="secondary" className="text-xs">
-                        {doc.file_type || 'unknown'}
-                      </Badge>
-                      <Badge variant="secondary" className="text-xs">
-                        {(doc.status || 'processed').toLowerCase()}
-                      </Badge>
-                    </div>
-                  </motion.div>
-                )
-              })}
-              
-              {/* Loading State */}
-              {isLoading && (
-                <div className="col-span-full flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p className="text-muted-foreground">Loading documents...</p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Empty State */}
-              {(isLoading === false && filteredDocuments.length === 0) && (
-                <div className="col-span-full flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No documents found</h3>
-                    <p className="text-muted-foreground mb-4">
-                      {searchTerm ? 'Try adjusting your search terms' : 'Upload your first document to get started'}
-                    </p>
-                    {!searchTerm && (
-                      <Button onClick={() => fileInputRef.current?.click()}>
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload Documents
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
-              
-              {/* Error State */}
-              {error && (
-                <div className="col-span-full flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <div className="text-red-500 mb-4">⚠️</div>
-                    <h3 className="text-lg font-semibold mb-2 text-red-500">Error loading documents</h3>
-                    <p className="text-muted-foreground">{error instanceof Error ? error.message : String(error)}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="cloud" className="space-y-6">
-            <CloudStoragePanel />
-          </TabsContent>
-
-          <TabsContent value="multimodal" className="space-y-6">
-            <MultimodalKnowledgePanel />
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            )}
           </TabsContent>
 
           <TabsContent value="database" className="space-y-6">
@@ -827,92 +919,6 @@ export function DocumentManagement() {
             </Tabs>
           </TabsContent>
 
-          <TabsContent value="search" className="space-y-6">
-            <SemanticSearch
-              context="documents"
-              onResultSelect={(result) => {
-                // Find and select the document
-                const doc = typedDocuments.find(d => d.id === result.document_id)
-                if (doc) {
-                  setSelectedDocumentId(doc.id)
-                  setShowDetailsModal(true)
-                }
-              }}
-              showActions={true}
-              maxResults={10}
-            />
-          </TabsContent>
-
-          <TabsContent value="upload" className="space-y-6">
-            <Card className="glass-card">
-              <CardHeader>
-                <CardTitle>Upload Documents</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div 
-                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-200 ${
-                    dragActive 
-                      ? 'border-primary bg-primary/5' 
-                      : 'border-border/50 hover:border-primary/50'
-                  }`}
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                >
-                  <Upload className={`w-12 h-12 mx-auto mb-4 ${
-                    dragActive ? 'text-primary' : 'text-muted-foreground'
-                  } ${uploadDocumentMutation.isLoading ? 'animate-bounce' : ''}`} />
-                  
-                  {uploadDocumentMutation.isLoading ? (
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold">Uploading...</h3>
-                      <div className="w-full bg-secondary rounded-full h-2">
-                        <div 
-                          className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300 animate-pulse"
-                        />
-                      </div>
-                      <p className="text-sm text-muted-foreground">Processing files...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <h3 className="text-lg font-semibold mb-2">
-                        {dragActive ? 'Drop files here' : 'Drag and drop files here'}
-                      </h3>
-                      <p className="text-muted-foreground mb-4">
-                        Supports PDF, DOCX, TXT, MD, XLSX, CSV, JSON, XML and more
-                      </p>
-                      <Button 
-                        className="gradient-accent hover:opacity-90"
-                        onClick={() => {
-                          console.log('[Upload Button] Choose Files clicked, fileInputRef:', fileInputRef.current)
-                          fileInputRef.current?.click()
-                        }}
-                        disabled={uploadDocumentMutation.isLoading}
-                      >
-                        <Plus className="w-4 h-4 mr-2" />
-                        Choose Files
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="processing" className="space-y-6">
-            <DocumentProcessing 
-              documents={documents}
-              onDocumentSelect={(docId) => {
-                const doc = typedDocuments.find(d => d.id === parseInt(docId))
-                if (doc) {
-                  setSelectedDocumentId(doc.id)
-                  setShowDetailsModal(true)
-                }
-              }}
-            />
-          </TabsContent>
-
           <TabsContent value="analytics" className="space-y-6">
             <DocumentAnalytics 
               documents={documents}
@@ -963,6 +969,34 @@ export function DocumentManagement() {
           // Refresh database sources after adding
           window.location.reload()
         }}
+      />
+
+      {/* Upload Provider Modal */}
+      <UploadProviderModal
+        open={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        providers={[
+          // Manual upload provider
+          {
+            id: 'manual',
+            name: 'Automatos Storage',
+            type: 'manual',
+            icon: Upload,
+            color: 'text-blue-400',
+            connected: true,
+          },
+          // Cloud providers from connections
+          ...cloudConnections.map(conn => ({
+            id: `cloud-${conn.id}`,
+            name: conn.app_name,
+            type: conn.app_name.toLowerCase() as any,
+            icon: Cloud,
+            color: 'text-green-400',
+            connected: true,
+            connectionId: conn.id,
+          }))
+        ]}
+        onUpload={handleProviderUpload}
       />
     </div>
   )

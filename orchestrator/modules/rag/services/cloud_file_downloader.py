@@ -98,31 +98,85 @@ class CloudFileDownloader:
             )
 
         # Extract file content from response
-        data = result.get("data", {})
-        content = data.get("content") or data.get("file_content") or data.get("data")
-        if content is None:
-            raise RuntimeError(
-                f"Download returned no file content for {external_file_id}"
+        # Composio wraps response in nested "data" key: {data: {data: {downloaded_file_content: ...}}}
+        outer_data = result.get("data", {})
+        data = outer_data.get("data", {}) if isinstance(outer_data, dict) and "data" in outer_data else outer_data
+
+        # DEBUG: Log the actual response structure
+        logger.warning(f"DEBUG - Composio response keys: {list(data.keys())}")
+        logger.warning(f"DEBUG - Full response data: {str(data)[:1000]}")
+
+        # Check if response contains a download URL instead of content
+        download_url = data.get("downloadUrl") or data.get("download_url") or data.get("url") or data.get("webContentLink")
+
+        if download_url:
+            logger.info(f"Downloading file from URL: {download_url[:100]}...")
+            import requests
+            response = requests.get(download_url)
+            if response.status_code == 200:
+                content = response.content
+                logger.info(f"Downloaded {len(content)} bytes from URL")
+            else:
+                raise RuntimeError(f"Failed to download from URL: {response.status_code}")
+        else:
+            # Try multiple possible keys for file content
+            content = (
+                data.get("downloaded_file_content") or
+                data.get("content") or
+                data.get("file_content") or
+                data.get("data")
             )
+
+            if content is None:
+                raise RuntimeError(
+                    f"Download returned no file content or URL for {external_file_id}. "
+                    f"Response structure: {list(data.keys())}"
+                )
 
         # Determine temp file suffix from original file name
         suffix = ""
         if file_name and "." in file_name:
             suffix = file_name[file_name.rfind("."):]
 
-        # Write to temp file
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        try:
-            if isinstance(content, str):
-                tmp.write(content.encode("utf-8"))
-            else:
-                tmp.write(content)
-        finally:
-            tmp.close()
+        # Check if content is a file path (Composio saves large files to disk)
+        import os
+        if isinstance(content, str) and os.path.exists(content):
+            logger.info(f"Content is a file path, reading from: {content}")
+            # Read the actual file from the Composio output directory
+            with open(content, 'rb') as source_file:
+                file_content = source_file.read()
+            # Write to our temp file
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
+            try:
+                tmp.write(file_content)
+            finally:
+                tmp.close()
+        else:
+            # Write content directly to temp file
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb')
+            try:
+                if isinstance(content, str):
+                    # Check if it's base64-encoded (common for binary files from APIs)
+                    import base64
+                    try:
+                        # Try to decode as base64
+                        binary_content = base64.b64decode(content)
+                        tmp.write(binary_content)
+                        logger.debug(f"Decoded base64 content for {file_name}")
+                    except Exception:
+                        # Not base64, write as UTF-8
+                        tmp.write(content.encode("utf-8"))
+                else:
+                    tmp.write(content)
+            finally:
+                tmp.close()
 
+        # Log file size for debugging
+        import os
+        file_size = os.path.getsize(tmp.name)
         logger.info(
             f"Downloaded {app_upper}/{external_file_id} → {tmp.name} "
-            f"({tmp.name})"
+            f"(size: {file_size} bytes)"
         )
         return tmp.name
 

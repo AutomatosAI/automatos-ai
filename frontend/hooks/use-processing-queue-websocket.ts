@@ -32,7 +32,7 @@ export function useProcessingQueueWebSocket() {
     error: null,
   })
 
-  // Use React Query with aggressive refetching
+  // Use React Query with smart polling (balanced between real-time and API costs)
   const {
     data: queueStatus,
     isLoading,
@@ -40,7 +40,7 @@ export function useProcessingQueueWebSocket() {
     isSuccess,
   } = useProcessingQueue({
     enabled: true,
-    refetchInterval: 2000, // Poll every 2 seconds
+    refetchInterval: 10000, // Poll every 10 seconds (reduced from 2s to save API costs)
   })
 
   // Update connection status based on query state
