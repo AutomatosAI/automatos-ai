@@ -64,9 +64,9 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
       disabled={isDeleting}
       className={`
         group w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-all
-        ${isActive 
-          ? 'bg-primary/10 border border-primary/30 text-foreground dark:text-white' 
-          : 'text-muted-foreground hover:bg-primary/5 hover:border hover:border-primary/20 hover:text-foreground dark:text-gray-400 dark:hover:text-white'
+        ${isActive
+          ? 'bg-primary/10 border border-primary/30 text-foreground'
+          : 'text-muted-foreground hover:bg-primary/5 hover:border hover:border-primary/20 hover:text-foreground'
         }
         ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}
       `}
@@ -87,7 +87,7 @@ export function SidebarHistoryItem({ chat, onDelete, onSelect, isActive = false 
         <DropdownMenuContent align="end" className="bg-popover border-border">
           <DropdownMenuItem
             onClick={handleDelete}
-            className="text-red-500 hover:text-red-600 hover:bg-red-500/10 cursor-pointer"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Delete

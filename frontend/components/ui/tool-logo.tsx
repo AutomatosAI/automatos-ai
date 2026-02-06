@@ -44,7 +44,7 @@ export function ToolLogo({
     if (logo && !imageError) {
         return (
             <div
-                className={`flex items-center justify-center ${showBackground ? 'bg-secondary/10' : ''} rounded-lg ${className}`}
+                className={`flex items-center justify-center ${showBackground ? 'bg-secondary/10' : ''} rounded-2xl ${className}`}
                 style={{
                     width: size,
                     height: size,
@@ -65,7 +65,7 @@ export function ToolLogo({
 
     return (
         <div
-            className={`inline-flex items-center justify-center ${showBackground ? 'bg-white/10 rounded-lg' : ''} ${className}`}
+            className={`inline-flex items-center justify-center ${showBackground ? 'bg-secondary/10 rounded-2xl' : ''} ${className}`}
             style={{
                 width: size,
                 height: size,

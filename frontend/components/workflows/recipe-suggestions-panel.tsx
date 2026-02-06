@@ -64,21 +64,21 @@ interface RecipeSuggestionsPanelProps {
 }
 
 const SUGGESTION_TYPE_CONFIG: Record<string, { icon: typeof Lightbulb; label: string; color: string }> = {
-  prompt_rewrite: { icon: Edit, label: 'Prompt Rewrite', color: 'text-blue-400 bg-blue-400/10 border-blue-400/30' },
-  model_upgrade: { icon: ArrowUpRight, label: 'Model Upgrade', color: 'text-purple-400 bg-purple-400/10 border-purple-400/30' },
-  tool_addition: { icon: Wrench, label: 'Tool Addition', color: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30' },
+  prompt_rewrite: { icon: Edit, label: 'Prompt Rewrite', color: 'text-[hsl(var(--info))] bg-[hsl(var(--info))]/10 border-[hsl(var(--info))]/30' },
+  model_upgrade: { icon: ArrowUpRight, label: 'Model Upgrade', color: 'text-[hsl(var(--agent))] bg-[hsl(var(--agent))]/10 border-[hsl(var(--agent))]/30' },
+  tool_addition: { icon: Wrench, label: 'Tool Addition', color: 'text-[hsl(var(--success))] bg-[hsl(var(--success))]/10 border-[hsl(var(--success))]/30' },
 }
 
 const PRIORITY_CONFIG: Record<string, string> = {
-  high: 'bg-red-400/10 text-red-400 border-red-400/30',
-  medium: 'bg-amber-400/10 text-amber-400 border-amber-400/30',
-  low: 'bg-blue-400/10 text-blue-400 border-blue-400/30',
+  high: 'bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30',
+  medium: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/30',
+  low: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/30',
 }
 
 const SEVERITY_CONFIG: Record<string, { color: string; icon: typeof AlertTriangle }> = {
-  high: { color: 'text-red-400 bg-red-400/10 border-red-400/30', icon: XCircle },
-  medium: { color: 'text-amber-400 bg-amber-400/10 border-amber-400/30', icon: AlertTriangle },
-  low: { color: 'text-blue-400 bg-blue-400/10 border-blue-400/30', icon: TrendingUp },
+  high: { color: 'text-[hsl(var(--destructive))] bg-[hsl(var(--destructive))]/10 border-[hsl(var(--destructive))]/30', icon: XCircle },
+  medium: { color: 'text-[hsl(var(--warning))] bg-[hsl(var(--warning))]/10 border-[hsl(var(--warning))]/30', icon: AlertTriangle },
+  low: { color: 'text-[hsl(var(--info))] bg-[hsl(var(--info))]/10 border-[hsl(var(--info))]/30', icon: TrendingUp },
 }
 
 export function RecipeSuggestionsPanel({
@@ -140,7 +140,7 @@ export function RecipeSuggestionsPanel({
                 cx="18" cy="18" r="15.91" fill="none" strokeWidth="2"
                 strokeDasharray={`${data.quality_score * 100} ${100 - data.quality_score * 100}`}
                 strokeLinecap="round"
-                className={data.quality_score >= 0.75 ? 'text-emerald-400' : data.quality_score >= 0.5 ? 'text-amber-400' : 'text-red-400'}
+                className={data.quality_score >= 0.75 ? 'text-[hsl(var(--success))]' : data.quality_score >= 0.5 ? 'text-[hsl(var(--warning))]' : 'text-[hsl(var(--destructive))]'}
               />
             </svg>
             <span className="absolute inset-0 flex items-center justify-center text-xs font-bold">
@@ -166,7 +166,7 @@ export function RecipeSuggestionsPanel({
       {hasSuggestions && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <Lightbulb className="w-4 h-4 text-orange-400" />
+            <Lightbulb className="w-4 h-4 text-primary" />
             Improvement Suggestions
           </div>
           <div className="space-y-2">
@@ -216,7 +216,7 @@ export function RecipeSuggestionsPanel({
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-7 text-xs bg-gray-800 border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white shrink-0"
+                          className="h-7 text-xs shrink-0"
                           onClick={() => handleApply(suggestion, index)}
                           disabled={applyingIndex === index}
                         >
@@ -243,7 +243,7 @@ export function RecipeSuggestionsPanel({
             className="flex items-center gap-2 text-sm font-medium w-full text-left hover:text-foreground transition-colors"
             onClick={() => setShowPatterns(!showPatterns)}
           >
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <AlertTriangle className="w-4 h-4 text-[hsl(var(--warning))]" />
             Detected Patterns ({data.patterns.length})
             {showPatterns ? <ChevronUp className="w-3.5 h-3.5 ml-auto" /> : <ChevronDown className="w-3.5 h-3.5 ml-auto" />}
           </button>
@@ -293,7 +293,7 @@ export function RecipeSuggestionsPanel({
             className="flex items-center gap-2 text-sm font-medium w-full text-left hover:text-foreground transition-colors"
             onClick={() => setShowPerformance(!showPerformance)}
           >
-            <BarChart3 className="w-4 h-4 text-blue-400" />
+            <BarChart3 className="w-4 h-4 text-[hsl(var(--info))]" />
             Performance Metrics
             {showPerformance ? <ChevronUp className="w-3.5 h-3.5 ml-auto" /> : <ChevronDown className="w-3.5 h-3.5 ml-auto" />}
           </button>

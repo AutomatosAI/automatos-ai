@@ -132,7 +132,7 @@ export function AgentPerformance({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
-            <BarChart3 className="w-5 h-5 text-orange-400" />
+            <BarChart3 className="w-5 h-5 text-primary" />
             <span>Agent Performance</span>
           </CardTitle>
           <p className="text-sm text-muted-foreground">
@@ -151,7 +151,7 @@ export function AgentPerformance({
                   <SelectItem key={agent.id} value={agent.id.toString()}>
                     <div className="flex items-center space-x-2">
                       <div className={`w-2 h-2 rounded-full ${
-                        agent.status === "active" ? "bg-green-400" : "bg-gray-400"
+                        agent.status === "active" ? "bg-[hsl(var(--success))]" : "bg-muted-foreground"
                       }`} />
                       <span>{agent.name}</span>
                       <Badge variant="outline" className="text-xs">
@@ -198,7 +198,7 @@ export function AgentPerformance({
                   <SelectItem key={agent.id} value={agent.id.toString()}>
                     <div className="flex items-center space-x-2">
                       <div className={`w-2 h-2 rounded-full ${
-                        agent.status === "active" ? "bg-green-400" : "bg-gray-400"
+                        agent.status === "active" ? "bg-[hsl(var(--success))]" : "bg-muted-foreground"
                       }`} />
                       <span>{agent.name}</span>
                     </div>
@@ -234,7 +234,7 @@ export function AgentPerformance({
         <Card className="glass-card">
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-xl">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-[hsl(var(--destructive))] flex items-center justify-center text-white text-xl">
                 🤖
               </div>
               <div className="flex-1">
@@ -278,11 +278,11 @@ export function AgentPerformance({
                   <p className="text-sm font-medium text-muted-foreground">Overall Score</p>
                   <p className="text-2xl font-bold">{performanceMetrics.overallScore}%</p>
                   <div className="flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-3 h-3 text-green-500" />
-                    <span className="text-xs text-green-500">Excellent</span>
+                    <TrendingUp className="w-3 h-3 text-[hsl(var(--success))]" />
+                    <span className="text-xs text-[hsl(var(--success))]">Excellent</span>
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-green-500 to-green-600">
+                <div className="p-3 rounded-xl bg-[hsl(var(--success))]">
                   <Target className="w-6 h-6 text-white" />
                 </div>
               </div>
@@ -299,7 +299,7 @@ export function AgentPerformance({
                     {performanceMetrics.completedTasks}/{performanceMetrics.totalTasks} tasks
                   </p>
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600">
+                <div className="p-3 rounded-xl bg-[hsl(var(--info))]">
                   <CheckCircle className="w-6 h-6 text-white" />
                 </div>
               </div>
@@ -313,11 +313,11 @@ export function AgentPerformance({
                   <p className="text-sm font-medium text-muted-foreground">Avg Response</p>
                   <p className="text-2xl font-bold">{performanceMetrics.averageResponseTime}s</p>
                   <div className="flex items-center gap-1 mt-1">
-                    <Clock className="w-3 h-3 text-blue-500" />
-                    <span className="text-xs text-blue-500">Fast</span>
+                    <Clock className="w-3 h-3 text-[hsl(var(--info))]" />
+                    <span className="text-xs text-[hsl(var(--info))]">Fast</span>
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600">
+                <div className="p-3 rounded-xl bg-[hsl(var(--agent))]">
                   <Clock className="w-6 h-6 text-white" />
                 </div>
               </div>
@@ -332,7 +332,7 @@ export function AgentPerformance({
                   <p className="text-2xl font-bold">{performanceMetrics.uptime}%</p>
                   <Progress value={performanceMetrics.uptime} className="mt-2 h-2" />
                 </div>
-                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600">
+                <div className="p-3 rounded-xl bg-primary">
                   <Activity className="w-6 h-6 text-white" />
                 </div>
               </div>
@@ -438,7 +438,7 @@ export function AgentPerformance({
               <div className="space-y-4">
                 {[1, 2, 3, 4, 5].map((i) => (
                   <div key={i} className="flex items-center gap-4 p-3 rounded-lg border border-border">
-                    <div className={`w-3 h-3 rounded-full ${i % 3 === 0 ? 'bg-red-500' : 'bg-green-500'}`} />
+                    <div className={`w-3 h-3 rounded-full ${i % 3 === 0 ? 'bg-[hsl(var(--destructive))]' : 'bg-[hsl(var(--success))]'}`} />
                     <div className="flex-1">
                       <div className="font-medium">Task #{1000 + i}</div>
                       <div className="text-sm text-muted-foreground">
@@ -505,8 +505,8 @@ export function AgentPerformance({
                   {(Array.isArray(agentLogs) ? agentLogs : []).slice(0, 10).map((log: any, index: number) => (
                     <div key={index} className="flex items-center gap-4 p-3 rounded-lg border border-border">
                       <div className={`w-3 h-3 rounded-full ${
-                        log.level === 'error' ? 'bg-red-500' : 
-                        log.level === 'warning' ? 'bg-yellow-500' : 'bg-green-500'
+                        log.level === 'error' ? 'bg-[hsl(var(--destructive))]' : 
+                        log.level === 'warning' ? 'bg-[hsl(var(--warning))]' : 'bg-[hsl(var(--success))]'
                       }`} />
                       <div className="flex-1">
                         <div className="font-medium">{log.message || `Log entry ${index + 1}`}</div>

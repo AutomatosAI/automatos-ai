@@ -156,7 +156,7 @@ export function ToolDetailsModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="flex items-center gap-3 text-xl">
                   <ToolLogo
@@ -168,7 +168,7 @@ export function ToolDetailsModal({
                   />
                   <div>
                     <div className="flex items-center gap-2">
-                      {tool.name}
+                      <span className="gradient-text">{tool.name}</span>
                       <Badge variant="outline" className="text-xs">
                         {tool.category}
                       </Badge>
@@ -196,7 +196,7 @@ export function ToolDetailsModal({
                           toast({ title: "Error", description: `Failed to save: ${e.message || "Unknown error"}`, variant: "destructive" })
                         }
                       }}
-                      className="bg-green-600 hover:bg-green-700 text-white"
+                      variant="outline"
                     >
                       Save Changes
                     </Button>
@@ -260,7 +260,7 @@ export function ToolDetailsModal({
                               <div className="text-center p-8 text-muted-foreground">No features found.</div>
                             ) : (
                               filteredActions.map(action => (
-                                <div key={action.name} className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-secondary/10">
+                                <div key={action.name} className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-secondary/10">
                                   <div className="min-w-0 mr-4">
                                     <div className="font-medium text-sm">{action.display_name || action.name}</div>
                                     <div className="text-xs text-muted-foreground truncate">{action.description}</div>
@@ -305,7 +305,7 @@ export function ToolDetailsModal({
                                   : (trigger.display_name || trigger.name || trigger.trigger_name || 'Trigger')
                                 const triggerDescription = typeof trigger === 'string' ? '' : (trigger.description || '')
                                 return (
-                                  <div key={triggerName} className="flex items-center justify-between p-3 rounded-lg border border-white/5 bg-secondary/10">
+                                  <div key={triggerName} className="flex items-center justify-between p-3 rounded-lg border border-border/50 bg-secondary/10">
                                     <div className="min-w-0 mr-4">
                                       <div className="font-medium text-sm">{triggerName}</div>
                                       {triggerDescription && (
@@ -347,7 +347,7 @@ export function ToolDetailsModal({
                               onClose() // Close modal after disconnect
                             }
                           }}
-                          className="flex-1 hover:border-red-500/50 text-red-400"
+                          className="flex-1 hover:border-destructive/50 text-destructive"
                           disabled={loading}
                         >
                           Disconnect OAuth
@@ -355,9 +355,10 @@ export function ToolDetailsModal({
                       </>
                     ) : (
                       <Button
+                        variant="outline"
                         onClick={onInstall}
                         disabled={loading}
-                        className="flex-1 bg-brand-primary hover:bg-brand-primary/90"
+                        className="flex-1"
                       >
                         <ExternalLink className="w-4 h-4 mr-2" />
                         Connect with Composio
@@ -370,7 +371,7 @@ export function ToolDetailsModal({
                     <Button
                       variant="outline"
                       onClick={onRemoveFromWorkspace}
-                      className="w-full hover:border-red-500/50 text-red-400"
+                      className="w-full hover:border-destructive/50 text-destructive"
                       disabled={loading}
                     >
                       <Trash2 className="w-4 h-4 mr-2" />

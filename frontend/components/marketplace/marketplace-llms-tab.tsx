@@ -1,13 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Zap, ExternalLink } from 'lucide-react'
+import { Search, Zap, ExternalLink, MoreVertical, Eye } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { useUser } from '@clerk/nextjs'
+import { toast } from 'sonner'
 
 const PROVIDER_FILTERS = [
   { id: 'all', name: 'All Providers' },
@@ -23,6 +31,13 @@ interface MarketplaceLlmsTabProps {
 
 export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
   const [selectedProvider, setSelectedProvider] = useState('all')
+  const [approvingId, setApprovingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const { user } = useUser()
+  const queryClient = useQueryClient()
+
+  // Admin check (same pattern as agents tab)
+  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
 
   const { data: llms = [], isLoading } = useQuery({
     queryKey: ['marketplaceLlms', selectedProvider, searchQuery],
@@ -36,6 +51,39 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
     },
   })
 
+  const handleApprove = async (e: React.MouseEvent, llmId: number) => {
+    e.stopPropagation()
+    setApprovingId(llmId)
+    try {
+      await apiClient.post(`/api/marketplace/items/${llmId}/approve`)
+      toast.success('LLM approved and published to marketplace!')
+      queryClient.invalidateQueries({ queryKey: ['marketplaceLlms'] })
+    } catch (error: any) {
+      toast.error('Failed to approve LLM', {
+        description: error?.message || 'An error occurred',
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent, llmId: number) => {
+    e.stopPropagation()
+    if (!confirm('Are you sure you want to delete this marketplace LLM?')) return
+    setDeletingId(llmId)
+    try {
+      await apiClient.delete(`/api/marketplace/items/${llmId}`)
+      toast.success('LLM removed from marketplace')
+      queryClient.invalidateQueries({ queryKey: ['marketplaceLlms'] })
+    } catch (error: any) {
+      toast.error('Failed to delete LLM', {
+        description: error?.message || 'An error occurred',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
@@ -47,7 +95,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
             onClick={() => setSelectedProvider(provider.id)}
             className={
               selectedProvider === provider.id
-                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }
           >
@@ -70,35 +118,48 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {llms.map((llm: any) => (
-            <Card key={llm.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
+            <Card key={llm.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300 flex flex-col">
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
-                    <Zap className="w-5 h-5 text-purple-400" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <Zap className="w-10 h-10 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground line-clamp-1">{llm.name}</h3>
+                      <p className="text-xs text-muted-foreground">{llm.category}</p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold line-clamp-1">{llm.name}</h3>
-                    <p className="text-xs text-muted-foreground">{llm.category}</p>
-                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Open Provider
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="flex-1 flex flex-col space-y-3">
                 <p className="text-sm text-muted-foreground line-clamp-2">{llm.description}</p>
                 <div className="flex flex-wrap gap-1">
-                  {llm.tags.map((tag: string, idx: number) => (
+                  {(llm.tags || []).map((tag: string, idx: number) => (
                     <Badge key={idx} variant="outline" className="text-xs">
                       {tag}
                     </Badge>
                   ))}
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-secondary">
+                <div className="pt-2 border-t border-secondary">
                   <span className="text-xs text-muted-foreground">
                     {llm.metadata?.context_window ? `${llm.metadata.context_window.toLocaleString()} tokens` : 'N/A'}
                   </span>
-                  <Button size="sm" variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-500/10">
-                    <ExternalLink className="w-3 h-3 mr-1" />
-                    Details
-                  </Button>
                 </div>
               </CardContent>
             </Card>

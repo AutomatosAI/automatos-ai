@@ -7,13 +7,13 @@ import {
   X,
   Save,
   Settings,
+  MoreVertical,
   Bot,
   AlertTriangle,
   CheckCircle,
   Info,
   Zap,
   Shield,
-  Brain,
   Database,
   Network,
   Clock,
@@ -46,6 +46,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
@@ -81,15 +87,6 @@ interface AgentConfiguration {
     logging_level?: 'debug' | 'info' | 'warning' | 'error'
     performance_monitoring?: boolean
   }
-  available_skills?: Array<{
-    id: number
-    name: string
-    description?: string
-    skill_type: string
-    category?: string
-    is_active: boolean
-    is_assigned?: boolean
-  }>
 }
 
 import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP, DB_TO_CATEGORY_MAP } from '@/lib/agent-constants'
@@ -111,18 +108,11 @@ export function AgentConfigurationModal({
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
-  // PRD-22: Load available skills from Skills API
-  const { listSkills } = useSkillsApi()
-  const [availableSkills, setAvailableSkills] = useState<any[]>([])
-  const { data: agentSkills } = useAgentSkills(agentId?.toString() || '') // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
 
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(agentId)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
-  const addSkillMutation = useAddSkillToAgent()
-  const removeSkillMutation = useRemoveSkillFromAgent()
-
   // Tools API
   const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsData?.data || []
@@ -149,25 +139,6 @@ export function AgentConfigurationModal({
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
-
-  // PRD-22: Fetch skills once when modal opens
-  useEffect(() => {
-    if (!open) return
-    let mounted = true
-      ; (async () => {
-        try {
-          const data = await listSkills({ limit: 200 })
-          const items = Array.isArray(data) ? data : (data?.items || data?.skills || [])
-          if (!mounted) return
-          setAvailableSkills(items)
-        } catch (_) {
-          if (!mounted) return
-          setAvailableSkills([])
-        }
-      })()
-    return () => { mounted = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]) // Re-fetch when modal opens
 
   // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
   useEffect(() => {
@@ -219,7 +190,7 @@ export function AgentConfigurationModal({
     apiClient.request<any>('/api/personas')
       .then((data) => {
         if (!mounted) return
-        const list = Array.isArray(data) ? data : (data?.personas || data?.data || [])
+        const list = Array.isArray(data) ? data : (data?.items || data?.personas || data?.data || [])
         setPersonas(list)
       })
       .catch((err) => {
@@ -335,51 +306,6 @@ export function AgentConfigurationModal({
       }
     }))
     setHasChanges(true)
-  }
-
-  const toggleSkillAssignment = async (skillId: number) => {
-    const currentSkills = formData.assigned_skills || []
-    const hasSkill = currentSkills.includes(skillId)
-    const newSkills = hasSkill
-      ? currentSkills.filter((id: number) => id !== skillId)
-      : [...currentSkills, skillId]
-
-    // Optimistic UI update
-    updateFormData('assigned_skills', newSkills)
-
-    // Persist using the working backend endpoints
-    try {
-      if (hasSkill) {
-        // DELETE: Use /api/v1/skills/agents/{agent_id}/skills with query params
-        const deleteUrl = `/api/v1/skills/agents/${String(agentId)}/skills?skill_ids=${skillId}`
-        const res = await fetch(deleteUrl, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        console.info('Removed skill from agent', { agentId, skillId, ok: res.ok, status: res.status })
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`Remove failed: ${res.status} - ${errorText}`)
-        }
-      } else {
-        // POST: Use /api/agents/{agent_id}/skills - body must be raw array [1, 2, 3]
-        const postUrl = `/api/agents/${String(agentId)}/skills`
-        const res = await fetch(postUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([skillId])
-        })
-        console.info('Added skill to agent', { agentId, skillId, ok: res.ok, status: res.status })
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`Add failed: ${res.status} - ${errorText}`)
-        }
-      }
-    } catch (e) {
-      // Revert on error
-      updateFormData('assigned_skills', currentSkills)
-      console.error('Failed to update skill assignment', e)
-    }
   }
 
   const toggleToolAssignment = (toolId: number) => {
@@ -569,12 +495,12 @@ export function AgentConfigurationModal({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-5xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-5xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3">
-              <Settings className="w-6 h-6 text-orange-400" />
+              <Settings className="w-6 h-6 text-primary" />
               <div>
-                <span className="text-xl">Agent Configuration</span>
+                <span className="text-xl">Agent <span className="gradient-text">Configuration</span></span>
                 <p className="text-sm text-muted-foreground font-normal">
                   {(agent as any)?.name || 'Loading...'}
                 </p>
@@ -586,25 +512,22 @@ export function AgentConfigurationModal({
                   Unsaved Changes
                 </Badge>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSave}
-                disabled={saving || !hasChanges}
-                className="hover:border-green-500/50"
-              >
-                {saving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-                    Saving...
-                  </>
-                ) : (
-                  <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={handleSave}
+                    disabled={saving || !hasChanges}
+                  >
                     <Save className="w-4 h-4 mr-2" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="ghost" size="icon" onClick={onClose}>
                 <X className="w-5 h-5" />
               </Button>
@@ -624,8 +547,8 @@ export function AgentConfigurationModal({
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+                  <p className="text-destructive mb-4">Error: {error}</p>
                   <Button onClick={() => window.location.reload()} variant="outline">
                     Try Again
                   </Button>
@@ -635,7 +558,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-7 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-1">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -647,10 +570,6 @@ export function AgentConfigurationModal({
                   <TabsTrigger value="resources" className="flex items-center space-x-1">
                     <Database className="w-4 h-4" />
                     <span>Resources</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="skills" className="flex items-center space-x-1">
-                    <Brain className="w-4 h-4" />
-                    <span>Skills</span>
                   </TabsTrigger>
                   <TabsTrigger value="plugins" className="flex items-center space-x-1">
                     <Puzzle className="w-4 h-4" />
@@ -755,7 +674,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <User className="h-5 w-5 text-violet-400" />
+                        <User className="h-5 w-5 text-[hsl(var(--agent))]" />
                         Agent Persona
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -966,7 +885,7 @@ export function AgentConfigurationModal({
                           size="sm"
                           onClick={handleSavePersona}
                           disabled={personaSaving}
-                          className="hover:border-violet-500/50"
+                          className="hover:border-[hsl(var(--agent))]/50"
                         >
                           {personaSaving ? (
                             <>
@@ -1081,68 +1000,12 @@ export function AgentConfigurationModal({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="skills" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">Skills Assignment</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        Select skills to assign to this agent
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      {availableSkills && availableSkills.length > 0 ? (
-                        <div className="space-y-3">
-                          {availableSkills.map((skill: any) => (
-                            <div key={skill.id} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
-                              <Checkbox
-                                id={`skill-${skill.id}`}
-                                checked={formData.assigned_skills?.includes(skill.id) || false}
-                                onCheckedChange={() => toggleSkillAssignment(skill.id)}
-                              />
-                              <div className="flex-1">
-                                <Label htmlFor={`skill-${skill.id}`} className="cursor-pointer">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <h4 className="font-medium">{skill.name}</h4>
-                                      <p className="text-sm text-muted-foreground">
-                                        {skill.description || 'No description available'}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                      <Badge variant="outline" className="text-xs">
-                                        {skill.skill_type?.replace('_', ' ') || 'Unknown'}
-                                      </Badge>
-                                      {skill.category && (
-                                        <Badge variant="secondary" className="text-xs">
-                                          {skill.category}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  </div>
-                                </Label>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8">
-                          <Brain className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                          <h3 className="text-lg font-semibold mb-2">No Skills Available</h3>
-                          <p className="text-muted-foreground">
-                            No skills are available for assignment at this time.
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
                 {/* PRD-42: Plugins Tab */}
                 <TabsContent value="plugins" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Puzzle className="h-5 w-5 text-orange-400" />
+                        <Puzzle className="h-5 w-5 text-primary" />
                         Plugin Assignment
                       </CardTitle>
                       <div className="flex items-center justify-between">
@@ -1176,7 +1039,7 @@ export function AgentConfigurationModal({
                                 key={plugin.plugin_id}
                                 className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
                                   isAssigned
-                                    ? 'bg-orange-500/5 border-orange-500/30'
+                                    ? 'bg-primary/5 border-primary/30'
                                     : 'bg-background/50 border-border/50'
                                 }`}
                               >
@@ -1198,7 +1061,7 @@ export function AgentConfigurationModal({
                                       </div>
                                       <div className="flex items-center gap-2 shrink-0">
                                         {plugin.security_status === 'safe' && (
-                                          <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                          <Badge variant="secondary" className="text-xs text-[hsl(var(--success))] border-[hsl(var(--success))]/30">
                                             <Shield className="w-3 h-3 mr-1" />
                                             Verified
                                           </Badge>
@@ -1260,7 +1123,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Wrench className="h-5 w-5 text-blue-400" />
+                        <Wrench className="h-5 w-5 text-[hsl(var(--info))]" />
                         Tool Assignment
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -1324,7 +1187,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Bot className="h-5 w-5 text-purple-400" />
+                        <Bot className="h-5 w-5 text-[hsl(var(--agent))]" />
                         Model Configuration
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -1457,7 +1320,7 @@ export function AgentConfigurationModal({
                           <SelectTrigger id="fallback-model" className="bg-background/50 border-border">
                             <SelectValue placeholder="Select fallback model..." />
                           </SelectTrigger>
-                          <SelectContent className="bg-gray-900 border-gray-800">
+                          <SelectContent className="bg-popover border-border">
                             <SelectItem value="none">No fallback</SelectItem>
                             <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                             <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku</SelectItem>

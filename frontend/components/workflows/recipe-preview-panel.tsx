@@ -64,10 +64,10 @@ function calculateComplexity(
 
   score = Math.min(score, 100)
 
-  if (score <= 25) return { score, label: 'Simple', color: 'text-green-400' }
-  if (score <= 50) return { score, label: 'Moderate', color: 'text-yellow-400' }
-  if (score <= 75) return { score, label: 'Complex', color: 'text-orange-400' }
-  return { score, label: 'Advanced', color: 'text-red-400' }
+  if (score <= 25) return { score, label: 'Simple', color: 'text-[hsl(var(--success))]' }
+  if (score <= 50) return { score, label: 'Moderate', color: 'text-[hsl(var(--warning))]' }
+  if (score <= 75) return { score, label: 'Complex', color: 'text-primary' }
+  return { score, label: 'Advanced', color: 'text-[hsl(var(--destructive))]' }
 }
 
 export function RecipePreviewPanel() {
@@ -141,8 +141,8 @@ export function RecipePreviewPanel() {
         <div
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
             executionConfig.mode === 'parallel'
-              ? 'border-purple-400/40 bg-purple-400/10 text-purple-400'
-              : 'border-blue-400/40 bg-blue-400/10 text-blue-400'
+              ? 'border-[hsl(var(--agent))]/40 bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))]'
+              : 'border-[hsl(var(--info))]/40 bg-[hsl(var(--info))]/10 text-[hsl(var(--info))]'
           }`}
         >
           {executionConfig.mode === 'parallel' ? (
@@ -154,7 +154,7 @@ export function RecipePreviewPanel() {
         </div>
 
         {/* Schedule Type Badge */}
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-orange-400/40 bg-orange-400/10 text-orange-400">
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary">
           <ScheduleIcon className="w-3 h-3" />
           {scheduleInfo.label}
         </div>
@@ -179,13 +179,13 @@ export function RecipePreviewPanel() {
                 <div key={step.step_id} className="relative">
                   {/* Step Box */}
                   <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 flex items-center justify-center rounded bg-orange-400/20 text-orange-400 text-[10px] font-bold flex-shrink-0">
+                    <div className="w-5 h-5 flex items-center justify-center rounded bg-primary/20 text-primary text-[10px] font-bold flex-shrink-0">
                       {step.order}
                     </div>
                     <div className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-secondary/40 border border-border/20 flex items-center gap-2">
                       {agent ? (
                         <>
-                          <Bot className="w-3 h-3 text-orange-400 flex-shrink-0" />
+                          <Bot className="w-3 h-3 text-primary flex-shrink-0" />
                           <span className="text-xs text-foreground/80 truncate">
                             {agent.name}
                           </span>
@@ -197,7 +197,7 @@ export function RecipePreviewPanel() {
                       )}
                     </div>
                     {hasCustomRoute && (
-                      <div className="text-[10px] text-purple-400 flex-shrink-0 flex items-center gap-0.5">
+                      <div className="text-[10px] text-[hsl(var(--agent))] flex-shrink-0 flex items-center gap-0.5">
                         <GitBranch className="w-2.5 h-2.5" />
                         {(() => {
                           const target = steps.find((s) => s.step_id === step.pass_to)
@@ -229,7 +229,7 @@ export function RecipePreviewPanel() {
           <div className="space-y-1.5">
             {Array.from(stepAgents.values()).map((agent) => (
               <div key={agent.id} className="flex items-center gap-2">
-                <Bot className="w-3 h-3 text-orange-400 flex-shrink-0" />
+                <Bot className="w-3 h-3 text-primary flex-shrink-0" />
                 <span className="text-xs text-foreground/80 truncate">{agent.name}</span>
                 <span className="text-[10px] text-muted-foreground/50 ml-auto flex-shrink-0">
                   {agent.skills?.length || 0} tools
@@ -277,7 +277,7 @@ export function RecipePreviewPanel() {
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${complexity.score}%`,
-                background: `linear-gradient(to right, #22c55e, #f97316, #ef4444)`,
+                background: `linear-gradient(to right, hsl(var(--success)), hsl(var(--primary)), hsl(var(--destructive)))`,
                 backgroundSize: '300% 100%',
                 backgroundPosition: `${complexity.score}% 0`,
               }}

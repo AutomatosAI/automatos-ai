@@ -56,11 +56,11 @@ export function AgentConfirmDeleteModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div 
@@ -69,10 +69,10 @@ export function AgentConfirmDeleteModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-md">
+        <Card className="glass-card card-glow w-full max-w-md">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3 text-xl">
-              <Trash2 className="w-5 h-5 text-red-500" />
+              <Trash2 className="w-5 h-5 text-[hsl(var(--destructive))]" />
               <span>Confirm Delete</span>
             </CardTitle>
             <Button variant="ghost" size="icon" onClick={onClose}>
@@ -87,10 +87,10 @@ export function AgentConfirmDeleteModal({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-start space-x-3">
-                  <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                <div className="bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/20 rounded-lg p-4 flex items-start space-x-3">
+                  <AlertTriangle className="w-5 h-5 text-[hsl(var(--destructive))] shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="font-medium text-red-500">Warning: Permanent Action</h3>
+                    <h3 className="font-medium text-[hsl(var(--destructive))]">Warning: Permanent Action</h3>
                     <p className="text-sm text-muted-foreground">
                       You are about to delete <strong>{agent?.name}</strong>. This action cannot be undone.
                     </p>
@@ -98,7 +98,7 @@ export function AgentConfirmDeleteModal({
                 </div>
                 
                 <div className="flex items-start space-x-3">
-                  <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                  <Info className="w-5 h-5 text-[hsl(var(--info))] shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm text-muted-foreground">
                       This will remove all configuration, skills associations, and historical data for this agent.

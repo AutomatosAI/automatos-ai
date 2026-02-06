@@ -39,6 +39,9 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
+import { SearchInput } from '@/components/shared/search-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
@@ -77,10 +80,10 @@ const statusIcons = {
 }
 
 const statusColors = {
-  available: 'text-green-400',
-  deprecated: 'text-red-400',
-  maintenance: 'text-yellow-400',
-  beta: 'text-blue-400'
+  available: 'text-[hsl(var(--success))]',
+  deprecated: 'text-[hsl(var(--destructive))]',
+  maintenance: 'text-[hsl(var(--warning))]',
+  beta: 'text-[hsl(var(--info))]'
 }
 
 interface Tool {
@@ -206,7 +209,7 @@ export function ToolsDashboard() {
       {
         id: 'all',
         name: 'All Tools',
-        color: 'text-gray-400',
+        color: 'text-muted-foreground',
         count: paginationData.total || 0
       }
     ]
@@ -217,7 +220,7 @@ export function ToolsDashboard() {
         categories.push({
           id: cat.name || cat.id, // Use name as ID to match exact backend string
           name: cat.name,
-          color: 'text-blue-400', // Default color
+          color: 'text-[hsl(var(--info))]', // Default color
           count: cat.count || 0
         })
       })
@@ -620,98 +623,52 @@ export function ToolsDashboard() {
   return (
     <div className="space-y-6">
       {/* Header Section */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex justify-between items-start"
-      >
-        <div>
-          <h1 className="text-3xl font-bold mb-2">
-            Tools & <span className="gradient-text">Integrations</span>
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Discover, install, and manage tools to extend your AI agents' capabilities
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+      <PageHeader
+        title="Tools &"
+        titleAccent="Integrations"
+        subtitle="Discover, install, and manage tools to extend your AI agents' capabilities"
+        actions={
+          <Badge variant="outline" className="text-primary border-primary/30">
+            <div className="w-2 h-2 bg-[hsl(var(--success))] rounded-full animate-pulse mr-2" />
             {toolsLoading ? 'Loading...' : `${paginationData.total || 0} Total Tools`}
           </Badge>
-
-
-          {/* Agent Assignment Button Removed */}
-        </div>
-      </motion.div>
+        }
+      />
 
       {/* Statistics Cards */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-      >
-        {[
+      <StatsBar
+        stats={[
           {
             label: 'Connected Apps',
             value: stats.connectedApps.toString(),
             change: 'Active',
             icon: CheckCircle,
-            color: 'text-green-400'
+            iconColor: 'text-[hsl(var(--success))]',
           },
           {
             label: 'In Workspace',
             value: stats.workspaceApps.toString(),
             change: 'Total apps',
             icon: Grid3X3,
-            color: 'text-blue-400'
+            iconColor: 'text-[hsl(var(--info))]',
           },
           {
             label: 'Tools Available',
             value: stats.toolsAvailable.toString(),
             change: 'Actions',
             icon: Wrench,
-            color: 'text-purple-400'
+            iconColor: 'text-[hsl(var(--agent))]',
           },
           {
             label: 'Triggers',
             value: stats.triggersAvailable.toString(),
             change: 'Available',
             icon: Zap,
-            color: 'text-orange-400'
+            iconColor: 'text-primary',
           }
-        ].map((stat, index) => (
-          <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <stat.icon
-                      className={`w-5 h-5 ${index === 0 ? 'text-green-400' :
-                        index === 1 ? 'text-blue-400' :
-                          index === 2 ? 'text-purple-400' :
-                            index === 3 ? 'text-orange-400' :
-                              'text-white'
-                        }`}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-2xl font-bold leading-none">
-                      {toolsLoading ? '…' : stat.value}
-                    </div>
-                    <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
-                  </div>
-                </div>
-                <div className={`shrink-0 text-xs ${stat.color}`}>
-                  {stat.change}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </motion.div>
+        ] satisfies StatItem[]}
+        loading={toolsLoading}
+      />
 
       {/* Consolidated Controls Bar */}
       <motion.div
@@ -745,18 +702,12 @@ export function ToolsDashboard() {
             </div>
 
             {/* Search - Full Width */}
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input
-                placeholder="Search tools..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-9 h-9 bg-secondary/50 border-secondary focus:border-primary/50"
-              />
-              {toolsFetching && (
-                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-              )}
-            </div>
+            <SearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Search tools..."
+              loading={toolsFetching}
+            />
 
             {/* View Mode Toggle */}
             <div className="flex items-center space-x-1 bg-secondary/30 rounded-lg p-1 justify-self-end">
@@ -819,32 +770,32 @@ export function ToolsDashboard() {
               <Card className="bg-secondary/30 border-border/30">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center space-x-2">
-                    <Shield className="w-5 h-5 text-green-400" />
+                    <Shield className="w-5 h-5 text-[hsl(var(--success))]" />
                     <span>Security Status</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Active Tools</span>
-                    <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                    <Badge className="bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20">
                       {tools.filter(t => t?.status === 'active').length}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Assigned Tools</span>
-                    <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                    <Badge className="bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20">
                       {tools.filter(t => t?.isInstalled).length}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Configured Tools</span>
-                    <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20">
+                    <Badge className="bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/20">
                       {tools.filter(t => t?.isConfigured).length}
                     </Badge>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-muted-foreground">Total Agents</span>
-                    <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+                    <Badge className="bg-primary/10 text-primary border-primary/20">
                       —
                     </Badge>
                   </div>
@@ -854,7 +805,7 @@ export function ToolsDashboard() {
               <Card className="bg-secondary/30 border-border/30">
                 <CardHeader>
                   <CardTitle className="text-base flex items-center space-x-2">
-                    <Activity className="w-5 h-5 text-blue-400" />
+                    <Activity className="w-5 h-5 text-[hsl(var(--info))]" />
                     <span>Tool Assignments</span>
                   </CardTitle>
                 </CardHeader>
@@ -936,7 +887,7 @@ function ToolCard({
   showMenu = false
 }: ToolCardProps) {
   const StatusIcon = statusIcons[tool?.status as keyof typeof statusIcons] || CheckCircle
-  const statusColor = statusColors[tool?.status as keyof typeof statusColors] || 'text-gray-400'
+  const statusColor = statusColors[tool?.status as keyof typeof statusColors] || 'text-muted-foreground'
   const authSchemes = Array.isArray(tool?.metadata?.auth_schemes) ? tool.metadata.auth_schemes : []
   const toolsCount = tool?.metadata?.action_count ?? tool?.metadata?.actions_count ?? tool?.metadata?.tools_count
   const triggersCount = tool?.metadata?.trigger_count ?? (Array.isArray(tool?.metadata?.triggers) ? tool.metadata.triggers.length : undefined)
@@ -994,7 +945,7 @@ function ToolCard({
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-blue-400 border border-blue-400/30 hover:bg-blue-400/10"
+                    className="text-[hsl(var(--info))] border border-[hsl(var(--info))]/30 hover:bg-[hsl(var(--info))]/10"
                     onClick={onUninstall} // Mapped to Manage
                   >
                     <Settings className="w-4 h-4 mr-2" />
@@ -1003,7 +954,7 @@ function ToolCard({
                 ) : (
                   <Button
                     size="sm"
-                    className="bg-orange-600 hover:bg-orange-700 text-white"
+                    variant="outline"
                     onClick={onInstall} // Mapped to Connect
                   >
                     <ExternalLink className="w-4 h-4 mr-2" />
@@ -1027,8 +978,8 @@ function ToolCard({
     >
       <Card className={`bg-secondary/30 border-border/30 transition-all duration-200 group ${
         isConnected
-          ? 'border-green-500/30 bg-green-500/5 hover:border-green-500/50 hover:shadow-lg hover:shadow-green-500/20'
-          : 'hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20'
+          ? 'border-[hsl(var(--success))]/30 bg-[hsl(var(--success))]/5 hover:border-[hsl(var(--success))]/50 hover:shadow-lg hover:shadow-[hsl(var(--success))]/20'
+          : 'hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20'
       }`}>
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
@@ -1046,7 +997,7 @@ function ToolCard({
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {isConnected && <Badge className="bg-green-500/20 text-green-400 border-none text-xs px-2 py-0.5">Connected</Badge>}
+              {isConnected && <Badge className="bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border-none text-xs px-2 py-0.5">Connected</Badge>}
             </div>
           </div>
         </CardHeader>
@@ -1058,7 +1009,7 @@ function ToolCard({
           <div className="flex items-center justify-between text-xs">
             {tool?.rating ? (
               <div className="flex items-center space-x-1">
-                <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                <Star className="w-3 h-3 fill-[hsl(var(--warning))] text-[hsl(var(--warning))]" />
                 <span>{tool.rating}</span>
               </div>
             ) : (
@@ -1090,7 +1041,7 @@ function ToolCard({
                 <Badge
                   key={scheme}
                   variant="outline"
-                  className="text-[10px] h-5 border-orange-500/40 text-orange-300"
+                  className="text-[10px] h-5 border-primary/30 text-primary"
                 >
                   {formatAuthScheme(scheme)}
                 </Badge>
@@ -1101,7 +1052,7 @@ function ToolCard({
           <Separator />
           {/* Action Section */}
           <div className="flex items-center justify-between">
-            <Button variant="ghost" size="sm" onClick={onDetails} className="text-muted-foreground hover:text-white p-0 h-auto">
+            <Button variant="ghost" size="sm" onClick={onDetails} className="text-muted-foreground hover:text-foreground p-0 h-auto">
               Details
             </Button>
 
@@ -1118,7 +1069,8 @@ function ToolCard({
             ) : (
               <Button
                 size="sm"
-                className="w-24 bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-900/20"
+                variant="outline"
+                className="w-24"
                 onClick={onInstall}
                 style={{ height: '32px' }}
               >

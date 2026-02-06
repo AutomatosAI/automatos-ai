@@ -9,6 +9,7 @@ import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { RoleProvider } from '../contexts/role-context'
+import { FirstLoginGuard } from './onboarding/first-login-guard'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -25,23 +26,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
       appearance={{
         baseTheme: undefined,
         variables: {
-          colorPrimary: '#7c3aed',
-          colorBackground: '#0f1117',
-          colorText: '#e5e7eb',
-          colorInputBackground: '#1f2430',
-          colorInputText: '#e5e7eb',
-          colorTextSecondary: '#9aa4b2',
-          colorDanger: '#ef4444',
-          fontFamily: 'Inter, ui-sans-serif, system-ui',
+          colorPrimary: '#ff6b35',
+          colorBackground: '#0f0f0f',
+          colorText: '#fafafa',
+          colorInputBackground: '#1a1a1a',
+          colorInputText: '#fafafa',
+          colorTextSecondary: '#a6a6a6',
+          colorDanger: '#e54545',
+          fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+          borderRadius: '1rem',
         },
         elements: {
-          card: 'bg-slate-900/95 border border-slate-800/80 shadow-2xl',
-          headerTitle: 'text-white',
-          headerSubtitle: 'text-slate-400',
-          socialButtonsBlockButton: 'bg-slate-800 hover:bg-slate-700 text-white',
-          formFieldInput: 'bg-slate-800 border border-slate-700 text-white placeholder:text-slate-500',
-          formButtonPrimary: 'bg-violet-600 hover:bg-violet-500 text-white',
-          footerActionLink: 'text-violet-300 hover:text-violet-200',
+          card: 'glass-card card-glow',
+          headerTitle: 'text-foreground',
+          headerSubtitle: 'text-muted-foreground',
+          socialButtonsBlockButton: 'bg-secondary/50 hover:bg-secondary/70 text-foreground border border-border/50 backdrop-blur rounded-2xl',
+          formFieldInput: 'bg-background/50 border border-border/50 text-foreground placeholder:text-muted-foreground backdrop-blur rounded-2xl',
+          formButtonPrimary: 'bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl',
+          footerActionLink: 'text-primary hover:text-primary/80',
         },
         layout: {
           logoImageUrl: '/brand/automatos-mark-hi.png',
@@ -60,6 +62,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <WorkspaceProvider>
                 <MockProvider>
+                  <FirstLoginGuard />
                   {children}
                 </MockProvider>
               </WorkspaceProvider>

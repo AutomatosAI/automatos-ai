@@ -32,21 +32,21 @@ export function MyToolsDashboard() {
     switch (status) {
       case 'active':
         return (
-          <Badge className="bg-green-500/20 text-green-500 border-green-500/30">
+          <Badge className="bg-[hsl(var(--success))]/20 text-[hsl(var(--success))] border-[hsl(var(--success))]/30">
             <CheckCircle className="h-3 w-3 mr-1" />
             Active
           </Badge>
         )
       case 'failed':
         return (
-          <Badge className="bg-red-500/20 text-red-500 border-red-500/30">
+          <Badge className="bg-[hsl(var(--destructive))]/20 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/30">
             <AlertTriangle className="h-3 w-3 mr-1" />
             Error
           </Badge>
         )
       default:
         return (
-          <Badge className="bg-gray-500/20 text-gray-500 border-gray-500/30">
+          <Badge className="bg-muted/20 text-muted-foreground border-border">
             <Clock className="h-3 w-3 mr-1" />
             Disconnected
           </Badge>
@@ -60,54 +60,54 @@ export function MyToolsDashboard() {
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-bold">
-            My <span className="text-orange-500">Tools</span>
+            My <span className="gradient-text">Tools</span>
           </h1>
           <Link href="/marketplace?tab=tools">
-            <Button className="bg-orange-500 hover:bg-orange-600 text-white">
+            <Button variant="outline">
               <Store className="h-4 w-4 mr-2" />
               Browse Marketplace
             </Button>
           </Link>
         </div>
-        <p className="text-gray-400">
+        <p className="text-muted-foreground">
           Manage your connected tools and integrations
         </p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <Card className="bg-[#1a1a1a] border-gray-800">
+        <Card className="bg-secondary border-border">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-white">{connections.length}</div>
-                <div className="text-sm text-gray-400">Total Connected</div>
+                <div className="text-2xl font-bold text-foreground">{connections.length}</div>
+                <div className="text-sm text-muted-foreground">Total Connected</div>
               </div>
-              <CheckCircle className="h-8 w-8 text-blue-500" />
+              <CheckCircle className="h-8 w-8 text-[hsl(var(--info))]" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#1a1a1a] border-gray-800">
+        <Card className="bg-secondary border-border">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-white">{activeCount}</div>
-                <div className="text-sm text-gray-400">Active</div>
+                <div className="text-2xl font-bold text-foreground">{activeCount}</div>
+                <div className="text-sm text-muted-foreground">Active</div>
               </div>
-              <CheckCircle className="h-8 w-8 text-green-500" />
+              <CheckCircle className="h-8 w-8 text-[hsl(var(--success))]" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#1a1a1a] border-gray-800">
+        <Card className="bg-secondary border-border">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-white">{errorCount}</div>
-                <div className="text-sm text-gray-400">Errors</div>
+                <div className="text-2xl font-bold text-foreground">{errorCount}</div>
+                <div className="text-sm text-muted-foreground">Errors</div>
               </div>
-              <AlertTriangle className="h-8 w-8 text-red-500" />
+              <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))]" />
             </div>
           </CardContent>
         </Card>
@@ -116,13 +116,13 @@ export function MyToolsDashboard() {
       {/* Search */}
       <div className="mb-6">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
           <Input
             type="text"
             placeholder="Search connected tools..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-[#1a1a1a] border-gray-800 text-white placeholder:text-gray-500"
+            className="pl-10 bg-secondary border-border text-foreground placeholder:text-muted-foreground"
           />
         </div>
       </div>
@@ -131,7 +131,7 @@ export function MyToolsDashboard() {
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-32 bg-gray-800 animate-pulse rounded-lg" />
+            <div key={i} className="h-32 bg-secondary animate-pulse rounded-lg" />
           ))}
         </div>
       ) : filteredConnections.length === 0 ? (
@@ -140,12 +140,12 @@ export function MyToolsDashboard() {
           animate={{ opacity: 1 }}
           className="text-center py-12"
         >
-          <Store className="h-12 w-12 text-gray-600 mx-auto mb-4" />
-          <p className="text-gray-400 mb-4">
+          <Store className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground mb-4">
             {searchQuery ? 'No tools found matching your search' : 'No tools connected yet'}
           </p>
           <Link href="/marketplace?tab=tools">
-            <Button className="bg-orange-500 hover:bg-orange-600 text-white">
+            <Button variant="outline">
               Browse Marketplace
             </Button>
           </Link>
@@ -155,16 +155,16 @@ export function MyToolsDashboard() {
           {filteredConnections.map((connection) => (
             <Card
               key={connection.connection_id || connection.app_name}
-              className="bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all duration-200"
+              className="glass-card card-glow hover:border-primary/50 transition-all duration-200"
             >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <h3 className="font-semibold text-white capitalize">
+                    <h3 className="font-semibold text-foreground capitalize">
                       {connection.app_name.toLowerCase().replace(/_/g, ' ')}
                     </h3>
                     {connection.connection_id && (
-                      <p className="text-xs text-gray-500 mt-1 truncate">
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
                         {connection.connection_id}
                       </p>
                     )}
@@ -174,7 +174,7 @@ export function MyToolsDashboard() {
               </CardHeader>
 
               <CardContent className="space-y-3">
-                <div className="text-xs text-gray-400 space-y-1">
+                <div className="text-xs text-muted-foreground space-y-1">
                   {connection.created_at && (
                     <div>
                       Connected: {new Date(connection.created_at).toLocaleDateString()}
@@ -186,7 +186,7 @@ export function MyToolsDashboard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
+                    className="flex-1 border-border text-muted-foreground hover:bg-secondary"
                   >
                     <Settings className="h-3 w-3 mr-1" />
                     Settings
@@ -195,7 +195,7 @@ export function MyToolsDashboard() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="border-gray-700 text-gray-300 hover:bg-gray-800"
+                      className="border-border text-muted-foreground hover:bg-secondary"
                     >
                       <ExternalLink className="h-3 w-3" />
                     </Button>

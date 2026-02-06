@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Search,
   Puzzle,
   CheckCircle,
   Loader2,
@@ -11,12 +10,21 @@ import {
   Download,
   Terminal,
   Zap,
-  Coins,
+  Cpu,
   ArrowUpDown,
+  MoreVertical,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/shared'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import {
   Select,
@@ -27,7 +35,9 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { apiClient } from '@/lib/api-client'
+import { useUser } from '@clerk/nextjs'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
+import { GitHubImportModal } from './github-import-modal'
 
 // ===================================================================
 // Types
@@ -50,6 +60,7 @@ interface PluginSummary {
   enable_count: number
   is_featured: boolean
   security_status: string | null
+  approval_status: string | null
   original_author: string | null
   license: string | null
   created_at: string | null
@@ -75,6 +86,10 @@ interface MarketplacePluginsTabProps {
 
 export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProps) {
   const { toast } = useToast()
+  const { user } = useUser()
+
+  // Admin check (same pattern as agents tab)
+  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
 
   // State
   const [plugins, setPlugins] = useState<PluginSummary[]>([])
@@ -86,6 +101,10 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   const [isLoading, setIsLoading] = useState(true)
   const [enablingId, setEnablingId] = useState<string | null>(null)
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   // Get workspace ID from localStorage (same pattern as api-client.ts)
   const getWorkspaceId = useCallback((): string | null => {
@@ -125,34 +144,127 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
     fetchEnabledPlugins()
   }, [getWorkspaceId])
 
-  // Fetch plugins
-  useEffect(() => {
-    async function fetchPlugins() {
-      setIsLoading(true)
-      try {
-        const params: Record<string, any> = {
-          sort: sortBy,
-          limit: 100,
-        }
-        if (selectedCategory !== 'all') {
-          params.category = selectedCategory
-        }
-
-        const data: any = await apiClient.get('/api/marketplace/plugins', params)
-        const items: PluginSummary[] = data?.items || []
-
-        // Separate featured plugins
-        const featured = items.filter((p) => p.is_featured)
-        setFeaturedPlugins(featured)
-        setPlugins(items)
-      } catch (err) {
-        console.error('Failed to fetch plugins:', err)
-      } finally {
-        setIsLoading(false)
+  // Fetch plugins (+ pending for admins)
+  const fetchAllPlugins = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const params: Record<string, any> = {
+        sort: sortBy,
+        limit: 100,
       }
+      if (selectedCategory !== 'all') {
+        params.category = selectedCategory
+      }
+
+      const data: any = await apiClient.get('/api/marketplace/plugins', params)
+      let items: PluginSummary[] = data?.items || []
+
+      // Admin: also fetch pending plugins and merge
+      if (isAdmin) {
+        try {
+          const pendingData: any = await apiClient.get('/api/admin/plugins/pending', { limit: 100 })
+          const pendingItems: any[] = pendingData?.items || []
+          const existingIds = new Set(items.map((p) => p.id))
+          for (const p of pendingItems) {
+            if (!existingIds.has(p.id)) {
+              items.push({
+                id: p.id,
+                slug: p.slug,
+                name: p.name,
+                version: p.version,
+                description: p.description,
+                category_id: null,
+                category_name: null,
+                tags: [],
+                skills_count: 0,
+                commands_count: 0,
+                agents_count: 0,
+                hooks_count: 0,
+                token_estimate: 0,
+                enable_count: 0,
+                is_featured: false,
+                security_status: p.security_status,
+                approval_status: 'pending',
+                original_author: null,
+                license: null,
+                created_at: p.created_at,
+              })
+            }
+          }
+        } catch {
+          // Non-fatal: admin pending fetch failed
+        }
+      }
+
+      // Separate featured plugins
+      const featured = items.filter((p) => p.is_featured)
+      setFeaturedPlugins(featured)
+      setPlugins(items)
+    } catch (err) {
+      console.error('Failed to fetch plugins:', err)
+    } finally {
+      setIsLoading(false)
     }
-    fetchPlugins()
-  }, [selectedCategory, sortBy])
+  }, [selectedCategory, sortBy, isAdmin])
+
+  useEffect(() => {
+    fetchAllPlugins()
+  }, [fetchAllPlugins])
+
+  // Admin action handlers
+  const handleApprove = async (pluginId: string) => {
+    setApprovingId(pluginId)
+    try {
+      await apiClient.post(`/api/admin/plugins/${pluginId}/approve`)
+      toast({ title: 'Plugin approved and published to marketplace!' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to approve plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleDeactivate = async (pluginId: string) => {
+    setDeactivatingId(pluginId)
+    try {
+      await apiClient.post(`/api/admin/plugins/${pluginId}/deactivate`)
+      toast({ title: 'Plugin deactivated' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to deactivate plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeactivatingId(null)
+    }
+  }
+
+  const handleDelete = async (pluginId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this plugin? This cannot be undone.')) {
+      return
+    }
+    setDeletingId(pluginId)
+    try {
+      await apiClient.delete(`/api/admin/plugins/${pluginId}`)
+      toast({ title: 'Plugin deleted permanently' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to delete plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   // Client-side search filter
   const filteredPlugins = useMemo(() => {
@@ -308,13 +420,12 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant="outline" className="text-green-400 border-green-500/30">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+          <StatusBadge size="sm" status="success" dot>
             {enabledPluginIds.size} Enabled
-          </Badge>
-          <Badge variant="outline" className="text-blue-400 border-blue-500/30">
+          </StatusBadge>
+          <StatusBadge size="sm" status="info">
             {plugins.length} Available
-          </Badge>
+          </StatusBadge>
         </div>
       </div>
 
@@ -322,8 +433,8 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       {featuredPlugins.length > 0 && selectedCategory === 'all' && !searchQuery && (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <Star className="w-4 h-4 text-orange-400" />
-            <h4 className="text-sm font-semibold text-orange-400 uppercase tracking-wider">Featured Plugins</h4>
+            <Star className="w-4 h-4 text-primary" />
+            <h4 className="text-sm font-semibold text-primary uppercase tracking-wider">Featured Plugins</h4>
           </div>
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
             {featuredPlugins.map((plugin) => (
@@ -349,7 +460,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
             onClick={() => setSelectedCategory('all')}
             className={`whitespace-nowrap flex-shrink-0 ${
               selectedCategory === 'all'
-                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }`}
           >
@@ -363,7 +474,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
               onClick={() => setSelectedCategory(cat.slug)}
               className={`whitespace-nowrap flex-shrink-0 ${
                 selectedCategory === cat.slug
-                  ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                   : 'border-secondary text-muted-foreground hover:bg-secondary'
               }`}
             >
@@ -419,6 +530,13 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
                 isEnabling={enablingId === plugin.id}
                 onEnable={() => handleEnable(plugin.id, plugin.name)}
                 onClick={() => setSelectedPluginId(plugin.id)}
+                isAdmin={isAdmin}
+                isApproving={approvingId === plugin.id}
+                isDeleting={deletingId === plugin.id}
+                isDeactivating={deactivatingId === plugin.id}
+                onApprove={() => handleApprove(plugin.id)}
+                onDeactivate={() => handleDeactivate(plugin.id)}
+                onDelete={() => handleDelete(plugin.id)}
               />
             ))}
           </AnimatePresence>
@@ -444,6 +562,15 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           }
         }}
       />
+
+      {/* GitHub Import Modal (admin only) */}
+      {isAdmin && (
+        <GitHubImportModal
+          open={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImportComplete={fetchAllPlugins}
+        />
+      )}
     </div>
   )
 }
@@ -469,73 +596,80 @@ function FeaturedPluginCard({
 }: FeaturedPluginCardProps) {
   return (
     <Card
-      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-orange-500/10 to-secondary/30 border-orange-500/20 hover:border-orange-500/40 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-orange-500/10"
+      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-primary/10 to-secondary/30 border-primary/20 hover:border-primary/40 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-primary/10"
       onClick={onClick}
     >
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-white truncate">{plugin.name}</h4>
-              <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] h-5 flex-shrink-0">
-                <Star className="w-2.5 h-2.5 mr-0.5" />
-                Featured
-              </Badge>
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <Puzzle className="w-8 h-8 text-primary shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h4 className="font-semibold text-foreground truncate">{plugin.name}</h4>
+                <StatusBadge size="sm" status="primary" className="flex-shrink-0">
+                  <Star className="w-2.5 h-2.5 mr-0.5" />
+                  Featured
+                </StatusBadge>
+              </div>
+              <p className="text-xs text-muted-foreground">v{plugin.version}</p>
             </div>
-            <p className="text-xs text-muted-foreground">v{plugin.version}</p>
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick() }}>
+                <Eye className="w-4 h-4 mr-2" />
+                View Details
+              </DropdownMenuItem>
+              {!isEnabled && (
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
+                  <Puzzle className="w-4 h-4 mr-2" />
+                  {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
+                </DropdownMenuItem>
+              )}
+              {isEnabled && (
+                <DropdownMenuItem disabled>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Enabled
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        <p className="text-sm text-gray-400 line-clamp-2">
+        <p className="text-sm text-muted-foreground line-clamp-2">
           {plugin.description || 'No description available'}
         </p>
 
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1">
-            <Terminal className="w-3 h-3" />
-            <span>{plugin.skills_count} skills</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Coins className="w-3 h-3" />
-            <span>~{plugin.token_estimate} tokens</span>
-          </div>
+          {plugin.skills_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Terminal className="w-3 h-3" />
+              <span>{plugin.skills_count} skills</span>
+            </div>
+          )}
+          {plugin.commands_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3" />
+              <span>{plugin.commands_count} cmds</span>
+            </div>
+          )}
+          {plugin.agents_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Cpu className="w-3 h-3" />
+              <span>{plugin.agents_count} agents</span>
+            </div>
+          )}
           <div className="flex items-center gap-1">
             <Download className="w-3 h-3" />
             <span>{plugin.enable_count}</span>
           </div>
         </div>
 
-        <div
-          onClick={(e) => e.stopPropagation()}
-        >
-          {isEnabled ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="w-full bg-secondary/50 border border-white/10"
-              disabled
-            >
-              <CheckCircle className="w-3 h-3 mr-1" />
-              Enabled
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white"
-              onClick={onEnable}
-              disabled={isEnabling}
-            >
-              {isEnabling ? (
-                <>
-                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                  Enabling...
-                </>
-              ) : (
-                'Enable for Workspace'
-              )}
-            </Button>
-          )}
-        </div>
       </CardContent>
     </Card>
   )
@@ -552,6 +686,13 @@ interface PluginCardProps {
   isEnabling: boolean
   onEnable: () => void
   onClick: () => void
+  isAdmin?: boolean
+  isApproving?: boolean
+  isDeleting?: boolean
+  isDeactivating?: boolean
+  onApprove?: () => void
+  onDeactivate?: () => void
+  onDelete?: () => void
 }
 
 function PluginCard({
@@ -561,7 +702,16 @@ function PluginCard({
   isEnabling,
   onEnable,
   onClick,
+  isAdmin,
+  isApproving,
+  isDeleting,
+  isDeactivating,
+  onApprove,
+  onDeactivate,
+  onDelete,
 }: PluginCardProps) {
+  const isPending = plugin.approval_status === 'pending'
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -570,118 +720,110 @@ function PluginCard({
       transition={{ delay: Math.min(index * 0.05, 0.5) }}
     >
       <Card
-        className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
+        className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
         onClick={onClick}
       >
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-white line-clamp-1">
-                  {plugin.name}
-                </h3>
-                {plugin.is_featured && (
-                  <Star className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
-                )}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Puzzle className="w-10 h-10 text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-foreground line-clamp-1">
+                    {plugin.name}
+                  </h3>
+                  {plugin.is_featured && (
+                    <Star className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  v{plugin.version}
+                  {plugin.original_author && (
+                    <> &middot; {plugin.original_author}</>
+                  )}
+                </p>
               </div>
-              <p className="text-xs text-gray-500">
-                v{plugin.version}
-                {plugin.original_author && (
-                  <> &middot; {plugin.original_author}</>
-                )}
-              </p>
             </div>
-            {plugin.security_status === 'safe' && (
-              <Badge
-                variant="outline"
-                className="text-[10px] h-5 border-green-500/30 text-green-400 flex-shrink-0"
-              >
-                Verified
-              </Badge>
-            )}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {plugin.security_status === 'safe' && (
+                <StatusBadge size="sm" status="success" className="flex-shrink-0">
+                  Verified
+                </StatusBadge>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick() }}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    View Details
+                  </DropdownMenuItem>
+                  {!isEnabled && (
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
+                      <Puzzle className="w-4 h-4 mr-2" />
+                      {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
+                    </DropdownMenuItem>
+                  )}
+                  {isEnabled && (
+                    <DropdownMenuItem disabled>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Enabled
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </CardHeader>
 
         <CardContent className="space-y-3">
-          <p className="text-sm text-gray-400 line-clamp-2">
+          <p className="text-sm text-muted-foreground line-clamp-2">
             {plugin.description || 'No description available'}
           </p>
 
           {/* Category + Tags */}
           <div className="flex flex-wrap gap-1.5">
             {plugin.category_name && (
-              <Badge variant="outline" className="text-[10px] h-5 border-gray-700 text-gray-400">
+              <StatusBadge size="sm" status="neutral">
                 {plugin.category_name}
-              </Badge>
+              </StatusBadge>
             )}
             {(plugin.tags || []).slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[10px] h-5 border-gray-700 text-gray-500">
+              <StatusBadge key={tag} size="sm" status="neutral">
                 {tag}
-              </Badge>
+              </StatusBadge>
             ))}
           </div>
 
           {/* Stats Row */}
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1" title="Skills">
-              <Terminal className="w-3 h-3" />
-              <span>{plugin.skills_count}</span>
-            </div>
-            <div className="flex items-center gap-1" title="Commands">
-              <Zap className="w-3 h-3" />
-              <span>{plugin.commands_count}</span>
-            </div>
-            <div className="flex items-center gap-1" title="Token estimate">
-              <Coins className="w-3 h-3" />
-              <span>~{plugin.token_estimate}</span>
-            </div>
+            {plugin.skills_count > 0 && (
+              <div className="flex items-center gap-1" title="Skills">
+                <Terminal className="w-3 h-3" />
+                <span>{plugin.skills_count}</span>
+              </div>
+            )}
+            {plugin.commands_count > 0 && (
+              <div className="flex items-center gap-1" title="Commands">
+                <Zap className="w-3 h-3" />
+                <span>{plugin.commands_count}</span>
+              </div>
+            )}
+            {plugin.agents_count > 0 && (
+              <div className="flex items-center gap-1" title="Agents">
+                <Cpu className="w-3 h-3" />
+                <span>{plugin.agents_count}</span>
+              </div>
+            )}
             <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
               <Download className="w-3 h-3" />
               <span>{plugin.enable_count}</span>
             </div>
           </div>
 
-          <Separator />
-
-          {/* Action Section */}
-          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
-              onClick={onClick}
-            >
-              Details
-            </Button>
-
-            {isEnabled ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="flex-1 bg-secondary/50 hover:bg-secondary border border-white/10"
-                disabled
-              >
-                <CheckCircle className="w-3 h-3 mr-1" />
-                Enabled
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                onClick={onEnable}
-                disabled={isEnabling}
-              >
-                {isEnabling ? (
-                  <>
-                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                    Enabling...
-                  </>
-                ) : (
-                  'Enable'
-                )}
-              </Button>
-            )}
-          </div>
         </CardContent>
       </Card>
     </motion.div>

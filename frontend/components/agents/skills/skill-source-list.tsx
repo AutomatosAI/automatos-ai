@@ -78,7 +78,7 @@ export function SkillSourceList() {
   const getStatusBadge = (status: SkillSourceStatus) => {
     switch (status) {
       case SkillSourceStatus.ACTIVE:
-        return <Badge variant="default" className="bg-green-500">Active</Badge>;
+        return <Badge variant="default" className="bg-[hsl(var(--success))]">Active</Badge>;
       case SkillSourceStatus.ERROR:
         return <Badge variant="destructive">Error</Badge>;
       case SkillSourceStatus.SYNCING:
@@ -144,9 +144,9 @@ export function SkillSourceList() {
                 <div className="mt-4 text-xs text-muted-foreground">
                   Last synced: {new Date(source.last_sync_at).toLocaleString()}
                   {source.last_sync_status === 'success' ? (
-                    <CheckCircle2 className="inline ml-2 h-3 w-3 text-green-500" />
+                    <CheckCircle2 className="inline ml-2 h-3 w-3 text-[hsl(var(--success))]" />
                   ) : source.last_sync_status === 'error' ? (
-                    <XCircle className="inline ml-2 h-3 w-3 text-red-500" />
+                    <XCircle className="inline ml-2 h-3 w-3 text-[hsl(var(--destructive))]" />
                   ) : null}
                 </div>
               )}

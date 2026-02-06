@@ -217,7 +217,7 @@ IMPORTANT: Be thorough but fair. Not every import or function call is malicious.
 
 async def llm_security_scan(
     plugin_files: Dict[str, str],
-    model: str = "claude-haiku-4-20250414",
+    model: str = "claude-haiku-4-5-20251001",
 ) -> LLMScanResult:
     """Run LLM-based deep security analysis on plugin files.
 

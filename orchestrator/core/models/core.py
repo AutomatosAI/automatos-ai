@@ -171,6 +171,13 @@ class Agent(Base):
     # PRD-42: Persona relationship
     persona = relationship("Persona", foreign_keys=[persona_id])
 
+    # PRD-42: Plugin assignments (marketplace plugins assigned to this agent)
+    assigned_plugins = relationship(
+        "AgentAssignedPlugin",
+        cascade="all, delete-orphan",
+        order_by="AgentAssignedPlugin.priority.asc()",
+    )
+
     @property
     def is_marketplace_item(self) -> bool:
         """Check if this agent is a marketplace item."""
@@ -542,6 +549,7 @@ class AgentResponse(BaseModel):
     created_by: Optional[str] = None
     skills: List[Dict[str, Any]] = []
     tools: List[Dict[str, Any]] = []  # Assigned apps/integrations (Composio)
+    plugins: List[Dict[str, Any]] = []  # Assigned marketplace plugins
     agent_model_config: Optional[Dict[str, Any]] = None  # PRD-15: Model configuration (renamed from model_config - Pydantic reserved)
 
 class SkillCreate(BaseModel):

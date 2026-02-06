@@ -33,13 +33,17 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
+import { SearchInput } from '@/components/shared/search-input'
+import { FilterTabs, TabsContent as SharedTabsContent } from '@/components/shared/filter-tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -61,48 +65,48 @@ const initialWorkflowStats = [
     value: '0',
     change: 'Loading...',
     icon: GitBranch,
-    color: 'text-blue-400'
+    color: 'text-[hsl(var(--info))]'
   },
   {
     label: 'Completed Today',
     value: '0',
     change: 'Loading...',
     icon: CheckCircle,
-    color: 'text-green-400'
+    color: 'text-[hsl(var(--success))]'
   },
   {
     label: 'Avg Duration',
     value: '0h',
     change: 'Loading...',
     icon: Clock,
-    color: 'text-orange-400'
+    color: 'text-primary'
   },
   {
     label: 'Agent Utilization',
     value: '0%',
     change: 'Loading...',
     icon: Activity,
-    color: 'text-purple-400'
+    color: 'text-[hsl(var(--agent))]'
   }
 ]
 
 const statusStyles: Record<string, string> = {
-  draft: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  active: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  archived: 'bg-green-500/10 text-green-400 border-green-500/20',
+  draft: 'bg-muted/10 text-muted-foreground border-muted/20',
+  active: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+  archived: 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20',
   // Legacy status support for UI display
-  running: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  completed: 'bg-green-500/10 text-green-400 border-green-500/20',
-  paused: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  queued: 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+  running: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+  completed: 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20',
+  paused: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20',
+  failed: 'bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/20',
+  queued: 'bg-muted/10 text-muted-foreground border-muted/20'
 }
 
 const priorityStyles: Record<string, string> = {
-  low: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  medium: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  high: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-  critical: 'bg-red-500/10 text-red-400 border-red-500/20'
+  low: 'bg-muted/10 text-muted-foreground border-muted/20',
+  medium: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+  high: 'bg-primary/10 text-primary border-primary/20',
+  critical: 'bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/20'
 }
 
 const statusIcons: Record<string, any> = {
@@ -169,6 +173,7 @@ export function WorkflowManagement() {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
+  const [activeWorkflowTab, setActiveWorkflowTab] = useState('templates')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
   const [isCreating, setIsCreating] = useState(false)
@@ -244,28 +249,28 @@ export function WorkflowManagement() {
           value: statsData.activeWorkflows.toString(),
           change: `${statsData.activeWorkflows > 0 ? '+' : ''}${statsData.activeWorkflows} total`,
           icon: GitBranch,
-          color: 'text-blue-400'
+          color: 'text-[hsl(var(--info))]'
         },
         {
           label: 'Completed Today',
           value: statsData.completedToday.toString(),
           change: `${statsData.successRate}% success rate`,
           icon: CheckCircle,
-          color: 'text-green-400'
+          color: 'text-[hsl(var(--success))]'
         },
         {
           label: 'Avg Duration',
           value: statsData.avgDuration,
           change: 'Based on history',
           icon: Clock,
-          color: 'text-orange-400'
+          color: 'text-primary'
         },
         {
           label: 'Agent Utilization',
           value: `${statsData.agentUtilization}%`,
           change: 'CPU usage based',
           icon: Activity,
-          color: 'text-purple-400'
+          color: 'text-[hsl(var(--agent))]'
         }
       ])
 
@@ -526,63 +531,34 @@ export function WorkflowManagement() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-3xl font-bold mb-2">
-            Workflow <span className="gradient-text">Management</span>
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Create, monitor, and manage your multi-agent workflows
-          </p>
-        </div>
-        
-        <Button
-          className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
-          onClick={() => setRecipeCreateOpen(true)}
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Recipe
-        </Button>
-      </motion.div>
+      <PageHeader
+        title="Workflow"
+        titleAccent="Management"
+        subtitle="Create, monitor, and manage your multi-agent workflows"
+        actions={
+          <Button
+            variant="outline"
+            onClick={() => setRecipeCreateOpen(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Create Recipe
+          </Button>
+        }
+      />
 
       {/* Stats Overview */}
-      <motion.div
-        ref={ref}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.8, delay: 0.2 }}
-      >
-        {workflowStats.map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300"
-            initial={{ opacity: 0, y: 20 }}
-            animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.8, delay: index * 0.1 }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-2xl font-bold leading-none">{stat.value}</div>
-                  <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
-                </div>
-              </div>
-              <div className="shrink-0 text-right text-xs text-green-400">
-                {stat.change}
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </motion.div>
+      <div ref={ref}>
+        <StatsBar
+          stats={workflowStats.map((stat) => ({
+            label: stat.label,
+            value: stat.value,
+            change: stat.change,
+            icon: stat.icon,
+            iconColor: stat.color,
+          }))}
+          loading={loading}
+        />
+      </div>
 
       {/* Workflow Management */}
       <motion.div
@@ -614,7 +590,7 @@ export function WorkflowManagement() {
             </div>
           </div>
 
-          <TabsContent value="active" className="space-y-6">
+          <SharedTabsContent value="active" className="space-y-6">
             {/* Loading State */}
             {loading && (
               <div className="flex items-center justify-center py-12">
@@ -629,8 +605,8 @@ export function WorkflowManagement() {
             {error && !loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error loading workflows: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
+                  <p className="text-[hsl(var(--destructive))] mb-4">Error loading workflows: {error}</p>
                   <Button onClick={loadWorkflowData} variant="outline">
                     Try Again
                   </Button>
@@ -640,9 +616,9 @@ export function WorkflowManagement() {
 
             {/* Active Workflows Panel - handles its own empty state */}
             <ActiveWorkflowsPanel onWorkflowClick={handleWorkflowClick} />
-          </TabsContent>
+          </SharedTabsContent>
 
-          <TabsContent value="templates" className="space-y-6">
+          <SharedTabsContent value="templates" className="space-y-6">
             <RecipesTab
               searchTerm={recipeSearchTerm}
               externalCreateOpen={recipeCreateOpen}
@@ -664,7 +640,7 @@ export function WorkflowManagement() {
                 setShowExecutionKitchen(true)
               }}
             />
-          </TabsContent>
+          </SharedTabsContent>
 
           {/* Monitoring tab removed — see /analytics */}
         </Tabs>
@@ -699,8 +675,8 @@ export function WorkflowManagement() {
 
           {/* Error Display */}
           {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
-              <p className="text-red-400 text-sm">{error}</p>
+            <div className="p-3 bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/50 rounded-lg">
+              <p className="text-[hsl(var(--destructive))] text-sm">{error}</p>
             </div>
           )}
 
@@ -721,7 +697,7 @@ export function WorkflowManagement() {
             <Button
               onClick={handleSubmitWorkflow}
               disabled={isCreating || !workflowForm.name || !workflowForm.description}
-              className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
+              className="flex-1 bg-primary hover:bg-primary/90"
             >
               {isCreating ? (
                 <>

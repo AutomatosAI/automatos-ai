@@ -144,7 +144,7 @@ export function MarketplaceAppDetailsModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="flex items-center gap-3 text-xl">
                   <ToolLogo
@@ -168,7 +168,7 @@ export function MarketplaceAppDetailsModal({
                       {isConnected && (
                         <>
                           {' • '}
-                          <span className="text-green-400">Connected</span>
+                          <span className="text-[hsl(var(--success))]">Connected</span>
                         </>
                       )}
                     </p>
@@ -197,11 +197,11 @@ export function MarketplaceAppDetailsModal({
                   {/* Capabilities Overview */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="rounded-lg border border-border/40 bg-secondary/20 p-4">
-                      <div className="text-2xl font-bold text-blue-400">{app.action_count || 0}</div>
+                      <div className="text-2xl font-bold text-[hsl(var(--info))]">{app.action_count || 0}</div>
                       <div className="text-sm text-muted-foreground">Features Available</div>
                     </div>
                     <div className="rounded-lg border border-border/40 bg-secondary/20 p-4">
-                      <div className="text-2xl font-bold text-purple-400">{app.trigger_count || 0}</div>
+                      <div className="text-2xl font-bold text-[hsl(var(--agent))]">{app.trigger_count || 0}</div>
                       <div className="text-sm text-muted-foreground">Triggers Available</div>
                     </div>
                   </div>
@@ -218,7 +218,7 @@ export function MarketplaceAppDetailsModal({
                           <Badge
                             key={scheme}
                             variant="outline"
-                            className="text-xs border-orange-500/40 text-orange-300"
+                            className="text-xs border-primary/40 text-primary"
                           >
                             {formatAuthScheme(scheme)}
                           </Badge>
@@ -284,7 +284,7 @@ export function MarketplaceAppDetailsModal({
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="font-medium text-sm flex items-center gap-2">
-                                    <CheckCircle className="w-3 h-3 text-blue-400 shrink-0" />
+                                    <CheckCircle className="w-3 h-3 text-[hsl(var(--info))] shrink-0" />
                                     {action.display_name || action.name}
                                   </div>
                                   {action.description && (
@@ -334,7 +334,7 @@ export function MarketplaceAppDetailsModal({
                                 >
                                   <div className="min-w-0 flex-1">
                                     <div className="font-medium text-sm flex items-center gap-2">
-                                      <Zap className="w-3 h-3 text-purple-400 shrink-0" />
+                                      <Zap className="w-3 h-3 text-[hsl(var(--agent))] shrink-0" />
                                       {triggerName}
                                     </div>
                                     {triggerDescription && (
@@ -360,7 +360,8 @@ export function MarketplaceAppDetailsModal({
                   <Button
                     onClick={onConnect}
                     disabled={loading}
-                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    variant="outline"
+                    className="flex-1"
                   >
                     <ExternalLink className="w-4 h-4 mr-2" />
                     {loading ? 'Adding...' : 'Add to Workspace'}
