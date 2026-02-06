@@ -37,6 +37,8 @@ from langchain_text_splitters import (
 from langchain_core.documents import Document
 # OpenAI embeddings handled by centralized manager
 import psycopg2
+import boto3
+from botocore.exceptions import ClientError
 
 # Use SemanticChunker from RAG module
 try:
@@ -147,7 +149,8 @@ class DocumentProcessor:
             return DocumentType.TEXT
     
     def extract_text_from_pdf(self, file_path: str) -> str:
-        """Extract text from PDF using pdfplumber"""
+        """Extract text from PDF using pdfplumber with PyPDF2 fallback"""
+        # Try pdfplumber first (best quality)
         try:
             text = ""
             with pdfplumber.open(file_path) as pdf:
@@ -160,10 +163,29 @@ class DocumentProcessor:
                         import re
                         page_text = re.sub(r'(.)\1+', r'\1', page_text)  # Remove duplicate characters
                         text += page_text + "\n"
-            return text.strip()
+            if text.strip():
+                return text.strip()
         except Exception as e:
-            logger.error(f"Error extracting text from PDF {file_path}: {e}")
-            raise
+            logger.warning(f"pdfplumber failed for {file_path}: {e}. Trying PyPDF2 fallback...")
+
+        # Fallback to PyPDF2 (handles more PDF varieties)
+        try:
+            import PyPDF2
+            text = ""
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                for page in pdf_reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+            if text.strip():
+                logger.info(f"Successfully extracted text from PDF using PyPDF2 fallback: {file_path}")
+                return text.strip()
+        except Exception as e:
+            logger.error(f"PyPDF2 also failed for {file_path}: {e}")
+
+        # If both fail, raise error
+        raise Exception(f"Could not extract text from PDF {file_path} with any available parser")
     
     def extract_text_from_docx(self, file_path: str) -> str:
         """Extract text from DOCX file"""
@@ -314,12 +336,47 @@ class DocumentProcessor:
 
 class DocumentManager:
     """Main document management class"""
-    
-    def __init__(self, db_config: Dict[str, str]):
+
+    def __init__(
+        self,
+        db_config: Dict[str, str],
+        workspace_id: Optional[str] = None,
+        use_s3_vectors: bool = False,
+        s3_bucket: Optional[str] = None
+    ):
         self.db_config = db_config
         self.processor = DocumentProcessor()
         self._db_initialized = False
         self._init_lock = False  # Simple flag to prevent concurrent initialization
+        self.workspace_id = workspace_id
+        self.use_s3_vectors = use_s3_vectors
+        self._s3_backend = None
+
+        # S3 configuration for document storage
+        self.s3_bucket = s3_bucket or os.getenv('S3_DOCUMENTS_BUCKET', 'automatos-ai')
+        self.s3_region = os.getenv('AWS_REGION', 'us-east-1')
+        self.s3_client = boto3.client(
+            's3',
+            region_name=self.s3_region,
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+        )
+
+        # Ensure S3 bucket exists (create if needed)
+        self._ensure_s3_bucket_exists()
+
+        logger.info(f"✅ DocumentManager initialized with S3 document storage: bucket={self.s3_bucket}")
+
+        # Initialize S3 vectors backend if enabled
+        if self.use_s3_vectors:
+            if not self.workspace_id:
+                raise ValueError("workspace_id required when use_s3_vectors=True")
+            from modules.search.vector_store import get_vector_store
+            self._s3_backend = get_vector_store(
+                backend="s3_vectors",
+                workspace_id=self.workspace_id
+            )
+            logger.info(f"✅ DocumentManager using S3 vectors for workspace {workspace_id}")
         
         # Use centralized embedding manager
         from core.llm import create_embedding_manager
@@ -327,7 +384,33 @@ class DocumentManager:
         logger.info(f"DocumentManager using {self.embedding_manager.get_provider_info()['provider']} embeddings")
         
         # Don't initialize database at import time - do it lazily on first use
-    
+
+    def _ensure_s3_bucket_exists(self):
+        """Create S3 bucket if it doesn't exist"""
+        try:
+            # Check if bucket exists
+            self.s3_client.head_bucket(Bucket=self.s3_bucket)
+            logger.info(f"✅ S3 bucket '{self.s3_bucket}' exists")
+        except Exception as e:
+            if 'NoSuchBucket' in str(e) or '404' in str(e):
+                logger.info(f"📦 Creating S3 bucket '{self.s3_bucket}' in region '{self.s3_region}'...")
+                try:
+                    if self.s3_region == 'us-east-1':
+                        # us-east-1 doesn't accept LocationConstraint
+                        self.s3_client.create_bucket(Bucket=self.s3_bucket)
+                    else:
+                        self.s3_client.create_bucket(
+                            Bucket=self.s3_bucket,
+                            CreateBucketConfiguration={'LocationConstraint': self.s3_region}
+                        )
+                    logger.info(f"✅ Created S3 bucket '{self.s3_bucket}'")
+                except Exception as create_error:
+                    logger.error(f"❌ Failed to create S3 bucket: {create_error}")
+                    raise
+            else:
+                logger.error(f"❌ S3 bucket check failed: {e}")
+                raise
+
     def _ensure_database_initialized(self, max_retries: int = 5, retry_delay: float = 2.0):
         """Ensure database is initialized with retry logic"""
         if self._db_initialized:
@@ -434,6 +517,42 @@ class DocumentManager:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
+
+    def _upload_to_s3(self, file_path: str, document_id: int, filename: str) -> str:
+        """
+        Upload document to S3 with workspace isolation.
+
+        Returns S3 key (path) for the uploaded file.
+        Structure: workspaces/{workspace_id}/documents/{document_id}_{filename}
+        """
+        if not self.workspace_id:
+            raise ValueError("workspace_id required for S3 upload")
+
+        # S3 key with workspace isolation
+        s3_key = f"workspaces/{self.workspace_id}/documents/{document_id}_{filename}"
+
+        try:
+            with open(file_path, 'rb') as f:
+                self.s3_client.put_object(
+                    Bucket=self.s3_bucket,
+                    Key=s3_key,
+                    Body=f,
+                    ContentType=mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                )
+            logger.info(f"✅ Uploaded document to S3: s3://{self.s3_bucket}/{s3_key}")
+            return s3_key
+        except ClientError as e:
+            logger.error(f"Failed to upload document to S3: {e}")
+            raise
+
+    def _download_from_s3(self, s3_key: str, local_path: str) -> None:
+        """Download document from S3 to local path for processing."""
+        try:
+            self.s3_client.download_file(self.s3_bucket, s3_key, local_path)
+            logger.info(f"✅ Downloaded from S3: {s3_key} → {local_path}")
+        except ClientError as e:
+            logger.error(f"Failed to download from S3: {e}")
+            raise
     
     async def upload_document(self, file_path: str, filename: str = None, 
                             tags: List[str] = None, description: str = "",
@@ -446,36 +565,41 @@ class DocumentManager:
             
             if filename is None:
                 filename = os.path.basename(file_path)
-            
-            # NEW: Copy file to persistent storage
-            storage_dir = "/var/automatos/documents"
-            os.makedirs(storage_dir, exist_ok=True)
-            
-            persistent_path = os.path.join(storage_dir, filename)
-            
-            # Copy file if not already in storage
-            if os.path.abspath(file_path) != os.path.abspath(persistent_path):
-                import shutil
-                shutil.copy2(file_path, persistent_path)
-                logger.info(f"Copied document to {persistent_path}")
-            
-            file_size = os.path.getsize(persistent_path)
-            file_hash = self._calculate_file_hash(persistent_path)
-            file_type = self.processor.detect_file_type(persistent_path)
+
+            # Calculate file metadata from local temp file
+            file_size = os.path.getsize(file_path)
+            file_hash = self._calculate_file_hash(file_path)
+            file_type = self.processor.detect_file_type(file_path)
             
             # Check if document already exists
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
             
-            cursor.execute("SELECT id FROM documents WHERE file_hash = %s", (file_hash,))
+            cursor.execute("SELECT id, status FROM documents WHERE file_hash = %s", (file_hash,))
             existing = cursor.fetchone()
             if existing:
-                logger.info(f"Document with hash {file_hash} already exists with ID {existing[0]}")
-                cursor.close()
-                conn.close()
-                return existing[0]
-            
-            # Create document record
+                existing_id, existing_status = existing
+                # Only return existing document if it was successfully processed
+                if existing_status == DocumentStatus.COMPLETED.value:
+                    logger.info(f"Document with hash {file_hash} already exists with ID {existing_id} (status: {existing_status})")
+                    cursor.close()
+                    conn.close()
+                    return existing_id
+                else:
+                    # Document exists but failed/pending - delete and re-process
+                    logger.warning(f"Document with hash {file_hash} exists with ID {existing_id} but has status '{existing_status}'. Deleting and re-processing...")
+                    cursor.execute("DELETE FROM document_chunks WHERE document_id = %s", (existing_id,))
+                    cursor.execute("DELETE FROM documents WHERE id = %s", (existing_id,))
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    logger.info(f"Deleted failed document {existing_id}, will re-process")
+
+                    # Reopen connection for new document creation
+                    conn = psycopg2.connect(**self.db_config)
+                    cursor = conn.cursor()
+
+            # Create document record (without file_path yet)
             metadata = DocumentMetadata(
                 filename=filename,
                 file_type=file_type.value,
@@ -485,24 +609,33 @@ class DocumentManager:
                 description=description,
                 created_by=created_by
             )
-            
+
             cursor.execute("""
-                INSERT INTO documents (filename, file_type, file_size, upload_date, status, 
-                                     metadata, created_by, tags, description, file_hash)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO documents (filename, file_type, file_size, upload_date, status,
+                                     metadata, created_by, tags, description, file_hash, workspace_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 metadata.filename, metadata.file_type, metadata.file_size,
                 metadata.upload_date, DocumentStatus.PROCESSING.value,
                 json.dumps(metadata.to_dict()), metadata.created_by,
-                metadata.tags, metadata.description, file_hash
+                metadata.tags, metadata.description, file_hash, self.workspace_id
             ))
-            
+
             document_id = cursor.fetchone()[0]
             conn.commit()
-            
-            # Process document asynchronously (use persistent path)
-            await self._process_document(document_id, persistent_path, file_type)
+
+            # Upload to S3 with workspace isolation
+            s3_key = self._upload_to_s3(file_path, document_id, filename)
+
+            # Update document with S3 path
+            cursor.execute("""
+                UPDATE documents SET file_path = %s WHERE id = %s
+            """, (f"s3://{self.s3_bucket}/{s3_key}", document_id))
+            conn.commit()
+
+            # Process document (it will read from local temp file)
+            await self._process_document(document_id, file_path, file_type, s3_key)
             
             cursor.close()
             conn.close()
@@ -514,11 +647,19 @@ class DocumentManager:
             logger.error(f"Error uploading document: {e}")
             raise
     
-    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType):
-        """Process document: extract text, chunk, and generate embeddings"""
+    async def _process_document(self, document_id: int, file_path: str, file_type: DocumentType, s3_key: Optional[str] = None):
+        """
+        Process document: extract text, chunk, and generate embeddings.
+
+        Args:
+            document_id: Database document ID
+            file_path: Local temp file path for processing
+            file_type: Document type
+            s3_key: S3 key where document is stored (for reference)
+        """
         self._ensure_database_initialized()
         try:
-            logger.info(f"Starting document processing for document {document_id}, type: {file_type}")
+            logger.info(f"Starting document processing for document {document_id}, type: {file_type} (S3: {s3_key})")
 
             conn = psycopg2.connect(**self.db_config)
             cursor = conn.cursor()
@@ -739,9 +880,12 @@ class DocumentManager:
             
             # Generate embeddings and save chunks
             valid_chunks = []
+            embeddings_for_s3 = []
+            documents_for_s3 = []
+
             for chunk in chunks:
                 chunk.document_id = document_id
-                
+
                 # SAFETY CHECK: Skip bad chunks (separators, empty, too short)
                 content = chunk.content.strip() if chunk.content else ""
                 if not content or len(content) < 20:
@@ -751,23 +895,65 @@ class DocumentManager:
                 stripped = content.replace('-', '').replace('=', '').replace('_', '').replace('#', '').replace('`', '').strip()
                 if len(stripped) < 10:
                     continue
-                
+
                 # Generate embedding
                 embedding = await self._generate_embedding(chunk.content)
                 chunk.embedding = embedding
-                
-                # Save chunk to database (with parent_content and headers for smart chunking)
-                cursor.execute("""
-                    INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers, workspace_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    chunk.document_id, chunk.chunk_index, chunk.content,
-                    embedding, json.dumps(chunk.metadata),
-                    chunk.parent_content,  # NEW: Store parent content
-                    json.dumps(chunk.headers) if chunk.headers else '{}',  # NEW: Store headers
-                    workspace_id  # Include workspace_id from parent document
-                ))
+
+                if self.use_s3_vectors and self._s3_backend:
+                    # Store metadata in postgres WITHOUT embedding (S3 vectors mode)
+                    cursor.execute("""
+                        INSERT INTO document_chunks (document_id, chunk_index, content, metadata, parent_content, headers, workspace_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        chunk.document_id, chunk.chunk_index, chunk.content,
+                        json.dumps(chunk.metadata),
+                        chunk.parent_content,
+                        json.dumps(chunk.headers) if chunk.headers else '{}',
+                        workspace_id
+                    ))
+
+                    # Collect for S3 batch insert
+                    embeddings_for_s3.append(embedding)
+                    documents_for_s3.append({
+                        "external_file_id": str(document_id),  # Use document_id as external_file_id
+                        "document_id": str(document_id),  # Keep for backwards compatibility
+                        "chunk_index": chunk.chunk_index,
+                        "chunk_text": chunk.content[:500],  # Preview
+                        "file_name": os.path.basename(file_path),  # Match expected field name
+                        "source_file": os.path.basename(file_path),  # Keep for backwards compatibility
+                        "file_path": file_path,
+                        "file_type": file_type.value if hasattr(file_type, 'value') else str(file_type),
+                        "app_name": "document_sync",  # Add app_name field
+                        "workspace_id": workspace_id
+                    })
+                else:
+                    # Store everything in postgres (legacy pgvector mode)
+                    cursor.execute("""
+                        INSERT INTO document_chunks (document_id, chunk_index, content, embedding, metadata, parent_content, headers, workspace_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        chunk.document_id, chunk.chunk_index, chunk.content,
+                        embedding, json.dumps(chunk.metadata),
+                        chunk.parent_content,
+                        json.dumps(chunk.headers) if chunk.headers else '{}',
+                        workspace_id
+                    ))
+
                 valid_chunks.append(chunk)
+
+            # Batch insert vectors to S3 if enabled
+            if self.use_s3_vectors and self._s3_backend and embeddings_for_s3:
+                try:
+                    await self._s3_backend.initialize()
+                    vector_ids = self._s3_backend.add_documents(
+                        documents=documents_for_s3,
+                        embeddings=embeddings_for_s3
+                    )
+                    logger.info(f"✅ Stored {len(vector_ids)} vectors in S3 for document {document_id}")
+                except Exception as e:
+                    logger.error(f"Failed to store vectors in S3: {e}")
+                    raise
             
             # Update document status
             cursor.execute("""
@@ -803,9 +989,24 @@ class DocumentManager:
             raise
     
     async def _generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text"""
+        """Generate embedding for text with caching"""
         try:
+            # Try cache first (massive cost savings!)
+            from core.cache import get_cache_service
+            cache = get_cache_service()
+
+            cached_embedding = cache.get_embedding(text)
+            if cached_embedding is not None:
+                logger.debug(f"✅ Using cached embedding (saved API call)")
+                return cached_embedding
+
+            # Cache miss - generate new embedding
             embedding = await self.embedding_manager.generate_embedding(text)
+
+            # Cache for future use
+            cache.set_embedding(text, embedding)
+            logger.debug(f"💾 Cached new embedding")
+
             return embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")

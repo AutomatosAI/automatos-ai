@@ -10,6 +10,7 @@ import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplaceRecipesTab } from './marketplace-recipes-tab'
+import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { apiClient } from '@/lib/api-client'
 
 export interface MarketplaceItem {
@@ -161,6 +162,12 @@ export function MarketplaceHomepage() {
             >
               LLMs
             </TabsTrigger>
+            <TabsTrigger
+              value="plugins"
+              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+            >
+              Plugins
+            </TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -192,6 +199,10 @@ export function MarketplaceHomepage() {
 
         <TabsContent value="llms" className="mt-0">
           <MarketplaceLlmsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="plugins" className="mt-0">
+          <MarketplacePluginsTab searchQuery={searchQuery} />
         </TabsContent>
       </Tabs>
     </div>

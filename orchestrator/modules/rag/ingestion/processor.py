@@ -6,10 +6,14 @@ Document processing pipeline for ingesting documents into RAG system.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+
+import pdfplumber
+from docx import Document as DocxDocument
 
 from ..chunking import SemanticChunker, SemanticChunk
 
@@ -43,6 +47,8 @@ class DocumentProcessor:
         
         # Supported file types
         self.supported_extensions = {
+            '.pdf': 'pdf',
+            '.docx': 'docx',
             '.txt': 'text',
             '.md': 'markdown',
             '.py': 'code',
@@ -65,7 +71,61 @@ class DocumentProcessor:
             '.css': 'code',
             '.sql': 'code'
         }
-    
+
+    def _extract_text_from_pdf(self, file_path: str) -> str:
+        """Extract text from PDF using pdfplumber"""
+        try:
+            text = ""
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        # Remove null characters and other problematic characters
+                        page_text = page_text.replace('\x00', '').replace('\x01', '').replace('\x02', '')
+                        # Fix double characters (common PDF extraction issue)
+                        page_text = re.sub(r'(.)\1+', r'\1', page_text)
+                        text += page_text + "\n"
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF {file_path}: {e}")
+            return ""
+
+    def _extract_text_from_docx(self, file_path: str) -> str:
+        """Extract text from DOCX file"""
+        try:
+            doc = DocxDocument(file_path)
+            text = ""
+            for paragraph in doc.paragraphs:
+                text += paragraph.text + "\n"
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error extracting text from DOCX {file_path}: {e}")
+            return ""
+
+    def _extract_text(self, file_path: str, content_type: str) -> str:
+        """Extract text based on file type"""
+        if content_type == 'pdf':
+            return self._extract_text_from_pdf(file_path)
+        elif content_type == 'docx':
+            return self._extract_text_from_docx(file_path)
+        else:
+            # Text-based files
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            except UnicodeDecodeError:
+                try:
+                    with open(file_path, 'r', encoding='latin-1') as f:
+                        text = f.read()
+                except Exception as e:
+                    logger.error(f"Error reading file {file_path}: {e}")
+                    return ""
+
+            # Clean null characters
+            if text:
+                text = text.replace('\x00', '').replace('\x01', '').replace('\x02', '')
+            return text
+
     async def ingest_directory(
         self, 
         directory_path: str, 
@@ -138,14 +198,19 @@ class DocumentProcessor:
         extension = file_path_obj.suffix.lower()
         content_type = self.supported_extensions.get(extension, 'text')
         
-        # Read file content
+        # Extract text based on file type
         try:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-            except UnicodeDecodeError:
-                with open(file_path, 'r', encoding='latin-1') as f:
-                    content = f.read()
+            content = self._extract_text(file_path, content_type)
+            if not content:
+                return IngestionResult(
+                    document_path=file_path,
+                    chunk_count=0,
+                    embeddings_count=0,
+                    content_type=content_type,
+                    processing_time_ms=(datetime.now() - start_time).total_seconds() * 1000,
+                    success=False,
+                    error="Failed to extract text from file"
+                )
         except Exception as e:
             return IngestionResult(
                 document_path=file_path,
@@ -213,32 +278,35 @@ class DocumentProcessor:
         )
     
     async def _store_chunks(
-        self, 
-        chunks: List[SemanticChunk], 
-        file_path: str, 
+        self,
+        chunks: List[SemanticChunk],
+        file_path: str,
         content_type: str
     ) -> None:
         """Store chunks in vector store"""
-        
+
         if not self.vector_store:
             return
-            
-        # Convert chunks to storage format
-        chunk_data = []
+
+        # Extract vectors and metadata for S3VectorStore
+        vectors = []
+        metadata_list = []
+
         for chunk in chunks:
-            chunk_data.append({
-                'content': chunk.content,
-                'embedding': chunk.embedding,
-                'metadata': {
+            if hasattr(chunk, 'embedding') and chunk.embedding:
+                vectors.append(chunk.embedding)
+                metadata_list.append({
                     'chunk_id': chunk.metadata.chunk_id,
+                    'content': chunk.content,
                     'source': file_path,
                     'content_type': content_type,
                     'word_count': chunk.metadata.word_count,
                     'importance_score': chunk.metadata.importance_score
-                }
-            })
-        
-        await self.vector_store.add_embeddings(chunk_data)
+                })
+
+        if vectors:
+            # S3VectorStore.add_vectors is synchronous, not async
+            self.vector_store.add_vectors(vectors=vectors, metadata=metadata_list)
     
     def _detect_programming_language(self, extension: str) -> str:
         """Detect programming language from file extension"""

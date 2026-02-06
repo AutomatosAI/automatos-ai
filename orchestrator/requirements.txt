@@ -61,7 +61,7 @@ camelot-py==0.11.0
 opencv-python-headless==4.8.1.78
 chromadb==0.4.18
 openai>=1.10.0  # Compatible with langchain-openai 1.0.1
-anthropic==0.8.1
+anthropic>=0.40.0  # >=0.40 required for streaming message helpers used by chatbot service
 sentence-transformers>=2.2.2
 transformers>=4.21.0
 huggingface-hub>=0.10.0
@@ -102,3 +102,6 @@ slowapi>=0.1.9
 # PRD-36: Composio Integration (500+ tools, Tool Router, Triggers)
 composio-core>=0.6.0
 composio-openai>=0.6.0
+
+# PRD-42: Cloud Document Sync with S3 Vectors
+boto3>=1.39.5

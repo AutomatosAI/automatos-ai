@@ -17,10 +17,17 @@ from .tools import *  # Import last - may extend models from core.py
 from .tool_assignments import *  # PRD-35: Tool catalog and assignments
 from .composio_cache import *  # Redesign: Composio metadata cache
 from .routing import *  # PRD-50: Universal Orchestrator Router
+from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
+from .personas import *  # PRD-42: Agent Personas
 
 # Optional model packs (may not exist in all deployments/branches)
 try:
     from .composio import *  # PRD-36: Composio integration
+except ImportError:
+    pass
+
+try:
+    from .cloud_sync import *  # PRD-42: Cloud Document Sync
 except ImportError:
     pass
 

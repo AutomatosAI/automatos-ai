@@ -152,12 +152,37 @@ class Config:
     # FEATURE FLAGS
     # =============================================================================
     ENABLE_BATCH_API: bool = os.getenv("ENABLE_BATCH_API", "false").lower() == "true"
+
+    # =============================================================================
+    # AWS S3 VECTORS (PRD-42: Cloud Document Sync)
+    # =============================================================================
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+
+    # S3 Vectors Configuration
+    S3_VECTORS_ENABLED: bool = os.getenv("S3_VECTORS_ENABLED", "false").lower() == "true"
+    S3_VECTORS_BUCKET: str = os.getenv("S3_VECTORS_BUCKET")  # e.g., "automatos-ai" or "automatos-vectors-{workspace_id}"
+    S3_VECTORS_INDEX_NAME: str = os.getenv("S3_VECTORS_INDEX_NAME", "documents-index")
+    S3_VECTORS_DIMENSION: int = int(os.getenv("S3_VECTORS_DIMENSION", "1024"))
+    S3_VECTORS_METRIC: str = os.getenv("S3_VECTORS_METRIC", "cosine")
     
     # =============================================================================
     # JIRA BUG REPORTS (Pilot Helper Widget)
     # =============================================================================
     JIRA_PROJECT_KEY: str = os.getenv("JIRA_PROJECT_KEY", "PILOT")
     JIRA_BUG_REPORTS_ENABLED: bool = os.getenv("JIRA_BUG_REPORTS_ENABLED", "true").lower() == "true"
+
+    # =============================================================================
+    # MARKETPLACE / S3 (Plugin Marketplace)
+    # =============================================================================
+    MARKETPLACE_S3_BUCKET: str = os.getenv("MARKETPLACE_S3_BUCKET", "automatos-marketplace")
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+    PLUGIN_MAX_UPLOAD_SIZE_MB: int = int(os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "10"))
+    PLUGIN_LLM_SCAN_MODEL: str = os.getenv("PLUGIN_LLM_SCAN_MODEL", "claude-haiku-4-20250414")
+    PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
 
     # =============================================================================
     # RAG / KNOWLEDGE SERVICES API

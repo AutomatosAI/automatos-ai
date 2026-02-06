@@ -39,6 +39,7 @@ from api.workflow_templates import router as workflow_templates_router
 from api.workflow_recipes import router as workflow_recipes_router
 from api.marketplace import router as marketplace_router
 from api.documents import router as documents_router
+from api.cache import router as cache_router
 from api.system import router as system_router
 from api.context_engineering import router as context_engineering_router
 from api.memory import router as memory_router
@@ -62,6 +63,11 @@ try:
     from api.composio import router as composio_router
 except ImportError:
     composio_router = None
+# PRD-42: Cloud Document Sync with S3 Vectors (optional module)
+try:
+    from api.cloud_documents import router as cloud_documents_router
+except ImportError:
+    cloud_documents_router = None
 from api.statistics import router as statistics_router
 from api.permissions import router as permissions_router
 from api.skills import router as skills_router
@@ -70,6 +76,11 @@ from api.templates import router as templates_router
 from api.context_summarization import router as context_summarization_router  # Context Engineering 2.0
 from api.team import router as team_router  # PRD-37: Team Management
 from api.routing import router as routing_router  # PRD-50: Universal Orchestrator Router
+from api.admin_plugins import router as admin_plugins_router  # PRD-42: Admin Plugin Marketplace
+from api.marketplace_plugins import router as marketplace_plugins_router  # PRD-42: Public Marketplace Plugins
+from api.workspace_plugins import router as workspace_plugins_router  # PRD-42: Workspace Plugin Enablement
+from api.agent_plugins import router as agent_plugins_router  # PRD-42: Agent Plugin Assignment
+from api.personas import router as personas_router  # PRD-42: Persona API
 # Pilot Helper Widget: Jira bug reports (optional — Composio dependency)
 try:
     from api.bug_reports import router as bug_reports_router
@@ -404,6 +415,7 @@ app.include_router(workflow_templates_router)  # Legacy - backward compatibility
 app.include_router(workflow_recipes_router)  # US-009: Renamed from templates
 app.include_router(marketplace_router)  # Community Marketplace
 app.include_router(documents_router)
+app.include_router(cache_router)  # Cache management and monitoring
 app.include_router(system_router)
 app.include_router(context_engineering_router)
 app.include_router(memory_router)
@@ -425,6 +437,8 @@ app.include_router(system_settings_router)  # System Settings Management
 app.include_router(tools_router)
 if composio_router is not None:
     app.include_router(composio_router)  # PRD-36: Composio Integration (500+ tools)
+if cloud_documents_router is not None:
+    app.include_router(cloud_documents_router)  # PRD-42: Cloud Document Sync
 app.include_router(statistics_router)
 app.include_router(permissions_router)
 app.include_router(skills_router)
@@ -456,6 +470,11 @@ app.include_router(database_knowledge_router)  # PRD-21: Database Knowledge
 app.include_router(database_analytics_router)  # PRD-21: Database Analytics
 app.include_router(team_router)  # PRD-37: Team Management
 app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
+app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
+app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
+app.include_router(workspace_plugins_router)  # PRD-42: Workspace Plugin Enablement
+app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
+app.include_router(personas_router)  # PRD-42: Persona API
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
 

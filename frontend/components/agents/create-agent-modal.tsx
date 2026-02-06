@@ -1,11 +1,20 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
   Bot,
+  ChevronDown,
+  ChevronUp,
+  User,
+  PenLine,
+  Puzzle,
+  Terminal,
+  Zap,
+  Coins,
+  Shield,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
@@ -21,10 +30,26 @@ import { Slider } from '@/components/ui/slider'
 import { useTools } from '@/hooks/use-tools-api'
 
 // API hooks
-import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
+import { useCreateAgent } from '@/hooks/use-agent-api'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
+import { apiClient } from '@/lib/api-client'
+
+// Persona types
+interface PersonaItem {
+  id: string
+  slug: string
+  name: string
+  description?: string
+  system_prompt?: string
+  voice_description?: string
+  category?: string
+  suggested_temperature: number
+  scope: string
+}
+
+type PersonaMode = 'none' | 'predefined' | 'custom'
 
 interface CreateAgentModalProps {
   open: boolean
@@ -34,8 +59,6 @@ interface CreateAgentModalProps {
 
 import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP } from '@/lib/agent-constants'
 
-// Skills will be loaded dynamically from the API
-
 export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalProps) {
   const [step, setStep] = useState(1)
   const [agentData, setAgentData] = useState({
@@ -43,7 +66,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     category: '',  // Changed from 'type' to 'category'
     description: '',
     tags: '',
-    skills: [] as string[],
+    plugins: [] as string[],
     tools: [] as number[],
     specializations: [] as string[],
     // Marketplace field - just the toggle
@@ -62,20 +85,82 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     fallback_model_id: null as string | null
   })
 
+  // Persona state (US-021)
+  const [personaMode, setPersonaMode] = useState<PersonaMode>('none')
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null)
+  const [customPersonaPrompt, setCustomPersonaPrompt] = useState('')
+  const [personas, setPersonas] = useState<PersonaItem[]>([])
+  const [personasLoading, setPersonasLoading] = useState(false)
+  const [personaCategoryFilter, setPersonaCategoryFilter] = useState<string>('all')
+  const [expandedPersonaId, setExpandedPersonaId] = useState<string | null>(null)
+
+  // Plugin state
+  const [workspacePlugins, setWorkspacePlugins] = useState<any[]>([])
+  const [pluginsLoading, setPluginsLoading] = useState(false)
+
   // API hooks
   const createAgentMutation = useCreateAgent()
-  const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
   const { data: toolsResponse, isLoading: toolsLoading } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
 
-  const handleSkillToggle = (skill: string) => {
+  // Fetch workspace-enabled plugins when modal opens
+  useEffect(() => {
+    if (!open) return
+    let mounted = true
+    setPluginsLoading(true)
+    const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+    if (!workspaceId) {
+      setWorkspacePlugins([])
+      setPluginsLoading(false)
+      return
+    }
+    apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' })
+      .then((data) => {
+        if (!mounted) return
+        const items = data?.items || data || []
+        setWorkspacePlugins(Array.isArray(items) ? items : [])
+      })
+      .catch(() => {
+        if (mounted) setWorkspacePlugins([])
+      })
+      .finally(() => { if (mounted) setPluginsLoading(false) })
+    return () => { mounted = false }
+  }, [open])
+
+  // Fetch personas when modal opens (US-021)
+  useEffect(() => {
+    if (!open) return
+    setPersonasLoading(true)
+    apiClient.request<any>('/api/personas')
+      .then((data) => {
+        const list = Array.isArray(data) ? data : (data?.items || data?.personas || data?.data || [])
+        setPersonas(list)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch personas:', err)
+        setPersonas([])
+      })
+      .finally(() => setPersonasLoading(false))
+  }, [open])
+
+  // Pre-fill custom prompt when switching from predefined to custom (US-021)
+  useEffect(() => {
+    if (personaMode === 'custom' && selectedPersonaId && !customPersonaPrompt) {
+      const persona = personas.find(p => p.id === selectedPersonaId)
+      if (persona?.system_prompt) {
+        setCustomPersonaPrompt(persona.system_prompt)
+      }
+    }
+  }, [personaMode, selectedPersonaId, personas, customPersonaPrompt])
+
+  const handlePluginToggle = (pluginId: string) => {
     setAgentData(prev => ({
       ...prev,
-      skills: prev.skills.includes(skill)
-        ? prev.skills.filter(s => s !== skill)
-        : [...prev.skills, skill]
+      plugins: prev.plugins.includes(pluginId)
+        ? prev.plugins.filter(p => p !== pluginId)
+        : [...prev.plugins, pluginId]
     }))
   }
 
@@ -119,7 +204,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         agent_type: dbAgentType,
         marketplace_category: agentData.category, // Preserve original UI category for round-trip
         description: agentData.description || '',
-        skill_ids: agentData.skills, // Backend expects skill_ids array
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         tags,
         configuration: {
@@ -151,6 +235,40 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
           // Don't alert, just log - non-critical
         }
 
+        // US-021: Set persona if selected
+        if (personaMode !== 'none') {
+          try {
+            const personaPayload: any = { use_custom: false }
+            if (personaMode === 'predefined' && selectedPersonaId) {
+              personaPayload.persona_id = selectedPersonaId
+            } else if (personaMode === 'custom' && customPersonaPrompt) {
+              personaPayload.custom_prompt = customPersonaPrompt
+              personaPayload.use_custom = true
+            }
+            if (personaPayload.persona_id || personaPayload.custom_prompt) {
+              await apiClient.request(`/api/agents/${newAgent.id}/persona`, {
+                method: 'PUT',
+                body: personaPayload,
+              })
+              console.log('Persona set successfully')
+            }
+          } catch (error) {
+            console.error('Failed to set persona:', error)
+          }
+        }
+
+        // Assign plugins if any selected
+        if (agentData.plugins.length > 0) {
+          try {
+            await apiClient.request(`/api/agents/${newAgent.id}/plugins`, {
+              method: 'PUT',
+              body: { plugin_ids: agentData.plugins } as any,
+            })
+            console.log('Plugins assigned successfully')
+          } catch (error) {
+            console.error('Failed to assign plugins:', error)
+          }
+        }
       }
 
       toast.success(`Agent "${agentData.name}" created successfully!`)
@@ -168,7 +286,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             metadata: {
               agent_id: newAgent.id,
               agent_type: agentData.category,
-              skills: agentData.skills,
+              plugins: agentData.plugins,
               tools: agentData.tools
             }
           }
@@ -203,7 +321,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         category: '',
         description: '',
         tags: '',
-        skills: [],
+        plugins: [],
         tools: [],
         specializations: [],
         shareToMarketplace: false
@@ -218,6 +336,11 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         presence_penalty: 0.0,
         fallback_model_id: null
       })
+      setPersonaMode('none')
+      setSelectedPersonaId(null)
+      setCustomPersonaPrompt('')
+      setPersonaCategoryFilter('all')
+      setExpandedPersonaId(null)
       setStep(1)
     } catch (error: any) {
       console.error('❌ CREATE AGENT ERROR:', error)
@@ -262,18 +385,21 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
               <CardContent className="pr-2">
                 <Tabs value={`step-${step}`} className="space-y-6">
-                  <TabsList className="grid w-full grid-cols-4 bg-secondary/50">
+                  <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
-                      1. Configuration
+                      1. Config
                     </TabsTrigger>
                     <TabsTrigger value="step-2" disabled={step < 2}>
-                      2. Model
+                      2. Persona
                     </TabsTrigger>
                     <TabsTrigger value="step-3" disabled={step < 3}>
-                      3. Tools
+                      3. Model
                     </TabsTrigger>
                     <TabsTrigger value="step-4" disabled={step < 4}>
-                      4. Skills
+                      4. Tools
+                    </TabsTrigger>
+                    <TabsTrigger value="step-5" disabled={step < 5}>
+                      5. Plugins
                     </TabsTrigger>
                   </TabsList>
 
@@ -404,8 +530,231 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     </div>
                   </TabsContent>
 
-                  {/* Step 2: Model Configuration (PRD-15) */}
+                  {/* Step 2: Persona Selection (US-021) */}
                   <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Agent Persona</h3>
+                      <p className="text-muted-foreground mb-6">
+                        Give your agent a personality and voice
+                      </p>
+                    </div>
+
+                    {/* Persona Mode Selection */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <motion.div
+                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                          personaMode === 'none'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                        }`}
+                        onClick={() => {
+                          setPersonaMode('none')
+                          setSelectedPersonaId(null)
+                          setCustomPersonaPrompt('')
+                        }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <Bot className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                        <div className="font-medium text-sm">No Persona</div>
+                        <div className="text-xs text-muted-foreground mt-1">Default behavior</div>
+                      </motion.div>
+
+                      <motion.div
+                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                          personaMode === 'predefined'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                        }`}
+                        onClick={() => setPersonaMode('predefined')}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <User className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                        <div className="font-medium text-sm">Predefined</div>
+                        <div className="text-xs text-muted-foreground mt-1">Choose a persona</div>
+                      </motion.div>
+
+                      <motion.div
+                        className={`p-4 rounded-lg border cursor-pointer transition-all text-center ${
+                          personaMode === 'custom'
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border/50 hover:border-primary/30'
+                        }`}
+                        onClick={() => setPersonaMode('custom')}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <PenLine className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+                        <div className="font-medium text-sm">Custom</div>
+                        <div className="text-xs text-muted-foreground mt-1">Write your own</div>
+                      </motion.div>
+                    </div>
+
+                    {/* Predefined Persona Selection */}
+                    {personaMode === 'predefined' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-4"
+                      >
+                        {/* Category Filter */}
+                        <div>
+                          <Label>Filter by Category</Label>
+                          <Select
+                            value={personaCategoryFilter}
+                            onValueChange={setPersonaCategoryFilter}
+                          >
+                            <SelectTrigger className="bg-secondary/50">
+                              <SelectValue placeholder="All categories" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Categories</SelectItem>
+                              {[...new Set(personas.map(p => p.category).filter(Boolean))].map(cat => (
+                                <SelectItem key={cat} value={cat!}>{cat}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Persona List */}
+                        {personasLoading ? (
+                          <div className="space-y-2">
+                            {[1, 2, 3].map(i => (
+                              <div key={i} className="h-16 bg-secondary/20 animate-pulse rounded-lg" />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
+                            {personas
+                              .filter(p => personaCategoryFilter === 'all' || p.category === personaCategoryFilter)
+                              .map(persona => (
+                                <motion.div
+                                  key={persona.id}
+                                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                    selectedPersonaId === persona.id
+                                      ? 'border-primary bg-primary/10'
+                                      : 'border-border/50 hover:border-primary/30'
+                                  }`}
+                                  onClick={() => setSelectedPersonaId(persona.id)}
+                                  whileHover={{ scale: 1.01 }}
+                                  whileTap={{ scale: 0.99 }}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium">{persona.name}</span>
+                                        {persona.category && (
+                                          <Badge variant="outline" className="text-xs">{persona.category}</Badge>
+                                        )}
+                                      </div>
+                                      {persona.voice_description && (
+                                        <p className="text-xs text-muted-foreground mt-1 truncate">
+                                          {persona.voice_description}
+                                        </p>
+                                      )}
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        Temperature: {persona.suggested_temperature}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 ml-2">
+                                      {selectedPersonaId === persona.id && (
+                                        <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setExpandedPersonaId(
+                                            expandedPersonaId === persona.id ? null : persona.id
+                                          )
+                                        }}
+                                      >
+                                        {expandedPersonaId === persona.id ? (
+                                          <ChevronUp className="w-4 h-4" />
+                                        ) : (
+                                          <ChevronDown className="w-4 h-4" />
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </div>
+
+                                  {/* Expandable System Prompt Preview */}
+                                  {expandedPersonaId === persona.id && persona.system_prompt && (
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0 }}
+                                      animate={{ opacity: 1, height: 'auto' }}
+                                      className="mt-3 pt-3 border-t border-border/30"
+                                    >
+                                      <Label className="text-xs">System Prompt</Label>
+                                      <pre className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap bg-secondary/30 rounded p-2 max-h-[150px] overflow-y-auto">
+                                        {persona.system_prompt}
+                                      </pre>
+                                    </motion.div>
+                                  )}
+                                </motion.div>
+                              ))}
+                            {personas.filter(p => personaCategoryFilter === 'all' || p.category === personaCategoryFilter).length === 0 && (
+                              <div className="text-center py-6 text-muted-foreground">
+                                No personas found{personaCategoryFilter !== 'all' ? ` in category "${personaCategoryFilter}"` : ''}.
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Tip: Switch to custom to pre-fill */}
+                        {selectedPersonaId && (
+                          <p className="text-xs text-muted-foreground italic">
+                            Tip: Select a predefined persona and switch to &quot;Custom&quot; to pre-fill for editing.
+                          </p>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {/* Custom Persona */}
+                    {personaMode === 'custom' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-3"
+                      >
+                        <div>
+                          <Label htmlFor="custom-persona">Custom Persona Prompt</Label>
+                          <Textarea
+                            id="custom-persona"
+                            placeholder="Describe the agent's personality, communication style, expertise, and behavioral guidelines..."
+                            value={customPersonaPrompt}
+                            onChange={(e) => setCustomPersonaPrompt(e.target.value)}
+                            className="bg-secondary/50 min-h-[200px] font-mono text-sm"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            This prompt will be prepended to the agent&apos;s system message.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Summary */}
+                    <div className="flex justify-between items-center pt-4 border-t border-border/30">
+                      <div>
+                        <p className="font-medium">
+                          {personaMode === 'none' && 'No persona selected'}
+                          {personaMode === 'predefined' && (selectedPersonaId
+                            ? `Persona: ${personas.find(p => p.id === selectedPersonaId)?.name || 'Selected'}`
+                            : 'Select a persona above')}
+                          {personaMode === 'custom' && (customPersonaPrompt
+                            ? `Custom persona (${customPersonaPrompt.length} chars)`
+                            : 'Write a custom persona above')}
+                        </p>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  {/* Step 3: Model Configuration (PRD-15) */}
+                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
                       <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
                       <p className="text-muted-foreground mb-6">
@@ -584,57 +933,93 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     )}
                   </TabsContent>
 
-                  {/* Step 4: Skills & Settings */}
-                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  {/* Step 5: Plugins */}
+                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <div>
-                      <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
+                      <h3 className="text-lg font-semibold mb-2">Plugins</h3>
                       <p className="text-muted-foreground mb-6">
-                        Customize the agent's skills and advanced configuration
+                        Select marketplace plugins to give your agent skills and capabilities
                       </p>
                     </div>
 
-                    <div>
-                      <Label className="text-base font-medium">Available Skills</Label>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Select the skills your agent should possess
-                      </p>
-                      {skillsLoading ? (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                            {[1, 2, 3, 4, 5, 6].map((i) => (
-                              <div key={i} className="p-3 rounded-lg border border-border/50 animate-pulse bg-secondary/20">
-                                <div className="h-5 w-20 bg-secondary rounded" />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {availableSkillsData.map((skill) => (
+                    {pluginsLoading ? (
+                      <div className="space-y-2">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="h-20 bg-secondary/20 animate-pulse rounded-lg" />
+                        ))}
+                      </div>
+                    ) : workspacePlugins.length > 0 ? (
+                      <div className="space-y-3">
+                        {workspacePlugins.map((plugin: any) => {
+                          const isSelected = agentData.plugins.includes(plugin.plugin_id)
+                          return (
                             <motion.div
-                              key={skill.id}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${agentData.skills.includes(skill.id)
-                                ? 'border-primary bg-primary/10'
-                                : 'border-border/50 hover:border-primary/30'
-                                }`}
-                              onClick={() => handleSkillToggle(skill.id)}
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
+                              key={plugin.plugin_id}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-orange-500/50 bg-orange-500/5'
+                                  : 'border-border/50 hover:border-primary/30'
+                              }`}
+                              onClick={() => handlePluginToggle(plugin.plugin_id)}
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.99 }}
                             >
-                              <span className="text-sm font-medium">
-                                {skill.name}
-                              </span>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Puzzle className="w-5 h-5 text-orange-400 shrink-0" />
+                                  <span className="font-medium truncate">{plugin.name}</span>
+                                  <Badge variant="outline" className="text-xs shrink-0">
+                                    v{plugin.version}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {plugin.security_status === 'safe' && (
+                                    <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                      <Shield className="w-3 h-3 mr-1" />
+                                      Verified
+                                    </Badge>
+                                  )}
+                                  {isSelected && (
+                                    <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                {plugin.description || 'No description available'}
+                              </p>
+                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Terminal className="w-3 h-3" />
+                                  {plugin.skills_count} skills
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Zap className="w-3 h-3" />
+                                  {plugin.commands_count} commands
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Coins className="w-3 h-3" />
+                                  ~{(plugin.token_estimate || 0).toLocaleString()} tokens
+                                </span>
+                              </div>
                             </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                        <p className="text-muted-foreground">
+                          No plugins are enabled for this workspace yet. You can assign plugins later.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex justify-between items-center pt-6 border-t border-border/30">
                       <div>
-                        <p className="font-medium">Selected Skills: {agentData.skills.length}</p>
+                        <p className="font-medium">Selected Plugins: {agentData.plugins.length}</p>
                         <p className="text-sm text-muted-foreground">
-                          Agent will be created with these capabilities
+                          Agent will be created with these plugins
                         </p>
                       </div>
                     </div>
