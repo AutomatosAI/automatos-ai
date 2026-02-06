@@ -24,7 +24,7 @@ import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
-import { AgentSkills } from './agent-skills'
+import { AgentPlugins } from './agent-plugins-tab'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
 import { AgentPerformance } from './agent-performance'
@@ -162,7 +162,7 @@ export function AgentManagement() {
             Agents failed to load (backend error)
           </div>
           <div className="mt-1 text-sm text-muted-foreground">
-            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code> and <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/v1/skills</code>.
+            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code>.
           </div>
           <div className="mt-3 flex gap-2">
             <Button variant="outline" size="sm" onClick={handleRefresh}>
@@ -226,17 +226,19 @@ export function AgentManagement() {
           onValueChange={setActiveTab}
         >
           <TabsContent value="roster" className="space-y-6">
-            <AgentRoster
-              agents={agents as any[]}
-              loading={agentsLoading && !agentsError}
-              searchTerm={searchTerm}
-              statusFilter={statusFilter}
-              onAgentSelect={setSelectedAgentId}
-              onViewDetails={handleViewDetails}
-              selectedAgentId={selectedAgentId}
-              onRefresh={() => refetchAgents()}
-              setSearchTerm={setSearchTerm}
-            />
+            <div data-tour="agent-roster">
+              <AgentRoster
+                agents={agents as any[]}
+                loading={agentsLoading && !agentsError}
+                searchTerm={searchTerm}
+                statusFilter={statusFilter}
+                onAgentSelect={setSelectedAgentId}
+                onViewDetails={handleViewDetails}
+                selectedAgentId={selectedAgentId}
+                onRefresh={() => refetchAgents()}
+                setSearchTerm={setSearchTerm}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="skills" className="space-y-6">

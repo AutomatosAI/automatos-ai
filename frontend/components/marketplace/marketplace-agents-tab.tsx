@@ -228,6 +228,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                         <DropdownMenuItem
                           onClick={(e) => { e.stopPropagation(); handleApprove(e as any, agent.id) }}
                           disabled={approvingId === agent.id}
+                          title="Approve"
                         >
                           <Check className="w-4 h-4 mr-2" />
                           {approvingId === agent.id ? 'Approving...' : 'Approve'}

@@ -16,7 +16,10 @@ import {
   Shield,
   Database,
   Bot,
-  Wrench
+  Wrench,
+  Puzzle,
+  Terminal,
+  Coins
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -40,7 +43,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'react-hot-toast'
 
 // API hooks
-import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useSkills } from '@/hooks/use-agent-api'
+import { useAgent, useAgentConfig, useUpdateAgentConfig } from '@/hooks/use-agent-api'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -61,14 +64,17 @@ export function AgentConfiguration({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [configData, setConfigData] = useState<any>({})
   const [modelConfigData, setModelConfigData] = useState<any>({})
-  const [assignedSkills, setAssignedSkills] = useState<number[]>([])
   const [assignedTools, setAssignedTools] = useState<number[]>([])
+
+  // Plugin state
+  const [workspacePlugins, setWorkspacePlugins] = useState<any[]>([])
+  const [assignedPluginIds, setAssignedPluginIds] = useState<Set<string>>(new Set())
+  const [pluginsLoading, setPluginsLoading] = useState(false)
+  const [pluginsSaving, setPluginsSaving] = useState(false)
 
   // Fetch agent and configuration data
   const { data: agent, isLoading: agentLoading } = useAgent(selectedAgentId)
   const { data: agentConfig, isLoading: configLoading } = useAgentConfig(selectedAgentId)
-  const { data: availableSkills } = useSkills() // Get ALL available skills
-  const { data: agentSkills } = useAgentSkills(selectedAgentId) // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
 
   // PRD-15: Model configuration hooks
@@ -79,28 +85,55 @@ export function AgentConfiguration({
   const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools: any[] = (toolsData as any)?.data || []
 
-  // Initialize assigned skills when agent or agentSkills loads
+  // Initialize tools when agent loads
   useEffect(() => {
-    if (agentSkills && agentSkills.length > 0) {
-      const skillIds = agentSkills.map((skill: any) => skill.id)
-      console.log('Initializing assigned skills:', skillIds)
-      setAssignedSkills(skillIds)
-    } else if ((agent as any)?.skills && (agent as any).skills.length > 0) {
-      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
-      console.log('Initializing assigned skills from agent:', skillIds)
-      setAssignedSkills(skillIds)
-    } else {
-      setAssignedSkills([])
-    }
-
-    // Initialize tools
     if ((agent as any)?.tools && (agent as any).tools.length > 0) {
       const toolIds = (agent as any).tools.map((tool: any) => tool.id)
       setAssignedTools(toolIds)
     } else {
       setAssignedTools([])
     }
-  }, [agentSkills, agent])
+  }, [agent])
+
+  // Fetch workspace-enabled plugins and agent plugin assignments
+  useEffect(() => {
+    if (!selectedAgentId) return
+    let mounted = true
+    setPluginsLoading(true)
+    ;(async () => {
+      try {
+        const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+        if (!workspaceId) {
+          if (mounted) {
+            setWorkspacePlugins([])
+            setAssignedPluginIds(new Set())
+            setPluginsLoading(false)
+          }
+          return
+        }
+        const [wpRes, apRes] = await Promise.all([
+          apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' }),
+          apiClient.request<any>(`/api/agents/${selectedAgentId}/plugins`, { method: 'GET' }),
+        ])
+        if (!mounted) return
+        const wpItems = wpRes?.items || wpRes || []
+        const apItems = apRes?.items || apRes || []
+        setWorkspacePlugins(Array.isArray(wpItems) ? wpItems : [])
+        setAssignedPluginIds(new Set(
+          (Array.isArray(apItems) ? apItems : []).map((p: any) => p.plugin_id)
+        ))
+      } catch (err) {
+        console.error('Failed to fetch plugins:', err)
+        if (mounted) {
+          setWorkspacePlugins([])
+          setAssignedPluginIds(new Set())
+        }
+      } finally {
+        if (mounted) setPluginsLoading(false)
+      }
+    })()
+    return () => { mounted = false }
+  }, [selectedAgentId])
 
   // Initialize config data when agent config is loaded
   useEffect(() => {
@@ -133,17 +166,6 @@ export function AgentConfiguration({
     }
   }, [agentModelConfig])
 
-  // Initialize assigned skills when agent data loads
-  useEffect(() => {
-    if (agentSkills && Array.isArray(agentSkills)) {
-      const skillIds = agentSkills.map((skill: any) => skill.id)
-      setAssignedSkills(skillIds)
-    } else if (agent && (agent as any).skills && Array.isArray((agent as any).skills)) {
-      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
-      setAssignedSkills(skillIds)
-    }
-  }, [agentSkills, agent])
-
   // Handle form changes
   const handleConfigChange = (key: string, value: any) => {
     setConfigData((prev: any) => ({
@@ -174,16 +196,35 @@ export function AgentConfiguration({
     setHasUnsavedChanges(true)
   }
 
-  // Handle skills assignment toggle
-  const toggleSkillAssignment = (skillId: number) => {
-    setAssignedSkills((prev) => {
-      const newSkills = prev.includes(skillId)
-        ? prev.filter((id) => id !== skillId)
-        : [...prev, skillId]
-      setHasUnsavedChanges(true)
-      return newSkills
-    })
+  // Handle plugin assignment toggle (persists immediately via API)
+  const togglePluginAssignment = async (pluginId: string) => {
+    if (!selectedAgentId) return
+    const wasAssigned = assignedPluginIds.has(pluginId)
+    const newIds = new Set(assignedPluginIds)
+    if (wasAssigned) {
+      newIds.delete(pluginId)
+    } else {
+      newIds.add(pluginId)
+    }
+    setAssignedPluginIds(newIds)
+    setPluginsSaving(true)
+    try {
+      await apiClient.request(`/api/agents/${selectedAgentId}/plugins`, {
+        method: 'PUT',
+        body: { plugin_ids: Array.from(newIds) } as any,
+      })
+    } catch (err) {
+      console.error('Failed to update plugin assignment:', err)
+      setAssignedPluginIds(assignedPluginIds)
+    } finally {
+      setPluginsSaving(false)
+    }
   }
+
+  // Compute total token estimate for assigned plugins
+  const assignedTokenEstimate = workspacePlugins
+    .filter((p: any) => assignedPluginIds.has(p.plugin_id))
+    .reduce((sum: number, p: any) => sum + (p.token_estimate || 0), 0)
 
   // Handle tools assignment toggle
   const toggleToolAssignment = (toolId: number) => {
@@ -220,46 +261,8 @@ export function AgentConfiguration({
         }
       })
 
-      // 2. Handle skill assignments separately
-      // Get current skills
-      const currentSkillIds = (agent as any)?.skills?.map((s: any) => s.id) || []
-      const newSkillIds = assignedSkills
-
-      console.log('Skill assignment - Current:', currentSkillIds)
-      console.log('Skill assignment - New:', newSkillIds)
-
-      // Find skills to add and remove
-      const skillsToAdd = newSkillIds.filter((id: number) => !currentSkillIds.includes(id))
-      const skillsToRemove = currentSkillIds.filter((id: number) => !newSkillIds.includes(id))
-
-      console.log('Skills to add:', skillsToAdd)
-      console.log('Skills to remove:', skillsToRemove)
-
-      // Add new skills
-      for (const skillId of skillsToAdd) {
-        try {
-          console.log(`Adding skill ${skillId} to agent ${selectedAgentId}`)
-          const result = await apiClient.addSkillToAgent(selectedAgentId, String(skillId))
-          console.log(`Successfully added skill ${skillId}:`, result)
-        } catch (error) {
-          console.error(`Failed to add skill ${skillId}:`, error)
-          toast.error(`Failed to add skill ${skillId}`)
-        }
-      }
-
-      // Remove old skills
-      for (const skillId of skillsToRemove) {
-        try {
-          console.log(`Removing skill ${skillId} from agent ${selectedAgentId}`)
-          const result = await apiClient.removeSkillFromAgent(selectedAgentId, String(skillId))
-          console.log(`Successfully removed skill ${skillId}:`, result)
-        } catch (error) {
-          console.error(`Failed to remove skill ${skillId}:`, error)
-          toast.error(`Failed to remove skill ${skillId}`)
-        }
-      }
-
-      // 3. Save model configuration (PRD-15)
+      // 2. Save model configuration (PRD-15)
+      // Note: Plugin assignments are saved immediately via togglePluginAssignment
       if (modelConfigData && Object.keys(modelConfigData).length > 0) {
         try {
           await updateModelConfigMutation.mutateAsync({
@@ -273,7 +276,7 @@ export function AgentConfiguration({
       }
 
       toast.dismiss()
-      toast.success(`Configuration saved! Added ${skillsToAdd.length} skills, removed ${skillsToRemove.length} skills.`)
+      toast.success('Configuration saved!')
       setHasUnsavedChanges(false)
 
       // Force refresh agent data
@@ -304,16 +307,6 @@ export function AgentConfiguration({
         fallback_model_id: null
       }
       setModelConfigData(modelConfig)
-    }
-    // Reset skills to original state
-    if (agentSkills && Array.isArray(agentSkills)) {
-      const skillIds = agentSkills.map((skill: any) => skill.id)
-      setAssignedSkills(skillIds)
-    } else if (agent && (agent as any).skills && Array.isArray((agent as any).skills)) {
-      const skillIds = (agent as any).skills.map((skill: any) => skill.id)
-      setAssignedSkills(skillIds)
-    } else {
-      setAssignedSkills([])
     }
     if (agent && (agent as any).tools && Array.isArray((agent as any).tools)) {
       const toolIds = (agent as any).tools.map((tool: any) => tool.id)
@@ -728,58 +721,92 @@ export function AgentConfiguration({
           </CardContent>
         </Card>
 
-        {/* Skills Assignment */}
+        {/* Plugin Assignment */}
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Bot className="w-5 h-5" />
-              Skills Assignment
+              <Puzzle className="w-5 h-5 text-orange-400" />
+              Plugin Assignment
             </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Select skills to assign to this agent
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Select marketplace plugins to assign to this agent
+              </p>
+              {assignedPluginIds.size > 0 && (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">
+                    <Coins className="w-3 h-3 mr-1" />
+                    ~{assignedTokenEstimate.toLocaleString()} tokens
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">
+                    {assignedPluginIds.size} assigned
+                  </Badge>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            {availableSkills && availableSkills.length > 0 ? (
+            {pluginsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              </div>
+            ) : workspacePlugins.length > 0 ? (
               <div className="space-y-3 max-h-64 overflow-y-auto">
-                {availableSkills.map((skill: any) => (
-                  <div key={skill.id} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
-                    <Checkbox
-                      id={`skill-${skill.id}`}
-                      checked={assignedSkills.includes(skill.id)}
-                      onCheckedChange={() => toggleSkillAssignment(skill.id)}
-                    />
-                    <div className="flex-1">
-                      <Label htmlFor={`skill-${skill.id}`} className="cursor-pointer">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium">{skill.name}</h4>
-                            <p className="text-sm text-muted-foreground">
-                              {skill.description || 'No description available'}
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Badge variant="outline" className="text-xs">
-                              {skill.skill_type?.replace('_', ' ') || 'Unknown'}
+                {workspacePlugins.map((plugin: any) => {
+                  const isAssigned = assignedPluginIds.has(plugin.plugin_id)
+                  return (
+                    <div
+                      key={plugin.plugin_id}
+                      className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
+                        isAssigned
+                          ? 'bg-orange-500/5 border-orange-500/30'
+                          : 'bg-background/50 border-border/50'
+                      }`}
+                    >
+                      <Checkbox
+                        id={`cfg-plugin-${plugin.plugin_id}`}
+                        checked={isAssigned}
+                        onCheckedChange={() => togglePluginAssignment(plugin.plugin_id)}
+                        disabled={pluginsSaving}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <Label htmlFor={`cfg-plugin-${plugin.plugin_id}`} className="cursor-pointer">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium truncate">{plugin.name}</span>
+                            <Badge variant="outline" className="text-xs shrink-0">
+                              v{plugin.version}
                             </Badge>
-                            {skill.category && (
-                              <Badge variant="secondary" className="text-xs">
-                                {skill.category}
-                              </Badge>
-                            )}
                           </div>
-                        </div>
-                      </Label>
+                          <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                            {plugin.description || 'No description available'}
+                          </p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Terminal className="w-3 h-3" />
+                              {plugin.skills_count} skills
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Zap className="w-3 h-3" />
+                              {plugin.commands_count} commands
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Coins className="w-3 h-3" />
+                              ~{(plugin.token_estimate || 0).toLocaleString()} tokens
+                            </span>
+                          </div>
+                        </Label>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div className="text-center py-8">
-                <Bot className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No Skills Available</h3>
+                <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
                 <p className="text-muted-foreground">
-                  No skills are available for assignment at this time.
+                  No plugins are enabled for this workspace yet.
                 </p>
               </div>
             )}

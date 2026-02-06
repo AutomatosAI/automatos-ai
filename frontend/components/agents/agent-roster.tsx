@@ -131,6 +131,7 @@ interface AgentWithPerformance {
   description?: string
   created_at?: string
   skills?: Array<{ id: string; name: string }>
+  plugins?: Array<{ plugin_id: string; slug: string; name: string; skills_count: number; commands_count: number }>
   performance_metrics?: {
     success_rate?: number
     tasks_completed?: number
@@ -273,7 +274,7 @@ export function AgentRoster({
           return (
             <motion.div
               key={agent.id}
-              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300"
+              className="glass-card p-6 card-glow hover:border-primary/20 transition-all duration-300 flex flex-col h-full"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
@@ -398,24 +399,30 @@ export function AgentRoster({
                   <p className="text-xs text-muted-foreground">Tasks Completed</p>
                 </div>
                 <div>
-                  <p className="text-lg font-bold">{agent.skills ? agent.skills.length : 0}</p>
-                  <p className="text-xs text-muted-foreground">Skills</p>
+                  <p className="text-lg font-bold">{agent.plugins?.length || 0}</p>
+                  <p className="text-xs text-muted-foreground">Plugins</p>
                 </div>
               </div>
 
-              {/* Skills Preview */}
+              {/* Plugins Preview */}
               <div className="mb-4">
-                <p className="text-xs text-muted-foreground mb-2">Primary Skills</p>
+                <p className="text-xs text-muted-foreground mb-2">Plugins</p>
                 <div className="flex flex-wrap gap-1">
-                  {agent.skills && agent.skills.slice(0, 3).map((skill: any) => (
-                    <Badge key={skill.id} variant="secondary" className="text-xs">
-                      {skill.name ? skill.name.replace('_', ' ') : 'Unknown Skill'}
-                    </Badge>
-                  ))}
-                  {agent.skills && agent.skills.length > 3 && (
-                    <Badge variant="secondary" className="text-xs">
-                      +{agent.skills.length - 3} more
-                    </Badge>
+                  {agent.plugins && agent.plugins.length > 0 ? (
+                    <>
+                      {agent.plugins.slice(0, 3).map((plugin: any) => (
+                        <Badge key={plugin.plugin_id} variant="secondary" className="text-xs">
+                          {plugin.name}
+                        </Badge>
+                      ))}
+                      {agent.plugins.length > 3 && (
+                        <Badge variant="secondary" className="text-xs">
+                          +{agent.plugins.length - 3} more
+                        </Badge>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">No plugins assigned</span>
                   )}
                 </div>
               </div>
@@ -445,7 +452,7 @@ export function AgentRoster({
               )}
 
               {/* Created Date */}
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground mt-auto pt-3">
                 Created: {agent.created_at ? new Date(agent.created_at).toLocaleDateString() : 'Unknown'}
               </p>
             </motion.div>

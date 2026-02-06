@@ -81,7 +81,7 @@ async def _execute_step(
         }
 
     # 1. System prompt — build from agent's identity and skills
-    system_prompt = _build_system_prompt(agent, db)
+    system_prompt = await _build_system_prompt(agent, db)
     messages = [{"role": "system", "content": system_prompt}]
 
     # 2. Hints — same service, same call signature as chatbot (service.py:1314-1325)
@@ -181,12 +181,15 @@ async def _execute_step(
     }
 
 
-def _build_system_prompt(agent: Agent, db: Session) -> str:
+async def _build_system_prompt(agent: Agent, db: Session) -> str:
     """
     Build a system prompt for the agent from its DB record.
 
     Simplified version of agent_factory._build_agent_system_prompt —
     loads identity + skills without the full factory machinery.
+
+    If the agent has assigned plugins, loads plugin context (Tier 1 + Tier 2)
+    and skips skill loading entirely.
     """
     sections = [
         f"# Agent: {agent.name}",
@@ -196,8 +199,45 @@ def _build_system_prompt(agent: Agent, db: Session) -> str:
     if agent.description:
         sections.append(agent.description)
 
-    # Load skills if assigned
-    if getattr(agent, 'skills', None):
+    # PRD-42: Inject persona
+    try:
+        if getattr(agent, 'use_custom_persona', False) and agent.custom_persona_prompt:
+            sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
+            logger.info(f"[recipe] Loaded custom persona for agent {agent.id}")
+        elif getattr(agent, 'persona_id', None) and getattr(agent, 'persona', None):
+            persona_prompt = agent.persona.system_prompt or ""
+            if persona_prompt:
+                sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
+                logger.info(f"[recipe] Loaded persona '{agent.persona.name}' for agent {agent.id}")
+    except Exception as e:
+        logger.warning(f"[recipe] Failed to load persona for agent {agent.id}: {e}")
+
+    # PRD-42: Load plugins — if present, skip skills entirely
+    has_plugins = False
+    try:
+        from core.services.plugin_context_service import PluginContextService
+
+        plugin_svc = PluginContextService(db)
+        plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
+        if plugin_rows:
+            has_plugins = True
+            tier1 = plugin_svc.build_tier1_summary(plugin_rows)
+            tier2 = await plugin_svc.build_tier2_content(
+                plugin_rows,
+                task_context=agent.description,
+            )
+            sections.append(tier1)
+            if tier2:
+                sections.append(tier2)
+            logger.info(
+                "[recipe] Loaded plugin context for agent %s (%d plugins)",
+                agent.id, len(plugin_rows),
+            )
+    except Exception as e:
+        logger.warning(f"[recipe] Failed to load plugins for agent {agent.id}: {e}")
+
+    # Load skills if assigned (skipped when plugins are present)
+    if not has_plugins and getattr(agent, 'skills', None):
         sections.append("\n## Your Specialized Skills\n")
         try:
             from modules.agents.services.skill_loader import get_skill_loader

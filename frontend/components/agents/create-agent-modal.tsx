@@ -10,6 +10,11 @@ import {
   ChevronUp,
   User,
   PenLine,
+  Puzzle,
+  Terminal,
+  Zap,
+  Coins,
+  Shield,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
@@ -25,7 +30,7 @@ import { Slider } from '@/components/ui/slider'
 import { useTools } from '@/hooks/use-tools-api'
 
 // API hooks
-import { useCreateAgent, useSkills } from '@/hooks/use-agent-api'
+import { useCreateAgent } from '@/hooks/use-agent-api'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -54,8 +59,6 @@ interface CreateAgentModalProps {
 
 import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP } from '@/lib/agent-constants'
 
-// Skills will be loaded dynamically from the API
-
 export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalProps) {
   const [step, setStep] = useState(1)
   const [agentData, setAgentData] = useState({
@@ -63,7 +66,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     category: '',  // Changed from 'type' to 'category'
     description: '',
     tags: '',
-    skills: [] as string[],
+    plugins: [] as string[],
     tools: [] as number[],
     specializations: [] as string[],
     // Marketplace field - just the toggle
@@ -91,13 +94,40 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const [personaCategoryFilter, setPersonaCategoryFilter] = useState<string>('all')
   const [expandedPersonaId, setExpandedPersonaId] = useState<string | null>(null)
 
+  // Plugin state
+  const [workspacePlugins, setWorkspacePlugins] = useState<any[]>([])
+  const [pluginsLoading, setPluginsLoading] = useState(false)
+
   // API hooks
   const createAgentMutation = useCreateAgent()
-  const { data: availableSkillsData = [], isLoading: skillsLoading } = useSkills()
   const { data: toolsResponse, isLoading: toolsLoading } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
+
+  // Fetch workspace-enabled plugins when modal opens
+  useEffect(() => {
+    if (!open) return
+    let mounted = true
+    setPluginsLoading(true)
+    const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
+    if (!workspaceId) {
+      setWorkspacePlugins([])
+      setPluginsLoading(false)
+      return
+    }
+    apiClient.request<any>(`/api/workspaces/${workspaceId}/plugins`, { method: 'GET' })
+      .then((data) => {
+        if (!mounted) return
+        const items = data?.items || data || []
+        setWorkspacePlugins(Array.isArray(items) ? items : [])
+      })
+      .catch(() => {
+        if (mounted) setWorkspacePlugins([])
+      })
+      .finally(() => { if (mounted) setPluginsLoading(false) })
+    return () => { mounted = false }
+  }, [open])
 
   // Fetch personas when modal opens (US-021)
   useEffect(() => {
@@ -105,7 +135,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     setPersonasLoading(true)
     apiClient.request<any>('/api/personas')
       .then((data) => {
-        const list = Array.isArray(data) ? data : (data?.personas || data?.data || [])
+        const list = Array.isArray(data) ? data : (data?.items || data?.personas || data?.data || [])
         setPersonas(list)
       })
       .catch((err) => {
@@ -125,12 +155,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     }
   }, [personaMode, selectedPersonaId, personas, customPersonaPrompt])
 
-  const handleSkillToggle = (skill: string) => {
+  const handlePluginToggle = (pluginId: string) => {
     setAgentData(prev => ({
       ...prev,
-      skills: prev.skills.includes(skill)
-        ? prev.skills.filter(s => s !== skill)
-        : [...prev.skills, skill]
+      plugins: prev.plugins.includes(pluginId)
+        ? prev.plugins.filter(p => p !== pluginId)
+        : [...prev.plugins, pluginId]
     }))
   }
 
@@ -174,7 +204,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         agent_type: dbAgentType,
         marketplace_category: agentData.category, // Preserve original UI category for round-trip
         description: agentData.description || '',
-        skill_ids: agentData.skills, // Backend expects skill_ids array
         tool_ids: agentData.tools, // Agent app assignments (Composio apps)
         tags,
         configuration: {
@@ -227,6 +256,19 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             console.error('Failed to set persona:', error)
           }
         }
+
+        // Assign plugins if any selected
+        if (agentData.plugins.length > 0) {
+          try {
+            await apiClient.request(`/api/agents/${newAgent.id}/plugins`, {
+              method: 'PUT',
+              body: { plugin_ids: agentData.plugins } as any,
+            })
+            console.log('Plugins assigned successfully')
+          } catch (error) {
+            console.error('Failed to assign plugins:', error)
+          }
+        }
       }
 
       toast.success(`Agent "${agentData.name}" created successfully!`)
@@ -244,7 +286,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             metadata: {
               agent_id: newAgent.id,
               agent_type: agentData.category,
-              skills: agentData.skills,
+              plugins: agentData.plugins,
               tools: agentData.tools
             }
           }
@@ -279,7 +321,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
         category: '',
         description: '',
         tags: '',
-        skills: [],
+        plugins: [],
         tools: [],
         specializations: [],
         shareToMarketplace: false
@@ -362,7 +404,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       4. Tools
                     </TabsTrigger>
                     <TabsTrigger value="step-5" disabled={step < 5}>
-                      5. Skills
+                      5. Plugins
                     </TabsTrigger>
                   </TabsList>
 
@@ -423,6 +465,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           <Label htmlFor="agent-name">Agent Name <span className="text-[hsl(var(--destructive))]">*</span></Label>
                           <Input
                             id="agent-name"
+                            data-tour="agent-name-input"
                             placeholder="Enter agent name..."
                             value={agentData.name}
                             onChange={(e) => setAgentData(prev => ({ ...prev, name: e.target.value }))}
@@ -434,6 +477,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           <Label htmlFor="agent-description">Description</Label>
                           <Textarea
                             id="agent-description"
+                            data-tour="agent-description-input"
                             placeholder="Describe the agent's purpose and capabilities..."
                             value={agentData.description}
                             onChange={(e) => setAgentData(prev => ({ ...prev, description: e.target.value }))}
@@ -909,7 +953,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     </Card>
                   </TabsContent>
 
-                  {/* Step 5: Skills & Settings */}
+                  {/* Step 5: Plugins */}
                   <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
@@ -920,48 +964,84 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </CardHeader>
                       <CardContent>
 
-                    <div>
-                      <Label className="text-base font-medium">Available Skills</Label>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Select the skills your agent should possess
-                      </p>
-                      {skillsLoading ? (
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                            {[1, 2, 3, 4, 5, 6].map((i) => (
-                              <div key={i} className="p-3 rounded-lg border border-border/50 animate-pulse bg-secondary/20">
-                                <div className="h-5 w-20 bg-secondary rounded" />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                          {availableSkillsData.map((skill) => (
+                    {pluginsLoading ? (
+                      <div className="space-y-2">
+                        {[1, 2, 3].map((i) => (
+                          <div key={i} className="h-20 bg-secondary/20 animate-pulse rounded-lg" />
+                        ))}
+                      </div>
+                    ) : workspacePlugins.length > 0 ? (
+                      <div className="space-y-3">
+                        {workspacePlugins.map((plugin: any) => {
+                          const isSelected = agentData.plugins.includes(plugin.plugin_id)
+                          return (
                             <motion.div
-                              key={skill.id}
-                              className={`p-3 rounded-lg border cursor-pointer transition-all duration-200 ${agentData.skills.includes(skill.id)
-                                ? 'border-primary bg-primary/10'
-                                : 'border-border/50 hover:border-primary/30'
-                                }`}
-                              onClick={() => handleSkillToggle(skill.id)}
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
+                              key={plugin.plugin_id}
+                              className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-orange-500/50 bg-orange-500/5'
+                                  : 'border-border/50 hover:border-primary/30'
+                              }`}
+                              onClick={() => handlePluginToggle(plugin.plugin_id)}
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.99 }}
                             >
-                              <span className="text-sm font-medium">
-                                {skill.name}
-                              </span>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Puzzle className="w-5 h-5 text-orange-400 shrink-0" />
+                                  <span className="font-medium truncate">{plugin.name}</span>
+                                  <Badge variant="outline" className="text-xs shrink-0">
+                                    v{plugin.version}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {plugin.security_status === 'safe' && (
+                                    <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                      <Shield className="w-3 h-3 mr-1" />
+                                      Verified
+                                    </Badge>
+                                  )}
+                                  {isSelected && (
+                                    <Badge className="bg-primary text-primary-foreground">Selected</Badge>
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                {plugin.description || 'No description available'}
+                              </p>
+                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Terminal className="w-3 h-3" />
+                                  {plugin.skills_count} skills
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Zap className="w-3 h-3" />
+                                  {plugin.commands_count} commands
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Coins className="w-3 h-3" />
+                                  ~{(plugin.token_estimate || 0).toLocaleString()} tokens
+                                </span>
+                              </div>
                             </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                        <p className="text-muted-foreground">
+                          No plugins are enabled for this workspace yet. You can assign plugins later.
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex justify-between items-center pt-6 border-t border-border/30">
                       <div>
-                        <p className="font-medium">Selected Skills: {agentData.skills.length}</p>
+                        <p className="font-medium">Selected Plugins: {agentData.plugins.length}</p>
                         <p className="text-sm text-muted-foreground">
-                          Agent will be created with these capabilities
+                          Agent will be created with these plugins
                         </p>
                       </div>
                     </div>
@@ -995,6 +1075,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
+                      data-tour="save-agent-btn"
                       disabled={!agentData.name || !agentData.category || (createAgentMutation as any).isLoading}
                       variant="outline"
                     >

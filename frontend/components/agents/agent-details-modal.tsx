@@ -48,7 +48,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useAgent, useAgentStats, useAgentLogs, useAgentPerformance, useAgentSkills } from '@/hooks/use-agent-api'
+import { useAgent, useAgentStats, useAgentLogs, useAgentPerformance } from '@/hooks/use-agent-api'
+import { apiClient } from '@/lib/api-client'
 import { useSubmitToMarketplace } from '@/hooks/use-marketplace-api'
 
 interface AgentDetailsModalProps {
@@ -137,13 +138,30 @@ export function AgentDetailsModal({
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentPerformance } = useAgentPerformance(agentId?.toString() || '')
   const { data: agentLogs } = useAgentLogs(agentId?.toString() || '')
-  // Note: Skills should be included in agent data, but fallback to separate API call if needed
-  const { data: agentSkills } = useAgentSkills(agentId?.toString() || '')
-
-  // Use skills from agent data if available, otherwise use separate API call
-  const skills = agent?.skills || agentSkills || []
+  // Plugin state for the Plugins tab
+  const [plugins, setPlugins] = useState<any[]>([])
+  const [pluginsLoading, setPluginsLoading] = useState(false)
 
   const error = agentError?.message || null
+
+  // Fetch assigned plugins when modal opens
+  useEffect(() => {
+    if (!open || !agentId) return
+    let mounted = true
+    setPluginsLoading(true)
+    apiClient.request<any>(`/api/agents/${agentId}/plugins`, { method: 'GET' })
+      .then((data) => {
+        if (!mounted) return
+        const items = Array.isArray(data) ? data : (data?.items || data?.plugins || [])
+        setPlugins(items)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch agent plugins:', err)
+        if (mounted) setPlugins([])
+      })
+      .finally(() => { if (mounted) setPluginsLoading(false) })
+    return () => { mounted = false }
+  }, [open, agentId])
 
   // Marketplace submission
   const { mutate: submitToMarketplace, isPending: isSubmitting } = useSubmitToMarketplace()
@@ -312,9 +330,9 @@ export function AgentDetailsModal({
                     <Activity className="w-4 h-4" />
                     <span>Workload</span>
                   </TabsTrigger>
-                  <TabsTrigger value="skills" className="flex items-center space-x-2">
-                    <Brain className="w-4 h-4" />
-                    <span>Skills</span>
+                  <TabsTrigger value="plugins" className="flex items-center space-x-2">
+                    <Puzzle className="w-4 h-4" />
+                    <span>Plugins</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -408,7 +426,7 @@ export function AgentDetailsModal({
                           <p className="text-2xl font-bold text-primary">
                             {skills?.length || 0}
                           </p>
-                          <p className="text-sm text-muted-foreground">Skills</p>
+                          <p className="text-sm text-muted-foreground">Plugins</p>
                         </div>
                       </div>
                     </CardContent>
@@ -574,13 +592,20 @@ export function AgentDetailsModal({
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="skills" className="space-y-6 mt-6">
+                <TabsContent value="plugins" className="space-y-6 mt-6">
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
-                      <CardTitle className="text-base">Assigned Skills</CardTitle>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Puzzle className="h-5 w-5 text-orange-400" />
+                        Assigned Plugins
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {skills && skills.length > 0 ? (
+                      {pluginsLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                        </div>
+                      ) : plugins && plugins.length > 0 ? (
                         <div className="space-y-4">
                           {skills.map((skill: any) => (
                             <div key={skill.id} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
@@ -593,25 +618,25 @@ export function AgentDetailsModal({
                                   </p>
                                 </div>
                               </div>
-                              <div className="flex items-center space-x-2">
-                                <Badge variant="outline" className="text-xs">
-                                  {skill.category || skill.skill_type || 'General'}
-                                </Badge>
-                                {skill.difficulty && (
-                                  <Badge variant="secondary" className="text-xs">
-                                    {skill.difficulty}
-                                  </Badge>
-                                )}
+                              <div className="flex items-center gap-3 shrink-0 ml-4 text-xs text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Terminal className="w-3 h-3" />
+                                  {plugin.skills_count || 0} skills
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Zap className="w-3 h-3" />
+                                  {plugin.commands_count || 0} cmds
+                                </span>
                               </div>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div className="text-center py-8">
-                          <Brain className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                          <h3 className="text-lg font-semibold mb-2">No Skills Assigned</h3>
+                          <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Plugins Assigned</h3>
                           <p className="text-muted-foreground">
-                            This agent doesn't have any skills assigned yet.
+                            This agent doesn't have any plugins assigned yet. Use the configuration modal to assign plugins.
                           </p>
                         </div>
                       )}

@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
+import { useUser } from '@clerk/nextjs'
 import { useInstallRecipeFromMarketplace } from '@/hooks/use-recipe-api'
 import { ViewRecipeModal } from '@/components/workflows/view-recipe-modal'
 
@@ -27,9 +28,52 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
   const [installingRecipeId, setInstallingRecipeId] = useState<number | null>(null)
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null)
   const [showViewModal, setShowViewModal] = useState(false)
+  const [approvingId, setApprovingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const { toast } = useToast()
+  const { user } = useUser()
   const queryClient = useQueryClient()
   const installMutation = useInstallRecipeFromMarketplace()
+
+  // Admin check (same pattern as agents tab)
+  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
+
+  const handleApprove = async (e: React.MouseEvent, recipeId: number) => {
+    e.stopPropagation()
+    setApprovingId(recipeId)
+    try {
+      await apiClient.post(`/api/marketplace/items/${recipeId}/approve`)
+      toast({ title: 'Recipe approved and published to marketplace!' })
+      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+    } catch (error: any) {
+      toast({
+        title: 'Failed to approve recipe',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleDeleteRecipe = async (e: React.MouseEvent, recipeId: number) => {
+    e.stopPropagation()
+    if (!confirm('Are you sure you want to delete this marketplace recipe?')) return
+    setDeletingId(recipeId)
+    try {
+      await apiClient.delete(`/api/marketplace/items/${recipeId}`)
+      toast({ title: 'Recipe removed from marketplace' })
+      queryClient.invalidateQueries({ queryKey: ['marketplaceRecipes'] })
+    } catch (error: any) {
+      toast({
+        title: 'Failed to delete recipe',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const { data: recipes = [], isLoading } = useQuery({
     queryKey: ['marketplaceRecipes', selectedType, searchQuery],
@@ -154,6 +198,11 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                         <h3 className="font-semibold text-foreground line-clamp-1">
                           {recipe.name}
                         </h3>
+                        {isAdmin && !recipe.is_approved && (
+                          <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400">
+                            Pending
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         by {recipe.creator_name || 'Unknown'}
@@ -192,8 +241,8 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
                       {recipe.marketplace_category}
                     </Badge>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {/* Stats Row */}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">

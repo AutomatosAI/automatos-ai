@@ -118,6 +118,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   return (
     <motion.div
+      data-tour="sidebar"
       className={cn(
         'fixed left-0 top-0 z-40 h-screen glass-card border-r border-primary/15 bg-background/25 backdrop-blur-xl shadow-[0_0_80px_hsla(var(--primary)/0.06)] transition-all duration-300',
         collapsed ? 'w-16' : 'w-64'
@@ -207,6 +208,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <Link
                 href={item.href}
                 onClick={() => onToggle(true)}
+                data-tour={item.href === '/agents' ? 'nav-agents' : undefined}
                 className={cn(
                   'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
                   isActive

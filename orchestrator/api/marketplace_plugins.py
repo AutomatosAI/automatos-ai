@@ -71,6 +71,12 @@ class PluginSummaryOut(BaseModel):
         from_attributes = True
 
 
+class PluginContentItem(BaseModel):
+    """A skill, command, or agent inside a plugin."""
+    name: str
+    description: Optional[str] = None
+
+
 class PluginDetailOut(BaseModel):
     id: str
     slug: str
@@ -98,6 +104,10 @@ class PluginDetailOut(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     manifest: Optional[Dict[str, Any]] = None
+    # Enriched content lists extracted from manifest
+    skills: List[PluginContentItem] = Field(default_factory=list)
+    commands: List[PluginContentItem] = Field(default_factory=list)
+    agents: List[PluginContentItem] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -108,6 +118,42 @@ class PluginContentOut(BaseModel):
     slug: str
     version: str
     files: Dict[str, str] = Field(default_factory=dict, description="Map of file path to content")
+
+
+# ===================================================================
+# Helpers
+# ===================================================================
+
+def _extract_content_items(manifest: Optional[Dict], key: str) -> List[PluginContentItem]:
+    """Extract named content items (skills, commands, agents) from a manifest dict.
+
+    Items in the manifest can be plain strings (filenames) or dicts with name/description.
+    We normalise them all into PluginContentItem objects with human-friendly names.
+    """
+    if not manifest:
+        return []
+    contents = manifest.get("contents", {})
+    items = contents.get(key, [])
+    if not isinstance(items, list):
+        return []
+
+    result: List[PluginContentItem] = []
+    for item in items:
+        if isinstance(item, dict):
+            name = item.get("name", item.get("slug", ""))
+            desc = item.get("description")
+        elif isinstance(item, str):
+            # Strip file extension and convert kebab-case to title
+            name = item.rsplit(".", 1)[0] if "." in item else item
+            desc = None
+        else:
+            continue
+        if name:
+            result.append(PluginContentItem(
+                name=name.replace("-", " ").replace("_", " ").title(),
+                description=desc,
+            ))
+    return result
 
 
 # ===================================================================
@@ -134,13 +180,16 @@ async def list_plugins(
             MarketplacePlugin.is_active == True,
         )
 
-        # Category filter (by slug)
+        # Category filter (by slug) — return empty set if category not found
         if category:
             cat = db.query(PluginCategory).filter(
                 PluginCategory.slug == category,
             ).first()
             if cat:
                 query = query.filter(MarketplacePlugin.category_id == cat.id)
+            else:
+                # Unknown category → return nothing rather than ignoring the filter
+                query = query.filter(MarketplacePlugin.id == None)
 
         # Search filter
         if search:
@@ -316,6 +365,9 @@ async def get_plugin_detail(
             created_at=plugin.created_at.isoformat() if plugin.created_at else None,
             updated_at=plugin.updated_at.isoformat() if plugin.updated_at else None,
             manifest=manifest,
+            skills=_extract_content_items(manifest, "skills"),
+            commands=_extract_content_items(manifest, "commands"),
+            agents=_extract_content_items(manifest, "agents"),
         )
 
     except HTTPException:

@@ -46,6 +46,11 @@ import { apiClient } from '@/lib/api-client'
 // Types
 // ===================================================================
 
+interface ContentItem {
+  name: string
+  description?: string | null
+}
+
 interface PluginDetail {
   id: string
   slug: string
@@ -72,17 +77,11 @@ interface PluginDetail {
   license: string | null
   created_at: string | null
   updated_at: string | null
-  manifest: {
-    name?: string
-    description?: string
-    version?: string
-    contents?: {
-      skills?: Array<{ name: string; description?: string }>
-      commands?: Array<{ name: string; description?: string }>
-      agents?: Array<{ name: string; description?: string }>
-      hooks?: Array<{ name: string; description?: string }>
-    }
-  } | null
+  manifest: Record<string, any> | null
+  // Enriched content lists from API
+  skills: ContentItem[]
+  commands: ContentItem[]
+  agents: ContentItem[]
 }
 
 interface MarketplacePluginDetailModalProps {
@@ -150,9 +149,10 @@ export function MarketplacePluginDetailModal({
 
   if (!open) return null
 
-  // Extract manifest contents
-  const skills = plugin?.manifest?.contents?.skills || []
-  const commands = plugin?.manifest?.contents?.commands || []
+  // Content lists come from enriched API fields (not raw manifest)
+  const skills = plugin?.skills || []
+  const commands = plugin?.commands || []
+  const agents = plugin?.agents || []
 
   const securityBadge = (status: string | null) => {
     switch (status) {
@@ -305,8 +305,8 @@ export function MarketplacePluginDetailModal({
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
                         <div className="text-xl font-bold text-primary">~{plugin.token_estimate}</div>
                         <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                          <Coins className="w-3 h-3" />
-                          Tokens
+                          <Cpu className="w-3 h-3" />
+                          Agents
                         </div>
                       </div>
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
@@ -369,6 +369,36 @@ export function MarketplacePluginDetailModal({
                                 {cmd.description && (
                                   <p className="text-xs text-muted-foreground mt-1">
                                     {cmd.description}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Included Agents */}
+                    {agents.length > 0 && (
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold flex items-center gap-2">
+                          <Cpu className="w-4 h-4" />
+                          Included Agents ({agents.length})
+                        </h3>
+                        <div className="space-y-2">
+                          {agents.map((agent, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-start p-3 rounded-lg border border-white/5 bg-secondary/10"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-sm flex items-center gap-2">
+                                  <Cpu className="w-3 h-3 text-orange-400 shrink-0" />
+                                  {agent.name}
+                                </div>
+                                {agent.description && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    {agent.description}
                                   </p>
                                 )}
                               </div>

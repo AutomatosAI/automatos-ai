@@ -3,7 +3,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Search,
   Puzzle,
   CheckCircle,
   Loader2,
@@ -11,7 +10,7 @@ import {
   Download,
   Terminal,
   Zap,
-  Coins,
+  Cpu,
   ArrowUpDown,
   MoreVertical,
   Eye,
@@ -36,7 +35,9 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { apiClient } from '@/lib/api-client'
+import { useUser } from '@clerk/nextjs'
 import { MarketplacePluginDetailModal } from './marketplace-plugin-detail-modal'
+import { GitHubImportModal } from './github-import-modal'
 
 // ===================================================================
 // Types
@@ -59,6 +60,7 @@ interface PluginSummary {
   enable_count: number
   is_featured: boolean
   security_status: string | null
+  approval_status: string | null
   original_author: string | null
   license: string | null
   created_at: string | null
@@ -84,6 +86,10 @@ interface MarketplacePluginsTabProps {
 
 export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProps) {
   const { toast } = useToast()
+  const { user } = useUser()
+
+  // Admin check (same pattern as agents tab)
+  const isAdmin = user?.emailAddresses?.[0]?.emailAddress?.includes('automatos.app') || false
 
   // State
   const [plugins, setPlugins] = useState<PluginSummary[]>([])
@@ -95,6 +101,10 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   const [isLoading, setIsLoading] = useState(true)
   const [enablingId, setEnablingId] = useState<string | null>(null)
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   // Get workspace ID from localStorage (same pattern as api-client.ts)
   const getWorkspaceId = useCallback((): string | null => {
@@ -134,34 +144,127 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
     fetchEnabledPlugins()
   }, [getWorkspaceId])
 
-  // Fetch plugins
-  useEffect(() => {
-    async function fetchPlugins() {
-      setIsLoading(true)
-      try {
-        const params: Record<string, any> = {
-          sort: sortBy,
-          limit: 100,
-        }
-        if (selectedCategory !== 'all') {
-          params.category = selectedCategory
-        }
-
-        const data: any = await apiClient.get('/api/marketplace/plugins', params)
-        const items: PluginSummary[] = data?.items || []
-
-        // Separate featured plugins
-        const featured = items.filter((p) => p.is_featured)
-        setFeaturedPlugins(featured)
-        setPlugins(items)
-      } catch (err) {
-        console.error('Failed to fetch plugins:', err)
-      } finally {
-        setIsLoading(false)
+  // Fetch plugins (+ pending for admins)
+  const fetchAllPlugins = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const params: Record<string, any> = {
+        sort: sortBy,
+        limit: 100,
       }
+      if (selectedCategory !== 'all') {
+        params.category = selectedCategory
+      }
+
+      const data: any = await apiClient.get('/api/marketplace/plugins', params)
+      let items: PluginSummary[] = data?.items || []
+
+      // Admin: also fetch pending plugins and merge
+      if (isAdmin) {
+        try {
+          const pendingData: any = await apiClient.get('/api/admin/plugins/pending', { limit: 100 })
+          const pendingItems: any[] = pendingData?.items || []
+          const existingIds = new Set(items.map((p) => p.id))
+          for (const p of pendingItems) {
+            if (!existingIds.has(p.id)) {
+              items.push({
+                id: p.id,
+                slug: p.slug,
+                name: p.name,
+                version: p.version,
+                description: p.description,
+                category_id: null,
+                category_name: null,
+                tags: [],
+                skills_count: 0,
+                commands_count: 0,
+                agents_count: 0,
+                hooks_count: 0,
+                token_estimate: 0,
+                enable_count: 0,
+                is_featured: false,
+                security_status: p.security_status,
+                approval_status: 'pending',
+                original_author: null,
+                license: null,
+                created_at: p.created_at,
+              })
+            }
+          }
+        } catch {
+          // Non-fatal: admin pending fetch failed
+        }
+      }
+
+      // Separate featured plugins
+      const featured = items.filter((p) => p.is_featured)
+      setFeaturedPlugins(featured)
+      setPlugins(items)
+    } catch (err) {
+      console.error('Failed to fetch plugins:', err)
+    } finally {
+      setIsLoading(false)
     }
-    fetchPlugins()
-  }, [selectedCategory, sortBy])
+  }, [selectedCategory, sortBy, isAdmin])
+
+  useEffect(() => {
+    fetchAllPlugins()
+  }, [fetchAllPlugins])
+
+  // Admin action handlers
+  const handleApprove = async (pluginId: string) => {
+    setApprovingId(pluginId)
+    try {
+      await apiClient.post(`/api/admin/plugins/${pluginId}/approve`)
+      toast({ title: 'Plugin approved and published to marketplace!' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to approve plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleDeactivate = async (pluginId: string) => {
+    setDeactivatingId(pluginId)
+    try {
+      await apiClient.post(`/api/admin/plugins/${pluginId}/deactivate`)
+      toast({ title: 'Plugin deactivated' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to deactivate plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeactivatingId(null)
+    }
+  }
+
+  const handleDelete = async (pluginId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this plugin? This cannot be undone.')) {
+      return
+    }
+    setDeletingId(pluginId)
+    try {
+      await apiClient.delete(`/api/admin/plugins/${pluginId}`)
+      toast({ title: 'Plugin deleted permanently' })
+      fetchAllPlugins()
+    } catch (error: any) {
+      toast({
+        title: 'Failed to delete plugin',
+        description: error?.message || 'An error occurred',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   // Client-side search filter
   const filteredPlugins = useMemo(() => {
@@ -427,6 +530,13 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
                 isEnabling={enablingId === plugin.id}
                 onEnable={() => handleEnable(plugin.id, plugin.name)}
                 onClick={() => setSelectedPluginId(plugin.id)}
+                isAdmin={isAdmin}
+                isApproving={approvingId === plugin.id}
+                isDeleting={deletingId === plugin.id}
+                isDeactivating={deactivatingId === plugin.id}
+                onApprove={() => handleApprove(plugin.id)}
+                onDeactivate={() => handleDeactivate(plugin.id)}
+                onDelete={() => handleDelete(plugin.id)}
               />
             ))}
           </AnimatePresence>
@@ -452,6 +562,15 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           }
         }}
       />
+
+      {/* GitHub Import Modal (admin only) */}
+      {isAdmin && (
+        <GitHubImportModal
+          open={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImportComplete={fetchAllPlugins}
+        />
+      )}
     </div>
   )
 }
@@ -527,14 +646,24 @@ function FeaturedPluginCard({
         </p>
 
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1">
-            <Terminal className="w-3 h-3" />
-            <span>{plugin.skills_count} skills</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Coins className="w-3 h-3" />
-            <span>~{plugin.token_estimate} tokens</span>
-          </div>
+          {plugin.skills_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Terminal className="w-3 h-3" />
+              <span>{plugin.skills_count} skills</span>
+            </div>
+          )}
+          {plugin.commands_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3" />
+              <span>{plugin.commands_count} cmds</span>
+            </div>
+          )}
+          {plugin.agents_count > 0 && (
+            <div className="flex items-center gap-1">
+              <Cpu className="w-3 h-3" />
+              <span>{plugin.agents_count} agents</span>
+            </div>
+          )}
           <div className="flex items-center gap-1">
             <Download className="w-3 h-3" />
             <span>{plugin.enable_count}</span>
@@ -557,6 +686,13 @@ interface PluginCardProps {
   isEnabling: boolean
   onEnable: () => void
   onClick: () => void
+  isAdmin?: boolean
+  isApproving?: boolean
+  isDeleting?: boolean
+  isDeactivating?: boolean
+  onApprove?: () => void
+  onDeactivate?: () => void
+  onDelete?: () => void
 }
 
 function PluginCard({
@@ -566,7 +702,16 @@ function PluginCard({
   isEnabling,
   onEnable,
   onClick,
+  isAdmin,
+  isApproving,
+  isDeleting,
+  isDeactivating,
+  onApprove,
+  onDeactivate,
+  onDelete,
 }: PluginCardProps) {
+  const isPending = plugin.approval_status === 'pending'
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -655,18 +800,24 @@ function PluginCard({
 
           {/* Stats Row */}
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1" title="Skills">
-              <Terminal className="w-3 h-3" />
-              <span>{plugin.skills_count}</span>
-            </div>
-            <div className="flex items-center gap-1" title="Commands">
-              <Zap className="w-3 h-3" />
-              <span>{plugin.commands_count}</span>
-            </div>
-            <div className="flex items-center gap-1" title="Token estimate">
-              <Coins className="w-3 h-3" />
-              <span>~{plugin.token_estimate}</span>
-            </div>
+            {plugin.skills_count > 0 && (
+              <div className="flex items-center gap-1" title="Skills">
+                <Terminal className="w-3 h-3" />
+                <span>{plugin.skills_count}</span>
+              </div>
+            )}
+            {plugin.commands_count > 0 && (
+              <div className="flex items-center gap-1" title="Commands">
+                <Zap className="w-3 h-3" />
+                <span>{plugin.commands_count}</span>
+              </div>
+            )}
+            {plugin.agents_count > 0 && (
+              <div className="flex items-center gap-1" title="Agents">
+                <Cpu className="w-3 h-3" />
+                <span>{plugin.agents_count}</span>
+              </div>
+            )}
             <div className="flex items-center gap-1 ml-auto" title="Enabled by workspaces">
               <Download className="w-3 h-3" />
               <span>{plugin.enable_count}</span>

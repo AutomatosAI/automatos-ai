@@ -14,7 +14,6 @@ import {
   Info,
   Zap,
   Shield,
-  Brain,
   Database,
   Network,
   Clock,
@@ -88,15 +87,6 @@ interface AgentConfiguration {
     logging_level?: 'debug' | 'info' | 'warning' | 'error'
     performance_monitoring?: boolean
   }
-  available_skills?: Array<{
-    id: number
-    name: string
-    description?: string
-    skill_type: string
-    category?: string
-    is_active: boolean
-    is_assigned?: boolean
-  }>
 }
 
 import { AGENT_CATEGORIES, CATEGORY_TO_DB_MAP, DB_TO_CATEGORY_MAP } from '@/lib/agent-constants'
@@ -118,18 +108,11 @@ export function AgentConfigurationModal({
   // Use real API hooks
   const { data: agent, isLoading: loading, error: agentError } = useAgent(agentId?.toString() || '')
   const { data: agentConfig } = useAgentConfig(agentId?.toString() || '')
-  // PRD-22: Load available skills from Skills API
-  const { listSkills } = useSkillsApi()
-  const [availableSkills, setAvailableSkills] = useState<any[]>([])
-  const { data: agentSkills } = useAgentSkills(agentId?.toString() || '') // Get agent's current skills
   const updateConfigMutation = useUpdateAgentConfig()
 
   // PRD-15: Model configuration hooks
   const { data: agentModelConfig } = useAgentModelConfig(agentId)
   const updateModelConfigMutation = useUpdateAgentModelConfig()
-  const addSkillMutation = useAddSkillToAgent()
-  const removeSkillMutation = useRemoveSkillFromAgent()
-
   // Tools API
   const { data: toolsData } = useTools({ status: 'active', limit: 100 })
   const availableTools = toolsData?.data || []
@@ -156,25 +139,6 @@ export function AgentConfigurationModal({
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
-
-  // PRD-22: Fetch skills once when modal opens
-  useEffect(() => {
-    if (!open) return
-    let mounted = true
-      ; (async () => {
-        try {
-          const data = await listSkills({ limit: 200 })
-          const items = Array.isArray(data) ? data : (data?.items || data?.skills || [])
-          if (!mounted) return
-          setAvailableSkills(items)
-        } catch (_) {
-          if (!mounted) return
-          setAvailableSkills([])
-        }
-      })()
-    return () => { mounted = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]) // Re-fetch when modal opens
 
   // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
   useEffect(() => {
@@ -226,7 +190,7 @@ export function AgentConfigurationModal({
     apiClient.request<any>('/api/personas')
       .then((data) => {
         if (!mounted) return
-        const list = Array.isArray(data) ? data : (data?.personas || data?.data || [])
+        const list = Array.isArray(data) ? data : (data?.items || data?.personas || data?.data || [])
         setPersonas(list)
       })
       .catch((err) => {
@@ -342,51 +306,6 @@ export function AgentConfigurationModal({
       }
     }))
     setHasChanges(true)
-  }
-
-  const toggleSkillAssignment = async (skillId: number) => {
-    const currentSkills = formData.assigned_skills || []
-    const hasSkill = currentSkills.includes(skillId)
-    const newSkills = hasSkill
-      ? currentSkills.filter((id: number) => id !== skillId)
-      : [...currentSkills, skillId]
-
-    // Optimistic UI update
-    updateFormData('assigned_skills', newSkills)
-
-    // Persist using the working backend endpoints
-    try {
-      if (hasSkill) {
-        // DELETE: Use /api/v1/skills/agents/{agent_id}/skills with query params
-        const deleteUrl = `/api/v1/skills/agents/${String(agentId)}/skills?skill_ids=${skillId}`
-        const res = await fetch(deleteUrl, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        console.info('Removed skill from agent', { agentId, skillId, ok: res.ok, status: res.status })
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`Remove failed: ${res.status} - ${errorText}`)
-        }
-      } else {
-        // POST: Use /api/agents/{agent_id}/skills - body must be raw array [1, 2, 3]
-        const postUrl = `/api/agents/${String(agentId)}/skills`
-        const res = await fetch(postUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([skillId])
-        })
-        console.info('Added skill to agent', { agentId, skillId, ok: res.ok, status: res.status })
-        if (!res.ok) {
-          const errorText = await res.text()
-          throw new Error(`Add failed: ${res.status} - ${errorText}`)
-        }
-      }
-    } catch (e) {
-      // Revert on error
-      updateFormData('assigned_skills', currentSkills)
-      console.error('Failed to update skill assignment', e)
-    }
   }
 
   const toggleToolAssignment = (toolId: number) => {
@@ -639,7 +558,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-7 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-1">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -651,10 +570,6 @@ export function AgentConfigurationModal({
                   <TabsTrigger value="resources" className="flex items-center space-x-1">
                     <Database className="w-4 h-4" />
                     <span>Resources</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="skills" className="flex items-center space-x-1">
-                    <Brain className="w-4 h-4" />
-                    <span>Skills</span>
                   </TabsTrigger>
                   <TabsTrigger value="plugins" className="flex items-center space-x-1">
                     <Puzzle className="w-4 h-4" />
@@ -1081,62 +996,6 @@ export function AgentConfigurationModal({
                           Controls the verbosity of agent logs
                         </p>
                       </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="skills" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
-                  <Card className="bg-secondary/30 border-border/30">
-                    <CardHeader>
-                      <CardTitle className="text-base">Skills Assignment</CardTitle>
-                      <p className="text-sm text-muted-foreground">
-                        Select skills to assign to this agent
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      {availableSkills && availableSkills.length > 0 ? (
-                        <div className="space-y-3">
-                          {availableSkills.map((skill: any) => (
-                            <div key={skill.id} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
-                              <Checkbox
-                                id={`skill-${skill.id}`}
-                                checked={formData.assigned_skills?.includes(skill.id) || false}
-                                onCheckedChange={() => toggleSkillAssignment(skill.id)}
-                              />
-                              <div className="flex-1">
-                                <Label htmlFor={`skill-${skill.id}`} className="cursor-pointer">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <h4 className="font-medium">{skill.name}</h4>
-                                      <p className="text-sm text-muted-foreground">
-                                        {skill.description || 'No description available'}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center space-x-2">
-                                      <Badge variant="outline" className="text-xs">
-                                        {skill.skill_type?.replace('_', ' ') || 'Unknown'}
-                                      </Badge>
-                                      {skill.category && (
-                                        <Badge variant="secondary" className="text-xs">
-                                          {skill.category}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  </div>
-                                </Label>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8">
-                          <Brain className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                          <h3 className="text-lg font-semibold mb-2">No Skills Available</h3>
-                          <p className="text-muted-foreground">
-                            No skills are available for assignment at this time.
-                          </p>
-                        </div>
-                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
