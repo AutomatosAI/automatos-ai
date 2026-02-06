@@ -275,7 +275,7 @@ None of these are accessible to regular users. There's no cost/token visibility,
 
 ### Layout Structure
 
-```
+```text
 /analytics
 ├── Header: "Analytics" + time range selector (7d/30d/90d) + Refresh + Export
 ├── Tab Bar: Overview | Agents | Workflows | Documents | LLM & Costs | [Admin]

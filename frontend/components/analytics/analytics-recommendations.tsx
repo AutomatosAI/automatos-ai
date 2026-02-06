@@ -108,6 +108,7 @@ export function AnalyticsRecommendations({ recommendations, isLoading }: Props) 
                     variant="ghost"
                     size="sm"
                     className="shrink-0 h-6 w-6 p-0"
+                    aria-label={`Dismiss ${rec.title || 'recommendation'}`}
                     onClick={() => setDismissed(prev => new Set([...prev, rec.id]))}
                   >
                     <X className="w-3 h-3" />

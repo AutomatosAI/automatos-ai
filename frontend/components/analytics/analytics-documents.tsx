@@ -203,7 +203,7 @@ export function AnalyticsDocuments({ days }: Props) {
                         <Badge className="text-xs bg-yellow-500/20 text-yellow-400 border-yellow-500/30">Never used</Badge>
                       )}
                     </td>
-                    <td className="p-4 hidden lg:table-cell text-sm">{doc.ragQueries || '-'}</td>
+                    <td className="p-4 hidden lg:table-cell text-sm">{doc.ragQueries ?? '-'}</td>
                     <td className="p-4 hidden lg:table-cell">
                       {doc.tags?.length > 0 ? (
                         <div className="flex flex-wrap gap-1">

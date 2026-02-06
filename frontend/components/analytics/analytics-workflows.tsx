@@ -40,11 +40,29 @@ export function AnalyticsWorkflows({ days }: Props) {
     }
   }
 
+  const parseDuration = (value: string): number => {
+    const match = value.match(/^([\d.]+)\s*(ms|s|m|h)$/)
+    if (!match) return 0
+    const n = parseFloat(match[1])
+    switch (match[2]) {
+      case 'ms': return n
+      case 's': return n * 1000
+      case 'm': return n * 60000
+      case 'h': return n * 3600000
+      default: return 0
+    }
+  }
+
   const sortedWorkflows = useMemo(() => {
     if (!data?.workflows) return []
     return [...data.workflows].sort((a: any, b: any) => {
       const aVal = a[sortField] ?? 0
       const bVal = b[sortField] ?? 0
+      if (sortField === 'avgDuration') {
+        const aMs = parseDuration(String(aVal))
+        const bMs = parseDuration(String(bVal))
+        return sortDir === 'asc' ? aMs - bMs : bMs - aMs
+      }
       if (typeof aVal === 'string' && typeof bVal === 'string') {
         return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal)
       }

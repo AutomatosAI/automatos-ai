@@ -72,7 +72,12 @@ export function AnalyticsPlanUsage({ data, isLoading }: Props) {
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Object.entries(data.usage).map(([key, item]) => {
-            const percentage = item.limit ? Math.min(100, (item.used / item.limit) * 100) : null
+            const hasLimit = item.limit != null
+            const percentage = hasLimit
+              ? item.limit! > 0
+                ? Math.min(100, (item.used / item.limit!) * 100)
+                : item.used > 0 ? 100 : 0
+              : null
 
             return (
               <div key={key} className="space-y-2 p-3 rounded-lg bg-secondary/20">
@@ -80,7 +85,7 @@ export function AnalyticsPlanUsage({ data, isLoading }: Props) {
                   <span className="text-sm font-medium">{item.label}</span>
                   <span className="text-sm text-muted-foreground">
                     {formatNumber(item.used)}
-                    {item.limit ? ` / ${formatNumber(item.limit)}` : ''}
+                    {hasLimit ? ` / ${formatNumber(item.limit!)}` : ''}
                   </span>
                 </div>
                 {percentage !== null ? (

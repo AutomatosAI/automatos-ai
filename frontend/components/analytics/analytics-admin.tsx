@@ -30,12 +30,32 @@ function formatNumber(n: number): string {
 export function AnalyticsAdmin({ days }: Props) {
   const { data, isLoading } = useAdminWorkspaceAnalytics(days)
 
+  const escapeCsvField = (value: string): string => {
+    // Neutralize formula-characters to prevent CSV injection
+    let escaped = value
+    if (/^[=+\-@]/.test(escaped)) {
+      escaped = "'" + escaped
+    }
+    // Double internal quotes and wrap in quotes
+    return '"' + escaped.replace(/"/g, '""') + '"'
+  }
+
   const handleExport = () => {
     if (!data?.workspaces) return
 
     const headers = ['Workspace,Plan,Users,Agents,Workflows,API Calls,Tokens,Cost,Status']
     const rows = data.workspaces.map(ws =>
-      `"${ws.name}","${ws.plan}",${ws.users},${ws.agents},${ws.workflows},${ws.apiCalls},${ws.tokens},$${ws.cost.toFixed(2)},${ws.status}`
+      [
+        escapeCsvField(ws.name),
+        escapeCsvField(ws.plan),
+        ws.users,
+        ws.agents,
+        ws.workflows,
+        ws.apiCalls,
+        ws.tokens,
+        `$${ws.cost.toFixed(2)}`,
+        escapeCsvField(ws.status),
+      ].join(',')
     )
     const csv = [...headers, ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })

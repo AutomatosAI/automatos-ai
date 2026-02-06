@@ -26,10 +26,11 @@ export function useAnalyticsOverview(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.overview(days),
     queryFn: async () => {
       // Aggregate from existing endpoints
-      const [metrics, costData, workflowStats] = await Promise.all([
+      const [metrics, costData, workflowStats, docStats] = await Promise.all([
         apiClient.getAllMetrics().catch(() => null),
         apiClient.getCostAnalysis().catch(() => null),
         apiClient.getWorkflowStatsDashboard().catch(() => null),
+        apiClient.getAnalyticsOverview().catch(() => null),
       ])
 
       const agentStats = (metrics as any)?.agents || {}
@@ -46,8 +47,8 @@ export function useAnalyticsOverview(days: number = 30) {
           successRate: (workflowStats as any)?.today?.success_rate_today || 0,
         },
         documents: {
-          total: 0, // Will be populated from document stats
-          storageMb: 0,
+          total: (docStats as any)?.total_documents || 0,
+          storageMb: (docStats as any)?.storage_mb || 0,
         },
         cost: {
           currentPeriod: (costData as any)?.total_cost || 0,
