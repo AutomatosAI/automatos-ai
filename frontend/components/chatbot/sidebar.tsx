@@ -98,12 +98,12 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
       {/* Header */}
       <div className="p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground/80 dark:text-white/90 uppercase tracking-wider">Chats</h2>
+          <h2 className="text-sm font-semibold text-foreground/80 uppercase tracking-wider">Chats</h2>
         </div>
 
         <Button
           onClick={handleNewChat}
-          className="w-full rounded-2xl bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-[0_0_18px_rgba(249,115,22,0.25)]"
+          className="w-full rounded-2xl shadow-[0_0_18px_hsla(var(--primary)/0.25)]"
         >
           <Plus className="w-4 h-4 mr-2" />
           New Chat
@@ -111,24 +111,24 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
 
         {/* Search */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground dark:text-gray-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search chats..."
-            className="pl-10 bg-secondary/40 border-border/60 focus-visible:border-primary/40 focus-visible:ring-primary/20 text-foreground placeholder:text-muted-foreground rounded-2xl dark:bg-gray-950/30 dark:border-orange-500/15 dark:focus-visible:ring-orange-500/20 dark:text-white dark:placeholder-gray-400"
+            className="pl-10 rounded-full"
           />
         </div>
       </div>
 
-      <Separator className="bg-border/50 dark:bg-gray-800/40" />
+      <Separator className="bg-border/50" />
 
       {/* Chat History */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-4 py-4">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
-              <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
           ) : filteredChats.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground text-sm">
@@ -194,23 +194,23 @@ export function AppSidebar({ user, onChatSelect, onNewChat }: AppSidebarProps) {
         </div>
       </ScrollArea>
 
-      <Separator className="bg-border/50 dark:bg-gray-800/40" />
+      <Separator className="bg-border/50" />
 
       {/* User Section */}
       {user && (
         <div className="p-4">
-          <div className="flex items-center space-x-3 p-2 rounded-lg bg-secondary/30 border border-border/40 dark:bg-gray-900/40 dark:border-gray-800/30">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-              <span className="text-sm font-semibold text-white">
+          <div className="flex items-center space-x-3 p-2 rounded-2xl bg-secondary/30 border border-border/40">
+            <div className="w-8 h-8 rounded-full gradient-accent flex items-center justify-center">
+              <span className="text-sm font-semibold text-primary-foreground">
                 {user.name?.[0] || user.email?.[0] || 'U'}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-foreground dark:text-white truncate">
+              <div className="text-sm font-medium text-foreground truncate">
                 {user.name || user.email || 'User'}
               </div>
             </div>
-            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground dark:text-gray-400 dark:hover:text-white p-1">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground p-1">
               <Settings className="w-4 h-4" />
             </Button>
           </div>

@@ -71,50 +71,50 @@ const skillCategories: Record<string, SkillCategory> = {
   development: {
     name: 'Development',
     icon: Code,
-    color: 'text-blue-400',
-    bgColor: 'bg-blue-500/10'
+    color: 'text-[hsl(var(--info))]',
+    bgColor: 'bg-[hsl(var(--info))]/10'
   },
   security: {
     name: 'Security',
     icon: Shield,
-    color: 'text-red-400',
-    bgColor: 'bg-red-500/10'
+    color: 'text-[hsl(var(--destructive))]',
+    bgColor: 'bg-[hsl(var(--destructive))]/10'
   },
   data: {
     name: 'Data & Analytics',
     icon: Database,
-    color: 'text-green-400',
-    bgColor: 'bg-green-500/10'
+    color: 'text-[hsl(var(--success))]',
+    bgColor: 'bg-[hsl(var(--success))]/10'
   },
   performance: {
     name: 'Performance',
     icon: Zap,
-    color: 'text-yellow-400',
-    bgColor: 'bg-yellow-500/10'
+    color: 'text-[hsl(var(--warning))]',
+    bgColor: 'bg-[hsl(var(--warning))]/10'
   },
   ai: {
     name: 'AI & ML',
     icon: Brain,
-    color: 'text-purple-400',
-    bgColor: 'bg-purple-500/10'
+    color: 'text-[hsl(var(--agent))]',
+    bgColor: 'bg-[hsl(var(--agent))]/10'
   },
   documentation: {
     name: 'Documentation',
     icon: FileText,
-    color: 'text-indigo-400',
-    bgColor: 'bg-indigo-500/10'
+    color: 'text-[hsl(var(--info))]',
+    bgColor: 'bg-[hsl(var(--info))]/10'
   },
   system: {
     name: 'System Administration',
     icon: Settings,
-    color: 'text-gray-400',
-    bgColor: 'bg-gray-500/10'
+    color: 'text-muted-foreground',
+    bgColor: 'bg-secondary/50'
   },
   monitoring: {
     name: 'Monitoring & Analytics',
     icon: BarChart,
-    color: 'text-orange-400',
-    bgColor: 'bg-orange-500/10'
+    color: 'text-primary',
+    bgColor: 'bg-primary/10'
   }
 }
 
@@ -313,14 +313,14 @@ export function AgentSkills({ agents, selectedAgentId, onAgentSelect }: AgentSki
           <Button
             variant="outline"
             onClick={() => setShowImportGit(true)}
-            className="border-orange-400/50 hover:border-orange-400"
+            className="border-primary/50 hover:border-primary"
           >
             <Code className="w-4 h-4 mr-2" />
             Import from Git
           </Button>
           <Button
             onClick={() => setShowCreateModal(true)}
-            className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
+            className="bg-secondary border border-primary/50 hover:border-primary hover:bg-secondary/80 text-foreground transition-all duration-200"
           >
             <Plus className="w-4 h-4 mr-2" />
             Create Skill

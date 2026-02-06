@@ -330,18 +330,23 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="flex items-center space-x-2">
-                  <Bot className="w-6 h-6" />
-                  <span>Create New Agent</span>
+            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
+                <CardTitle className="flex items-center space-x-3">
+                  <Bot className="w-6 h-6 text-primary" />
+                  <div>
+                    <span className="text-xl">Create New <span className="gradient-text">Agent</span></span>
+                    <p className="text-sm text-muted-foreground font-normal">
+                      Configure your agent&apos;s settings
+                    </p>
+                  </div>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={onClose}>
                   <X className="w-5 h-5" />
                 </Button>
               </CardHeader>
 
-              <CardContent className="pr-2">
+              <CardContent className="overflow-y-auto p-6">
                 <Tabs value={`step-${step}`} className="space-y-6">
                   <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
@@ -363,17 +368,18 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                   {/* Step 1: Configuration */}
                   <TabsContent value="step-1" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Agent Configuration</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Configure your agent's basic information
-                      </p>
-                    </div>
-
+                    <Card className="bg-secondary/30 border-border/30">
+                      <CardHeader>
+                        <CardTitle className="text-base">Agent Configuration</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Configure your agent's basic information
+                        </p>
+                      </CardHeader>
+                      <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-4">
                         <div>
-                          <Label htmlFor="agent-category">Category <span className="text-red-500">*</span></Label>
+                          <Label htmlFor="agent-category">Category <span className="text-[hsl(var(--destructive))]">*</span></Label>
                           <Select
                             value={agentData.category}
                             onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
@@ -414,7 +420,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </div>
 
                         <div>
-                          <Label htmlFor="agent-name">Agent Name <span className="text-red-500">*</span></Label>
+                          <Label htmlFor="agent-name">Agent Name <span className="text-[hsl(var(--destructive))]">*</span></Label>
                           <Input
                             id="agent-name"
                             placeholder="Enter agent name..."
@@ -455,7 +461,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         <div className="flex items-center justify-between mb-4">
                         <div>
                           <Label htmlFor="share-marketplace" className="text-base font-medium">
-                            Share to <span className="text-orange-500">Marketplace</span>
+                            Share to <span className="text-primary">Marketplace</span>
                           </Label>
                           <p className="text-sm text-muted-foreground">
                             Make this agent available for others to discover and install
@@ -475,8 +481,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           exit={{ opacity: 0, height: 0 }}
                           className="mt-4"
                         >
-                          <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
-                            <p className="text-sm text-orange-200">
+                          <div className="bg-primary/10 border border-primary/30 rounded-lg p-3">
+                            <p className="text-sm text-primary">
                               <strong>Note:</strong> Your agent will be submitted to the approval queue using the same name, description, category, and tags. Trusted users' submissions are auto-published.
                             </p>
                           </div>
@@ -484,16 +490,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       )}
                       </div>
                     </div>
+                      </CardContent>
+                    </Card>
                   </TabsContent>
 
                   {/* Step 2: Persona Selection (US-021) */}
                   <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Agent Persona</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Give your agent a personality and voice
-                      </p>
-                    </div>
+                    <Card className="bg-secondary/30 border-border/30">
+                      <CardHeader>
+                        <CardTitle className="text-base">Agent Persona</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Give your agent a personality and voice
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
 
                     {/* Persona Mode Selection */}
                     <div className="grid grid-cols-3 gap-3">
@@ -707,16 +717,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </p>
                       </div>
                     </div>
+                      </CardContent>
+                    </Card>
                   </TabsContent>
 
                   {/* Step 3: Model Configuration (PRD-15) */}
                   <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Model Configuration</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Select and configure the LLM model for your agent
-                      </p>
-                    </div>
+                    <Card className="bg-secondary/30 border-border/30">
+                      <CardHeader>
+                        <CardTitle className="text-base">Model Configuration</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Select and configure the LLM model for your agent
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
 
                     <ModelSelector
                       value={modelConfig.model_id}
@@ -830,16 +844,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </div>
                       </div>
                     </div>
+                      </CardContent>
+                    </Card>
                   </TabsContent>
 
                   {/* Step 4: Tool Selection */}
                   <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Select Tools</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Choose the tools this agent can use
-                      </p>
-                    </div>
+                    <Card className="bg-secondary/30 border-border/30">
+                      <CardHeader>
+                        <CardTitle className="text-base">Select Tools</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Choose the tools this agent can use
+                        </p>
+                      </CardHeader>
+                      <CardContent>
 
                     {toolsLoading ? (
                       <div className="grid grid-cols-2 gap-4">
@@ -887,16 +905,20 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         })}
                       </div>
                     )}
+                      </CardContent>
+                    </Card>
                   </TabsContent>
 
                   {/* Step 5: Skills & Settings */}
                   <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
-                      <h3 className="text-lg font-semibold mb-2">Skills & Advanced Settings</h3>
-                      <p className="text-muted-foreground mb-6">
-                        Customize the agent's skills and advanced configuration
-                      </p>
-                    </div>
+                    <Card className="bg-secondary/30 border-border/30">
+                      <CardHeader>
+                        <CardTitle className="text-base">Skills & Advanced Settings</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Customize the agent's skills and advanced configuration
+                        </p>
+                      </CardHeader>
+                      <CardContent>
 
                     <div>
                       <Label className="text-base font-medium">Available Skills</Label>
@@ -943,6 +965,8 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         </p>
                       </div>
                     </div>
+                      </CardContent>
+                    </Card>
                   </TabsContent>
                 </Tabs>
 
@@ -964,7 +988,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     <Button
                       onClick={() => setStep(Math.min(5, step + 1))}
                       disabled={step === 1 && !agentData.category}
-                      className="gradient-accent hover:opacity-90"
+                      variant="outline"
                     >
                       Next
                     </Button>
@@ -972,7 +996,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                     <Button
                       onClick={handleCreate}
                       disabled={!agentData.name || !agentData.category || (createAgentMutation as any).isLoading}
-                      className="gradient-accent hover:opacity-90"
+                      variant="outline"
                     >
                       {(createAgentMutation as any).isLoading ? 'Creating...' : 'Create Agent'}
                     </Button>

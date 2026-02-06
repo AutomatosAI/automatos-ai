@@ -346,11 +346,11 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-5xl max-h-[90vh] overflow-hidden">
+            <Card className="glass-card card-glow w-full max-w-5xl max-h-[90vh] overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center space-x-2">
                   <Zap className="w-6 h-6 text-brand-primary" />
-                  <span>Tool: {currentTool.name}</span>
+                  <span>Tool: <span className="gradient-text">{currentTool.name}</span></span>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={handleClose}>
                   <X className="w-5 h-5" />
@@ -363,7 +363,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                     <TabsTrigger value="credentials">1. Credentials</TabsTrigger>
                     <TabsTrigger value="details">2. Details</TabsTrigger>
                     {isComposioApp && (
-                      <TabsTrigger value="features" className="text-purple-400">
+                      <TabsTrigger value="features" className="text-[hsl(var(--agent))]">
                         3. Features
                       </TabsTrigger>
                     )}
@@ -483,16 +483,16 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                               </p>
                             </div>
                           </div>
-                          <Badge variant="outline" className="text-xs bg-gray-800/50 text-gray-300 border-gray-700">
+                          <Badge variant="outline" className="text-xs bg-secondary/50 text-muted-foreground border-border/50">
                             Required
                           </Badge>
                         </div>
 
                         {/* Existing Credential Status Box */}
                         {existingCredential && (
-                          <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                            <p className="text-sm text-blue-400">
-                              Updating existing credential: <strong className="text-blue-300">{existingCredential.name}</strong>
+                          <div className="p-4 bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20 rounded-lg">
+                            <p className="text-sm text-[hsl(var(--info))]">
+                              Updating existing credential: <strong className="text-[hsl(var(--info))]">{existingCredential.name}</strong>
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
                               Last updated: {new Date(existingCredential.updated_at).toLocaleString('en-GB', {
@@ -513,9 +513,9 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
 
                           {/* Security Warning */}
                           {existingCredential && (
-                            <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                              <AlertTriangle className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                              <p className="text-sm text-yellow-400">
+                            <div className="flex items-start gap-2 p-3 bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20 rounded-lg">
+                              <AlertTriangle className="w-4 h-4 text-[hsl(var(--warning))] mt-0.5 flex-shrink-0" />
+                              <p className="text-sm text-[hsl(var(--warning))]">
                                 For security reasons, existing values are not shown. Re-enter values to update.
                               </p>
                             </div>
@@ -552,7 +552,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                         <div className="rounded-lg border border-border/40 bg-secondary/20 p-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`} />
+                              <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-[hsl(var(--success))]' : 'bg-muted-foreground'}`} />
                               <div>
                                 <p className="font-medium">{composioAppName}</p>
                                 <p className="text-sm text-muted-foreground">
@@ -565,19 +565,19 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => disconnectMutation.mutate(composioAppName)}
-                                className="text-red-400 hover:text-red-300"
+                                className="text-destructive hover:text-destructive/80"
                               >
                                 Disconnect
                               </Button>
                             ) : (
                               <Button
+                                variant="outline"
                                 onClick={() => {
                                   initiateConnectionMutation.mutate({
                                     appName: composioAppName,
                                     callbackUrl: `${window.location.origin}/tools?connected=${composioAppName}`,
                                   })
                                 }}
-                                className="bg-purple-600 hover:bg-purple-700"
                               >
                                 Connect {composioAppName}
                               </Button>
@@ -605,7 +605,7 @@ export function ToolConfigModal({ open, onClose, tool }: ToolConfigModalProps) {
                                       <p className="text-xs text-muted-foreground">{action.description}</p>
                                     )}
                                   </div>
-                                  <Badge variant="outline" className={action.enabled ? 'text-green-400' : 'text-gray-400'}>
+                                  <Badge variant="outline" className={action.enabled ? 'text-[hsl(var(--success))]' : 'text-muted-foreground'}>
                                     {action.enabled ? 'Enabled' : 'Disabled'}
                                   </Badge>
                                 </div>

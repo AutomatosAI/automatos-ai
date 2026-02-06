@@ -68,15 +68,15 @@ export function ModelSelector({
 
   const getProviderColor = (provider: string) => {
     const colors: Record<string, string> = {
-      openai: 'bg-green-500/10 text-green-400 border-green-500/20',
-      anthropic: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-      google: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-      azure: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-      huggingface: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-      aws_bedrock: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-      bedrock: 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+      openai: 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20',
+      anthropic: 'bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/20',
+      google: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+      azure: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+      huggingface: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20',
+      aws_bedrock: 'bg-primary/10 text-primary border-primary/20',
+      bedrock: 'bg-primary/10 text-primary border-primary/20'
     }
-    return colors[provider.toLowerCase()] || 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+    return colors[provider.toLowerCase()] || 'bg-secondary/50 text-muted-foreground border-border/50'
   }
 
   const getCapabilityBadge = (capability: string, rating: string) => {
@@ -84,10 +84,10 @@ export function ModelSelector({
     const isGood = rating.toLowerCase().includes('good')
     const isFast = rating.toLowerCase().includes('fast')
     
-    let colorClass = 'border-gray-500/30 text-gray-400'
-    if (isExcellent) colorClass = 'border-green-500/30 text-green-400'
-    else if (isGood) colorClass = 'border-blue-500/30 text-blue-400'
-    else if (isFast) colorClass = 'border-yellow-500/30 text-yellow-400'
+    let colorClass = 'border-border/50 text-muted-foreground'
+    if (isExcellent) colorClass = 'border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
+    else if (isGood) colorClass = 'border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
+    else if (isFast) colorClass = 'border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]'
     
     return (
       <Badge 
@@ -116,8 +116,8 @@ export function ModelSelector({
 
   if (error) {
     return (
-      <div className="p-4 rounded-lg border border-red-500/20 bg-red-500/10">
-        <div className="flex items-center gap-2 text-red-400 text-sm">
+      <div className="p-4 rounded-lg border border-[hsl(var(--destructive))]/20 bg-[hsl(var(--destructive))]/10">
+        <div className="flex items-center gap-2 text-[hsl(var(--destructive))] text-sm">
           <AlertCircle className="h-4 w-4" />
           <span>Failed to load models. Please try again.</span>
         </div>
@@ -129,12 +129,12 @@ export function ModelSelector({
     <div className={`space-y-4 ${className}`}>
       {/* Model Selector */}
       <div className="space-y-2">
-        <label className="text-sm font-medium text-gray-200">Model</label>
+        <label className="text-sm font-medium text-foreground">Model</label>
         <Select value={value} onValueChange={handleChange} disabled={isLoading}>
-          <SelectTrigger className="w-full bg-black/20 border-gray-800">
+          <SelectTrigger className="w-full bg-secondary/30 border-border/50">
             <SelectValue placeholder={isLoading ? "Loading models..." : "Select a model..."} />
           </SelectTrigger>
-          <SelectContent className="bg-gray-900 border-gray-800">
+          <SelectContent className="bg-popover/95 border-border/50">
             {isLoading ? (
               <div className="p-4">
                 <Skeleton className="h-4 w-full" />
@@ -142,14 +142,14 @@ export function ModelSelector({
             ) : (
               groupedModels && Object.entries(groupedModels).map(([provider, providerModels]) => (
                 <SelectGroup key={provider}>
-                  <SelectLabel className="text-xs uppercase text-gray-400 px-2 py-1.5">
+                  <SelectLabel className="text-xs uppercase text-muted-foreground px-2 py-1.5">
                     {provider}
                   </SelectLabel>
                   {providerModels.map((model) => (
                     <SelectItem 
                       key={model.model_id} 
                       value={model.model_id}
-                      className="text-gray-200 focus:bg-gray-800 focus:text-white"
+                      className="text-foreground focus:bg-secondary focus:text-foreground"
                     >
                       <div className="flex items-center gap-2">
                         <span>{model.display_name}</span>
@@ -160,7 +160,7 @@ export function ModelSelector({
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger>
-                                <Sparkles className="h-3 w-3 text-yellow-400" />
+                                <Sparkles className="h-3 w-3 text-[hsl(var(--warning))]" />
                               </TooltipTrigger>
                               <TooltipContent>
                                 <p className="text-xs">Recommended for {agentType}</p>
@@ -185,15 +185,15 @@ export function ModelSelector({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2 }}
         >
-          <Card className="bg-black/20 border-gray-800">
+          <Card className="bg-secondary/30 border-border/50">
             <CardContent className="p-4 space-y-4">
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div>
-                  <h4 className="font-semibold text-white">
+                  <h4 className="font-semibold text-foreground">
                     {selectedModel.display_name}
                   </h4>
-                  <p className="text-sm text-gray-400">
+                  <p className="text-sm text-muted-foreground">
                     {selectedModel.model_family} by {selectedModel.provider}
                   </p>
                 </div>
@@ -205,14 +205,14 @@ export function ModelSelector({
               {/* Key Metrics */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Brain className="h-3 w-3" />
                     <span>Context</span>
                   </div>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="text-sm font-medium text-white cursor-help">
+                        <p className="text-sm font-medium text-foreground cursor-help">
                           {formatNumber(selectedModel.context_window)} tokens
                         </p>
                       </TooltipTrigger>
@@ -224,14 +224,14 @@ export function ModelSelector({
                 </div>
                 
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Zap className="h-3 w-3" />
                     <span>Max Output</span>
                   </div>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="text-sm font-medium text-white cursor-help">
+                        <p className="text-sm font-medium text-foreground cursor-help">
                           {formatNumber(selectedModel.max_output_tokens)} tokens
                         </p>
                       </TooltipTrigger>
@@ -243,14 +243,14 @@ export function ModelSelector({
                 </div>
                 
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <DollarSign className="h-3 w-3" />
                     <span>Cost</span>
                   </div>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <p className="text-sm font-medium text-white cursor-help">
+                        <p className="text-sm font-medium text-foreground cursor-help">
                           ${selectedModel.input_cost_per_1k.toFixed(4)}/1K
                         </p>
                       </TooltipTrigger>
@@ -268,7 +268,7 @@ export function ModelSelector({
               {/* Capabilities */}
               {Object.keys(selectedModel.capabilities).length > 0 && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Info className="h-3 w-3" />
                     <span>Capabilities</span>
                   </div>
@@ -283,19 +283,19 @@ export function ModelSelector({
               {/* Features */}
               <div className="flex flex-wrap gap-2">
                 {selectedModel.supports_functions && (
-                  <Badge variant="outline" className="border-blue-500/30 text-blue-400 text-xs">
+                  <Badge variant="outline" className="border-[hsl(var(--info))]/30 text-[hsl(var(--info))] text-xs">
                     <Check className="h-3 w-3 mr-1" />
                     Function Calling
                   </Badge>
                 )}
                 {selectedModel.supports_vision && (
-                  <Badge variant="outline" className="border-purple-500/30 text-purple-400 text-xs">
+                  <Badge variant="outline" className="border-[hsl(var(--agent))]/30 text-[hsl(var(--agent))] text-xs">
                     <Check className="h-3 w-3 mr-1" />
                     Vision
                   </Badge>
                 )}
                 {selectedModel.supports_streaming && (
-                  <Badge variant="outline" className="border-gray-500/30 text-gray-400 text-xs">
+                  <Badge variant="outline" className="border-border/50 text-muted-foreground text-xs">
                     <Check className="h-3 w-3 mr-1" />
                     Streaming
                   </Badge>
@@ -305,13 +305,13 @@ export function ModelSelector({
               {/* Recommended For */}
               {selectedModel.recommended_for.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-xs text-gray-400">Recommended for:</div>
+                  <div className="text-xs text-muted-foreground">Recommended for:</div>
                   <div className="flex flex-wrap gap-1">
                     {selectedModel.recommended_for.map((task) => (
                       <Badge 
                         key={task} 
                         variant="secondary"
-                        className="text-xs bg-gray-800/50 text-gray-300"
+                        className="text-xs bg-secondary/50 text-muted-foreground"
                       >
                         {task.replace(/_/g, ' ')}
                       </Badge>
@@ -322,16 +322,16 @@ export function ModelSelector({
 
               {/* Description */}
               {selectedModel.description && (
-                <p className="text-xs text-gray-400 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   {selectedModel.description}
                 </p>
               )}
 
               {/* Warning for deprecated */}
               {selectedModel.status === 'deprecated' && (
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                  <AlertCircle className="h-4 w-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-yellow-400">
+                <div className="flex items-start gap-2 p-2 rounded-lg bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20">
+                  <AlertCircle className="h-4 w-4 text-[hsl(var(--warning))] mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-[hsl(var(--warning))]">
                     This model is deprecated and may be removed in the future.
                   </div>
                 </div>
@@ -339,9 +339,9 @@ export function ModelSelector({
               
               {/* Beta warning */}
               {selectedModel.status === 'beta' && (
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                  <Info className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-blue-400">
+                <div className="flex items-start gap-2 p-2 rounded-lg bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20">
+                  <Info className="h-4 w-4 text-[hsl(var(--info))] mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-[hsl(var(--info))]">
                     This model is in beta. Features may change.
                   </div>
                 </div>

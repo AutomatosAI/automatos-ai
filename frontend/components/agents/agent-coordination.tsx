@@ -54,40 +54,40 @@ const coordinationStrategies = [
     name: 'Sequential',
     description: 'Execute tasks one after another',
     icon: GitBranch,
-    color: 'text-blue-500',
-    bgColor: 'bg-blue-500/10'
+    color: 'text-[hsl(var(--info))]',
+    bgColor: 'bg-[hsl(var(--info))]/10'
   },
   {
     id: 'parallel',
     name: 'Parallel',
     description: 'Execute multiple tasks simultaneously',
     icon: Users,
-    color: 'text-green-500',
-    bgColor: 'bg-green-500/10'
+    color: 'text-[hsl(var(--success))]',
+    bgColor: 'bg-[hsl(var(--success))]/10'
   },
   {
     id: 'hierarchical',
     name: 'Hierarchical',
     description: 'Organized hierarchy with lead agents',
     icon: Network,
-    color: 'text-purple-500',
-    bgColor: 'bg-purple-500/10'
+    color: 'text-[hsl(var(--agent))]',
+    bgColor: 'bg-[hsl(var(--agent))]/10'
   },
   {
     id: 'mesh',
     name: 'Mesh Network',
     description: 'All agents communicate with each other',
     icon: Activity,
-    color: 'text-orange-500',
-    bgColor: 'bg-orange-500/10'
+    color: 'text-primary',
+    bgColor: 'bg-primary/10'
   },
   {
     id: 'adaptive',
     name: 'Adaptive',
     description: 'Strategy adapts based on task complexity',
     icon: Brain,
-    color: 'text-pink-500',
-    bgColor: 'bg-pink-500/10'
+    color: 'text-[hsl(var(--destructive))]',
+    bgColor: 'bg-[hsl(var(--destructive))]/10'
   }
 ]
 
@@ -267,19 +267,19 @@ export function AgentCoordination({ agents, selectedAgentId }: AgentCoordination
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-500">
+                <div className="text-2xl font-bold text-[hsl(var(--success))]">
                   {coordinationStatus?.active_coordinations || 0}
                 </div>
                 <div className="text-sm text-muted-foreground">Active Coordinations</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-blue-500">
+                <div className="text-2xl font-bold text-[hsl(var(--info))]">
                   {coordinationStatus?.total_agents_coordinated || 0}
                 </div>
                 <div className="text-sm text-muted-foreground">Agents Coordinated</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-purple-500">
+                <div className="text-2xl font-bold text-[hsl(var(--agent))]">
                   {coordinationStatus?.success_rate || 0}%
                 </div>
                 <div className="text-sm text-muted-foreground">Success Rate</div>
@@ -398,7 +398,7 @@ export function AgentCoordination({ agents, selectedAgentId }: AgentCoordination
                       onClick={() => toggleAgentSelection(agent.id, 'coordination')}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-sm">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-[hsl(var(--destructive))] flex items-center justify-center text-white text-sm">
                           🤖
                         </div>
                         <div className="flex-1">
@@ -549,7 +549,7 @@ export function AgentCoordination({ agents, selectedAgentId }: AgentCoordination
                       onClick={() => toggleAgentSelection(agent.id, 'reasoning')}
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white text-sm">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-[hsl(var(--destructive))] flex items-center justify-center text-white text-sm">
                           🤖
                         </div>
                         <div className="flex-1">

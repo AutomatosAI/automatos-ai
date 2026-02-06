@@ -26,12 +26,12 @@ import {
 
 // App categories for filtering
 const APP_CATEGORIES = [
-    { id: 'all', name: 'All Apps', color: 'text-gray-400' },
-    { id: 'developer', name: 'Developer', color: 'text-blue-400' },
-    { id: 'productivity', name: 'Productivity', color: 'text-green-400' },
-    { id: 'communication', name: 'Communication', color: 'text-purple-400' },
-    { id: 'crm', name: 'CRM', color: 'text-orange-400' },
-    { id: 'analytics', name: 'Analytics', color: 'text-cyan-400' },
+    { id: 'all', name: 'All Apps', color: 'text-muted-foreground' },
+    { id: 'developer', name: 'Developer', color: 'text-[hsl(var(--info))]' },
+    { id: 'productivity', name: 'Productivity', color: 'text-[hsl(var(--success))]' },
+    { id: 'communication', name: 'Communication', color: 'text-[hsl(var(--agent))]' },
+    { id: 'crm', name: 'CRM', color: 'text-primary' },
+    { id: 'analytics', name: 'Analytics', color: 'text-[hsl(var(--info))]' },
 ]
 
 export function ComposioAppsSection() {
@@ -189,11 +189,11 @@ export function ComposioAppsSection() {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-green-400 border-green-500/30">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+                    <Badge variant="outline" className="text-[hsl(var(--success))] border-[hsl(var(--success))]/30">
+                        <div className="w-2 h-2 bg-[hsl(var(--success))] rounded-full animate-pulse mr-2" />
                         {connectedCount} Connected
                     </Badge>
-                    <Badge variant="outline" className="text-blue-400 border-blue-500/30">
+                    <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30">
                         {apps.length} Available
                     </Badge>
                 </div>
@@ -222,8 +222,8 @@ export function ComposioAppsSection() {
                         onClick={() => setSelectedCategory(category.id)}
                         className={
                             selectedCategory === category.id
-                                ? 'bg-gray-800 border-orange-400/50 text-white'
-                                : 'hover:border-orange-500/50'
+                                ? 'bg-secondary border-primary/50 text-foreground'
+                                : 'hover:border-primary/50'
                         }
                     >
                         {category.name}
@@ -247,7 +247,7 @@ export function ComposioAppsSection() {
                                 transition={{ duration: 0.3, delay: index * 0.05 }}
                             >
                                 <Card
-                                    className={`glass-card hover:border-primary/20 transition-all duration-300 ${isConnected ? 'border-green-500/30' : ''
+                                    className={`glass-card hover:border-primary/20 transition-all duration-300 ${isConnected ? 'border-[hsl(var(--success))]/30' : ''
                                         }`}
                                 >
                                     <CardHeader className="pb-2">
@@ -260,7 +260,7 @@ export function ComposioAppsSection() {
                                                         className="w-10 h-10 rounded-lg"
                                                     />
                                                 ) : (
-                                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold">
+                                                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[hsl(var(--info))] to-[hsl(var(--agent))] flex items-center justify-center text-foreground font-semibold">
                                                         {app.display_name.charAt(0)}
                                                     </div>
                                                 )}
@@ -274,7 +274,7 @@ export function ComposioAppsSection() {
                                                 </div>
                                             </div>
                                             {isConnected && (
-                                                <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+                                                <Badge className="bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20">
                                                     <CheckCircle className="w-3 h-3 mr-1" />
                                                     Connected
                                                 </Badge>
@@ -288,7 +288,7 @@ export function ComposioAppsSection() {
                                                     <Badge
                                                         key={cat}
                                                         variant="outline"
-                                                        className="text-xs border-slate-600 text-slate-400"
+                                                        className="text-xs border-border text-muted-foreground"
                                                     >
                                                         {cat}
                                                     </Badge>
@@ -299,7 +299,7 @@ export function ComposioAppsSection() {
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => handleDisconnect(app.name)}
-                                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10 h-8"
+                                                    className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 h-8"
                                                 >
                                                     Disconnect
                                                 </Button>
@@ -309,7 +309,7 @@ export function ComposioAppsSection() {
                                                     size="sm"
                                                     onClick={() => handleConnect(app)}
                                                     disabled={isConnecting}
-                                                    className="bg-slate-800 hover:bg-slate-700 border-slate-600 h-8"
+                                                    className="bg-secondary hover:bg-secondary/80 border-border h-8"
                                                 >
                                                     {isConnecting ? (
                                                         <>
@@ -350,7 +350,7 @@ export function ComposioAppsSection() {
                                                                     ? 'Basic Auth'
                                                                     : scheme.replace(/_/g, ' ').toUpperCase()
                                                     return (
-                                                        <Badge key={scheme} variant="outline" className="text-[10px] h-5 border-orange-500/40 text-orange-300">
+                                                        <Badge key={scheme} variant="outline" className="text-[10px] h-5 border-primary/30 text-primary">
                                                             {label}
                                                         </Badge>
                                                     )

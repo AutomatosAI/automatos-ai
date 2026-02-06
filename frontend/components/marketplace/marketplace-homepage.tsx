@@ -6,6 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
+import { SearchInput } from '@/components/shared/search-input'
 import { MarketplaceToolsTab } from './marketplace-tools-tab'
 import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
@@ -66,121 +69,63 @@ export function MarketplaceHomepage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">
-            Community <span className="gradient-text">Marketplace</span>
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Discover, install, and manage tools to extend your AI agents' capabilities
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Community"
+        titleAccent="Marketplace"
+        subtitle="Discover, install, and manage tools to extend your AI agents' capabilities"
+      />
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.totalItems}</div>
-                <div className="text-sm text-muted-foreground">Total Items</div>
-              </div>
-              <Store className="h-8 w-8 text-orange-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.categories}</div>
-                <div className="text-sm text-muted-foreground">Categories</div>
-              </div>
-              <Grid3X3 className="h-8 w-8 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-white">{stats.featuredCount}</div>
-                <div className="text-sm text-muted-foreground">Featured</div>
-              </div>
-              <Badge className="bg-orange-500/20 text-orange-500 border-orange-500/30">
-                Curated
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold text-white">
-                  {stats.totalInstalls >= 1000
-                    ? `${(stats.totalInstalls / 1000).toFixed(1)}k`
-                    : stats.totalInstalls}
-                </div>
-                <div className="text-sm text-muted-foreground">Total Installs</div>
-              </div>
-              <Download className="h-8 w-8 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <StatsBar
+        stats={[
+          {
+            label: 'Total Items',
+            value: stats.totalItems.toString(),
+            icon: Store,
+            iconColor: 'text-primary',
+          },
+          {
+            label: 'Categories',
+            value: stats.categories.toString(),
+            icon: Grid3X3,
+            iconColor: 'text-[hsl(var(--info))]',
+          },
+          {
+            label: 'Featured',
+            value: stats.featuredCount.toString(),
+            change: 'Curated',
+            icon: TrendingUp,
+            iconColor: 'text-[hsl(var(--warning))]',
+          },
+          {
+            label: 'Total Installs',
+            value: stats.totalInstalls >= 1000
+              ? `${(stats.totalInstalls / 1000).toFixed(1)}k`
+              : stats.totalInstalls.toString(),
+            icon: Download,
+            iconColor: 'text-[hsl(var(--success))]',
+          },
+        ] satisfies StatItem[]}
+      />
 
       {/* Tabs and Search Bar - Full Width */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between w-full">
         <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-          <TabsList className="bg-secondary border border-secondary">
-            <TabsTrigger
-              value="tools"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              Applications
-            </TabsTrigger>
-            <TabsTrigger
-              value="agents"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              Agents
-            </TabsTrigger>
-            <TabsTrigger
-              value="recipes"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              Recipes
-            </TabsTrigger>
-            <TabsTrigger
-              value="llms"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              LLMs
-            </TabsTrigger>
-            <TabsTrigger
-              value="plugins"
-              className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              Plugins
-            </TabsTrigger>
+          <TabsList>
+            <TabsTrigger value="tools">Applications</TabsTrigger>
+            <TabsTrigger value="agents">Agents</TabsTrigger>
+            <TabsTrigger value="recipes">Recipes</TabsTrigger>
+            <TabsTrigger value="llms">LLMs</TabsTrigger>
+            <TabsTrigger value="plugins">Plugins</TabsTrigger>
           </TabsList>
         </Tabs>
 
-        <div className="relative w-full sm:flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            type="text"
-            placeholder="Search marketplace..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-secondary/50 border-secondary focus:border-primary/50 w-full"
-          />
-        </div>
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search marketplace..."
+          className="w-full sm:flex-1"
+        />
       </div>
 
       {/* Tab Content */}

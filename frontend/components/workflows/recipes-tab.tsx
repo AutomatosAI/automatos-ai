@@ -63,14 +63,14 @@ interface RecipesTabProps {
 // Generate a consistent color from agent_id
 function agentColor(id: number): string {
   const colors = [
-    'from-blue-500/80 to-blue-600/80',
-    'from-purple-500/80 to-purple-600/80',
-    'from-emerald-500/80 to-emerald-600/80',
-    'from-orange-500/80 to-orange-600/80',
-    'from-pink-500/80 to-pink-600/80',
-    'from-cyan-500/80 to-cyan-600/80',
-    'from-yellow-500/80 to-yellow-600/80',
-    'from-red-500/80 to-red-600/80',
+    'from-[hsl(var(--info))]/80 to-[hsl(var(--info))]/60',
+    'from-[hsl(var(--agent))]/80 to-[hsl(var(--agent))]/60',
+    'from-[hsl(var(--success))]/80 to-[hsl(var(--success))]/60',
+    'from-primary/80 to-primary/60',
+    'from-[hsl(var(--destructive))]/80 to-[hsl(var(--destructive))]/60',
+    'from-[hsl(var(--info))]/80 to-[hsl(var(--info))]/60',
+    'from-[hsl(var(--warning))]/80 to-[hsl(var(--warning))]/60',
+    'from-[hsl(var(--destructive))]/80 to-[hsl(var(--destructive))]/60',
   ]
   return colors[(id || 0) % colors.length]
 }
@@ -273,8 +273,8 @@ export function RecipesTab({
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
-          <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-          <p className="text-red-400">Error loading recipes</p>
+          <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
+          <p className="text-[hsl(var(--destructive))]">Error loading recipes</p>
         </div>
       </div>
     )
@@ -308,11 +308,11 @@ export function RecipesTab({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: index * 0.05 }}
               >
-                <Card className="glass-card hover:border-orange-500/30 transition-all duration-300 h-full flex flex-col group">
+                <Card className="glass-card hover:border-primary/30 transition-all duration-300 h-full flex flex-col group">
                   {/* Card Header — icon, name, badges */}
                   <CardHeader className="pb-3">
                     <div className="flex items-start gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/10 border border-orange-500/30 flex items-center justify-center shrink-0 text-xl">
+                      <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 text-xl">
                         {recipe.icon || '🍳'}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -326,19 +326,19 @@ export function RecipesTab({
                     {/* Badges row */}
                     <div className="flex flex-wrap gap-1.5 mt-3">
                       {recipe.marketplace_category && (
-                        <Badge variant="outline" className="text-[10px] h-5 bg-blue-500/10 text-blue-400 border-blue-500/20">
+                        <Badge variant="outline" className="text-[10px] h-5 bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20">
                           {recipe.marketplace_category}
                         </Badge>
                       )}
                       {recipe.is_system && (
-                        <Badge variant="outline" className="text-[10px] h-5 bg-purple-500/10 text-purple-400 border-purple-500/20">
+                        <Badge variant="outline" className="text-[10px] h-5 bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/20">
                           System
                         </Badge>
                       )}
                       {recipe.learning_data?.latest_suggestions?.length > 0 && (
                         <Badge
                           variant="outline"
-                          className="text-[10px] h-5 bg-orange-500/10 text-orange-400 border-orange-500/20 cursor-pointer hover:bg-orange-500/20"
+                          className="text-[10px] h-5 bg-primary/10 text-primary border-primary/20 cursor-pointer hover:bg-primary/20"
                           onClick={(e) => { e.stopPropagation(); handleViewClick(recipe) }}
                         >
                           <Lightbulb className="w-2.5 h-2.5 mr-0.5" />
@@ -354,16 +354,16 @@ export function RecipesTab({
                       <div>
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
                           <span>Quality Score</span>
-                          <span className={qualityPct >= 80 ? 'text-emerald-400' : qualityPct >= 50 ? 'text-orange-400' : 'text-red-400'}>
+                          <span className={qualityPct >= 80 ? 'text-[hsl(var(--success))]' : qualityPct >= 50 ? 'text-primary' : 'text-[hsl(var(--destructive))]'}>
                             {qualityPct}%
                           </span>
                         </div>
                         <div className="h-1.5 rounded-full bg-secondary/80 overflow-hidden">
                           <div
                             className={`h-full rounded-full transition-all duration-500 ${
-                              qualityPct >= 80 ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' :
-                              qualityPct >= 50 ? 'bg-gradient-to-r from-orange-500 to-yellow-400' :
-                              'bg-gradient-to-r from-red-500 to-red-400'
+                              qualityPct >= 80 ? 'bg-gradient-to-r from-[hsl(var(--success))] to-[hsl(var(--success))]/80' :
+                              qualityPct >= 50 ? 'bg-gradient-to-r from-primary to-[hsl(var(--warning))]/80' :
+                              'bg-gradient-to-r from-[hsl(var(--destructive))] to-[hsl(var(--destructive))]/80'
                             }`}
                             style={{ width: `${qualityPct}%` }}
                           />
@@ -374,15 +374,15 @@ export function RecipesTab({
                     {/* Stats row */}
                     <div className="grid grid-cols-3 gap-2">
                       <div className="text-center">
-                        <div className="text-lg font-bold text-white">{stepCount}</div>
+                        <div className="text-lg font-bold text-foreground">{stepCount}</div>
                         <div className="text-[10px] text-muted-foreground">Steps</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-lg font-bold text-orange-400">{agentIds.length}</div>
+                        <div className="text-lg font-bold text-primary">{agentIds.length}</div>
                         <div className="text-[10px] text-muted-foreground">Agents</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-lg font-bold text-white">{recipe.use_count || 0}</div>
+                        <div className="text-lg font-bold text-foreground">{recipe.use_count || 0}</div>
                         <div className="text-[10px] text-muted-foreground">Runs</div>
                       </div>
                     </div>
@@ -395,26 +395,26 @@ export function RecipesTab({
                           return (
                             <div
                               key={aid}
-                              className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-white/10`}
+                              className={`w-7 h-7 rounded-lg bg-gradient-to-br ${agentColor(aid)} flex items-center justify-center border border-border/10`}
                               title={`Agent ${aid}`}
                             >
-                              <Bot className="w-3.5 h-3.5 text-white" />
+                              <Bot className="w-3.5 h-3.5 text-foreground" />
                             </div>
                           )
                         })}
                         {agentIds.length > 4 && (
-                          <div className="w-7 h-7 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center text-[10px] text-muted-foreground font-medium">
+                          <div className="w-7 h-7 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center text-[10px] text-muted-foreground font-medium">
                             +{agentIds.length - 4}
                           </div>
                         )}
                         {/* Tool icons */}
                         {tools.length > 0 && (
                           <>
-                            <div className="w-px h-5 bg-white/10 mx-1" />
+                            <div className="w-px h-5 bg-border/10 mx-1" />
                             {tools.slice(0, 3).map((tool: string, i: number) => (
                               <div
                                 key={i}
-                                className="w-7 h-7 rounded-lg bg-secondary/80 border border-white/10 flex items-center justify-center"
+                                className="w-7 h-7 rounded-lg bg-secondary/80 border border-border/10 flex items-center justify-center"
                                 title={tool}
                               >
                                 <Wrench className="w-3 h-3 text-muted-foreground" />
@@ -429,9 +429,9 @@ export function RecipesTab({
                     )}
 
                     {/* Action buttons */}
-                    <div className="flex gap-1.5 pt-1 border-t border-white/5">
+                    <div className="flex gap-1.5 pt-1 border-t border-border/5">
                       <Button
-                        className="flex-1 bg-orange-600/90 hover:bg-orange-500 text-white text-xs h-8 transition-all duration-200"
+                        className="flex-1 bg-primary/90 hover:bg-primary/80 text-primary-foreground text-xs h-8 transition-all duration-200"
                         size="sm"
                         onClick={() => handleCookRecipe(recipe)}
                         disabled={isCooking}
@@ -462,7 +462,7 @@ export function RecipesTab({
                             <Edit className="w-3.5 h-3.5" />
                           </Button>
                           <Button
-                            variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-400 hover:text-red-300"
+                            variant="ghost" size="sm" className="h-8 w-8 p-0 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80"
                             onClick={() => handleDeleteClick(recipe)}
                             title="Delete"
                           >

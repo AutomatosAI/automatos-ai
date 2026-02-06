@@ -1,11 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Zap, ExternalLink } from 'lucide-react'
+import { Search, Zap, ExternalLink, MoreVertical, Eye } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
@@ -47,7 +53,7 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
             onClick={() => setSelectedProvider(provider.id)}
             className={
               selectedProvider === provider.id
-                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }
           >
@@ -72,14 +78,31 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
           {llms.map((llm: any) => (
             <Card key={llm.id} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
               <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
-                    <Zap className="w-5 h-5 text-purple-400" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <Zap className="w-10 h-10 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground line-clamp-1">{llm.name}</h3>
+                      <p className="text-xs text-muted-foreground">{llm.category}</p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold line-clamp-1">{llm.name}</h3>
-                    <p className="text-xs text-muted-foreground">{llm.category}</p>
-                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Open Provider
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -91,14 +114,10 @@ export function MarketplaceLlmsTab({ searchQuery }: MarketplaceLlmsTabProps) {
                     </Badge>
                   ))}
                 </div>
-                <div className="flex items-center justify-between pt-2 border-t border-secondary">
+                <div className="pt-2 border-t border-secondary">
                   <span className="text-xs text-muted-foreground">
                     {llm.metadata?.context_window ? `${llm.metadata.context_window.toLocaleString()} tokens` : 'N/A'}
                   </span>
-                  <Button size="sm" variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-500/10">
-                    <ExternalLink className="w-3 h-3 mr-1" />
-                    Details
-                  </Button>
                 </div>
               </CardContent>
             </Card>

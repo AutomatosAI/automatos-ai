@@ -2,12 +2,18 @@
 
 import { useState } from 'react'
 import {
-  Loader2, Download, Bot, Check, Trash2, Zap,
+  Loader2, Download, Bot, Check, Trash2, Zap, MoreVertical, Eye,
   UserCircle, Headphones, Terminal, Share2, Calculator, ShoppingBag, PenTool, Users, BarChart3, Wrench
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ToolLogo } from '@/components/ui/tool-logo'
 import { useMarketplaceItems, useInstallMarketplaceItem } from '@/hooks/use-marketplace-api'
 import { MarketplaceItemModal } from './marketplace-item-modal'
@@ -151,7 +157,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
             onClick={() => setSelectedCategory(category.id)}
             className={
               selectedCategory === category.id
-                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }
           >
@@ -177,7 +183,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
           {agents.map((agent: MarketplaceAgent) => (
             <Card
               key={agent.id}
-              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
+              className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleAgentClick(agent)}
             >
               <CardHeader className="pb-3">
@@ -185,66 +191,75 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {(() => {
                       const IconComponent = getCategoryIcon(agent.category)
-                      return <IconComponent className="w-10 h-10 text-orange-400 shrink-0" />
+                      return <IconComponent className="w-10 h-10 text-primary shrink-0" />
                     })()}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-white line-clamp-1">
+                        <h3 className="font-semibold text-foreground line-clamp-1">
                           {agent.name}
                         </h3>
                         {isAdmin && !agent.is_approved && (
-                          <Badge variant="outline" className="text-xs border-yellow-500/30 text-yellow-400">
+                          <Badge variant="outline" className="text-xs border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]">
                             Pending
                           </Badge>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-muted-foreground">
                         by {agent.creator_name}
                       </p>
                     </div>
                   </div>
-                  {/* Admin Controls */}
-                  {isAdmin && (
-                    <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
-                      {!agent.is_approved && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs border-green-500/30 text-green-400 hover:bg-green-500/10"
-                          onClick={(e) => handleApprove(e, agent.id)}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}>
+                        <Download className="w-4 h-4 mr-2" />
+                        Add to Workspace
+                      </DropdownMenuItem>
+                      {isAdmin && !agent.is_approved && (
+                        <DropdownMenuItem
+                          onClick={(e) => { e.stopPropagation(); handleApprove(e as any, agent.id) }}
                           disabled={approvingId === agent.id}
                         >
-                          <Check className="w-3 h-3 mr-1" />
+                          <Check className="w-4 h-4 mr-2" />
                           {approvingId === agent.id ? 'Approving...' : 'Approve'}
-                        </Button>
+                        </DropdownMenuItem>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
-                        onClick={(e) => handleDelete(e, agent.id)}
-                        disabled={deletingId === agent.id}
-                      >
-                        <Trash2 className="w-3 h-3 mr-1" />
-                        {deletingId === agent.id ? 'Deleting...' : 'Delete'}
-                      </Button>
-                    </div>
-                  )}
+                      {isAdmin && (
+                        <DropdownMenuItem
+                          className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10 focus:text-[hsl(var(--destructive))] focus:bg-[hsl(var(--destructive))]/10"
+                          onClick={(e) => { e.stopPropagation(); handleDelete(e as any, agent.id) }}
+                          disabled={deletingId === agent.id}
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          {deletingId === agent.id ? 'Deleting...' : 'Delete'}
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardHeader>
 
               <CardContent className="space-y-3">
-                <p className="text-sm text-gray-400 line-clamp-2">
+                <p className="text-sm text-muted-foreground line-clamp-2">
                   {agent.description}
                 </p>
 
                 {/* Category badge */}
                 <div className="flex flex-col gap-2">
-                  <Badge variant="outline" className="text-xs border-gray-700 text-gray-400 w-fit">
+                  <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
                     {agent.category}
                   </Badge>
                   {agent.metadata.model_id && (
-                    <Badge className="text-xs bg-purple-500/20 text-purple-300 border-purple-500/30 w-fit">
+                    <Badge className="text-xs bg-[hsl(var(--agent))]/10 text-[hsl(var(--agent))] border-[hsl(var(--agent))]/30 w-fit">
                       <Zap className="w-3 h-3 mr-1" />
                       {agent.metadata.model_id.split('/').pop()?.substring(0, 15)}
                     </Badge>
@@ -274,35 +289,10 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 )}
 
                 {/* Install count */}
-                <div className="text-xs text-gray-500 pb-2">
+                <div className="text-xs text-muted-foreground pb-2">
                   {formatInstallCount(agent.install_count)} installs
                 </div>
 
-                {/* Action Buttons - Standard Layout */}
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleAgentClick(agent)
-                    }}
-                  >
-                    Details
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleAgentClick(agent)
-                    }}
-                  >
-                    <Download className="w-3 h-3 mr-1" />
-                    Add to Workspace
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           ))}

@@ -118,7 +118,7 @@ export function ImportGitModal({ open, onOpenChange, onSuccess }: ImportGitModal
         {importResult ? (
           <div className="py-8 text-center space-y-4">
             <div className="flex justify-center">
-              <CheckCircle2 className="h-16 w-16 text-green-500" />
+              <CheckCircle2 className="h-16 w-16 text-[hsl(var(--success))]" />
             </div>
             <div>
               <h3 className="text-lg font-semibold">{importResult.message}</h3>
@@ -140,7 +140,7 @@ export function ImportGitModal({ open, onOpenChange, onSuccess }: ImportGitModal
             {/* Git URL */}
             <div className="space-y-2">
               <Label htmlFor="git_url">
-                Git Repository URL <span className="text-red-500">*</span>
+                Git Repository URL <span className="text-[hsl(var(--destructive))]">*</span>
               </Label>
               <Input
                 id="git_url"

@@ -33,6 +33,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/shared'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,31 +86,31 @@ const getAgentIcon = (agentType: string, category?: string) => {
 
 // Get color for each agent type/category
 const getAgentIconColor = (agentType: string, category?: string) => {
-  // Category-based colors (matching create-agent-modal)
+  // Category-based colors using semantic tokens
   const categoryColorMap: Record<string, string> = {
-    'Personal Assistant': 'text-blue-500',
-    'Customer Support': 'text-green-500',
-    'DevOps': 'text-purple-500',
-    'Social Media': 'text-pink-500',
-    'Accounting': 'text-amber-500',
-    'E-commerce': 'text-cyan-500',
-    'Content Creation': 'text-indigo-500',
-    'HR': 'text-teal-500',
-    'Data Analysis': 'text-rose-500',
-    'Custom': 'text-orange-500'
+    'Personal Assistant': 'text-[hsl(var(--info))]',
+    'Customer Support': 'text-[hsl(var(--success))]',
+    'DevOps': 'text-[hsl(var(--agent))]',
+    'Social Media': 'text-primary',
+    'Accounting': 'text-[hsl(var(--warning))]',
+    'E-commerce': 'text-[hsl(var(--info))]',
+    'Content Creation': 'text-[hsl(var(--agent))]',
+    'HR': 'text-[hsl(var(--success))]',
+    'Data Analysis': 'text-[hsl(var(--destructive))]',
+    'Custom': 'text-primary'
   }
 
-  // Agent type-based colors
+  // Agent type-based colors using semantic tokens
   const typeColorMap: Record<string, string> = {
-    code_architect: 'text-purple-500',
-    security_expert: 'text-red-500',
-    performance_optimizer: 'text-yellow-500',
-    data_analyst: 'text-rose-500',
-    infrastructure_manager: 'text-cyan-500',
-    custom: 'text-orange-500',
-    devops: 'text-purple-500',
-    support: 'text-green-500',
-    assistant: 'text-blue-500',
+    code_architect: 'text-[hsl(var(--agent))]',
+    security_expert: 'text-[hsl(var(--destructive))]',
+    performance_optimizer: 'text-[hsl(var(--warning))]',
+    data_analyst: 'text-[hsl(var(--destructive))]',
+    infrastructure_manager: 'text-[hsl(var(--info))]',
+    custom: 'text-primary',
+    devops: 'text-[hsl(var(--agent))]',
+    support: 'text-[hsl(var(--success))]',
+    assistant: 'text-[hsl(var(--info))]',
   }
 
   // Try category first
@@ -118,7 +119,7 @@ const getAgentIconColor = (agentType: string, category?: string) => {
   }
 
   // Then try agent type
-  return typeColorMap[agentType] || 'text-orange-500'
+  return typeColorMap[agentType] || 'text-primary'
 }
 
 // Real agent data from API - no more mock data
@@ -149,12 +150,6 @@ interface AgentWithPerformance {
   }>
 }
 
-const statusStyles: Record<string, string> = {
-  active: 'bg-green-500/10 text-green-400 border-green-500/20',
-  idle: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  maintenance: 'bg-red-500/10 text-red-400 border-red-500/20'
-}
-
 const statusIcons: Record<string, any> = {
   active: CheckCircle,
   idle: Clock,
@@ -176,19 +171,6 @@ const getModelDisplayName = (modelId?: string): string => {
   }
 
   return modelNames[modelId] || modelId.split('-')[0].toUpperCase()
-}
-
-const getProviderColor = (provider?: string): string => {
-  const colors: Record<string, string> = {
-    openai: 'bg-green-500/10 text-green-400 border-green-500/20',
-    anthropic: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-    google: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    azure: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-    huggingface: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-    aws_bedrock: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-    bedrock: 'bg-orange-500/10 text-orange-400 border-orange-500/20'
-  }
-  return colors[provider?.toLowerCase() || 'openai'] || 'bg-blue-500/10 text-blue-400 border-blue-500/20'
 }
 
 interface AgentRosterProps {
@@ -348,7 +330,7 @@ export function AgentRoster({
                         e.stopPropagation(); // Prevent card click
                         handleDelete(agent.id);
                       }}
-                      className="text-red-500 hover:text-red-600 hover:bg-red-100/10"
+                      className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
                     >
                       <Trash2 className="w-4 h-4 mr-2" />
                       Delete
@@ -360,15 +342,28 @@ export function AgentRoster({
               {/* Status & Model */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <Badge className={statusStyles[agent.status || 'active'] || statusStyles.active}>
-                    <StatusIcon className="w-3 h-3 mr-1" />
+                  <StatusBadge size="sm" status={
+                    agent.status === 'idle' ? 'warning' :
+                    agent.status === 'maintenance' ? 'error' : 'success'
+                  }>
+                    <StatusIcon className="w-2.5 h-2.5 mr-0.5" />
                     {agent.status || 'active'}
-                  </Badge>
+                  </StatusBadge>
                   {/* PRD-15: Model Badge */}
-                  <Badge className={getProviderColor(agent.agent_model_config?.provider)}>
-                    <Bot className="w-3 h-3 mr-1" />
+                  <StatusBadge size="sm" status={
+                    (() => {
+                      const p = agent.agent_model_config?.provider?.toLowerCase()
+                      if (p === 'anthropic') return 'purple' as const
+                      if (p === 'openai') return 'success' as const
+                      if (p === 'google' || p === 'azure') return 'info' as const
+                      if (p === 'huggingface') return 'warning' as const
+                      if (p === 'aws_bedrock' || p === 'bedrock') return 'primary' as const
+                      return 'info' as const
+                    })()
+                  }>
+                    <Bot className="w-2.5 h-2.5 mr-0.5" />
                     {getModelDisplayName(agent.agent_model_config?.model_id)}
-                  </Badge>
+                  </StatusBadge>
                 </div>
               </div>
 
@@ -385,7 +380,7 @@ export function AgentRoster({
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
-                    className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-primary to-[hsl(var(--destructive))] h-2 rounded-full transition-all duration-300"
                     style={{
                       width: `${agent.performance_metrics?.success_rate != null ?
                         agent.performance_metrics.success_rate * 100 : 0}%`
@@ -427,7 +422,7 @@ export function AgentRoster({
 
               {/* Tools Preview */}
               {agent.tools && agent.tools.length > 0 && (
-                <div className="mb-4 pt-3 border-t border-white/5">
+                <div className="mb-4 pt-3 border-t border-border/50">
                   <div className="flex flex-wrap gap-2">
                     {agent.tools.slice(0, 5).map((tool: any) => (
                       <div key={tool.id} title={tool.name}>
@@ -436,12 +431,12 @@ export function AgentRoster({
                           logo={tool.icon}
                           size={24}
                           showBackground={true}
-                          className="bg-secondary/30 border border-white/5"
+                          className="bg-secondary/30 border border-border/50"
                         />
                       </div>
                     ))}
                     {agent.tools.length > 5 && (
-                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-white/5 text-[10px] text-muted-foreground">
+                      <div className="bg-secondary/30 px-1.5 h-[24px] flex items-center justify-center rounded-md border border-border/50 text-[10px] text-muted-foreground">
                         +{agent.tools.length - 5}
                       </div>
                     )}

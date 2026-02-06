@@ -23,7 +23,8 @@ import {
   TrendingUp,
   Users,
   Brain,
-  Share2
+  Share2,
+  MoreVertical
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +32,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -99,11 +106,11 @@ interface AgentDetails {
 }
 
 const statusStyles: Record<string, string> = {
-  active: 'bg-green-500/10 text-green-400 border-green-500/20',
-  inactive: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
-  training: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  maintenance: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20'
+  active: 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20',
+  inactive: 'bg-secondary/50 text-muted-foreground border-border/30',
+  training: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
+  maintenance: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20',
+  error: 'bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/20'
 }
 
 const agentTypeIcons: Record<string, string> = {
@@ -198,11 +205,11 @@ export function AgentDetailsModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div 
@@ -211,14 +218,12 @@ export function AgentDetailsModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-6xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-6xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-                {agent?.agent_type ? agentTypeIcons[agent.agent_type] || '🤖' : <Bot className="w-5 h-5" />}
-              </div>
+              <Eye className="w-6 h-6 text-primary" />
               <div>
-                <span className="text-xl">Agent Details</span>
+                <span className="text-xl">Agent <span className="gradient-text">Details</span></span>
                 <p className="text-sm text-muted-foreground font-normal">
                   {agent?.name || 'Loading...'}
                 </p>
@@ -226,54 +231,43 @@ export function AgentDetailsModal({
             </CardTitle>
             <div className="flex items-center space-x-2">
               {agent && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleEdit}
-                    className="hover:border-blue-500/50"
-                  >
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleShare}
-                    disabled={isSubmitting}
-                    className="hover:border-orange-500/50 text-orange-400"
-                  >
-                    <Share2 className="w-4 h-4 mr-2" />
-                    {isSubmitting ? 'Sharing...' : 'Share to Marketplace'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleToggleStatus}
-                    className={agent.status === 'active' ? "hover:border-yellow-500/50" : "hover:border-green-500/50"}
-                  >
-                    {agent.status === 'active' ? (
-                      <>
-                        <Pause className="w-4 h-4 mr-2" />
-                        Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4 mr-2" />
-                        Start
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleDelete}
-                    className="hover:border-red-500/50 text-red-400"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete
-                  </Button>
-                </>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleEdit}>
+                      <Edit className="w-4 h-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleShare} disabled={isSubmitting}>
+                      <Share2 className="w-4 h-4 mr-2" />
+                      {isSubmitting ? 'Sharing...' : 'Share to Marketplace'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleToggleStatus}>
+                      {agent.status === 'active' ? (
+                        <>
+                          <Pause className="w-4 h-4 mr-2" />
+                          Pause Agent
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 mr-2" />
+                          Start Agent
+                        </>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={handleDelete}
+                      className="text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               <Button variant="ghost" size="icon" onClick={onClose}>
                 <X className="w-5 h-5" />
@@ -294,8 +288,8 @@ export function AgentDetailsModal({
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-[hsl(var(--destructive))] mx-auto mb-4" />
+                  <p className="text-[hsl(var(--destructive))] mb-4">Error: {error}</p>
                   <Button onClick={() => window.location.reload()} variant="outline">
                     Try Again
                   </Button>
@@ -374,7 +368,7 @@ export function AgentDetailsModal({
                         </div>
                         <div>
                           <p className="text-sm font-medium text-muted-foreground">Agent ID</p>
-                          <p className="font-semibold text-orange-400">#{agent?.id}</p>
+                          <p className="font-semibold text-primary">#{agent?.id}</p>
                         </div>
                       </CardContent>
                     </Card>
@@ -387,7 +381,7 @@ export function AgentDetailsModal({
                     <CardContent>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="text-center p-3 bg-background/50 rounded-lg">
-                          <p className="text-2xl font-bold text-green-400">
+                          <p className="text-2xl font-bold text-[hsl(var(--success))]">
                             {agentPerformance?.success_rate != null ? 
                               `${agentPerformance.success_rate}%` : 
                               'N/A'
@@ -396,13 +390,13 @@ export function AgentDetailsModal({
                           <p className="text-sm text-muted-foreground">Success Rate</p>
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
-                          <p className="text-2xl font-bold text-blue-400">
+                          <p className="text-2xl font-bold text-[hsl(var(--info))]">
                             {agentPerformance?.completed_tasks || 0}
                           </p>
                           <p className="text-sm text-muted-foreground">Tasks Done</p>
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
-                          <p className="text-2xl font-bold text-purple-400">
+                          <p className="text-2xl font-bold text-[hsl(var(--agent))]">
                             {agentPerformance?.average_response_time != null ? 
                               `${agentPerformance.average_response_time}s` : 
                               'N/A'
@@ -411,7 +405,7 @@ export function AgentDetailsModal({
                           <p className="text-sm text-muted-foreground">Avg Response</p>
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
-                          <p className="text-2xl font-bold text-orange-400">
+                          <p className="text-2xl font-bold text-primary">
                             {skills?.length || 0}
                           </p>
                           <p className="text-sm text-muted-foreground">Skills</p>
@@ -442,13 +436,13 @@ export function AgentDetailsModal({
                         </div>
                         <div className="pt-4 grid grid-cols-2 gap-4 text-center">
                           <div>
-                            <p className="text-lg font-semibold text-green-400">
+                            <p className="text-lg font-semibold text-[hsl(var(--success))]">
                               {agentPerformance?.completed_tasks || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Completed</p>
                           </div>
                           <div>
-                            <p className="text-lg font-semibold text-red-400">
+                            <p className="text-lg font-semibold text-[hsl(var(--destructive))]">
                               {agentPerformance?.failed_tasks || 0}
                             </p>
                             <p className="text-xs text-muted-foreground">Failed</p>
@@ -515,22 +509,22 @@ export function AgentDetailsModal({
                     <CardContent>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="text-center p-4 bg-background/50 rounded-lg">
-                          <Users className="w-8 h-8 text-blue-400 mx-auto mb-2" />
+                          <Users className="w-8 h-8 text-[hsl(var(--info))] mx-auto mb-2" />
                           <p className="text-2xl font-bold">{agentPerformance?.total_tasks || 0}</p>
                           <p className="text-sm text-muted-foreground">Total Tasks</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
-                          <Clock className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
+                          <Clock className="w-8 h-8 text-[hsl(var(--warning))] mx-auto mb-2" />
                           <p className="text-2xl font-bold">{agentPerformance?.total_requests || 0}</p>
                           <p className="text-sm text-muted-foreground">Total Requests</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
-                          <Database className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                          <Database className="w-8 h-8 text-[hsl(var(--success))] mx-auto mb-2" />
                           <p className="text-2xl font-bold">{agentPerformance?.completed_tasks || 0}</p>
                           <p className="text-sm text-muted-foreground">Completed</p>
                         </div>
                         <div className="text-center p-4 bg-background/50 rounded-lg">
-                          <TrendingUp className="w-8 h-8 text-purple-400 mx-auto mb-2" />
+                          <TrendingUp className="w-8 h-8 text-[hsl(var(--agent))] mx-auto mb-2" />
                           <p className="text-2xl font-bold">{agentPerformance?.uptime_percentage || 0}%</p>
                           <p className="text-sm text-muted-foreground">Uptime</p>
                         </div>
@@ -549,9 +543,9 @@ export function AgentDetailsModal({
                           {agentLogs.slice(0, 5).map((log: any, index: number) => (
                             <div key={index} className="flex items-center space-x-3 p-3 bg-background/50 rounded-lg">
                               <div className={`w-2 h-2 rounded-full ${
-                                log.status === 'completed' ? 'bg-green-400' :
-                                log.status === 'failed' ? 'bg-red-400' :
-                                'bg-yellow-400'
+                                log.status === 'completed' ? 'bg-[hsl(var(--success))]' :
+                                log.status === 'failed' ? 'bg-[hsl(var(--destructive))]' :
+                                'bg-[hsl(var(--warning))]'
                               }`} />
                               <div className="flex-1">
                                 <p className="text-sm font-medium">{log.message}</p>
@@ -591,7 +585,7 @@ export function AgentDetailsModal({
                           {skills.map((skill: any) => (
                             <div key={skill.id} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
                               <div className="flex items-center space-x-3">
-                                <div className="w-3 h-3 rounded-full bg-green-400" />
+                                <div className="w-3 h-3 rounded-full bg-[hsl(var(--success))]" />
                                 <div>
                                   <h4 className="font-medium">{skill.name}</h4>
                                   <p className="text-sm text-muted-foreground">
@@ -632,18 +626,18 @@ export function AgentDetailsModal({
 
       {/* Share to Marketplace Confirmation Dialog */}
       <AlertDialog open={showShareDialog} onOpenChange={setShowShareDialog}>
-        <AlertDialogContent className="glass-card">
+        <AlertDialogContent className="glass-card card-glow">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center space-x-2">
-              <Share2 className="w-5 h-5 text-orange-400" />
+              <Share2 className="w-5 h-5 text-primary" />
               <span>Share Agent to Marketplace</span>
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-3">
               <p>
                 Are you sure you want to share <strong className="text-foreground">{agent?.name}</strong> to the marketplace?
               </p>
-              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-sm">
-                <p className="text-orange-400 font-semibold mb-1">📝 What happens next:</p>
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 text-sm">
+                <p className="text-primary font-semibold mb-1">📝 What happens next:</p>
                 <ul className="space-y-1 text-muted-foreground">
                   <li>• Your agent will be cloned to the marketplace</li>
                   <li>• Other users can browse and install it</li>
@@ -651,8 +645,8 @@ export function AgentDetailsModal({
                   <li>• You'll be credited as the creator</li>
                 </ul>
               </div>
-              <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-3 text-sm">
-                <p className="text-orange-400 font-semibold mb-1">⚡ Approval Status:</p>
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 text-sm">
+                <p className="text-primary font-semibold mb-1">⚡ Approval Status:</p>
                 <p className="text-muted-foreground">
                   Trusted creators (5+ approved items) get instant approval. New contributors go through a quick review process.
                 </p>
@@ -664,7 +658,7 @@ export function AgentDetailsModal({
             <AlertDialogAction
               onClick={confirmShare}
               disabled={isSubmitting}
-              className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
+              className="bg-gradient-to-r from-primary to-[hsl(var(--destructive))] hover:opacity-90"
             >
               {isSubmitting ? 'Sharing...' : 'Share to Marketplace'}
             </AlertDialogAction>

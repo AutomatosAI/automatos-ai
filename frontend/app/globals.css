@@ -103,11 +103,11 @@
     --background-gradient-from: 0 0% 4%;
     --background-gradient-to: 0 0% 10%;
 
-    --glass-card-alpha: 0.55;
+    --glass-card-alpha: 0.18;
     --glass-panel-alpha: 0.92;
-    --glass-border-alpha: 0.12;
-    --glass-border-alpha-hover: 0.22;
-    --glass-glow-alpha: 0.16;
+    --glass-border-alpha: 0.18;
+    --glass-border-alpha-hover: 0.30;
+    --glass-glow-alpha: 0.22;
     --glass-shadow-alpha: 0.45;
     --glass-shadow-alpha-hover: 0.50;
     --glass-border: var(--primary);
@@ -115,9 +115,9 @@
 
     --card-shadow-alpha: 0.45;
     --card-shadow-alpha-hover: 0.50;
-    --card-accent-alpha: 0.10;
-    --card-accent-alpha-hover: 0.16;
-    --card-highlight-alpha: 0.05;
+    --card-accent-alpha: 0.18;
+    --card-accent-alpha-hover: 0.25;
+    --card-highlight-alpha: 0.06;
 
     /* Semantic status colors (dark) */
     --success: 160 84% 39%;

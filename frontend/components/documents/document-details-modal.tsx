@@ -160,11 +160,11 @@ export function DocumentDetailsModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div 
@@ -173,7 +173,7 @@ export function DocumentDetailsModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-2">
               <FileText className="w-6 h-6 text-orange-400" />

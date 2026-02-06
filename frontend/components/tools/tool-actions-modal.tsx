@@ -117,7 +117,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col glass-card border-none bg-black/95">
+            <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col glass-card card-glow border-none bg-black/95">
                 <DialogHeader>
                     <div className="flex items-center gap-4">
                         <ToolLogo
@@ -128,7 +128,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
                             showBackground={true}
                         />
                         <div>
-                            <DialogTitle className="text-xl">Manage {tool?.name}</DialogTitle>
+                            <DialogTitle className="text-xl">Manage <span className="gradient-text">{tool?.name}</span></DialogTitle>
                             <DialogDescription>
                                 Enable or disable which features your agents can use for this app.
                             </DialogDescription>
@@ -160,7 +160,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
 
                     {/* Stats */}
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span className={`flex items-center gap-1 ${enabledCount > 0 ? 'text-green-400' : 'text-gray-400'}`}>
+                        <span className={`flex items-center gap-1 ${enabledCount > 0 ? 'text-[hsl(var(--success))]' : 'text-muted-foreground'}`}>
                             {enabledCount > 0 ? <CheckCircle className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
                             {enabledCount}/{actions.length} Enabled
                         </span>
@@ -171,7 +171,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
                 <ScrollArea className="flex-1 pr-4 -mr-4 h-[400px]">
                     {loading ? (
                         <div className="flex items-center justify-center h-40">
-                            <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
                         </div>
                     ) : filteredActions.length === 0 ? (
                         <div className="text-center py-12 text-muted-foreground">
@@ -191,7 +191,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
                                     <Switch
                                         checked={action.enabled}
                                         onCheckedChange={() => handleToggleAction(action.name)}
-                                        className="data-[state=checked]:bg-green-500"
+                                        className="data-[state=checked]:bg-[hsl(var(--success))]"
                                     />
                                 </div>
                             ))}
@@ -201,7 +201,7 @@ export function ToolActionsModal({ open, onClose, tool }: ToolActionsModalProps)
 
                 <DialogFooter className="mt-4 pt-4 border-t border-white/10">
                     <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-                    <Button onClick={handleSave} disabled={saving || loading}>
+                    <Button variant="outline" onClick={handleSave} disabled={saving || loading}>
                         {saving ? (
                             <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

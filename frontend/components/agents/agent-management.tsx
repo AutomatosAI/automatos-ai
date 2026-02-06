@@ -3,11 +3,8 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useInView } from 'react-intersection-observer'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   Plus,
   Bot,
@@ -16,10 +13,14 @@ import {
   Users,
   Zap,
   Brain,
-  Search,
-  Filter,
   RefreshCw
 } from 'lucide-react'
+
+// Shared components
+import { PageHeader } from '@/components/shared/page-header'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
+import { SearchInput } from '@/components/shared/search-input'
+import { FilterTabs, TabsContent } from '@/components/shared/filter-tabs'
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
@@ -54,16 +55,13 @@ export function AgentManagement() {
   useEffect(() => {
     console.log('Active tab changed:', activeTab)
     if (activeTab === 'configuration' && !selectedAgentId && (agents as any[])?.length > 0) {
-      // Auto-select first agent when entering configuration tab with no agent selected
       setSelectedAgentId((agents as any[])[0].id.toString())
     }
   }, [activeTab, agents, selectedAgentId])
 
   useEffect(() => {
     setMounted(true)
-    // Make sure viewDetailsAgentId starts as null
     setViewDetailsAgentId(null)
-    // Set page context for API client to use real APIs
     apiClient.setCurrentPage('agents')
   }, [])
   const [searchTerm, setSearchTerm] = useState('')
@@ -74,101 +72,93 @@ export function AgentManagement() {
   })
 
   // Calculate real statistics from actual data
-  const stats = [
+  const stats: StatItem[] = [
     {
       label: 'Total Agents',
-      value: (agentStats as any)?.total_agents || (agents as any[])?.length || '0',
+      value: String((agentStats as any)?.total_agents || (agents as any[])?.length || '0'),
       change: (agentStats as any)?.total_agents ? `${(agentStats as any).total_agents} agents` : '0 agents',
       icon: Bot,
-      color: 'text-orange-400'
+      iconColor: 'text-primary',
     },
     {
       label: 'Active Agents',
-      value: (agentStats as any)?.active_agents || (agents as any[])?.filter((a: any) => a.status === 'active')?.length || '0',
+      value: String((agentStats as any)?.active_agents || (agents as any[])?.filter((a: any) => a.status === 'active')?.length || '0'),
       change: (agentStats as any)?.active_agents && (agentStats as any)?.total_agents ? `${Math.round(((agentStats as any).active_agents / (agentStats as any).total_agents) * 100)}% online` : '0% online',
       icon: Zap,
-      color: 'text-green-400'
+      iconColor: 'text-[hsl(var(--success))]',
     },
     {
       label: 'Categories',
-      value: '10',  // Total available marketplace categories
+      value: '10',
       change: '10 categories',
       icon: Settings,
-      color: 'text-blue-400'
+      iconColor: 'text-[hsl(var(--info))]',
     },
     {
       label: 'Avg Performance',
       value: `${(agentStats as any)?.average_performance?.toFixed(1) || '0.0'}%`,
       change: (agentStats as any)?.average_performance ? ((agentStats as any).average_performance > 90 ? '↑ Excellent performance' : '↓ Needs optimization') : 'No data',
       icon: BarChart,
-      color: 'text-purple-400'
+      iconColor: 'text-[hsl(var(--agent))]',
     }
   ]
 
-  // Handle refresh
   const handleRefresh = async () => {
     await refetchAgents()
   }
 
-  // Handle view details
   const handleViewDetails = (agentId: string | null) => {
     if (agentId) {
       setViewDetailsAgentId(agentId)
     }
   }
 
+  const tabDefs = [
+    { value: 'roster', label: 'Agent Roster', icon: Users },
+    { value: 'skills', label: 'Skills', icon: Brain },
+    { value: 'configuration', label: 'Configuration', icon: Settings },
+    { value: 'coordination', label: 'Coordination', icon: Users },
+    { value: 'performance', label: 'Performance', icon: BarChart },
+  ]
+
   return (
     <div ref={ref} className="space-y-6">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5 }}
-        className="flex justify-between items-start"
-      >
-        <div>
-          <h1 className="text-3xl font-bold mb-2">
-            Agent <span className="gradient-text">Management</span>
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your AI agents, skills, and coordination strategies
-          </p>
-        </div>
+      <PageHeader
+        title="Agent"
+        titleAccent="Management"
+        subtitle="Manage your AI agents, skills, and coordination strategies"
+        actions={
+          <>
+            {!!agentsError && (
+              <Badge variant="outline" className="border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))]">
+                Agents API error (HTTP {(agentsError as any)?.status || '500'})
+              </Badge>
+            )}
+            <Button
+              onClick={handleRefresh}
+              variant="outline"
+              size="sm"
+              disabled={agentsLoading && !agentsError}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${agentsLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
 
-        <div className="flex items-center gap-3">
-          {agentsError && (
-            <Badge variant="outline" className="border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400">
-              Agents API error (HTTP {(agentsError as any)?.status || '500'})
-            </Badge>
-          )}
-          <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
-            {agentsLoading ? 'Loading...' : `${(agents as any[])?.length || 0} Agents`}
-          </Badge>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateModal(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Agent
+            </Button>
+          </>
+        }
+      />
 
-          <Button
-            onClick={handleRefresh}
-            variant="outline"
-            size="sm"
-            disabled={agentsLoading && !agentsError}
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${agentsLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-
-          <Button
-            onClick={() => setShowCreateModal(true)}
-            className="bg-brand-primary hover:bg-brand-primary/90"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Create Agent
-          </Button>
-        </div>
-      </motion.div>
-
-      {agentsError && (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
-          <div className="text-sm font-semibold text-red-600 dark:text-red-400">
+      {!!agentsError && (
+        <div className="rounded-2xl border border-[hsl(var(--destructive))]/20 bg-[hsl(var(--destructive))]/5 p-4">
+          <div className="text-sm font-semibold text-[hsl(var(--destructive))]">
             Agents failed to load (backend error)
           </div>
           <div className="mt-1 text-sm text-muted-foreground">
@@ -183,43 +173,7 @@ export function AgentManagement() {
       )}
 
       {/* Statistics Cards */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.6, delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-      >
-        {stats.map((stat, index) => (
-          <Card key={stat.label} className="glass-card card-glow hover:border-primary/20 transition-all duration-300">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-orange-500/10 flex items-center justify-center shrink-0">
-                    <stat.icon
-                      className={`w-5 h-5 ${
-                        index === 0 ? 'text-orange-400' :
-                        index === 1 ? 'text-green-400' :
-                        index === 2 ? 'text-blue-400' :
-                        index === 3 ? 'text-purple-400' :
-                        'text-white'
-                      }`}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-2xl font-bold leading-none">
-                      {statsLoading ? '…' : stat.value}
-                    </div>
-                    <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
-                  </div>
-                </div>
-                <div className={`shrink-0 text-xs ${stat.color}`}>
-                  {stat.change}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </motion.div>
+      <StatsBar stats={stats} loading={statsLoading} />
 
       {/* Search and Filters */}
       <motion.div
@@ -228,15 +182,12 @@ export function AgentManagement() {
         transition={{ duration: 0.6, delay: 0.2 }}
         className="flex flex-col sm:flex-row gap-4"
       >
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-          <Input
-            placeholder="Search agents by name, type, or skills..."
-            value={searchTerm}
-            onChange={(e: any) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
+        <SearchInput
+          value={searchTerm}
+          onChange={setSearchTerm}
+          placeholder="Search agents by name, type, or skills..."
+          className="flex-1"
+        />
 
         <div className="flex gap-2">
           <Button
@@ -269,31 +220,11 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
-            <TabsTrigger value="roster" className="flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Agent Roster</span>
-            </TabsTrigger>
-            <TabsTrigger value="skills" className="flex items-center gap-2">
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline">Skills</span>
-            </TabsTrigger>
-            <TabsTrigger value="configuration" className="flex items-center gap-2">
-              <Settings className="w-4 h-4" />
-              <span className="hidden sm:inline">Configuration</span>
-            </TabsTrigger>
-            <TabsTrigger value="coordination" className="flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Coordination</span>
-            </TabsTrigger>
-            <TabsTrigger value="performance" className="flex items-center gap-2">
-              <BarChart className="w-4 h-4" />
-              <span className="hidden sm:inline">Performance</span>
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Agent Roster Tab */}
+        <FilterTabs
+          tabs={tabDefs}
+          value={activeTab}
+          onValueChange={setActiveTab}
+        >
           <TabsContent value="roster" className="space-y-6">
             <AgentRoster
               agents={agents as any[]}
@@ -308,7 +239,6 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Skills Tab */}
           <TabsContent value="skills" className="space-y-6">
             <AgentSkills
               agents={agents as any[]}
@@ -317,7 +247,6 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Configuration Tab */}
           <TabsContent value="configuration" className="space-y-6">
             <AgentConfiguration
               agents={agents as any[]}
@@ -326,7 +255,6 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Coordination Tab */}
           <TabsContent value="coordination" className="space-y-6">
             <AgentCoordination
               agents={agents as any[]}
@@ -334,7 +262,6 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Performance Tab */}
           <TabsContent value="performance" className="space-y-6">
             <AgentPerformance
               agents={agents as any[]}
@@ -343,11 +270,10 @@ export function AgentManagement() {
               onAgentSelect={setSelectedAgentId}
             />
           </TabsContent>
-        </Tabs>
+        </FilterTabs>
       </motion.div>
 
-
-      {/* Agent Details Modal - ONLY opens when View Details is clicked */}
+      {/* Agent Details Modal */}
       {mounted && viewDetailsAgentId && (
         <AgentDetailsModal
           agentId={Number(viewDetailsAgentId)}

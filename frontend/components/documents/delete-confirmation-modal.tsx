@@ -159,11 +159,11 @@ export function DeleteConfirmationModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
       />
       <motion.div 
         className="fixed inset-0 z-50 flex items-center justify-center p-4" 
@@ -171,7 +171,7 @@ export function DeleteConfirmationModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-2xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-2xl max-h-[90vh] overflow-hidden">
           <CardHeader className="bg-red-500/5 border-b border-red-500/20">
             <CardTitle className="flex items-center space-x-2 text-red-400">
               <AlertTriangle className="w-6 h-6" />
