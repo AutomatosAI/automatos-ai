@@ -54,7 +54,7 @@ import { apiClient } from '@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
 import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
-import { MonitoringTab } from './monitoring-tab'
+// MonitoringTab removed — analytics consolidated into /analytics
 import { RecipesTab } from './recipes-tab'
 import { ExecutionKitchen } from './execution-kitchen'
 
@@ -566,22 +566,29 @@ export function WorkflowManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.4 }}
       >
-        <FilterTabs
-          tabs={[
-            { value: 'templates', label: 'Recipes', icon: GitBranch },
-            { value: 'active', label: 'Cooking', icon: Play },
-            { value: 'monitoring', label: 'Monitoring', icon: Activity },
-          ]}
-          value={activeWorkflowTab}
-          onValueChange={setActiveWorkflowTab}
-          trailing={
-            <SearchInput
-              value={recipeSearchTerm}
-              onChange={setRecipeSearchTerm}
-              placeholder="Search recipes..."
-            />
-          }
-        >
+        <Tabs defaultValue="templates" className="space-y-6">
+          <div className="flex items-center gap-4">
+            <TabsList className="bg-secondary/50 shrink-0">
+              <TabsTrigger value="templates" className="flex items-center space-x-2">
+                <GitBranch className="w-4 h-4" />
+                <span className="hidden sm:inline">Recipes</span>
+              </TabsTrigger>
+              <TabsTrigger value="active" className="flex items-center space-x-2">
+                <Play className="w-4 h-4" />
+                <span className="hidden sm:inline">Cooking</span>
+              </TabsTrigger>
+              {/* Monitoring tab removed — see /analytics */}
+            </TabsList>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                placeholder="Search recipes..."
+                value={recipeSearchTerm}
+                onChange={(e) => setRecipeSearchTerm(e.target.value)}
+                className="pl-10 bg-secondary/50 border-secondary"
+              />
+            </div>
+          </div>
 
           <SharedTabsContent value="active" className="space-y-6">
             {/* Loading State */}
@@ -635,10 +642,8 @@ export function WorkflowManagement() {
             />
           </SharedTabsContent>
 
-          <SharedTabsContent value="monitoring" className="space-y-6">
-            <MonitoringTab />
-          </SharedTabsContent>
-        </FilterTabs>
+          {/* Monitoring tab removed — see /analytics */}
+        </Tabs>
       </motion.div>
 
       {/* Cook Workflow Confirmation Modal */}

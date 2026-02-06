@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
-  LayoutDashboard,
   Users,
   GitBranch,
   Brain,
@@ -16,7 +15,6 @@ import {
   PanelLeft,
   Wrench,
   Database,
-  Lightbulb,
   Store
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -87,22 +85,13 @@ const navigationItems = [
     requiredRole: 'admin' as const,  // Admin only
   },
   {
-    name: 'Intelligence & Learning',
+    name: 'Analytics',
     href: '/analytics',
-    icon: Lightbulb,
-    iconColor: 'text-[hsl(var(--stage-1))]',
-    description: 'AI insights and system learning',
-    requiredRole: 'admin' as const,  // Admin only
+    icon: BarChart3,
+    iconColor: 'text-cyan-400',
+    description: 'Performance, costs & insights',
   },
-  // Move dashboard to bottom (near Settings)
-  {
-    name: 'System Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-    iconColor: 'text-[hsl(var(--info))]',
-    description: 'System overview and metrics',
-    requiredRole: 'admin' as const,  // Admin only
-  },
+  // Dashboard removed — analytics consolidated into /analytics
 ]
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {

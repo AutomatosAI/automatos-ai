@@ -27,7 +27,7 @@ import { AgentRoster } from './agent-roster'
 import { AgentPlugins } from './agent-plugins-tab'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
-import { AgentPerformance } from './agent-performance'
+// AgentPerformance removed — analytics consolidated into /analytics
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 
@@ -220,11 +220,28 @@ export function AgentManagement() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.6, delay: 0.3 }}
       >
-        <FilterTabs
-          tabs={tabDefs}
-          value={activeTab}
-          onValueChange={setActiveTab}
-        >
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:grid-cols-5">
+            <TabsTrigger value="roster" className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              <span className="hidden sm:inline">Agent Roster</span>
+            </TabsTrigger>
+            <TabsTrigger value="skills" className="flex items-center gap-2">
+              <Brain className="w-4 h-4" />
+              <span className="hidden sm:inline">Skills</span>
+            </TabsTrigger>
+            <TabsTrigger value="configuration" className="flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              <span className="hidden sm:inline">Configuration</span>
+            </TabsTrigger>
+            <TabsTrigger value="coordination" className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              <span className="hidden sm:inline">Coordination</span>
+            </TabsTrigger>
+            {/* Performance tab removed — see /analytics */}
+          </TabsList>
+
+          {/* Agent Roster Tab */}
           <TabsContent value="roster" className="space-y-6">
             <div data-tour="agent-roster">
               <AgentRoster
@@ -264,15 +281,8 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          <TabsContent value="performance" className="space-y-6">
-            <AgentPerformance
-              agents={agents as any[]}
-              agentStats={agentStats}
-              selectedAgentId={selectedAgentId}
-              onAgentSelect={setSelectedAgentId}
-            />
-          </TabsContent>
-        </FilterTabs>
+          {/* Performance tab removed — see /analytics */}
+        </Tabs>
       </motion.div>
 
       {/* Agent Details Modal */}
