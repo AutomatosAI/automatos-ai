@@ -1745,31 +1745,69 @@ To use actions, respond with JSON blocks like:
         if agent.description:
             sections.append(agent.description)
 
+        # PRD-42: Inject persona
+        try:
+            if getattr(agent, 'use_custom_persona', False) and agent.custom_persona_prompt:
+                sections.append(f"\n## Persona & Communication Style\n{agent.custom_persona_prompt}")
+                self.logger.info(f"Loaded custom persona for agent {agent.id}")
+            elif getattr(agent, 'persona_id', None) and getattr(agent, 'persona', None):
+                persona_prompt = agent.persona.system_prompt or ""
+                if persona_prompt:
+                    sections.append(f"\n## Persona & Communication Style\n{persona_prompt}")
+                    self.logger.info(f"Loaded persona '{agent.persona.name}' for agent {agent.id}")
+        except Exception as e:
+            self.logger.warning(f"Failed to load persona for agent {agent.id}: {e}")
+
         # Task context (optional)
         if task_context:
             sections.append("\n## Task Context\n" + str(task_context))
 
-        # Skills (progressive disclosure with intelligent selection)
-        if getattr(agent, 'skills', None):
+        # PRD-42: Load plugins — if present, skip skills entirely
+        has_plugins = False
+        try:
+            from core.services.plugin_context_service import PluginContextService
+
+            plugin_svc = PluginContextService(db) if db else None
+            if plugin_svc:
+                plugin_rows = plugin_svc.get_assigned_plugins(agent.id)
+                if plugin_rows:
+                    has_plugins = True
+                    tier1 = plugin_svc.build_tier1_summary(plugin_rows)
+                    tier2 = plugin_svc.build_tier2_content_sync(
+                        plugin_rows,
+                        task_context=task_context,
+                    )
+                    sections.append(tier1)
+                    if tier2:
+                        sections.append(tier2)
+                    self.logger.info(
+                        "Loaded plugin context for agent %s (%d plugins)",
+                        agent.id, len(plugin_rows),
+                    )
+        except Exception as e:
+            self.logger.warning(f"Failed to load plugins for agent {agent.id}: {e}")
+
+        # Skills (progressive disclosure with intelligent selection) — skipped when plugins are present
+        if not has_plugins and getattr(agent, 'skills', None):
             sections.append("\n## Your Specialized Skills\n")
             loader = get_skill_loader(db) if db is not None else None
-            
+
             # Get agent's context window for intelligent selection
             agent_config = agent.configuration or {}
             llm_config = agent_config.get('llm_config') or agent.model_config or {}
             context_window = llm_config.get('context_window', 8192)
-            
+
             # Intelligently select relevant skills to prevent context overflow
             skills_to_load = agent.skills
             if enable_smart_skill_selection and len(agent.skills) > 1:
                 skills_to_load = self._select_relevant_skills(
-                    agent.skills, 
+                    agent.skills,
                     task_context,
                     context_window=context_window  # Dynamic based on model
                 )
 
             for skill in skills_to_load:
-                self.logger.info(f"📚 Loading skill: {skill.name}")
+                self.logger.info(f"Loading skill: {skill.name}")
                 sections.append(f"### {skill.name}")
 
                 # Load prompt content
@@ -1779,9 +1817,9 @@ To use actions, respond with JSON blocks like:
                         # Level 2: core content from SKILL.md body or prompt_template
                         core_content = loader.load_skill_core(skill.name, db=db)
                         if core_content:
-                            self.logger.info(f"  ✅ Loaded {len(core_content)} chars of core content for '{skill.name}'")
+                            self.logger.info(f"  Loaded {len(core_content)} chars of core content for '{skill.name}'")
                     except Exception as e:
-                        self.logger.warning(f"  ⚠️  Failed to load core content for '{skill.name}': {e}")
+                        self.logger.warning(f"  Failed to load core content for '{skill.name}': {e}")
                         core_content = None
 
                 if core_content and isinstance(core_content, str) and core_content.strip():
@@ -1790,11 +1828,11 @@ To use actions, respond with JSON blocks like:
                     # Fallback for legacy/seed skills
                     fallback = skill.prompt_template or skill.description or ""
                     if fallback:
-                        self.logger.info(f"  📝 Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
+                        self.logger.info(f"  Using fallback content for '{skill.name}' ({len(str(fallback))} chars)")
                         sections.append(str(fallback))
                     else:
-                        self.logger.warning(f"  ⚠️  No content available for skill '{skill.name}'")
-                
+                        self.logger.warning(f"  No content available for skill '{skill.name}'")
+
                 # PRD-22: Extract tool schemas from skills
                 if hasattr(skill, 'tools_schema') and skill.tools_schema:
                     try:
@@ -1810,11 +1848,11 @@ To use actions, respond with JSON blocks like:
                                     "parameters": tool_def.get("parameters", {})
                                 }
                             })
-                            self.logger.info(f"  🛠️  Extracted tool: {tool_name}")
+                            self.logger.info(f"  Extracted tool: {tool_name}")
                         if tools:
-                            self.logger.info(f"  🦸 Total: {len(tools)} tool(s) from skill '{skill.name}'")
+                            self.logger.info(f"  Total: {len(tools)} tool(s) from skill '{skill.name}'")
                     except Exception as e:
-                        self.logger.warning(f"  ❌ Failed to extract tools from skill '{skill.name}': {e}")
+                        self.logger.warning(f"  Failed to extract tools from skill '{skill.name}': {e}")
 
         # Optional tools section (kept minimal; main tool wiring remains elsewhere)
         if required_tools:

@@ -15,7 +15,7 @@ import {
   BarChart,
   Users,
   Zap,
-  Brain,
+  Puzzle,
   Search,
   Filter,
   RefreshCw
@@ -23,7 +23,7 @@ import {
 
 // Import all tab components
 import { AgentRoster } from './agent-roster'
-import { AgentSkills } from './agent-skills'
+import { AgentPlugins } from './agent-plugins-tab'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
 import { AgentPerformance } from './agent-performance'
@@ -131,7 +131,7 @@ export function AgentManagement() {
             Agent <span className="gradient-text">Management</span>
           </h1>
           <p className="text-muted-foreground mt-1">
-            Manage your AI agents, skills, and coordination strategies
+            Manage your AI agents, plugins, and coordination strategies
           </p>
         </div>
 
@@ -172,7 +172,7 @@ export function AgentManagement() {
             Agents failed to load (backend error)
           </div>
           <div className="mt-1 text-sm text-muted-foreground">
-            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code> and <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/v1/skills</code>.
+            The backend returned an error for the Agents endpoints. Check the backend logs for <code className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs">/api/agents</code>.
           </div>
           <div className="mt-3 flex gap-2">
             <Button variant="outline" size="sm" onClick={handleRefresh}>
@@ -275,9 +275,9 @@ export function AgentManagement() {
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Agent Roster</span>
             </TabsTrigger>
-            <TabsTrigger value="skills" className="flex items-center gap-2">
-              <Brain className="w-4 h-4" />
-              <span className="hidden sm:inline">Skills</span>
+            <TabsTrigger value="plugins" className="flex items-center gap-2">
+              <Puzzle className="w-4 h-4" />
+              <span className="hidden sm:inline">Plugins</span>
             </TabsTrigger>
             <TabsTrigger value="configuration" className="flex items-center gap-2">
               <Settings className="w-4 h-4" />
@@ -308,9 +308,9 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Skills Tab */}
-          <TabsContent value="skills" className="space-y-6">
-            <AgentSkills
+          {/* Plugins Tab */}
+          <TabsContent value="plugins" className="space-y-6">
+            <AgentPlugins
               agents={agents as any[]}
               selectedAgentId={selectedAgentId}
               onAgentSelect={setSelectedAgentId}

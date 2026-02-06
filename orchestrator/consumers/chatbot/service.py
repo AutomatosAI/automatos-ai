@@ -1651,6 +1651,21 @@ COMMUNICATION TOOLS:
 
 Always be clear, concise, and ACTION-ORIENTED in your responses. When tools are available, USE THEM instead of explaining what you would do."""
         
+        # PRD-42: Load persona from agent's DB record
+        persona_prompt = ""
+        try:
+            from core.models import Agent as AgentModel
+            db_agent = self.db.query(AgentModel).filter(AgentModel.id == agent_runtime.agent_id).first()
+            if db_agent:
+                if db_agent.use_custom_persona and db_agent.custom_persona_prompt:
+                    persona_prompt = db_agent.custom_persona_prompt
+                    logger.info(f"Loaded custom persona for agent {agent_runtime.agent_id}")
+                elif db_agent.persona_id and db_agent.persona:
+                    persona_prompt = db_agent.persona.system_prompt or ""
+                    logger.info(f"Loaded persona '{db_agent.persona.name}' for agent {agent_runtime.agent_id}")
+        except Exception as e:
+            logger.warning(f"Failed to load persona for agent {agent_runtime.agent_id}: {e}")
+
         # Add agent-specific context
         agent_context = f"""
 
@@ -1658,43 +1673,78 @@ You are {agent_runtime.metadata.name}, a specialized {agent_runtime.metadata.age
 
 AGENT DESCRIPTION:
 {agent_runtime.metadata.description or f"Specialized {agent_runtime.metadata.agent_type} with expertise in specific domains."}
+"""
+        # Inject persona before skills
+        if persona_prompt:
+            agent_context += f"""
+## Persona & Communication Style
+{persona_prompt}
+"""
 
+        # PRD-42: Load plugins — if present, skip skills entirely
+        plugin_context = ""
+        has_plugins = False
+        try:
+            from core.services.plugin_context_service import PluginContextService
+
+            plugin_svc = PluginContextService(self.db)
+            plugin_rows = plugin_svc.get_assigned_plugins(agent_runtime.agent_id)
+            if plugin_rows:
+                has_plugins = True
+                tier1 = plugin_svc.build_tier1_summary(plugin_rows)
+                tier2 = await plugin_svc.build_tier2_content(
+                    plugin_rows,
+                    task_context=agent_runtime.metadata.description,
+                )
+                plugin_context = f"\n{tier1}\n{tier2}" if tier2 else f"\n{tier1}"
+                logger.info(
+                    "Loaded plugin context for agent %s (%d plugins)",
+                    agent_runtime.agent_id, len(plugin_rows),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to load plugins for agent {agent_runtime.agent_id}: {e}")
+
+        if has_plugins:
+            # Plugins replace skills
+            agent_context += plugin_context
+        else:
+            agent_context += """
 YOUR SPECIALIZED SKILLS:
 """
-        
-        # Load and inject skills from database
-        skills_text = ""
-        if agent_runtime.metadata.skills:
-            # Query database for skill details
-            skills = self.db.query(Skill).filter(
-                Skill.name.in_(agent_runtime.metadata.skills),
-                Skill.is_active == True
-            ).all()
-            
-            for skill in skills:
-                if skill.prompt_template:
-                    skills_text += f"\n{skill.prompt_template}\n"
-                elif skill.description:
-                    skills_text += f"\n- {skill.name}: {skill.description}\n"
-        
+            # Load and inject skills from database
+            skills_text = ""
+            if agent_runtime.metadata.skills:
+                # Query database for skill details
+                skills = self.db.query(Skill).filter(
+                    Skill.name.in_(agent_runtime.metadata.skills),
+                    Skill.is_active == True
+                ).all()
+
+                for skill in skills:
+                    if skill.prompt_template:
+                        skills_text += f"\n{skill.prompt_template}\n"
+                    elif skill.description:
+                        skills_text += f"\n- {skill.name}: {skill.description}\n"
+            agent_context += skills_text
+
         # Build complete prompt
-        complete_prompt = f"{base_prompt}\n\n{agent_context}\n\n{skills_text}"
-        
+        complete_prompt = f"{base_prompt}\n\n{agent_context}"
+
         # Extract tool schemas from skills for function calling
         tool_schemas = []
-        if agent_runtime.metadata.skills:
+        if not has_plugins and agent_runtime.metadata.skills:
             skills = self.db.query(Skill).filter(
                 Skill.name.in_(agent_runtime.metadata.skills),
                 Skill.is_active == True
             ).all()
-            
+
             for skill in skills:
                 if skill.content and isinstance(skill.content, dict):
                     tools_schema = skill.content.get('tools_schema', [])
                     if tools_schema:
                         logger.info(f"Extracted {len(tools_schema)} tools from skill '{skill.name}'")
                         tool_schemas.extend(tools_schema)
-        
+
         return (complete_prompt, tool_schemas)
     
     async def _handle_tool_calls_aisdk(

@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import and_, or_, func, text
 from sqlalchemy.exc import SQLAlchemyError
 import time
@@ -11,6 +11,8 @@ from core.models import PriorityLevel
 from core.models import Agent, Skill, Pattern, agent_skills
 # New cache tables (rewrite)
 from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
+# Plugin assignment models
+from core.models.marketplace_plugins import AgentAssignedPlugin, MarketplacePlugin
 # Composio connection manager (used to restrict assignments to connected apps)
 from core.composio.entity_manager import EntityManager
 # Import Pydantic models from database.models (not models.py)
@@ -134,7 +136,7 @@ def _normalize_tags(raw_tags) -> List[str]:
 
 
 def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
-    """Build agent response with skills and tools"""
+    """Build agent response with skills, tools, and plugins"""
     # PRD-15: Debug logging for model_config
     model_cfg = getattr(agent, 'model_config', None)
     logger.debug(f"Agent {agent.id} model_config: {model_cfg}")
@@ -170,13 +172,42 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
                 }
             )
     
+    # Build plugins list from assigned_plugins relationship (eager-loaded or queried)
+    plugins: List[Dict[str, Any]] = []
+    assigned_plugins = getattr(agent, 'assigned_plugins', None)
+    if assigned_plugins is None:
+        # Fallback: query if relationship wasn't eager-loaded
+        assigned_plugins = (
+            db.query(AgentAssignedPlugin)
+            .filter(AgentAssignedPlugin.agent_id == agent.id)
+            .all()
+        )
+    if assigned_plugins:
+        plugin_ids = [ap.plugin_id for ap in assigned_plugins]
+        plugin_map = {
+            p.id: p
+            for p in db.query(MarketplacePlugin).filter(MarketplacePlugin.id.in_(plugin_ids)).all()
+        } if plugin_ids else {}
+        for ap in assigned_plugins:
+            mp = plugin_map.get(ap.plugin_id)
+            if mp:
+                plugins.append({
+                    "plugin_id": str(mp.id),
+                    "slug": mp.slug,
+                    "name": mp.name,
+                    "version": mp.version,
+                    "description": mp.description or "",
+                    "skills_count": mp.skills_count or 0,
+                    "commands_count": mp.commands_count or 0,
+                })
+
     # Read-time legacy cleanup: remove tags from configuration if present
     # agent.tags is the single source of truth, configuration should not contain tags
     configuration = agent.configuration.copy() if agent.configuration else {}
     if "tags" in configuration:
         configuration.pop("tags", None)
         logger.debug(f"Removed legacy tags from configuration for agent {agent.id}")
-    
+
     return AgentResponse(
         id=agent.id,
         name=agent.name,
@@ -194,7 +225,8 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
             created_at=skill.created_at,
             updated_at=skill.updated_at
         ).model_dump() for skill in agent.skills] if agent.skills else [],
-        tools=tools,  # Add tools to response
+        tools=tools,
+        plugins=plugins,
         priority_level=getattr(agent, 'priority_level', 'medium') or 'medium',
         max_concurrent_tasks=getattr(agent, 'max_concurrent_tasks', 5) or 5,
         auto_start=getattr(agent, 'auto_start', False) or False,
@@ -423,7 +455,7 @@ async def list_agents(
     """List agents with enhanced filtering and pagination"""
     try:
         # Filter by workspace
-        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills))
+        query = db.query(Agent).filter(Agent.workspace_id == ctx.workspace_id).options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
         
         # Apply filters
         if status:
@@ -512,13 +544,13 @@ async def get_agent(agent_id: int, ctx: RequestContext = Depends(get_request_con
     try:
         agent = (
             db.query(Agent)
-            .options(joinedload(Agent.skills))
+            .options(joinedload(Agent.skills), subqueryload(Agent.assigned_plugins))
             .filter(Agent.id == agent_id, Agent.workspace_id == ctx.workspace_id)
             .first()
         )
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        
+
         return _build_agent_response(agent, db)
     except HTTPException:
         raise

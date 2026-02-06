@@ -177,7 +177,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
           {agents.map((agent: MarketplaceAgent) => (
             <Card
               key={agent.id}
-              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer"
+              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer flex flex-col"
               onClick={() => handleAgentClick(agent)}
             >
               <CardHeader className="pb-3">
@@ -205,35 +205,35 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                   </div>
                   {/* Admin Controls */}
                   {isAdmin && (
-                    <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                       {!agent.is_approved && (
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-7 text-xs border-green-500/30 text-green-400 hover:bg-green-500/10"
+                          className="h-6 w-6 p-0 border-green-500/30 text-green-400 hover:bg-green-500/10"
                           onClick={(e) => handleApprove(e, agent.id)}
                           disabled={approvingId === agent.id}
+                          title="Approve"
                         >
-                          <Check className="w-3 h-3 mr-1" />
-                          {approvingId === agent.id ? 'Approving...' : 'Approve'}
+                          {approvingId === agent.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                         </Button>
                       )}
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                        className="h-6 w-6 p-0 border-red-500/30 text-red-400 hover:bg-red-500/10"
                         onClick={(e) => handleDelete(e, agent.id)}
                         disabled={deletingId === agent.id}
+                        title="Delete"
                       >
-                        <Trash2 className="w-3 h-3 mr-1" />
-                        {deletingId === agent.id ? 'Deleting...' : 'Delete'}
+                        {deletingId === agent.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                       </Button>
                     </div>
                   )}
                 </div>
               </CardHeader>
 
-              <CardContent className="space-y-3">
+              <CardContent className="flex-1 flex flex-col space-y-3">
                 <p className="text-sm text-gray-400 line-clamp-2">
                   {agent.description}
                 </p>
@@ -279,7 +279,7 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
                 </div>
 
                 {/* Action Buttons - Standard Layout */}
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-800">
+                <div className="flex items-center gap-2 pt-2 border-t border-gray-800 mt-auto">
                   <Button
                     variant="outline"
                     size="sm"

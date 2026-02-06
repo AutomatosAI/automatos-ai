@@ -11,9 +11,69 @@ import json
 import logging
 import zipfile
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
+
+
+# ======================================================================
+# Auto-categorisation — keyword map from category slug → terms
+# ======================================================================
+# Checked against plugin slug, name, tags, and description (lower-cased).
+# Order matters: first match wins.
+
+_CATEGORY_KEYWORDS: List[tuple] = [
+    # Development
+    ("code-review",    ["code review", "lint", "code quality", "static analysis", "refactor", "code analysis"]),
+    ("testing",        ["test", "testing", "coverage", "spec", "jest", "pytest", "unit test", "e2e", "quality assurance"]),
+    ("documentation",  ["documentation", "docs", "readme", "docstring", "jsdoc", "typedoc", "visual docs"]),
+    # DevOps
+    ("deployment",     ["deploy", "deployment", "rollback", "release", "kubernetes", "k8s", "docker", "helm"]),
+    ("monitoring",     ["monitor", "monitoring", "alerting", "observability", "apm", "datadog", "grafana"]),
+    ("ci-cd",          ["ci/cd", "ci-cd", "pipeline", "github actions", "jenkins", "circleci", "gitlab ci", "devops"]),
+    # Marketing
+    ("seo",            ["seo", "search engine", "keyword research", "ranking", "sitemap", "meta tag"]),
+    ("content",        ["content creation", "content marketing", "copywriting", "blog", "editorial", "marketing skill"]),
+    ("analytics",      ["analytics", "attribution", "campaign", "google analytics", "tracking", "business analytics"]),
+    # Sales
+    ("outreach",       ["outreach", "email sequence", "cold email", "follow-up", "drip", "sales skill"]),
+    ("crm",            ["crm", "salesforce", "hubspot", "deal tracking", "contact management", "customer sales"]),
+    ("prospecting",    ["prospecting", "lead gen", "lead generation", "enrichment", "qualification"]),
+    # Support
+    ("ticketing",      ["ticketing", "ticket", "support", "helpdesk", "zendesk", "intercom"]),
+    ("knowledge-base", ["knowledge base", "faq", "self-service", "help center"]),
+    # Data
+    ("analysis",       ["data analysis", "exploration", "insight", "pandas", "jupyter", "notebook"]),
+    ("visualization",  ["visualization", "chart", "dashboard", "plotting"]),
+    ("etl",            ["etl", "extraction", "transform", "airflow", "dbt"]),
+    # Security
+    ("scanning",       ["security scan", "vulnerability", "pentest", "penetration", "owasp", "security"]),
+    ("compliance",     ["compliance", "regulatory", "policy", "gdpr", "hipaa", "sox", "hr legal", "hr-legal", "human resources"]),
+    ("audit",          ["audit", "access review", "log analysis", "security audit"]),
+    # Broader fallbacks (keep at bottom — first match wins)
+    ("content",        ["marketer", "marketing"]),
+    ("analytics",      ["payment", "payment processing", "stripe", "billing"]),
+]
+
+
+def _auto_categorise(slug: str, name: str, tags: list, description: str, db) -> Optional[str]:
+    """Return a category_id (UUID) based on keyword matching, or None."""
+    from core.models.marketplace_plugins import PluginCategory
+
+    # Build a single searchable string from all plugin metadata
+    haystack = " ".join([
+        slug.replace("-", " "),
+        name.lower(),
+        " ".join(t.lower() for t in (tags or [])),
+        (description or "").lower(),
+    ])
+
+    for cat_slug, keywords in _CATEGORY_KEYWORDS:
+        if any(kw in haystack for kw in keywords):
+            cat = db.query(PluginCategory).filter(PluginCategory.slug == cat_slug).first()
+            if cat:
+                return cat.id
+    return None
 
 
 class PluginUploadService:
@@ -209,6 +269,12 @@ class PluginUploadService:
         # ------------------------------------------------------------------
         # 6. Create MarketplacePlugin database record
         # ------------------------------------------------------------------
+
+        # Auto-assign category based on plugin metadata
+        category_id = _auto_categorise(slug, name, tags, description, self.db)
+        if category_id:
+            logger.info("Auto-categorised %s → category_id=%s", slug, category_id)
+
         plugin = MarketplacePlugin(
             slug=slug,
             name=name,
@@ -216,6 +282,7 @@ class PluginUploadService:
             s3_path=s3_prefix,
             description=description,
             long_description=long_description,
+            category_id=category_id,
             tags=tags,
             skills_count=skills_count,
             commands_count=commands_count,

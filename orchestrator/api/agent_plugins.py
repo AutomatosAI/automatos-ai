@@ -218,10 +218,6 @@ async def get_assembled_context(
     plugin skills, and tool definitions.  Used by AgentFactory at runtime."""
     try:
         from core.models.core import Agent
-        from core.models.marketplace_plugins import (
-            AgentAssignedPlugin,
-            MarketplacePlugin,
-        )
         from core.models.composio_cache import AgentAppAssignment, ComposioAppCache
 
         # ------------------------------------------------------------------
@@ -265,44 +261,16 @@ async def get_assembled_context(
                 }
 
         # ------------------------------------------------------------------
-        # 4. Load assigned plugin skills from S3
+        # 4. Load assigned plugin context via PluginContextService
         # ------------------------------------------------------------------
-        plugin_rows = (
-            db.query(AgentAssignedPlugin, MarketplacePlugin)
-            .join(MarketplacePlugin, MarketplacePlugin.id == AgentAssignedPlugin.plugin_id)
-            .filter(AgentAssignedPlugin.agent_id == agent_id)
-            .order_by(AgentAssignedPlugin.priority.asc())
-            .all()
-        )
+        from core.services.plugin_context_service import PluginContextService
 
-        plugins_loaded: List[str] = []
-        plugin_skills_text = ""
+        plugin_svc = PluginContextService(db)
+        plugin_rows = plugin_svc.get_assigned_plugins(agent_id)
+        plugins_loaded: List[str] = [p.slug for _, p in plugin_rows]
 
-        for _aap, plugin in plugin_rows:
-            plugins_loaded.append(plugin.slug)
-
-            # Try loading SKILL.md files from S3 for each plugin
-            try:
-                from core.services.marketplace_s3 import MarketplaceS3Service
-
-                s3 = MarketplaceS3Service()
-                file_keys = await s3.list_plugin_files(plugin.slug, plugin.version)
-
-                for key in file_keys:
-                    # Load SKILL.md files and any .md skill definitions
-                    if key.lower().endswith("skill.md") or key.lower().endswith("/skills.md"):
-                        content = await s3.get_file(key)
-                        relative_path = key.split(f"{plugin.slug}/{plugin.version}/", 1)[-1]
-                        plugin_skills_text += (
-                            f"\n\n## Plugin: {plugin.name} ({plugin.slug})\n"
-                            f"### {relative_path}\n\n{content}"
-                        )
-            except Exception as s3_err:
-                logger.warning(
-                    "Could not load S3 skills for plugin %s@%s: %s",
-                    plugin.slug, plugin.version, s3_err,
-                )
-                # Graceful fallback — plugin listed but content unavailable
+        tier1 = plugin_svc.build_tier1_summary(plugin_rows)
+        tier2 = await plugin_svc.build_tier2_content(plugin_rows)
 
         # ------------------------------------------------------------------
         # 5. Assemble system_prompt
@@ -312,12 +280,10 @@ async def get_assembled_context(
         if persona_prompt:
             sections.append(persona_prompt)
 
-        if plugin_skills_text:
-            sections.append(
-                "# Loaded Plugin Skills\n"
-                "The following skills are loaded from marketplace plugins:\n"
-                + plugin_skills_text
-            )
+        if tier1:
+            sections.append(tier1)
+        if tier2:
+            sections.append(tier2)
 
         system_prompt = "\n\n".join(sections)
 
