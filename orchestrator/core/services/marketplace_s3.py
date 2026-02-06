@@ -40,10 +40,13 @@ class LocalStorageService:
     """Local filesystem storage that mirrors the S3 API for dev/testing."""
 
     def __init__(self):
-        self.base_dir = pathlib.Path(
-            os.getenv("MARKETPLACE_LOCAL_DIR", "/tmp/automatos-marketplace")
+        default_dir = os.path.join(
+            os.path.expanduser("~"), ".automatos", "marketplace"
         )
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        self.base_dir = pathlib.Path(
+            os.getenv("MARKETPLACE_LOCAL_DIR", default_dir)
+        )
+        self.base_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         logger.info("Using local filesystem storage at %s", self.base_dir)
 
     async def upload_zip(self, slug: str, version: str, zip_bytes: bytes) -> str:
@@ -62,7 +65,20 @@ class LocalStorageService:
             shutil.rmtree(dest)
         dest.mkdir(parents=True, exist_ok=True)
 
+        max_uncompressed = int(
+            os.getenv("PLUGIN_MAX_UPLOAD_SIZE_MB", "50")
+        ) * 1024 * 1024
+
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            total_uncompressed = sum(
+                info.file_size for info in zf.infolist() if not info.filename.endswith("/")
+            )
+            if total_uncompressed > max_uncompressed:
+                raise ValueError(
+                    f"Total uncompressed size ({total_uncompressed} bytes) exceeds "
+                    f"limit ({max_uncompressed} bytes)"
+                )
+
             for info in zf.infolist():
                 if info.filename.endswith("/"):
                     continue

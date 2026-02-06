@@ -183,13 +183,11 @@ def _build_agent_response(agent: Agent, db: Session) -> AgentResponse:
             .all()
         )
     if assigned_plugins:
-        plugin_ids = [ap.plugin_id for ap in assigned_plugins]
-        plugin_map = {
-            p.id: p
-            for p in db.query(MarketplacePlugin).filter(MarketplacePlugin.id.in_(plugin_ids)).all()
-        } if plugin_ids else {}
         for ap in assigned_plugins:
-            mp = plugin_map.get(ap.plugin_id)
+            mp = getattr(ap, 'plugin', None)
+            if mp is None:
+                # Relationship not loaded — single fallback query
+                mp = db.query(MarketplacePlugin).filter(MarketplacePlugin.id == ap.plugin_id).first()
             if mp:
                 plugins.append({
                     "plugin_id": str(mp.id),

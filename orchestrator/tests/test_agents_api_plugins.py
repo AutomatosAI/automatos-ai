@@ -30,7 +30,7 @@ for mod_name in [
         stub.ExpiredSignatureError = Exception
         sys.modules[mod_name] = stub
 
-from api.agents import _build_agent_response  # noqa: E402
+from api.agents import _build_agent_response
 
 
 # ---------------------------------------------------------------------------
@@ -75,10 +75,11 @@ def _make_marketplace_plugin(plugin_id=None, slug="test-plugin", name="Test Plug
     return mp
 
 
-def _make_assignment(plugin_id, priority=0):
+def _make_assignment(plugin_id, priority=0, plugin=None):
     aap = MagicMock()
     aap.plugin_id = plugin_id
     aap.priority = priority
+    aap.plugin = plugin
     return aap
 
 
@@ -89,15 +90,13 @@ def _make_assignment(plugin_id, priority=0):
 class TestBuildAgentResponsePlugins:
     def test_plugins_included_in_response(self):
         mp = _make_marketplace_plugin(slug="email-auto", name="Email Automation")
-        aap = _make_assignment(mp.id)
+        aap = _make_assignment(mp.id, plugin=mp)
         agent = _make_full_agent(assigned_plugins=[aap])
 
         db = MagicMock()
         tools_q = MagicMock()
         tools_q.filter.return_value.all.return_value = []
-        mp_q = MagicMock()
-        mp_q.filter.return_value.all.return_value = [mp]
-        db.query.side_effect = [tools_q, mp_q]
+        db.query.side_effect = [tools_q]
 
         resp = _build_agent_response(agent, db)
         assert len(resp.plugins) == 1
@@ -122,15 +121,13 @@ class TestBuildAgentResponsePlugins:
             version="2.1.0", description="Database management",
             skills_count=7, commands_count=4,
         )
-        aap = _make_assignment(pid)
+        aap = _make_assignment(pid, plugin=mp)
         agent = _make_full_agent(assigned_plugins=[aap])
 
         db = MagicMock()
         tools_q = MagicMock()
         tools_q.filter.return_value.all.return_value = []
-        mp_q = MagicMock()
-        mp_q.filter.return_value.all.return_value = [mp]
-        db.query.side_effect = [tools_q, mp_q]
+        db.query.side_effect = [tools_q]
 
         resp = _build_agent_response(agent, db)
         p = resp.plugins[0]

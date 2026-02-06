@@ -112,6 +112,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
     setPluginsLoading(true)
     const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
     if (!workspaceId) {
+      setWorkspacePlugins([])
       setPluginsLoading(false)
       return
     }

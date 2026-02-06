@@ -194,8 +194,10 @@ class TestUpdateAgentPlugins:
         db = MagicMock()
         agent_q = MagicMock()
         agent_q.filter.return_value.first.return_value = agent
-        wep_a = MagicMock(); wep_a.plugin_id = pid_a
-        wep_b = MagicMock(); wep_b.plugin_id = pid_b
+        wep_a = MagicMock()
+        wep_a.plugin_id = pid_a
+        wep_b = MagicMock()
+        wep_b.plugin_id = pid_b
         wep_q = MagicMock()
         wep_q.filter.return_value.all.return_value = [wep_a, wep_b]
         delete_q = MagicMock()

@@ -29,7 +29,7 @@ export function GitHubImportModal({ open, onClose, onImportComplete }: GitHubImp
   const [results, setResults] = useState<ImportResult[] | null>(null)
 
   const handleImport = async () => {
-    if (!url.trim()) return
+    if (!url.trim() || isImporting) return
 
     setIsImporting(true)
     setResults(null)

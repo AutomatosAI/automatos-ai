@@ -70,7 +70,7 @@ class TestPluginContextInSystemPrompt:
         ]
 
         cache = MagicMock()
-        cache.get_file = AsyncMock(side_effect=lambda slug, ver, path: {
+        cache.get_file = AsyncMock(side_effect=lambda slug, _ver, _path: {
             "email-sender": "# Email Skills\nCompose and send.",
             "db-tool": "# DB Skills\nRun queries.",
         }.get(slug))

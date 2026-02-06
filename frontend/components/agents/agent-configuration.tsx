@@ -104,7 +104,11 @@ export function AgentConfiguration({
       try {
         const workspaceId = localStorage.getItem('last_active_workspace') || localStorage.getItem('last_active_org')
         if (!workspaceId) {
-          if (mounted) setPluginsLoading(false)
+          if (mounted) {
+            setWorkspacePlugins([])
+            setAssignedPluginIds(new Set())
+            setPluginsLoading(false)
+          }
           return
         }
         const [wpRes, apRes] = await Promise.all([

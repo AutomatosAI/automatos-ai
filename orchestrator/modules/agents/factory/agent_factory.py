@@ -1773,11 +1773,12 @@ To use actions, respond with JSON blocks like:
                 if plugin_rows:
                     has_plugins = True
                     tier1 = plugin_svc.build_tier1_summary(plugin_rows)
+                    if tier1:
+                        sections.append(tier1)
                     tier2 = plugin_svc.build_tier2_content_sync(
                         plugin_rows,
                         task_context=task_context,
                     )
-                    sections.append(tier1)
                     if tier2:
                         sections.append(tier2)
                     self.logger.info(

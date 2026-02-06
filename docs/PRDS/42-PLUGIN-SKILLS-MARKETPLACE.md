@@ -72,7 +72,7 @@ Automatos Marketplace is a centralized, admin-curated repository of skills, plug
 
 ### High-Level Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           EXTERNAL SOURCES                                   │
 │                                                                             │
@@ -155,7 +155,7 @@ Automatos Marketplace is a centralized, admin-curated repository of skills, plug
 │      • social   │    │      • code-rev │    │      • seo      │
 │      • copy     │    │      • devops   │    │      • analytics│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+```text
 
 ---
 
@@ -165,7 +165,7 @@ Automatos Marketplace is a centralized, admin-curated repository of skills, plug
 
 The sync service pulls from multiple sources and normalizes to Automatos format:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           SYNC PIPELINE                                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -217,7 +217,7 @@ The sync service pulls from multiple sources and normalizes to Automatos format:
 │     └─► Slack notification for new skills                                  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Sync Configuration
 
@@ -268,7 +268,7 @@ validation:
     - "exec("
     - "__import__"
     - "subprocess.call"
-```
+```text
 
 ---
 
@@ -500,11 +500,11 @@ CREATE TABLE skill_usage_events (
 -- Index for analytics queries
 CREATE INDEX idx_skill_usage_created ON skill_usage_events(created_at);
 CREATE INDEX idx_skill_usage_skill ON skill_usage_events(skill_id);
-```
+```text
 
 ### S3 Object Structure
 
-```
+```text
 s3://automatos-marketplace/
 
 ├── skills/
@@ -552,7 +552,7 @@ s3://automatos-marketplace/
     ├── support-agent.json
     ├── technical-writer.json
     └── ...
-```
+```text
 
 ### Manifest Schema (Automatos Format)
 
@@ -609,7 +609,7 @@ s3://automatos-marketplace/
     ]
   }
 }
-```
+```text
 
 ---
 
@@ -617,7 +617,7 @@ s3://automatos-marketplace/
 
 ### 1. Admin: Sync Management
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AUTOMATOS ADMIN > MARKETPLACE > SYNC                                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -658,11 +658,11 @@ s3://automatos-marketplace/
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### 2. Admin: Approval Queue
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AUTOMATOS ADMIN > MARKETPLACE > PENDING APPROVAL (12)                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -693,11 +693,11 @@ s3://automatos-marketplace/
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### 3. User: Marketplace Browse
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AUTOMATOS > MARKETPLACE                                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -743,11 +743,11 @@ s3://automatos-marketplace/
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### 4. User: Skill Detail
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AUTOMATOS > MARKETPLACE > Social Media Marketing                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -802,11 +802,11 @@ s3://automatos-marketplace/
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### 5. User: Agent Configuration with Skills
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  AUTOMATOS > AGENTS > Edit: LinkedIn Sales Bot                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -862,7 +862,7 @@ s3://automatos-marketplace/
 │  [Cancel]                                              [Save Agent]         │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ---
 
@@ -1204,7 +1204,7 @@ components:
             description: OpenAI-format tool definitions
         token_estimate:
           type: integer
-```
+```text
 
 ---
 
@@ -1298,7 +1298,7 @@ components:
     {"slug": "web-scraper", "reason": "Contains subprocess calls"}
   ]
 }
-```
+```text
 
 ### B. Claude Marketplace Format Reference
 
@@ -1323,7 +1323,7 @@ components:
     }
   ]
 }
-```
+```text
 
 ---
 
@@ -1333,7 +1333,7 @@ The plugin system runtime loads plugin context into agent system prompts at exec
 
 **Runtime chain:**
 
-```
+```text
 Agent assigned plugins (DB: agent_assigned_plugins)
   │
   ▼
@@ -1364,11 +1364,11 @@ PluginContextService.get_assigned_plugins(agent_id)
               └─ PluginContentCache.get_manifest(slug, version)
                    Returns parsed manifest.json
                    Tools rendered as "**tool_name**: description"
-```
+```text
 
 **Cache architecture:**
 
-```
+```text
 PluginContentCache (singleton via get_plugin_content_cache())
   │
   ├─ Redis layer
@@ -1381,7 +1381,7 @@ PluginContentCache (singleton via get_plugin_content_cache())
   │
   └─ invalidate_plugin(slug, version)
        Deletes: content key + manifest key + scans plugin_files:* keys
-```
+```text
 
 **Skills-vs-Plugins decision (caller responsibility):**
 
@@ -1394,7 +1394,7 @@ if plugin_rows:
 else:
     # No plugins → load legacy skills as before
     prompt += load_skills(agent)
-```
+```text
 
 **API endpoints (agent_plugins.py):**
 
@@ -1415,7 +1415,7 @@ The `plugins` array is included in every agent GET response via `AgentResponse` 
     "skills_count": 5, "commands_count": 3
   }]
 }
-```
+```text
 
 **Source files:**
 
@@ -1455,7 +1455,7 @@ All tests use mocked DB/S3/Redis — no live services needed. Runs in ~0.8s.
 **Run:**
 ```bash
 cd orchestrator && python -m pytest tests/ -v --tb=short
-```
+```text
 
 **Mock strategy:**
 - DB: `MagicMock(spec=Session)` with chainable `.query().join().filter().order_by().all()`

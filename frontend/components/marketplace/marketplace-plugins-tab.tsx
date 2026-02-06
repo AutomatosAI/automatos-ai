@@ -720,7 +720,7 @@ function PluginCard({
   onDeactivate,
   onDelete,
 }: PluginCardProps) {
-  const isPending = plugin.approval_status !== 'approved'
+  const isPending = plugin.approval_status === 'pending'
 
   return (
     <motion.div

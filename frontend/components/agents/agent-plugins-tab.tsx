@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Puzzle, Terminal, Zap, Shield, ExternalLink } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Puzzle, Terminal, Zap, Shield, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,26 +17,36 @@ interface AgentPluginsProps {
 export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPluginsProps) {
   const [plugins, setPlugins] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [fetchKey, setFetchKey] = useState(0)
 
-  useEffect(() => {
+  const fetchPlugins = useCallback(() => {
     if (!selectedAgentId) {
       setPlugins([])
+      setError(null)
       return
     }
     let mounted = true
     setLoading(true)
+    setError(null)
     apiClient.request<any>(`/api/agents/${selectedAgentId}/plugins`, { method: 'GET' })
       .then((data) => {
         if (!mounted) return
         const items = Array.isArray(data) ? data : (data?.items || data?.plugins || [])
         setPlugins(items)
       })
-      .catch(() => {
-        if (mounted) setPlugins([])
+      .catch((err) => {
+        if (mounted) {
+          setError(err?.message || 'Failed to load plugins')
+        }
       })
       .finally(() => { if (mounted) setLoading(false) })
     return () => { mounted = false }
-  }, [selectedAgentId])
+  }, [selectedAgentId, fetchKey])
+
+  useEffect(() => {
+    fetchPlugins()
+  }, [fetchPlugins])
 
   return (
     <div className="space-y-6">
@@ -78,6 +88,22 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
         <div className="flex items-center justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
+      ) : error ? (
+        <Card className="glass-card border-red-500/20">
+          <CardContent className="p-12 text-center">
+            <AlertCircle className="w-16 h-16 mx-auto text-red-400 mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Failed to Load Plugins</h3>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFetchKey((k) => k + 1)}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : plugins.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {plugins.map((plugin: any) => (

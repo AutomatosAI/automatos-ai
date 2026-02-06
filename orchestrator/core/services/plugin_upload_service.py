@@ -68,8 +68,9 @@ def _auto_categorise(slug: str, name: str, tags: list, description: str, db) -> 
         (description or "").lower(),
     ])
 
+    import re
     for cat_slug, keywords in _CATEGORY_KEYWORDS:
-        if any(kw in haystack for kw in keywords):
+        if any(re.search(rf"\b{re.escape(kw)}\b", haystack) for kw in keywords):
             cat = db.query(PluginCategory).filter(PluginCategory.slug == cat_slug).first()
             if cat:
                 return cat.id

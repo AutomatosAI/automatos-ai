@@ -247,7 +247,7 @@ def discover_plugins(repo_dir: Path, repo_name: str) -> List[DiscoveredPlugin]:
             slug = _extract_slug(marketplace)
             found.append(DiscoveredPlugin(
                 slug=slug,
-                content_dir=repo_dir,
+                content_dir=_resolve_content_dir(repo_dir, marketplace),
                 source_manifest=marketplace,
                 format_type="marketplace_single",
                 repo_name=repo_name,
@@ -348,10 +348,14 @@ def bridge_to_manifest(source: dict, plugin_dir: Path, slug: str) -> dict:
     else:
         author = str(author_raw)
 
-    # Extract tags/keywords
+    # Extract tags/keywords — always normalise to List[str]
     tags = source.get("tags", source.get("keywords", []))
-    if isinstance(tags, str):
+    if tags is None:
+        tags = []
+    elif isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
+    else:
+        tags = [str(t) for t in tags]
 
     # Discover content by scanning actual directories first
     skills = _find_skill_files(plugin_dir)
@@ -652,7 +656,12 @@ async def harvest(dry_run: bool = False, repair_s3: bool = False) -> None:
                         install_path = plugin.source_manifest.get("installation", {}).get("path", "")
                         source_url = f"{base_url}/tree/main/{install_path}" if install_path else base_url
                     else:
-                        source_url = base_url
+                        # Derive path from content_dir relative to repo root
+                        try:
+                            rel = plugin.content_dir.relative_to(repo_dir)
+                            source_url = f"{base_url}/tree/main/{rel}" if str(rel) != "." else base_url
+                        except ValueError:
+                            source_url = base_url
 
                     plugin_record = await upload_service.upload_plugin(
                         zip_bytes=zip_bytes,

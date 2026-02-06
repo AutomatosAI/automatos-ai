@@ -1717,7 +1717,7 @@ YOUR SPECIALIZED SKILLS:
                 # Query database for skill details
                 skills = self.db.query(Skill).filter(
                     Skill.name.in_(agent_runtime.metadata.skills),
-                    Skill.is_active == True
+                    Skill.is_active.is_(True)
                 ).all()
 
                 for skill in skills:

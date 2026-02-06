@@ -706,7 +706,7 @@ async def backfill_categories(
         from core.services.plugin_upload_service import _auto_categorise
 
         plugins = db.query(MarketplacePlugin).filter(
-            MarketplacePlugin.category_id == None,
+            MarketplacePlugin.category_id.is_(None),
         ).all()
 
         updated = 0
