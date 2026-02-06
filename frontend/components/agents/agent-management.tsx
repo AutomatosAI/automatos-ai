@@ -26,7 +26,7 @@ import { AgentRoster } from './agent-roster'
 import { AgentSkills } from './agent-skills'
 import { AgentConfiguration } from './agent-configuration'
 import { AgentCoordination } from './agent-coordination'
-import { AgentPerformance } from './agent-performance'
+// AgentPerformance removed — analytics consolidated into /analytics
 import { CreateAgentModal } from './create-agent-modal'
 import { AgentDetailsModal } from './agent-details-modal'
 
@@ -287,10 +287,7 @@ export function AgentManagement() {
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Coordination</span>
             </TabsTrigger>
-            <TabsTrigger value="performance" className="flex items-center gap-2">
-              <BarChart className="w-4 h-4" />
-              <span className="hidden sm:inline">Performance</span>
-            </TabsTrigger>
+            {/* Performance tab removed — see /analytics */}
           </TabsList>
 
           {/* Agent Roster Tab */}
@@ -334,15 +331,7 @@ export function AgentManagement() {
             />
           </TabsContent>
 
-          {/* Performance Tab */}
-          <TabsContent value="performance" className="space-y-6">
-            <AgentPerformance
-              agents={agents as any[]}
-              agentStats={agentStats}
-              selectedAgentId={selectedAgentId}
-              onAgentSelect={setSelectedAgentId}
-            />
-          </TabsContent>
+          {/* Performance tab removed — see /analytics */}
         </Tabs>
       </motion.div>
 

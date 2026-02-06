@@ -1,15 +1,15 @@
 'use client'
 
 import { MainLayout } from '@/components/layout/main-layout'
-import { PerformanceAnalytics } from '@/components/analytics/performance-analytics'
+import { AnalyticsPage as UnifiedAnalytics } from '@/components/analytics/analytics-page'
 import { usePageAPI } from '@/hooks/use-page-api'
 
-export default function AnalyticsPage() {
+export default function AnalyticsRoute() {
   usePageAPI('analytics')
-  
+
   return (
     <MainLayout>
-      <PerformanceAnalytics />
+      <UnifiedAnalytics />
     </MainLayout>
   )
 }

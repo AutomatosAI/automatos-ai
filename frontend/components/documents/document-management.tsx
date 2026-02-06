@@ -44,7 +44,7 @@ import { DeleteConfirmationModal } from './delete-confirmation-modal'
 import { UploadProviderModal } from './upload-provider-modal'
 import { SemanticSearch } from './semantic-search'
 import { DocumentProcessing } from './document-processing'
-import { DocumentAnalytics } from './document-analytics'
+// DocumentAnalytics removed — analytics consolidated into /analytics
 // Cloud Storage Components (PRD-42)
 import { ProviderCards } from './provider-cards'
 import { ProviderBrowser } from './provider-browser'
@@ -415,10 +415,7 @@ export function DocumentManagement() {
               <Database className="w-4 h-4" />
               <span>CodeGraph</span>
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center space-x-2">
-              <Eye className="w-4 h-4" />
-              <span>Analytics</span>
-            </TabsTrigger>
+            {/* Analytics tab removed — see /analytics */}
           </TabsList>
 
           <TabsContent value="documents" className="space-y-6">
@@ -889,12 +886,7 @@ export function DocumentManagement() {
             </Tabs>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-6">
-            <DocumentAnalytics 
-              documents={documents}
-              documentStats={documentStats}
-            />
-          </TabsContent>
+          {/* Analytics tab removed — see /analytics */}
 
           <TabsContent value="codegraph" className="space-y-6">
             <CodeGraphPanel />

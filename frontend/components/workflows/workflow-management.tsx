@@ -50,7 +50,7 @@ import { apiClient } from '@/lib/api-client'
 import { ActiveWorkflowsPanel } from './active-workflows-panel'
 import { toast } from '@/components/ui/use-toast'
 import { HistoryTab } from './history-tab'
-import { MonitoringTab } from './monitoring-tab'
+// MonitoringTab removed — analytics consolidated into /analytics
 import { RecipesTab } from './recipes-tab'
 import { ExecutionKitchen } from './execution-kitchen'
 
@@ -601,10 +601,7 @@ export function WorkflowManagement() {
                 <Play className="w-4 h-4" />
                 <span className="hidden sm:inline">Cooking</span>
               </TabsTrigger>
-              <TabsTrigger value="monitoring" className="flex items-center space-x-2">
-                <Activity className="w-4 h-4" />
-                <span className="hidden sm:inline">Monitoring</span>
-              </TabsTrigger>
+              {/* Monitoring tab removed — see /analytics */}
             </TabsList>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
@@ -669,9 +666,7 @@ export function WorkflowManagement() {
             />
           </TabsContent>
 
-          <TabsContent value="monitoring" className="space-y-6">
-            <MonitoringTab />
-          </TabsContent>
+          {/* Monitoring tab removed — see /analytics */}
         </Tabs>
       </motion.div>
 
