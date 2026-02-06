@@ -383,7 +383,7 @@
   dependencies:
     "@floating-ui/utils" "^0.2.10"
 
-"@floating-ui/dom@^1.0.1", "@floating-ui/dom@^1.7.2":
+"@floating-ui/dom@^1.0.1", "@floating-ui/dom@^1.7.0", "@floating-ui/dom@^1.7.2":
   version "1.7.2"
   resolved "https://registry.npmjs.org/@floating-ui/dom/-/dom-1.7.2.tgz"
   integrity sha512-7cfaOQuCS27HD7DX+6ib2OrnW+b4ZBwDNnCcT0uTyidcmyWb03FnQqJybDBoCnpdxwBSfA94UAYlRCt7mV+TbA==
@@ -1512,6 +1512,11 @@
   version "1.12.0"
   resolved "https://registry.npmjs.org/@rushstack/eslint-patch/-/eslint-patch-1.12.0.tgz"
   integrity sha512-5EwMtOqvJMMa3HbmxLlF74e+3/HhwBTMcvt3nqVJgGCozO6hzIPOBlwm8mGVNR9SN2IJpxSnlxczyDjcn7qIyw==
+
+"@scarf/scarf@^1.4.0":
+  version "1.4.0"
+  resolved "https://registry.npmjs.org/@scarf/scarf/-/scarf-1.4.0.tgz"
+  integrity sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ==
 
 "@standard-schema/spec@^1.0.0":
   version "1.0.0"
@@ -3730,6 +3735,11 @@ deep-is@^0.1.3:
   version "0.1.4"
   resolved "https://registry.npmjs.org/deep-is/-/deep-is-0.1.4.tgz"
   integrity sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==
+
+deepmerge-ts@^7.1.1:
+  version "7.1.5"
+  resolved "https://registry.npmjs.org/deepmerge-ts/-/deepmerge-ts-7.1.5.tgz"
+  integrity sha512-HOJkrhaYsweh+W+e74Yn7YStZOilkoPb6fycpwNLKzSPtruFs48nYis0zy5yJz1+ktUhHxoRDJ27RQAWLIJVJw==
 
 deepmerge@^2.1.1:
   version "2.2.1"
@@ -7485,6 +7495,13 @@ react-select@5.7.7:
     react-transition-group "^4.3.0"
     use-isomorphic-layout-effect "^1.1.2"
 
+react-shepherd@^6.1.9:
+  version "6.1.9"
+  resolved "https://registry.npmjs.org/react-shepherd/-/react-shepherd-6.1.9.tgz"
+  integrity sha512-kSFs7ER9+tDAQ9a80CGTaWHpuNf/6RNnnAqtPxFqZSt5NnlKi6T8/E93sYMPOibhvdtpG5pIZpeT3JI1+Ppqiw==
+  dependencies:
+    shepherd.js "14.5.1"
+
 react-smooth@^2.0.2:
   version "2.0.5"
   resolved "https://registry.npmjs.org/react-smooth/-/react-smooth-2.0.5.tgz"
@@ -8022,6 +8039,15 @@ shebang-regex@^3.0.0:
   version "3.0.0"
   resolved "https://registry.npmjs.org/shebang-regex/-/shebang-regex-3.0.0.tgz"
   integrity sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==
+
+shepherd.js@^14.5.1, shepherd.js@14.5.1:
+  version "14.5.1"
+  resolved "https://registry.npmjs.org/shepherd.js/-/shepherd.js-14.5.1.tgz"
+  integrity sha512-VuvPvLG1QjNOLP7AIm2HGyfmxEIz8QdskvWOHwUcxLDibYWjLRBmCWd8LSL5FlwhBW7D/GU+3gNVC/ASxAWdxg==
+  dependencies:
+    "@floating-ui/dom" "^1.7.0"
+    "@scarf/scarf" "^1.4.0"
+    deepmerge-ts "^7.1.1"
 
 side-channel-list@^1.0.0:
   version "1.0.0"
@@ -8891,7 +8917,7 @@ typedarray@^0.0.6:
   resolved "https://registry.npmjs.org/typedarray/-/typedarray-0.0.6.tgz"
   integrity sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==
 
-typescript@>=2.7, typescript@>=3.3.1, typescript@>=4.2.0, typescript@5.2.2:
+typescript@^5.0.0, typescript@>=2.7, typescript@>=3.3.1, typescript@>=4.2.0, typescript@5.2.2:
   version "5.2.2"
   resolved "https://registry.npmjs.org/typescript/-/typescript-5.2.2.tgz"
   integrity sha512-mI4WrpHsbCIcwT9cF4FZvr80QUeKvsUsUvKDoR+X/7XHQH98xYD8YHZg7ANtz2GtZt/CBq2QJ0thkGJMHfqc1w==

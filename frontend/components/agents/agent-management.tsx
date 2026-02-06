@@ -158,6 +158,7 @@ export function AgentManagement() {
 
           <Button
             onClick={() => setShowCreateModal(true)}
+            data-tour="create-agent-btn"
             className="bg-brand-primary hover:bg-brand-primary/90"
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -295,17 +296,19 @@ export function AgentManagement() {
 
           {/* Agent Roster Tab */}
           <TabsContent value="roster" className="space-y-6">
-            <AgentRoster
-              agents={agents as any[]}
-              loading={agentsLoading && !agentsError}
-              searchTerm={searchTerm}
-              statusFilter={statusFilter}
-              onAgentSelect={setSelectedAgentId}
-              onViewDetails={handleViewDetails}
-              selectedAgentId={selectedAgentId}
-              onRefresh={() => refetchAgents()}
-              setSearchTerm={setSearchTerm}
-            />
+            <div data-tour="agent-roster">
+              <AgentRoster
+                agents={agents as any[]}
+                loading={agentsLoading && !agentsError}
+                searchTerm={searchTerm}
+                statusFilter={statusFilter}
+                onAgentSelect={setSelectedAgentId}
+                onViewDetails={handleViewDetails}
+                selectedAgentId={selectedAgentId}
+                onRefresh={() => refetchAgents()}
+                setSearchTerm={setSearchTerm}
+              />
+            </div>
           </TabsContent>
 
           {/* Skills Tab */}

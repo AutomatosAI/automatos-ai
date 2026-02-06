@@ -333,6 +333,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           <Label htmlFor="agent-name">Agent Name <span className="text-red-500">*</span></Label>
                           <Input
                             id="agent-name"
+                            data-tour="agent-name-input"
                             placeholder="Enter agent name..."
                             value={agentData.name}
                             onChange={(e) => setAgentData(prev => ({ ...prev, name: e.target.value }))}
@@ -344,6 +345,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                           <Label htmlFor="agent-description">Description</Label>
                           <Textarea
                             id="agent-description"
+                            data-tour="agent-description-input"
                             placeholder="Describe the agent's purpose and capabilities..."
                             value={agentData.description}
                             onChange={(e) => setAgentData(prev => ({ ...prev, description: e.target.value }))}
@@ -527,7 +529,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
                   {/* Step 3: Tool Selection */}
                   <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
-                    <div>
+                    <div data-tour="agent-tools-section">
                       <h3 className="text-lg font-semibold mb-2">Select Tools</h3>
                       <p className="text-muted-foreground mb-6">
                         Choose the tools this agent can use
@@ -664,6 +666,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   ) : (
                     <Button
                       onClick={handleCreate}
+                      data-tour="save-agent-btn"
                       disabled={!agentData.name || !agentData.category || (createAgentMutation as any).isLoading}
                       className="gradient-accent hover:opacity-90"
                     >
