@@ -160,14 +160,6 @@ export function MarketplaceItemModal({
                 <Download className="w-4 h-4 mr-2" />
                 {installing ? 'Adding...' : 'Add to Workspace'}
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="h-8 w-8"
-              >
-                <X className="h-4 w-4" />
-              </Button>
             </div>
           </div>
         </DialogHeader>

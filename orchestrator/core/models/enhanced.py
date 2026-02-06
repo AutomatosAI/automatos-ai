@@ -211,6 +211,8 @@ class AgentResponse(BaseModel):
     auto_start: bool = Field(False, description="Auto-start on system boot")
     skills: List[Dict[str, Any]] = Field([], description="Associated skills")
     tools: List[Dict[str, Any]] = Field([], description="Assigned apps/integrations (Composio)")
+    plugins: List[Dict[str, Any]] = Field([], description="Assigned marketplace plugins")
+    tags: List[str] = Field([], description="Agent tags")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_by: Optional[str] = Field(None, description="Creator")

@@ -8,12 +8,17 @@ Provides REST APIs for admin plugin management:
 - View security scan results
 - Deactivate plugins
 - List pending plugins
+- Import plugins from GitHub repos
+- Hard-delete plugins
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -58,6 +63,19 @@ def _assert_admin(ctx: RequestContext) -> None:
 # ===================================================================
 # Pydantic Models
 # ===================================================================
+
+class GitHubImportBody(BaseModel):
+    github_url: str = Field(..., min_length=1, description="GitHub repo URL to import")
+
+
+class GitHubImportResult(BaseModel):
+    slug: str
+    plugin_id: Optional[str] = None
+    security_status: Optional[str] = None
+    approval_status: Optional[str] = None
+    status: str  # "uploaded", "already_exists", "error"
+    error: Optional[str] = None
+
 
 class PluginUploadOut(BaseModel):
     plugin_id: str
@@ -472,3 +490,245 @@ async def list_pending_plugins(
     except Exception as e:
         logger.exception("Error listing pending plugins: %s", e)
         raise HTTPException(status_code=500, detail="Failed to list pending plugins")
+
+
+@router.post("/import-github", status_code=200)
+async def import_github(
+    body: GitHubImportBody,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Import plugins from a GitHub repo URL.
+
+    Clones the repo, discovers plugins, bridges manifests, uploads through
+    the standard pipeline, and auto-approves safe plugins.
+    """
+    _assert_admin(ctx)
+
+    # Lazy-import harvest helpers to avoid coupling at module level
+    try:
+        from scripts.harvest_plugins import (
+            clone_repo,
+            discover_plugins,
+            bridge_to_manifest,
+            create_plugin_zip,
+        )
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Harvest helpers not available: {e}",
+        )
+
+    from core.services.marketplace_s3 import MarketplaceS3Service
+    from core.services.plugin_security_scanner import PluginScanService
+    from core.services.plugin_upload_service import PluginUploadService
+
+    url = body.github_url.strip()
+    if not url.startswith("https://github.com/"):
+        raise HTTPException(status_code=400, detail="URL must be a GitHub repository (https://github.com/...)")
+
+    # Normalise: ensure .git suffix
+    repo_url = url if url.endswith(".git") else url + ".git"
+    # Derive repo name from URL (e.g. "user/repo")
+    repo_name = url.replace("https://github.com/", "").rstrip("/")
+    if repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="github_import_"))
+    results: List[GitHubImportResult] = []
+
+    try:
+        repo_dir = tmp_dir / "repo"
+        if not clone_repo(repo_url, repo_dir):
+            raise HTTPException(status_code=400, detail=f"Failed to clone repository: {url}")
+
+        all_plugins = discover_plugins(repo_dir, repo_name)
+        if not all_plugins:
+            raise HTTPException(status_code=400, detail="No plugins discovered in this repository")
+
+        s3_service = MarketplaceS3Service()
+        scan_service = PluginScanService(db)
+        upload_service = PluginUploadService(db, s3_service, scan_service)
+        uploaded_by = str(getattr(ctx.user, "id", "admin"))
+
+        for plugin in all_plugins:
+            slug = plugin.slug
+
+            # Check existing
+            existing = db.query(MarketplacePlugin).filter(
+                MarketplacePlugin.slug == slug,
+            ).first()
+            if existing:
+                results.append(GitHubImportResult(
+                    slug=slug,
+                    plugin_id=str(existing.id),
+                    security_status=existing.security_status,
+                    approval_status=existing.approval_status,
+                    status="already_exists",
+                ))
+                continue
+
+            try:
+                manifest = bridge_to_manifest(
+                    plugin.source_manifest, plugin.content_dir, slug
+                )
+                zip_bytes = create_plugin_zip(
+                    plugin.content_dir, manifest, plugin.source_manifest
+                )
+
+                base_url = url.rstrip("/").replace(".git", "")
+                plugin_record = await upload_service.upload_plugin(
+                    zip_bytes=zip_bytes,
+                    source_type="github",
+                    source_url=base_url,
+                    uploaded_by=uploaded_by,
+                )
+
+                # Auto-approve safe plugins
+                if plugin_record.security_status == "safe":
+                    plugin_record.approval_status = "approved"
+                    plugin_record.approved_by = uploaded_by
+                    plugin_record.approved_at = datetime.utcnow()
+                    db.commit()
+
+                results.append(GitHubImportResult(
+                    slug=slug,
+                    plugin_id=str(plugin_record.id),
+                    security_status=plugin_record.security_status,
+                    approval_status=plugin_record.approval_status,
+                    status="uploaded",
+                ))
+
+            except Exception as e:
+                logger.error("Failed to import plugin %s: %s", slug, e)
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                results.append(GitHubImportResult(
+                    slug=slug,
+                    status="error",
+                    error=str(e),
+                ))
+
+        return {
+            "plugins": [r.model_dump() for r in results],
+            "total": len(results),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("GitHub import error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@router.delete("/{plugin_id}")
+async def delete_plugin(
+    plugin_id: UUID,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Hard-delete a plugin: remove S3 files, all DB records, and junction tables."""
+    _assert_admin(ctx)
+
+    try:
+        plugin = db.query(MarketplacePlugin).filter(
+            MarketplacePlugin.id == plugin_id,
+        ).first()
+
+        if not plugin:
+            raise HTTPException(status_code=404, detail="Plugin not found")
+
+        slug = plugin.slug
+        version = plugin.version
+
+        # Delete S3 files
+        from core.services.marketplace_s3 import MarketplaceS3Service
+        s3_service = MarketplaceS3Service()
+        try:
+            await s3_service.delete_plugin(slug, version)
+        except Exception as e:
+            logger.warning("S3 delete for %s@%s failed (continuing): %s", slug, version, e)
+
+        # Delete junction records
+        db.query(WorkspaceEnabledPlugin).filter(
+            WorkspaceEnabledPlugin.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+
+        db.query(AgentAssignedPlugin).filter(
+            AgentAssignedPlugin.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+
+        # Delete sync history
+        db.query(PluginSyncHistory).filter(
+            PluginSyncHistory.plugin_id == plugin_id,
+        ).delete(synchronize_session="fetch")
+
+        # Delete security scan
+        if plugin.security_scan_id:
+            db.query(PluginSecurityScan).filter(
+                PluginSecurityScan.id == plugin.security_scan_id,
+            ).delete(synchronize_session="fetch")
+
+        # Delete the plugin itself
+        db.delete(plugin)
+        db.commit()
+
+        return {
+            "deleted": True,
+            "slug": slug,
+            "plugin_id": str(plugin_id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error deleting plugin %s: %s", plugin_id, e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to delete plugin")
+
+
+@router.post("/backfill-categories")
+async def backfill_categories(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Backfill category_id on all plugins that don't have one set.
+
+    Uses the same keyword-matching logic as the upload pipeline.
+    """
+    _assert_admin(ctx)
+
+    try:
+        from core.services.plugin_upload_service import _auto_categorise
+
+        plugins = db.query(MarketplacePlugin).filter(
+            MarketplacePlugin.category_id.is_(None),
+        ).all()
+
+        updated = 0
+        results = []
+        for p in plugins:
+            cat_id = _auto_categorise(
+                p.slug, p.name, p.tags or [], p.description or "", db,
+            )
+            if cat_id:
+                p.category_id = cat_id
+                updated += 1
+                results.append({"slug": p.slug, "category_id": str(cat_id)})
+
+        db.commit()
+
+        return {
+            "total_checked": len(plugins),
+            "updated": updated,
+            "results": results,
+        }
+
+    except Exception as e:
+        logger.exception("Error backfilling categories: %s", e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to backfill categories")
