@@ -9,6 +9,7 @@ import { ThemeProvider } from './theme-provider'
 import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { RoleProvider } from '../contexts/role-context'
+import { FirstLoginGuard } from './onboarding/first-login-guard'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -60,6 +61,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             <QueryClientProvider client={queryClient}>
               <WorkspaceProvider>
                 <MockProvider>
+                  <FirstLoginGuard />
                   {children}
                 </MockProvider>
               </WorkspaceProvider>

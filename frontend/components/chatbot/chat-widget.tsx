@@ -241,7 +241,7 @@ export function PilotHelperWidget({
   const helpItems = PAGE_HELP_CONTENT[context.currentPage] || PAGE_HELP_CONTENT.dashboard
 
   return (
-    <div className={`fixed ${positionClasses[position]} z-[60]`}>
+    <div data-tour="chat-widget" className={`fixed ${positionClasses[position]} z-[60]`}>
       <AnimatePresence mode="wait">
         {isOpen && (
           <motion.div
