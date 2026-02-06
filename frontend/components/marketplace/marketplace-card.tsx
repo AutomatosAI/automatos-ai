@@ -28,7 +28,7 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
     <Card
       role="button"
       tabIndex={0}
-      className="cursor-pointer bg-[#1a1a1a] border-gray-800 hover:border-orange-500/50 transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/10 focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+      className="cursor-pointer glass-card card-glow hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/50"
       onClick={onClick}
       onKeyDown={handleKeyDown}
     >
@@ -39,12 +39,12 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
               <div className="text-3xl">{item.icon}</div>
             )}
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-lg text-white line-clamp-1">{item.name}</h3>
-              <p className="text-sm text-gray-400">{item.creator_name}</p>
+              <h3 className="font-semibold text-lg text-foreground line-clamp-1">{item.name}</h3>
+              <p className="text-sm text-muted-foreground">{item.creator_name}</p>
             </div>
           </div>
           {item.is_featured && (
-            <Badge className="bg-orange-500/20 text-orange-500 border-orange-500/30 flex items-center gap-1 shrink-0">
+            <Badge className="bg-primary/20 text-primary border-primary/30 flex items-center gap-1 shrink-0">
               <Star className="h-3 w-3" />
               Featured
             </Badge>
@@ -53,23 +53,23 @@ export function MarketplaceCard({ item, onClick }: MarketplaceCardProps) {
       </CardHeader>
 
       <CardContent>
-        <p className="text-sm text-gray-400 line-clamp-2 mb-3">
+        <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
           {item.description}
         </p>
 
         {item.category && (
-          <Badge variant="outline" className="text-xs border-gray-700 text-gray-300">
+          <Badge variant="outline" className="text-xs border-border text-muted-foreground">
             {item.category}
           </Badge>
         )}
       </CardContent>
 
-      <CardFooter className="pt-3 border-t border-gray-800 flex items-center justify-between text-sm text-gray-400">
+      <CardFooter className="pt-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
         <div className="flex items-center gap-1">
-          <Download className="h-4 w-4 text-green-500" />
-          <span className="text-gray-300">{formatInstallCount(item.install_count)}</span> installs
+          <Download className="h-4 w-4 text-[hsl(var(--success))]" />
+          <span className="text-muted-foreground">{formatInstallCount(item.install_count)}</span> installs
         </div>
-        <Badge variant="outline" className="text-xs border-gray-700 text-gray-400">
+        <Badge variant="outline" className="text-xs border-border text-muted-foreground">
           v{item.version}
         </Badge>
       </CardFooter>

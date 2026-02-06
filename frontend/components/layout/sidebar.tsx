@@ -7,10 +7,8 @@ import { motion } from 'framer-motion'
 import {
   LayoutDashboard,
   Users,
-  FileText,
   GitBranch,
   Brain,
-  BarChart3,
   Settings,
   ChevronLeft,
   Bot,
@@ -34,49 +32,49 @@ const navigationItems = [
     name: 'Chat',
     href: '/chat',
     icon: MessageCircle,
-    iconColor: 'text-orange-400',
+    iconColor: 'text-primary',
     description: 'Your AI workspace'
   },
   {
     name: 'Workflow Management',
     href: '/workflows',
     icon: GitBranch,
-    iconColor: 'text-purple-400',
+    iconColor: 'text-[hsl(var(--agent))]',
     description: 'Create and monitor workflows'
   },
   {
     name: 'Agent Management',
     href: '/agents',
     icon: Bot,
-    iconColor: 'text-orange-400',
+    iconColor: 'text-primary',
     description: 'Manage AI agents and skills'
   },
   {
     name: 'Tools & Integrations',
     href: '/tools',
     icon: Wrench,
-    iconColor: 'text-yellow-400',
+    iconColor: 'text-[hsl(var(--warning))]',
     description: 'Development and utility tools'
   },
   {
     name: 'Community Marketplace',
     href: '/marketplace',
     icon: Store,
-    iconColor: 'text-orange-400',
+    iconColor: 'text-primary',
     description: 'Discover agents, recipes & tools'
   },
   {
     name: 'Knowledge Bases',
     href: '/documents',
     icon: Database,
-    iconColor: 'text-green-400',
+    iconColor: 'text-[hsl(var(--success))]',
     description: 'Documents, databases & code-graph'
   },
   {
     name: 'Team Management',
     href: '/team',
     icon: Users,
-    iconColor: 'text-blue-400',
+    iconColor: 'text-[hsl(var(--info))]',
     description: 'Manage workspace members',
     requiredRole: 'admin' as const, // Admin only
   },
@@ -84,7 +82,7 @@ const navigationItems = [
     name: 'Context Engineering',
     href: '/context',
     icon: Brain,
-    iconColor: 'text-pink-400',
+    iconColor: 'text-[hsl(var(--chart-4))]',
     description: 'RAG system and field theory',
     requiredRole: 'admin' as const,  // Admin only
   },
@@ -92,7 +90,7 @@ const navigationItems = [
     name: 'Intelligence & Learning',
     href: '/analytics',
     icon: Lightbulb,
-    iconColor: 'text-cyan-400',
+    iconColor: 'text-[hsl(var(--stage-1))]',
     description: 'AI insights and system learning',
     requiredRole: 'admin' as const,  // Admin only
   },
@@ -101,7 +99,7 @@ const navigationItems = [
     name: 'System Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
-    iconColor: 'text-blue-400',
+    iconColor: 'text-[hsl(var(--info))]',
     description: 'System overview and metrics',
     requiredRole: 'admin' as const,  // Admin only
   },
@@ -122,7 +120,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     <motion.div
       data-tour="sidebar"
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen glass-card border-r border-orange-500/15 bg-background/25 backdrop-blur-xl shadow-[0_0_80px_rgba(249,115,22,0.06)] transition-all duration-300',
+        'fixed left-0 top-0 z-40 h-screen glass-card border-r border-primary/15 bg-background/25 backdrop-blur-xl shadow-[0_0_80px_hsla(var(--primary)/0.06)] transition-all duration-300',
         collapsed ? 'w-16' : 'w-64'
       )}
       initial={false}
@@ -138,15 +136,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             exit={{ opacity: 0 }}
             className="flex items-center"
           >
-            <div className="w-9 h-9 rounded-xl bg-secondary/30 border border-orange-500/15 flex items-center justify-center shadow-[0_0_18px_rgba(249,115,22,0.10)]">
-              <MessageCircle className="w-5 h-5 text-orange-400" />
+            <div className="w-9 h-9 rounded-xl bg-secondary/30 border border-primary/15 flex items-center justify-center shadow-[0_0_18px_hsla(var(--primary)/0.10)]">
+              <MessageCircle className="w-5 h-5 text-primary" />
             </div>
           </motion.div>
         )}
 
         <button
           onClick={() => onToggle(!collapsed)}
-          className="p-1 rounded-md hover:bg-secondary/50 transition-colors"
+          className="p-1 rounded-full hover:bg-secondary/50 transition-colors"
         >
           <ChevronLeft
             className={cn(
@@ -158,7 +156,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="p-4 space-y-2">
+      <nav className="px-3 py-3 space-y-0.5">
         {/* Chat-only: toggle chat history panel */}
         {isChatPage && (
           <motion.div
@@ -174,28 +172,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   window.dispatchEvent(new CustomEvent('automatos:chat-history-toggle'))
                 }
               }}
-              className={cn('sidebar-item group relative')}
+              className={cn(
+                'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+                'hover:bg-secondary/40'
+              )}
               aria-label="Toggle chat history"
             >
-              <div
-                className={cn(
-                  'w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200',
-                  'bg-secondary/30 group-hover:bg-secondary/50'
-                )}
-              >
-                <PanelLeft className={cn('w-5 h-5 transition-colors', collapsed ? 'text-orange-300' : 'text-orange-400')} />
-              </div>
+              <PanelLeft className={cn('w-[18px] h-[18px] shrink-0 transition-colors', collapsed ? 'text-primary/70' : 'text-primary')} />
 
               {!collapsed && (
-                <div className="ml-3 flex-1">
-                  <p className="text-sm font-medium">Chat history</p>
-                  <p className="text-xs text-muted-foreground">Toggle previous chats</p>
-                </div>
+                <span className="text-sm font-medium truncate">Chat History</span>
               )}
 
               {collapsed && (
-                <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                  Chat history
+                <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  Chat History
                 </div>
               )}
             </button>
@@ -212,45 +203,41 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               key={item.name}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: index * 0.1 }}
+              transition={{ delay: index * 0.05 }}
             >
               <Link
                 href={item.href}
                 onClick={() => onToggle(true)}
                 data-tour={item.href === '/agents' ? 'nav-agents' : undefined}
                 className={cn(
-                  'sidebar-item group relative',
-                  isActive && 'active'
+                  'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+                  isActive
+                    ? 'bg-primary/10 border border-primary/20'
+                    : 'hover:bg-secondary/40'
                 )}
               >
-                <div
+                <Icon
                   className={cn(
-                    'w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200',
-                    isActive ? 'icon-gradient' : 'bg-secondary/30 group-hover:bg-secondary/50'
+                    'w-[18px] h-[18px] shrink-0 transition-colors',
+                    isActive ? 'text-primary' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
                   )}
-                >
-                  <Icon
-                    className={cn(
-                      'w-5 h-5 transition-colors',
-                      isActive ? 'text-foreground' : item.iconColor || 'text-muted-foreground group-hover:text-foreground'
-                    )}
-                  />
-                </div>
+                />
 
                 {!collapsed && (
-                  <div className="ml-3 flex-1">
-                    {/* Icon inline with title (same row) */}
-                    <div className="flex items-center gap-3">
-                      <p className="text-sm font-medium">{item.name}</p>
-                    </div>
-                    {/* Description indented under the title */}
-                    <p className="text-xs text-muted-foreground">{item.description}</p>
+                  <div className="min-w-0">
+                    <p className={cn(
+                      'text-sm truncate',
+                      isActive ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground group-hover:text-foreground'
+                    )}>
+                      {item.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">{item.description}</p>
                   </div>
                 )}
 
                 {/* Tooltip for collapsed state */}
                 {collapsed && (
-                  <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
                     {item.name}
                   </div>
                 )}
@@ -262,24 +249,27 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Settings at bottom - Admin only */}
       {isAdmin && (
-        <div className="absolute bottom-4 left-4 right-4">
+        <div className="absolute bottom-4 left-3 right-3">
           <Link
             href="/settings"
-            className="sidebar-item group"
+            className={cn(
+              'flex items-center gap-3 w-full px-3 py-2 rounded-xl transition-all duration-200 group relative',
+              pathname === '/settings'
+                ? 'bg-primary/10 border border-primary/20'
+                : 'hover:bg-secondary/40'
+            )}
           >
-            <div className="w-10 h-10 rounded-lg bg-secondary/30 group-hover:bg-secondary/50 flex items-center justify-center transition-all duration-200">
-              <Settings className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
-            </div>
+            <Settings className="w-[18px] h-[18px] shrink-0 text-muted-foreground group-hover:text-foreground" />
 
             {!collapsed && (
-              <div className="ml-3">
-                <p className="text-sm font-medium">Settings</p>
-                <p className="text-xs text-muted-foreground">System configuration</p>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-muted-foreground group-hover:text-foreground truncate">Settings</p>
+                <p className="text-xs text-muted-foreground truncate">System configuration</p>
               </div>
             )}
 
             {collapsed && (
-              <div className="absolute left-full ml-2 px-2 py-1 bg-popover border border-border rounded-md text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              <div className="absolute left-full ml-2 px-2 py-1 bg-popover/90 border border-border/50 rounded-xl backdrop-blur-lg text-sm whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
                 Settings
               </div>
             )}

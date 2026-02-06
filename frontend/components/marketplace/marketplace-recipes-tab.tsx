@@ -1,10 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat, Check, Trash2 } from 'lucide-react'
+import { FileText, Download, Loader2, Bot, Zap, CheckCircle, ArrowRight, ChefHat, MoreVertical, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
@@ -131,7 +137,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           onClick={() => setSelectedType('all')}
           className={
             selectedType === 'all'
-              ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
               : 'border-secondary text-muted-foreground hover:bg-secondary'
           }
         >
@@ -143,7 +149,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           onClick={() => setSelectedType('simple')}
           className={
             selectedType === 'simple'
-              ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
               : 'border-secondary text-muted-foreground hover:bg-secondary'
           }
         >
@@ -155,7 +161,7 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           onClick={() => setSelectedType('complex')}
           className={
             selectedType === 'complex'
-              ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+              ? 'bg-secondary border-primary/50 text-foreground font-semibold'
               : 'border-secondary text-muted-foreground hover:bg-secondary'
           }
         >
@@ -179,17 +185,17 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
           {recipes.map((recipe: any) => (
             <Card
               key={recipe.id}
-              className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer flex flex-col"
+              className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
               onClick={() => handleViewRecipe(recipe)}
             >
               <CardHeader className="pb-3">
                 {/* Icon INLINE with Title - EXACTLY like Agent */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <ChefHat className="w-10 h-10 text-orange-400 shrink-0" />
+                    <ChefHat className="w-10 h-10 text-primary shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-white line-clamp-1">
+                        <h3 className="font-semibold text-foreground line-clamp-1">
                           {recipe.name}
                         </h3>
                         {isAdmin && !recipe.is_approved && (
@@ -198,58 +204,48 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                           </Badge>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-muted-foreground">
                         by {recipe.creator_name || 'Unknown'}
                       </p>
                     </div>
                   </div>
-                  {/* Admin Controls */}
-                  {isAdmin && (
-                    <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                      {!recipe.is_approved && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-6 w-6 p-0 border-green-500/30 text-green-400 hover:bg-green-500/10"
-                          onClick={(e) => handleApprove(e, recipe.id)}
-                          disabled={approvingId === recipe.id}
-                          title="Approve"
-                        >
-                          {approvingId === recipe.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 w-6 p-0 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                        onClick={(e) => handleDeleteRecipe(e, recipe.id)}
-                        disabled={deletingId === recipe.id}
-                        title="Delete"
-                      >
-                        {deletingId === recipe.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                        <MoreVertical className="h-4 w-4" />
                       </Button>
-                    </div>
-                  )}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleViewRecipe(recipe) }}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleInstall(e as any, recipe.id) }} disabled={installingRecipeId === recipe.id}>
+                        <Download className="w-4 h-4 mr-2" />
+                        {installingRecipeId === recipe.id ? 'Adding...' : 'Add to Workspace'}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardHeader>
 
-              <CardContent className="flex-1 flex flex-col gap-3">
-                {/* Description — fixed 2-line height */}
-                <p className="text-sm text-gray-400 line-clamp-2 min-h-[2.5rem]">
+              <CardContent className="space-y-3">
+                {/* Description */}
+                <p className="text-sm text-muted-foreground line-clamp-2">
                   {recipe.description || 'No description available'}
                 </p>
 
-                {/* Category badge — fixed slot so cards stay even */}
-                <div className="min-h-[1.25rem]">
-                  {recipe.marketplace_category && (
-                    <Badge variant="outline" className="text-xs border-gray-700 text-gray-400 w-fit">
+                {/* Category badge */}
+                {recipe.marketplace_category && (
+                  <div className="flex flex-col gap-2">
+                    <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
                       {recipe.marketplace_category}
                     </Badge>
                   )}
                 </div>
 
                 {/* Stats Row */}
-                <div className="flex items-center gap-3 text-xs text-gray-400">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <div className="flex items-center gap-1">
                     <FileText className="w-3.5 h-3.5" />
                     <span>{recipe.steps?.length || 0} Steps</span>
@@ -261,47 +257,12 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                 </div>
 
                 {/* Install count */}
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-muted-foreground pb-2">
                   {recipe.install_count >= 1000
                     ? `${(recipe.install_count / 1000).toFixed(1)}k installs`
                     : `${recipe.install_count || 0} installs`}
                 </div>
 
-                {/* Action Buttons — pinned to bottom */}
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-800 mt-auto">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleViewRecipe(recipe)
-                    }}
-                  >
-                    Details
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleInstall(e, recipe.id)
-                    }}
-                    disabled={installingRecipeId === recipe.id}
-                  >
-                    {installingRecipeId === recipe.id ? (
-                      <>
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        Adding...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-3 h-3 mr-1" />
-                        Add to Workspace
-                      </>
-                    )}
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           ))}

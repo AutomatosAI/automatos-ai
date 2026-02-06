@@ -158,21 +158,21 @@ export function MarketplacePluginDetailModal({
     switch (status) {
       case 'safe':
         return (
-          <Badge variant="outline" className="border-green-500/30 text-green-400">
+          <Badge variant="outline" className="border-[hsl(var(--success))]/30 text-[hsl(var(--success))]">
             <ShieldCheck className="w-3 h-3 mr-1" />
             Verified Safe
           </Badge>
         )
       case 'review_required':
         return (
-          <Badge variant="outline" className="border-yellow-500/30 text-yellow-400">
+          <Badge variant="outline" className="border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]">
             <ShieldAlert className="w-3 h-3 mr-1" />
             Review Required
           </Badge>
         )
       default:
         return (
-          <Badge variant="outline" className="border-gray-500/30 text-gray-400">
+          <Badge variant="outline" className="border-border text-muted-foreground">
             <Shield className="w-3 h-3 mr-1" />
             Pending
           </Badge>
@@ -201,7 +201,7 @@ export function MarketplacePluginDetailModal({
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
               {/* Loading State */}
               {loading && (
                 <div className="p-12 flex flex-col items-center justify-center">
@@ -213,7 +213,7 @@ export function MarketplacePluginDetailModal({
               {/* Error State */}
               {error && !loading && (
                 <div className="p-12 flex flex-col items-center justify-center">
-                  <p className="text-red-400 mb-4">{error}</p>
+                  <p className="text-[hsl(var(--destructive))] mb-4">{error}</p>
                   <Button variant="outline" onClick={onClose}>Close</Button>
                 </div>
               )}
@@ -224,8 +224,8 @@ export function MarketplacePluginDetailModal({
                   {/* Header */}
                   <CardHeader className="flex flex-row items-start justify-between pb-2">
                     <CardTitle className="flex items-start gap-3 text-xl flex-1 min-w-0">
-                      <div className="w-12 h-12 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center flex-shrink-0">
-                        <Package className="w-6 h-6 text-orange-400" />
+                      <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+                        <Package className="w-6 h-6 text-primary" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -234,7 +234,7 @@ export function MarketplacePluginDetailModal({
                             v{plugin.version}
                           </Badge>
                           {plugin.is_featured && (
-                            <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] h-5">
+                            <Badge className="bg-primary/20 text-primary border-primary/30 text-[10px] h-5">
                               <Star className="w-2.5 h-2.5 mr-0.5" />
                               Featured
                             </Badge>
@@ -289,28 +289,28 @@ export function MarketplacePluginDetailModal({
                     {/* Stats Row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
-                        <div className="text-xl font-bold text-blue-400">{plugin.skills_count}</div>
+                        <div className="text-xl font-bold text-[hsl(var(--info))]">{plugin.skills_count}</div>
                         <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                           <Terminal className="w-3 h-3" />
                           Skills
                         </div>
                       </div>
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
-                        <div className="text-xl font-bold text-purple-400">{plugin.commands_count}</div>
+                        <div className="text-xl font-bold text-[hsl(var(--agent))]">{plugin.commands_count}</div>
                         <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                           <Zap className="w-3 h-3" />
                           Commands
                         </div>
                       </div>
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
-                        <div className="text-xl font-bold text-orange-400">{plugin.agents_count}</div>
+                        <div className="text-xl font-bold text-primary">~{plugin.token_estimate}</div>
                         <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                           <Cpu className="w-3 h-3" />
                           Agents
                         </div>
                       </div>
                       <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
-                        <div className="text-xl font-bold text-green-400">{plugin.enable_count}</div>
+                        <div className="text-xl font-bold text-[hsl(var(--success))]">{plugin.enable_count}</div>
                         <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                           <Download className="w-3 h-3" />
                           Enabled
@@ -333,7 +333,7 @@ export function MarketplacePluginDetailModal({
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">
-                                  <Terminal className="w-3 h-3 text-blue-400 shrink-0" />
+                                  <Terminal className="w-3 h-3 text-[hsl(var(--info))] shrink-0" />
                                   {skill.name}
                                 </div>
                                 {skill.description && (
@@ -363,7 +363,7 @@ export function MarketplacePluginDetailModal({
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="font-medium text-sm flex items-center gap-2">
-                                  <Zap className="w-3 h-3 text-purple-400 shrink-0" />
+                                  <Zap className="w-3 h-3 text-[hsl(var(--agent))] shrink-0" />
                                   {cmd.name}
                                 </div>
                                 {cmd.description && (
@@ -420,7 +420,7 @@ export function MarketplacePluginDetailModal({
                             <Badge
                               key={model}
                               variant="outline"
-                              className="text-xs border-blue-500/30 text-blue-400"
+                              className="text-xs border-[hsl(var(--info))]/30 text-[hsl(var(--info))]"
                             >
                               {model}
                             </Badge>
@@ -441,7 +441,7 @@ export function MarketplacePluginDetailModal({
                             <Badge
                               key={tag}
                               variant="outline"
-                              className="text-xs border-gray-600 text-gray-400"
+                              className="text-xs border-border text-muted-foreground"
                             >
                               {tag}
                             </Badge>
@@ -478,7 +478,7 @@ export function MarketplacePluginDetailModal({
                                 href={plugin.source_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-blue-400 hover:underline truncate"
+                                className="text-[hsl(var(--info))] hover:underline truncate"
                               >
                                 {plugin.source_url}
                               </a>
@@ -499,7 +499,7 @@ export function MarketplacePluginDetailModal({
                   {/* Footer — Enable/Disable or Deactivated notice */}
                   <div className="p-6 border-t border-border/40 bg-background/50 backdrop-blur z-20 relative">
                     {plugin.is_active === false ? (
-                      <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400">
+                      <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))]">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0" />
                         <span className="text-sm font-medium">This plugin has been deactivated</span>
                       </div>
@@ -510,7 +510,7 @@ export function MarketplacePluginDetailModal({
                             <Button
                               onClick={onDisable}
                               variant="outline"
-                              className="flex-1 border-red-500/30 text-red-400 hover:bg-red-500/10"
+                              className="flex-1 border-[hsl(var(--destructive))]/30 text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
                             >
                               <X className="w-4 h-4 mr-2" />
                               Disable Plugin
@@ -529,7 +529,8 @@ export function MarketplacePluginDetailModal({
                           <Button
                             onClick={onEnable}
                             disabled={isEnabling}
-                            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                            variant="outline"
+                            className="flex-1"
                           >
                             {isEnabling ? (
                               <>

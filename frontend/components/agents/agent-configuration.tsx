@@ -396,7 +396,7 @@ export function AgentConfiguration({
 
         <div className="flex items-center gap-3">
           {hasUnsavedChanges && (
-            <Badge variant="secondary" className="text-yellow-600">
+            <Badge variant="secondary" className="text-[hsl(var(--warning))]">
               <AlertTriangle className="w-3 h-3 mr-1" />
               Unsaved Changes
             </Badge>
@@ -412,6 +412,7 @@ export function AgentConfiguration({
           </Button>
 
           <Button
+            variant="outline"
             onClick={handleSave}
             disabled={!hasUnsavedChanges || updateConfigMutation.isLoading}
           >
@@ -425,7 +426,7 @@ export function AgentConfiguration({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center text-white">
+            <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
               🤖
             </div>
             <div>
@@ -817,7 +818,7 @@ export function AgentConfiguration({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Wrench className="w-5 h-5 text-blue-400" />
+            <Wrench className="w-5 h-5 text-[hsl(var(--info))]" />
             Tool Assignment
           </CardTitle>
           <p className="text-sm text-muted-foreground">
@@ -879,7 +880,7 @@ export function AgentConfiguration({
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bot className="w-5 h-5 text-purple-400" />
+            <Bot className="w-5 h-5 text-[hsl(var(--agent))]" />
             Model Configuration
           </CardTitle>
           <p className="text-sm text-muted-foreground">
@@ -1037,7 +1038,7 @@ export function AgentConfiguration({
 
       {/* Save Status */}
       {hasUnsavedChanges && (
-        <Alert className="border-yellow-200 bg-yellow-50">
+        <Alert className="border-[hsl(var(--warning))]/20 bg-[hsl(var(--warning))]/10">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
             You have unsaved changes. Don't forget to save your configuration.

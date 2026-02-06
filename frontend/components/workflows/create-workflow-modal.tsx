@@ -68,11 +68,11 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
         <>
           <motion.div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-            <Card className="glass-card w-full max-w-3xl max-h-[90vh] overflow-hidden">
+            <Card className="glass-card card-glow w-full max-w-3xl max-h-[90vh] overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="flex items-center space-x-2">
                   <GitBranch className="w-6 h-6" />
-                  <span>Create Workflow</span>
+                  <span>Create <span className="gradient-text">Workflow</span></span>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={onClose}><X className="w-5 h-5" /></Button>
               </CardHeader>
@@ -99,7 +99,7 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                         variant="ghost"
                         size="sm"
                         onClick={() => setShowAdvanced(!showAdvanced)}
-                        className="text-sm text-blue-400 hover:text-blue-300 -ml-2"
+                        className="text-sm text-[hsl(var(--info))] hover:text-[hsl(var(--info))]/80 -ml-2"
                       >
                         <ChevronRight className={`w-4 h-4 mr-1 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
                         {showAdvanced ? 'Hide' : 'Show'} Advanced Options
@@ -134,7 +134,7 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                             rows={4}
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Additional context (JSON). Use <code className="bg-black/30 px-1 rounded text-xs">codegraph_project</code> to enable code access.
+                            Additional context (JSON). Use <code className="bg-secondary/30 px-1 rounded text-xs">codegraph_project</code> to enable code access.
                           </p>
                         </div>
                       </div>
@@ -149,7 +149,7 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                 </Tabs>
                 {/* Error Display */}
                 {error && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-sm text-red-400">
+                  <div className="p-3 bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/50 rounded-lg text-sm text-[hsl(var(--destructive))]">
                     {error}
                   </div>
                 )}
@@ -158,9 +158,9 @@ export function CreateWorkflowModal({ open, onClose }: { open: boolean; onClose:
                   <Button variant="outline" onClick={()=>setStep(Math.max(1, step-1))} disabled={step===1}>Previous</Button>
                   <div className="text-sm text-muted-foreground">Step {step} of 2</div>
                   {step<2 ? (
-                    <Button onClick={()=>setStep(2)} disabled={!name || !description} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200">Next</Button>
+                    <Button variant="outline" onClick={()=>setStep(2)} disabled={!name || !description}>Next</Button>
                   ) : (
-                    <Button onClick={handleCreate} disabled={!name || saving} className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200" aria-busy={saving}>
+                    <Button onClick={handleCreate} disabled={!name || saving} aria-busy={saving}>
                       {saving ? 'Creating...' : 'Create Workflow'}
                     </Button>
                   )}

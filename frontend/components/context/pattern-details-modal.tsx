@@ -186,7 +186,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
             <TabsContent value="overview" className="space-y-6">
               {/* Stats Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="glass-card">
+                <Card className="glass-card card-glow">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -198,7 +198,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                   </CardContent>
                 </Card>
 
-                <Card className="glass-card">
+                <Card className="glass-card card-glow">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -210,7 +210,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                   </CardContent>
                 </Card>
 
-                <Card className="glass-card">
+                <Card className="glass-card card-glow">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -222,7 +222,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
                   </CardContent>
                 </Card>
 
-                <Card className="glass-card">
+                <Card className="glass-card card-glow">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
@@ -236,7 +236,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
               </div>
 
               {/* Usage Chart */}
-              <Card className="glass-card">
+              <Card className="glass-card card-glow">
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <BarChart3 className="w-5 h-5" />
@@ -287,7 +287,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
               </Card>
 
               {/* Recent Queries Using This Pattern */}
-              <Card className="glass-card">
+              <Card className="glass-card card-glow">
                 <CardHeader>
                   <CardTitle>Recent Queries</CardTitle>
                 </CardHeader>
@@ -323,7 +323,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
 
             {/* Configuration Tab */}
             <TabsContent value="configuration" className="space-y-6">
-              <Card className="glass-card">
+              <Card className="glass-card card-glow">
                 <CardHeader>
                   <CardTitle>Pattern Configuration</CardTitle>
                 </CardHeader>
@@ -416,7 +416,7 @@ export function PatternDetailsModal({ isOpen, onClose, pattern }: PatternDetails
 
             {/* Test Tab */}
             <TabsContent value="test" className="space-y-6">
-              <Card className="glass-card">
+              <Card className="glass-card card-glow">
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <TestTube className="w-5 h-5" />

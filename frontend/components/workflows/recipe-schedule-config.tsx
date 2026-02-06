@@ -145,7 +145,7 @@ export function RecipeScheduleConfig() {
                 onClick={() => updateSchedule('type', st.value)}
                 className={`p-4 rounded-xl border text-left text-sm transition-all duration-200 ${
                   scheduleConfig.type === st.value
-                    ? 'border-orange-400 bg-orange-400/10 text-foreground'
+                    ? 'border-primary bg-primary/10 text-foreground'
                     : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
                 }`}
               >
@@ -204,7 +204,7 @@ export function RecipeScheduleConfig() {
             <select
               value={cronQuick}
               onChange={(e) => handleQuickPick(e.target.value)}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
             >
               <option value="">Select a schedule...</option>
               {CRON_QUICK_PICKS.map((pick) => (
@@ -246,7 +246,7 @@ export function RecipeScheduleConfig() {
               <ul className="space-y-1">
                 {nextRuns.map((run, i) => (
                   <li key={i} className="text-xs text-muted-foreground/80 font-mono flex items-center gap-2">
-                    <span className="w-4 h-4 flex items-center justify-center rounded-full bg-orange-400/20 text-orange-400 text-[10px]">{i + 1}</span>
+                    <span className="w-4 h-4 flex items-center justify-center rounded-full bg-primary/20 text-primary text-[10px]">{i + 1}</span>
                     {run}
                   </li>
                 ))}
@@ -255,7 +255,7 @@ export function RecipeScheduleConfig() {
           )}
 
           {scheduleConfig.cron_expression && nextRuns.length === 0 && (
-            <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+            <div className="p-2.5 rounded-xl bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/20 text-xs text-[hsl(var(--destructive))]">
               Invalid cron expression or no upcoming runs found
             </div>
           )}
@@ -285,8 +285,8 @@ export function RecipeScheduleConfig() {
                 onClick={handleCopyWebhook}
                 className={`shrink-0 rounded-xl transition-all duration-200 ${
                   copied
-                    ? 'border-green-400 text-green-400'
-                    : 'border-orange-400/50 hover:border-orange-400 hover:shadow-[0_0_12px_rgba(251,146,60,0.3)]'
+                    ? 'border-[hsl(var(--success))] text-[hsl(var(--success))]'
+                    : 'border-primary/50 hover:border-primary hover:shadow-[0_0_12px_hsl(var(--primary)/0.3)]'
                 }`}
               >
                 {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -311,7 +311,7 @@ export function RecipeScheduleConfig() {
                   onClick={() => updateTriggerConfig('source', opt.value)}
                   className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
                     (scheduleConfig.trigger_config as Record<string, unknown>)?.source === opt.value
-                      ? 'border-orange-400 bg-orange-400/10 text-foreground'
+                      ? 'border-primary bg-primary/10 text-foreground'
                       : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
                   }`}
                 >
@@ -333,7 +333,7 @@ export function RecipeScheduleConfig() {
                   <select
                     value={((scheduleConfig.trigger_config as Record<string, unknown>)?.app as string) || ''}
                     onChange={(e) => updateTriggerConfig('app', e.target.value)}
-                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
                   >
                     <option value="">Select an app...</option>
                     <option value="github">GitHub</option>
@@ -352,7 +352,7 @@ export function RecipeScheduleConfig() {
                   <select
                     value={((scheduleConfig.trigger_config as Record<string, unknown>)?.trigger as string) || ''}
                     onChange={(e) => updateTriggerConfig('trigger', e.target.value)}
-                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
                   >
                     <option value="">Select a trigger...</option>
                     <option value="new_issue">New Issue</option>
@@ -369,7 +369,7 @@ export function RecipeScheduleConfig() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="text-xs border-orange-400/50 hover:border-orange-400 hover:bg-gray-700"
+                  className="text-xs"
                 >
                   <ExternalLink className="w-3 h-3 mr-1.5" />
                   Configure in Composio
@@ -384,7 +384,7 @@ export function RecipeScheduleConfig() {
                   Use the webhook URL above to integrate with any external service. The webhook accepts POST requests with JSON body.
                 </p>
                 <div className="font-mono text-xs text-muted-foreground/80 bg-secondary/50 rounded-lg p-3">
-                  <span className="text-orange-400">POST</span> {webhookUrl}
+                  <span className="text-primary">POST</span> {webhookUrl}
                   <br />
                   <span className="text-muted-foreground/50">Content-Type:</span> application/json
                   <br />

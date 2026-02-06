@@ -25,200 +25,133 @@ This PRD defines a **Design System Enforcement** effort: lock down every reusabl
 
 ## User Stories
 
-### US-001: Create DESIGN_SYSTEM.md reference document
-**Description:** As a developer or AI agent, I need a single in-repo reference document that defines every brand rule so I never have to guess or improvise.
-
+### US-01: Shared PageHeader component
+**Description:** A reusable `PageHeader` component in `components/shared/page-header.tsx` that renders the two-color h1 pattern + subtitle + actions slot.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `DESIGN_SYSTEM.md` exists at repo root (or `frontend/` root)
-- [ ] Documents all brand colors with hex, HSL, and CSS variable names
-- [ ] Documents border-radius rules for every component type
-- [ ] Documents button hierarchy (primary, secondary, outline, ghost, destructive)
-- [ ] Documents glass effect specifications (blur, border, shadow, glow)
-- [ ] Documents modal/dialog styling requirements
-- [ ] Documents search bar and input focus states
-- [ ] Documents dropdown/select pill-shape requirement
-- [ ] Documents page header two-color pattern
-- [ ] Documents item state patterns (default, hover, selected)
-- [ ] Documents icon library (Lucide React only)
-- [ ] Documents spacing scale and typography
-- [ ] Documents dark and light theme differences
-- [ ] Documents animation/transition standards
-- [ ] Includes visual examples or ASCII diagrams where helpful
+- [x] Props: `title`, `titleAccent`, `subtitle?`, `actions?: ReactNode`
+- [x] Uses `text-3xl font-bold`, `gradient-text` for accent word
+- [x] Includes framer-motion fade-in
+- [x] Used by Agents, Tools, Workflows, Marketplace pages
 
 ---
 
-### US-002: Fix dialog/modal to use glass effect with orange glow
-**Description:** As a user, I want all popup modals to have the curved edges, orange glow, and glass effect that match the Automatos brand, not the stock shadcn default.
-
+### US-02: Shared StatsBar component
+**Description:** A reusable `StatsBar` component that renders a responsive grid of stat cards with glass-card + card-glow styling.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `dialog.tsx` DialogContent uses `glass-card` or equivalent glass styling
-- [ ] DialogContent uses `rounded-2xl` border-radius (not `sm:rounded-lg`)
-- [ ] DialogContent has orange glow border matching `card-glow` effect
-- [ ] Glass backdrop-blur of 18px applied
-- [ ] Orange glow visible on the dialog border (subtle, using `--primary` variable)
-- [ ] Dark theme: semi-transparent dark background with orange border glow
-- [ ] Light theme: frosted glass appearance with visible surface separation
-- [ ] Close button (X) uses `rounded-full` for consistency
-- [ ] All existing dialog usages across the app inherit new styling automatically
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Props: `stats: StatItem[]`, `loading?`, `glow?`
+- [x] StatItem has `label`, `value`, `change?`, `icon: LucideIcon`, `iconColor?`
+- [x] Icon colors use semantic tokens (--success, --info, --agent, --primary)
+- [x] Used by Agents, Tools, Workflows, Marketplace pages
 
 ---
 
-### US-003: Make all select/dropdown triggers pill-shaped
-**Description:** As a user, I want all dropdowns to be pill-shaped to match the brand language shown in the design reference images.
-
+### US-03: Shared SearchInput component
+**Description:** A reusable pill-shaped `SearchInput` that wraps Input with Search icon and optional loading spinner.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `select.tsx` SelectTrigger uses `rounded-full` (pill shape)
-- [ ] SelectContent dropdown panel uses `rounded-2xl` with glass effect
-- [ ] SelectItem hover state uses `rounded-xl`
-- [ ] All existing select usages across the app inherit new styling automatically
-- [ ] Any custom dropdown components also use pill-shaped triggers
-- [ ] Focus state shows orange ring (`ring-ring` which maps to `--ring: primary`)
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Props: `value`, `onChange(string)`, `placeholder?`, `loading?`
+- [x] `rounded-full bg-secondary/50 border-secondary` with orange focus glow
+- [x] Used by Agents, Tools, Workflows, Marketplace pages
 
 ---
 
-### US-004: Standardize search bar with orange focus highlight
-**Description:** As a user, I want all search bars to highlight with an orange border/glow when focused, matching the Automatos brand.
-
+### US-04: Shared StatusBadge component
+**Description:** A semantic `StatusBadge` with 8 variants (success, active, warning, error, info, neutral, purple, primary) using CSS variables.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `input.tsx` focus state shows orange border (not just ring)
-- [ ] Search inputs use `rounded-full` (pill shape) — distinct from regular text inputs which use `rounded-2xl`
-- [ ] On focus: orange border + subtle orange glow shadow (matching reference image)
-- [ ] Create a `SearchInput` compound component that wraps Input with search icon + pill shape + orange focus glow
-- [ ] All search bar instances across the platform use this component
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Props: `status`, `children`, `dot?`, `size?: 'sm' | 'default'`
+- [x] Colors use semantic CSS variables (--success, --info, --warning, --destructive, --agent)
+- [x] `rounded-full` with two size options
+- [x] Available for use across all pages
 
 ---
 
-### US-005: Standardize page headers with two-color pattern
-**Description:** As a user, I want all page headers to follow the pattern: first word in white/foreground, second word in orange (primary), matching "Agent **Management**", "Community **Marketplace**" etc.
-
+### US-05: Shared ItemCard component
+**Description:** A slot-based card component for grid/list items with glass-card styling.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] Create a `PageHeader` component that accepts `title` (splits into white + orange parts)
-- [ ] Component also accepts `description` (muted foreground subtitle)
-- [ ] Component accepts optional right-side action buttons slot
-- [ ] Orange word uses `gradient-text` class (gradient from #ff6b35 to #ff4500)
-- [ ] All existing page headers refactored to use this component
-- [ ] Consistent spacing: title is `text-3xl font-bold`, description is `text-sm text-muted-foreground`
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Slot props: `icon`, `title`, `subtitle`, `titleBadges`, `description`, `meta`, `actions`, `children`
+- [x] `glass-card card-glow`, `Separator` before actions
+- [x] Optional framer-motion animation
+- [x] Available for use in card grids
 
 ---
 
-### US-006: Fix button hierarchy — reduce "too much orange"
-**Description:** As a developer, I need clear rules for when to use solid orange (primary CTA only) vs orange-outline (secondary actions) so the UI doesn't become a wall of orange.
-
+### US-06: Shared FilterTabs component
+**Description:** A reusable tabs wrapper with consistent styling and trailing slot for search/sort controls.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] **Primary** (`default` variant): Solid orange fill — used for ONE main CTA per view (e.g., "Create Agent", "Enable for Workspace")
-- [ ] **Secondary action** (`outline` variant): Orange border, transparent/glass background — used for secondary actions (e.g., "Details", "Save Changes", "Refresh")
-- [ ] **Tertiary** (`ghost` variant): No border, text only with hover highlight — used for less important actions
-- [ ] **Destructive** stays red for delete/dangerous actions
-- [ ] Document the hierarchy clearly in `DESIGN_SYSTEM.md`
-- [ ] Audit all pages to fix button variants: marketplace cards should have "Details" as outline, "Enable" as primary
-- [ ] Save buttons in modal headers should use `outline` variant (per reference image showing ghost-style "Save Changes")
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Props: `tabs: FilterTab[]`, `value`, `onValueChange`, `trailing?`, `children`
+- [x] `bg-secondary/40 backdrop-blur`, icons + responsive text
+- [x] Re-exports TabsContent for convenience
+- [x] Used by Agents and Workflows pages
 
 ---
 
-### US-007: Standardize item states (default, hover, selected)
-**Description:** As a user, I want list items, category pills, and grid items to have consistent visual states matching the reference images.
-
+### US-07: Migrate Agents page to shared components
+**Description:** Replace inline header, stats, search, tabs in `agent-management.tsx` with shared components.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] **Default state**: Muted text, subtle border, dark background
-- [ ] **Hover state**: Orange border glow, text becomes brighter, slight scale or lift
-- [ ] **Selected/Active state**: Solid orange background, white text, counter badge becomes dark
-- [ ] Create a reusable `SelectableItem` or apply via CSS classes (`.item-default`, `.item-hover`, `.item-selected`)
-- [ ] Category pills in marketplace follow this 3-state pattern
-- [ ] Tab-like navigation items follow this pattern
-- [ ] Sidebar items follow this pattern
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Uses `PageHeader`, `StatsBar`, `SearchInput`, `FilterTabs`
+- [x] Hardcoded icon colors replaced with semantic tokens
+- [x] `bg-brand-primary` replaced with default Button variant
+- [x] No new TS errors introduced
 
 ---
 
-### US-008: Fix light theme contrast
-**Description:** As a user on light theme, I want clear surface separation, readable text, and visible borders so the UI doesn't look washed out.
-
+### US-08: Migrate Tools page to shared components
+**Description:** Replace inline header, stats, search in `tools-dashboard.tsx` with shared components.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `--border` in light theme increased from `0 0% 82%` to stronger value (e.g., `0 0% 75%`)
-- [ ] `--card` given slight off-white tint or shadow to separate from background
-- [ ] Glass card borders are clearly visible in light theme (increase `--glass-border-alpha` for light)
-- [ ] Card hover glow is visible in light theme (not invisible against white)
-- [ ] All text meets WCAG AA contrast ratio (4.5:1 for normal text, 3:1 for large text)
-- [ ] `--muted-foreground` in light theme dark enough for readability (currently `0 0% 40%` — check if sufficient)
-- [ ] Orange primary color has sufficient contrast against white card backgrounds
-- [ ] Sidebar, header, and navigation clearly distinguished from main content area
-- [ ] Test all pages in light theme — no invisible text, borders, or buttons
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Uses `PageHeader`, `StatsBar`, `SearchInput`
+- [x] Hardcoded icon colors replaced with semantic tokens
+- [x] No new TS errors introduced
 
 ---
 
-### US-009: Replace all hardcoded color values with CSS variables
-**Description:** As a developer, I need all colors to flow through CSS variables so theme changes propagate everywhere automatically.
-
+### US-09: Migrate Workflows page to shared components
+**Description:** Replace inline header, stats, search, tabs in `workflow-management.tsx` with shared components.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `globals.css`: Replace all `rgba(255, 107, 53, ...)` with `hsla(var(--primary) / ...)`
-- [ ] `globals.css`: Replace all `rgba(16, 185, 129, ...)` with semantic variable (create `--success` if needed)
-- [ ] `globals.css`: Replace all `rgba(239, 68, 68, ...)` with `hsla(var(--destructive) / ...)`
-- [ ] `globals.css`: Replace all `rgba(59, 130, 246, ...)` with semantic variable (create `--info` if needed)
-- [ ] `globals.css`: Replace all `rgba(245, 158, 11, ...)` with semantic variable (create `--warning` if needed)
-- [ ] `globals.css`: Replace all `rgba(168, 85, 247, ...)` with semantic variable (create `--agent` or `--purple` if needed)
-- [ ] `gradient-accent` and `gradient-text` classes use CSS variables instead of hardcoded hex
-- [ ] Add missing semantic color variables to `:root` and `.dark`: `--success`, `--warning`, `--info`, `--agent`
-- [ ] Sidebar icon colors use CSS variables instead of named Tailwind colors
-- [ ] Clerk auth theme uses CSS variables where possible
-- [ ] No raw hex or rgba color values remain in `globals.css` (except in the variable definitions themselves)
-- [ ] Typecheck passes
+- [x] Uses `PageHeader`, `StatsBar`, `SearchInput`, `FilterTabs`
+- [x] Hardcoded icon colors replaced with semantic tokens
+- [x] Hardcoded error colors replaced with --destructive variable
+- [x] No new TS errors introduced
 
 ---
 
-### US-010: Standardize sub-tabs navigation
-**Description:** As a user, I want all sub-navigation tabs (like "General | Persona | Resources | Skills | Plugins | Model | Tools") to use the same pill-shaped tab bar pattern.
-
+### US-10: Migrate Marketplace page to shared components
+**Description:** Replace inline header, stats, search in `marketplace-homepage.tsx` with shared components.
+**Status:** COMPLETE
 **Acceptance Criteria:**
-- [ ] `tabs.tsx` TabsList uses pill-shaped container with `rounded-full` border and glass background
-- [ ] TabsTrigger active state: solid background with `rounded-full` pill shape
-- [ ] TabsTrigger inactive: transparent with hover state
-- [ ] Matches the reference image showing the rounded tab bar with "General" selected
-- [ ] All tab instances across the app inherit this styling
-- [ ] Consistent padding and font size across all tab bars
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Uses `PageHeader`, `StatsBar`, `SearchInput`
+- [x] Stats cards use semantic icon colors
+- [x] TabsTrigger overrides removed (base component styling is correct)
+- [x] No new TS errors introduced
 
 ---
 
-### US-011: Standardize modal header pattern
-**Description:** As a user, I want all modal headers to follow the same pattern: icon + title + subtitle on the left, action button(s) + close button on the right.
-
+### US-11: Migrate all remaining modals/pages
+**Description:** Migrate remaining page-level components (marketplace tabs, recipe cards, etc.) to use shared components where applicable.
+**Status:** PENDING
 **Acceptance Criteria:**
-- [ ] Create a `DialogHeader` pattern/component that includes: left side (icon + title + subtitle), right side (action buttons + close)
-- [ ] Title uses the two-color pattern (first word white, second word orange) where applicable
-- [ ] "Save Changes" button in modal headers uses `outline` variant with icon
-- [ ] Orange accent line/border at top of modal header (per reference image)
-- [ ] Close button (X) is circular with ghost styling
-- [ ] All existing modals refactored to use this consistent header
-- [ ] Typecheck passes
-- [ ] Verify in browser using dev-browser skill
+- [ ] Marketplace plugins tab uses StatusBadge for verified/enabled states
+- [ ] Recipe cards in recipes-tab.tsx use ItemCard structure
+- [ ] Remaining hardcoded colors in page-level components replaced with semantic tokens
+- [ ] Native `<button>` elements replaced with Button component
 
 ---
 
-### US-012: Add CSS variable for border-radius scale
-**Description:** As a developer, I need a single `--radius` variable that controls the border-radius scale across all components, so changing one value updates everything.
-
+### US-12: Light theme contrast validation
+**Description:** Validate all pages in light theme for WCAG AA compliance.
+**Status:** PENDING
 **Acceptance Criteria:**
-- [ ] Add `--radius: 1.5rem` to `:root` in `globals.css` (matches current `rounded-2xl` = 1rem... adjust as needed)
-- [ ] Define radius scale: `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-xl`, `--radius-full`
-- [ ] All components reference these variables through Tailwind config
-- [ ] `tailwind.config.ts` borderRadius section uses these variables
-- [ ] Changing `--radius` in one place updates buttons, cards, inputs, modals, tabs, badges
-- [ ] Document the radius scale in `DESIGN_SYSTEM.md`
-- [ ] Typecheck passes
+- [ ] All text meets 4.5:1 contrast ratio (normal text) or 3:1 (large text)
+- [ ] Glass card borders are visible in light theme
+- [ ] Orange primary has sufficient contrast against white card backgrounds
+- [ ] Toggle light/dark theme on all 4 main pages and verify no visual regressions
 
 ---
 
@@ -336,20 +269,20 @@ SELECTED:   [ developer tools  36 ]  ← solid orange bg, white text, dark count
 - **Framer Motion** transitions should align with the 220ms standard timing
 - **No new dependencies required** — everything can be done with the existing stack
 
-### Implementation Order (Recommended)
+### Implementation Order
 
-1. **US-009** — Replace hardcoded colors (foundation work, no visual changes)
-2. **US-012** — Add radius CSS variables (foundation work)
-3. **US-008** — Fix light theme contrast (high-impact, variable-only changes)
-4. **US-002** — Fix dialogs/modals (high-visibility fix)
-5. **US-003** — Fix dropdowns to pill shape (high-visibility fix)
-6. **US-004** — Fix search bars (high-visibility fix)
-7. **US-010** — Fix sub-tabs (medium visibility)
-8. **US-005** — Standardize page headers (medium visibility)
-9. **US-006** — Fix button hierarchy (requires page-by-page audit)
-10. **US-007** — Standardize item states (requires component-by-component work)
-11. **US-011** — Standardize modal headers (requires modal-by-modal refactor)
-12. **US-001** — Write DESIGN_SYSTEM.md (captures everything done above)
+1. **US-01** — Shared PageHeader component -- COMPLETE
+2. **US-02** — Shared StatsBar component -- COMPLETE
+3. **US-03** — Shared SearchInput component -- COMPLETE
+4. **US-04** — Shared StatusBadge component -- COMPLETE
+5. **US-05** — Shared ItemCard component -- COMPLETE
+6. **US-06** — Shared FilterTabs component -- COMPLETE
+7. **US-07** — Migrate Agents page -- COMPLETE
+8. **US-08** — Migrate Tools page -- COMPLETE
+9. **US-09** — Migrate Workflows page -- COMPLETE
+10. **US-10** — Migrate Marketplace page -- COMPLETE
+11. **US-11** — Migrate remaining modals/pages -- PENDING
+12. **US-12** — Light theme contrast validation -- PENDING
 
 ## Success Metrics
 
@@ -363,7 +296,5 @@ SELECTED:   [ developer tools  36 ]  ← solid orange bg, white text, dark count
 ## Open Questions
 
 1. Should the `DESIGN_SYSTEM.md` be enforced by a linter or pre-commit hook that checks for hardcoded colors?
-2. Should we create a `PageHeader` React component or just document the pattern and expect developers to apply the Tailwind classes?
-3. The reference images show `rounded-full` (pill) tabs — but the current tabs use `rounded-2xl`. Confirm: should ALL tabs become full-pill, or keep the slightly rounded rectangle?
-4. For the two-color header pattern, should it always be "last word = orange" or should we support custom splits (e.g., "Community **Marketplace**" vs "Agent **Configuration** Communication")?
-5. Should we add a `--radius-base` variable and derive all others from it, or keep independent radius variables?
+2. The reference images show `rounded-full` (pill) tabs — but the current tabs use `rounded-2xl`. Confirm: should ALL tabs become full-pill, or keep the slightly rounded rectangle?
+3. Should we add a `--radius-base` variable and derive all others from it, or keep independent radius variables?

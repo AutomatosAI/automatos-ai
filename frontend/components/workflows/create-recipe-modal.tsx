@@ -190,11 +190,11 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
           >
-            <Card className="glass-card w-full max-w-6xl flex flex-col max-h-[90vh]">
+            <Card className="glass-card card-glow w-full max-w-6xl flex flex-col max-h-[90vh]">
               <CardHeader className="flex flex-row items-center justify-between border-b border-border/30 pb-4 flex-shrink-0">
                 <CardTitle className="flex items-center space-x-2">
                   <ChefHat className="w-6 h-6 text-primary" />
-                  <span>{isEditMode ? 'Edit Recipe' : 'Create Recipe'}</span>
+                  <span>{isEditMode ? 'Edit' : 'Create'} <span className="gradient-text">Recipe</span></span>
                 </CardTitle>
                 <Button variant="ghost" size="icon" onClick={handleClose}>
                   <X className="w-5 h-5" />
@@ -252,7 +252,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                                   className="bg-secondary/50 rounded-2xl"
                                 />
                                 {watchedName.length > 0 && watchedName.length < 3 && (
-                                  <p className="text-xs text-red-400 mt-1">Name must be at least 3 characters</p>
+                                  <p className="text-xs text-[hsl(var(--destructive))] mt-1">Name must be at least 3 characters</p>
                                 )}
                               </div>
                               <div>
@@ -351,9 +351,9 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                           {!isLastStep ? (
                             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                               <Button
+                                variant="outline"
                                 onClick={handleNext}
                                 disabled={!canGoNext}
-                                className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                               >
                                 Next
                                 <ChevronRight className="w-4 h-4 ml-1" />
@@ -364,7 +364,6 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                               <Button
                                 onClick={handleSave}
                                 disabled={isSubmitting}
-                                className="bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200"
                               >
                                 {isSubmitting ? (
                                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />

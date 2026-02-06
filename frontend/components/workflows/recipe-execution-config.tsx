@@ -64,7 +64,7 @@ export function RecipeExecutionConfig() {
               onClick={() => updateConfig('mode', 'sequential')}
               className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
                 config.mode === 'sequential'
-                  ? 'border-orange-400 bg-orange-400/10 text-foreground'
+                  ? 'border-primary bg-primary/10 text-foreground'
                   : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
               }`}
             >
@@ -76,7 +76,7 @@ export function RecipeExecutionConfig() {
               onClick={() => updateConfig('mode', 'parallel')}
               className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
                 config.mode === 'parallel'
-                  ? 'border-orange-400 bg-orange-400/10 text-foreground'
+                  ? 'border-primary bg-primary/10 text-foreground'
                   : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
               }`}
             >
@@ -85,7 +85,7 @@ export function RecipeExecutionConfig() {
             </button>
           </div>
           {config.mode === 'parallel' && (
-            <div className="flex items-start gap-2 p-2.5 mt-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+            <div className="flex items-start gap-2 p-2.5 mt-2 rounded-xl bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20 text-xs text-[hsl(var(--warning))]">
               <span className="mt-0.5">⚠</span>
               <span>Parallel mode requires steps to be independent. Ensure no step depends on another&apos;s output.</span>
             </div>
@@ -106,7 +106,7 @@ export function RecipeExecutionConfig() {
             <select
               value={config.max_retries}
               onChange={(e) => updateConfig('max_retries', Number(e.target.value))}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
             >
               {Array.from({ length: 11 }, (_, i) => (
                 <option key={i} value={i}>{i}</option>
@@ -120,7 +120,7 @@ export function RecipeExecutionConfig() {
             <select
               value={config.retry_delay}
               onChange={(e) => updateConfig('retry_delay', Number(e.target.value))}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
             >
               {RETRY_DELAY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -134,7 +134,7 @@ export function RecipeExecutionConfig() {
             <select
               value={config.backoff_strategy}
               onChange={(e) => updateConfig('backoff_strategy', e.target.value)}
-              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+              className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
             >
               {BACKOFF_STRATEGIES.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -187,7 +187,7 @@ export function RecipeExecutionConfig() {
         </div>
 
         <div className="p-2.5 rounded-xl bg-secondary/30 border border-border/20 text-xs text-muted-foreground">
-          Calculated max time for {steps.length || 1} step{steps.length !== 1 ? 's' : ''} ({config.mode}): <span className="text-orange-400 font-medium">{formatMs(calculatedMaxTime)}</span>
+          Calculated max time for {steps.length || 1} step{steps.length !== 1 ? 's' : ''} ({config.mode}): <span className="text-primary font-medium">{formatMs(calculatedMaxTime)}</span>
         </div>
       </div>
 
@@ -201,7 +201,7 @@ export function RecipeExecutionConfig() {
         <div>
           <div className="flex items-center justify-between mb-2">
             <Label className="text-xs text-muted-foreground">Quality Threshold</Label>
-            <span className="text-sm font-mono text-orange-400">{config.quality_threshold.toFixed(2)}</span>
+            <span className="text-sm font-mono text-primary">{config.quality_threshold.toFixed(2)}</span>
           </div>
           <div className="relative">
             <input
@@ -213,7 +213,7 @@ export function RecipeExecutionConfig() {
               onChange={(e) => updateConfig('quality_threshold', Number(e.target.value))}
               className="w-full h-2 rounded-full appearance-none cursor-pointer"
               style={{
-                background: `linear-gradient(to right, #f97316 0%, #f97316 ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) 100%)`,
+                background: `linear-gradient(to right, hsl(var(--primary)) 0%, hsl(var(--primary)) ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) ${config.quality_threshold * 100}%, rgba(255,255,255,0.1) 100%)`,
               }}
             />
           </div>
@@ -233,7 +233,7 @@ export function RecipeExecutionConfig() {
             type="button"
             onClick={() => updateConfig('auto_learning', !config.auto_learning)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ${
-              config.auto_learning ? 'bg-orange-400' : 'bg-secondary'
+              config.auto_learning ? 'bg-primary' : 'bg-secondary'
             }`}
           >
             <span
@@ -302,7 +302,7 @@ function AdvancedSection({
                   onClick={() => updateConfig('memory_isolation', opt.value)}
                   className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
                     config.memory_isolation === opt.value
-                      ? 'border-orange-400 bg-orange-400/10 text-foreground'
+                      ? 'border-primary bg-primary/10 text-foreground'
                       : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
                   }`}
                 >

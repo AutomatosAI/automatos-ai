@@ -7,6 +7,7 @@ import {
   X,
   Save,
   Settings,
+  MoreVertical,
   Bot,
   AlertTriangle,
   CheckCircle,
@@ -45,7 +46,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { useAgent, useAgentConfig, useUpdateAgentConfig } from '@/hooks/use-agent-api'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
+import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useTools } from '@/hooks/use-tools-api'
@@ -487,12 +495,12 @@ export function AgentConfigurationModal({
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-5xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-5xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3">
-              <Settings className="w-6 h-6 text-orange-400" />
+              <Settings className="w-6 h-6 text-primary" />
               <div>
-                <span className="text-xl">Agent Configuration</span>
+                <span className="text-xl">Agent <span className="gradient-text">Configuration</span></span>
                 <p className="text-sm text-muted-foreground font-normal">
                   {(agent as any)?.name || 'Loading...'}
                 </p>
@@ -504,25 +512,22 @@ export function AgentConfigurationModal({
                   Unsaved Changes
                 </Badge>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSave}
-                disabled={saving || !hasChanges}
-                className="hover:border-green-500/50"
-              >
-                {saving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-                    Saving...
-                  </>
-                ) : (
-                  <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreVertical className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={handleSave}
+                    disabled={saving || !hasChanges}
+                  >
                     <Save className="w-4 h-4 mr-2" />
-                    Save Changes
-                  </>
-                )}
-              </Button>
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="ghost" size="icon" onClick={onClose}>
                 <X className="w-5 h-5" />
               </Button>
@@ -542,8 +547,8 @@ export function AgentConfigurationModal({
             {error && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <AlertTriangle className="h-8 w-8 text-red-400 mx-auto mb-4" />
-                  <p className="text-red-400 mb-4">Error: {error}</p>
+                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-4" />
+                  <p className="text-destructive mb-4">Error: {error}</p>
                   <Button onClick={() => window.location.reload()} variant="outline">
                     Try Again
                   </Button>
@@ -669,7 +674,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <User className="h-5 w-5 text-violet-400" />
+                        <User className="h-5 w-5 text-[hsl(var(--agent))]" />
                         Agent Persona
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -880,7 +885,7 @@ export function AgentConfigurationModal({
                           size="sm"
                           onClick={handleSavePersona}
                           disabled={personaSaving}
-                          className="hover:border-violet-500/50"
+                          className="hover:border-[hsl(var(--agent))]/50"
                         >
                           {personaSaving ? (
                             <>
@@ -1000,7 +1005,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Puzzle className="h-5 w-5 text-orange-400" />
+                        <Puzzle className="h-5 w-5 text-primary" />
                         Plugin Assignment
                       </CardTitle>
                       <div className="flex items-center justify-between">
@@ -1034,7 +1039,7 @@ export function AgentConfigurationModal({
                                 key={plugin.plugin_id}
                                 className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors ${
                                   isAssigned
-                                    ? 'bg-orange-500/5 border-orange-500/30'
+                                    ? 'bg-primary/5 border-primary/30'
                                     : 'bg-background/50 border-border/50'
                                 }`}
                               >
@@ -1056,7 +1061,7 @@ export function AgentConfigurationModal({
                                       </div>
                                       <div className="flex items-center gap-2 shrink-0">
                                         {plugin.security_status === 'safe' && (
-                                          <Badge variant="secondary" className="text-xs text-green-400 border-green-500/30">
+                                          <Badge variant="secondary" className="text-xs text-[hsl(var(--success))] border-[hsl(var(--success))]/30">
                                             <Shield className="w-3 h-3 mr-1" />
                                             Verified
                                           </Badge>
@@ -1118,7 +1123,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Wrench className="h-5 w-5 text-blue-400" />
+                        <Wrench className="h-5 w-5 text-[hsl(var(--info))]" />
                         Tool Assignment
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -1182,7 +1187,7 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Bot className="h-5 w-5 text-purple-400" />
+                        <Bot className="h-5 w-5 text-[hsl(var(--agent))]" />
                         Model Configuration
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
@@ -1315,7 +1320,7 @@ export function AgentConfigurationModal({
                           <SelectTrigger id="fallback-model" className="bg-background/50 border-border">
                             <SelectValue placeholder="Select fallback model..." />
                           </SelectTrigger>
-                          <SelectContent className="bg-gray-900 border-gray-800">
+                          <SelectContent className="bg-popover border-border">
                             <SelectItem value="none">No fallback</SelectItem>
                             <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                             <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku</SelectItem>

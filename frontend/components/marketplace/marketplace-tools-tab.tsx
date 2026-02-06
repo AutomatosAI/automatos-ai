@@ -20,12 +20,21 @@ import {
     Star,
     AlertTriangle,
     Clock,
-    RefreshCw
+    RefreshCw,
+    MoreVertical,
+    Eye,
+    Download,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -50,10 +59,10 @@ const statusIcons = {
 }
 
 const statusColors = {
-    available: 'text-green-400',
-    deprecated: 'text-red-400',
-    maintenance: 'text-yellow-400',
-    beta: 'text-blue-400'
+    available: 'text-[hsl(var(--success))]',
+    deprecated: 'text-[hsl(var(--destructive))]',
+    maintenance: 'text-[hsl(var(--warning))]',
+    beta: 'text-[hsl(var(--info))]'
 }
 
 interface MarketplaceToolsTabProps {
@@ -346,7 +355,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     if (appsError) {
         return (
             <div className="text-center py-12">
-                <div className="text-red-400 mb-4">
+                <div className="text-[hsl(var(--destructive))] mb-4">
                     <p className="text-lg font-semibold">Error loading tools</p>
                     <p className="text-sm mt-2">{(appsError as any)?.message || 'Unknown error'}</p>
                 </div>
@@ -367,11 +376,11 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <Badge variant="outline" className="text-green-400 border-green-500/30">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+                    <Badge variant="outline" className="text-[hsl(var(--success))] border-[hsl(var(--success))]/30">
+                        <div className="w-2 h-2 bg-[hsl(var(--success))] rounded-full animate-pulse mr-2" />
                         {connectedCount} Connected
                     </Badge>
-                    <Badge variant="outline" className="text-blue-400 border-blue-500/30">
+                    <Badge variant="outline" className="text-[hsl(var(--info))] border-[hsl(var(--info))]/30">
                         {apps.length} Available
                     </Badge>
                     {isAdmin && (
@@ -380,7 +389,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                             size="sm"
                             onClick={() => syncCacheMutation.mutate('full')}
                             disabled={syncCacheMutation.isLoading}
-                            className="gap-2 text-muted-foreground hover:text-white"
+                            className="gap-2 text-muted-foreground hover:text-foreground"
                         >
                             <RefreshCw className={`w-3.5 h-3.5 ${syncCacheMutation.isLoading ? 'animate-spin' : ''}`} />
                             {syncCacheMutation.isLoading ? 'Syncing...' : 'Sync'}
@@ -400,7 +409,7 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
                             onClick={() => setSelectedCategory(category.id)}
                             className={`whitespace-nowrap flex-shrink-0 ${
                                 selectedCategory === category.id
-                                    ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                                    ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                                     : 'border-secondary text-muted-foreground hover:bg-secondary'
                             }`}
                         >
@@ -532,7 +541,7 @@ function ToolCard({
             transition={{ delay: index * 0.1 }}
         >
             <Card
-                className="bg-secondary/30 border-border/30 hover:border-orange-500/30 transition-all duration-200 group hover:shadow-lg hover:shadow-orange-500/20"
+                className="glass-card card-glow hover:border-primary/30 transition-all duration-200 group hover:shadow-lg hover:shadow-primary/20"
             >
                 <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -550,7 +559,31 @@ function ToolCard({
                             </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                            {/* No connected badge in marketplace */}
+                            {isInWorkspace && (
+                                <Badge variant="secondary" className="text-xs bg-secondary/50 border border-border/50">
+                                    <CheckCircle className="w-3 h-3 mr-1" />
+                                    Added
+                                </Badge>
+                            )}
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                        <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={onDetails}>
+                                        <Eye className="w-4 h-4 mr-2" />
+                                        View Details
+                                    </DropdownMenuItem>
+                                    {!isInWorkspace && (
+                                        <DropdownMenuItem onClick={onConnect} disabled={isConnecting}>
+                                            <Download className="w-4 h-4 mr-2" />
+                                            {isConnecting ? 'Adding...' : 'Add to Workspace'}
+                                        </DropdownMenuItem>
+                                    )}
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         </div>
                     </div>
                 </CardHeader>
@@ -590,7 +623,7 @@ function ToolCard({
                                 <Badge
                                     key={scheme}
                                     variant="outline"
-                                    className="text-[10px] h-5 border-orange-500/40 text-orange-300"
+                                    className="text-[10px] h-5 border-primary/30 text-primary"
                                 >
                                     {formatAuthScheme(scheme)}
                                 </Badge>
@@ -598,56 +631,6 @@ function ToolCard({
                         </div>
                     )}
 
-                    <Separator />
-
-                    {/* Action Section - Add to Workspace Button */}
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={onDetails}
-                            className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
-                        >
-                            Details
-                        </Button>
-
-                        {isInWorkspace ? (
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                className="flex-1 bg-secondary/50 hover:bg-secondary border border-white/10"
-                                disabled
-                                onClick={() => console.log('🔵 [BTN] Already added button clicked (disabled)')}
-                            >
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                                Added
-                            </Button>
-                        ) : (
-                            <Button
-                                size="sm"
-                                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                                onClick={(e) => {
-                                    console.log('🟢 [BTN] Add to Workspace button clicked!', {
-                                        app: app.name,
-                                        event: e,
-                                        isConnecting,
-                                        onConnect: typeof onConnect
-                                    })
-                                    onConnect()
-                                }}
-                                disabled={isConnecting}
-                            >
-                                {isConnecting ? (
-                                    <>
-                                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                        Adding...
-                                    </>
-                                ) : (
-                                    'Add to Workspace'
-                                )}
-                            </Button>
-                        )}
-                    </div>
                 </CardContent>
             </Card>
         </motion.div>

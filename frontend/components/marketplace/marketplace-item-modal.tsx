@@ -102,9 +102,9 @@ export function MarketplaceItemModal({
   if (error) {
     return (
       <Dialog open={true} onOpenChange={onClose}>
-        <DialogContent className="glass-card border-border/50">
+        <DialogContent className="glass-card card-glow border-border/50">
           <div className="text-center py-8 space-y-4">
-            <p className="text-red-400">{error}</p>
+            <p className="text-[hsl(var(--destructive))]">{error}</p>
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
@@ -117,7 +117,7 @@ export function MarketplaceItemModal({
   if (loading || !item) {
     return (
       <Dialog open={true} onOpenChange={onClose}>
-        <DialogContent className="glass-card border-border/50">
+        <DialogContent className="glass-card card-glow border-border/50">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-secondary/50 rounded" />
             <div className="h-32 bg-secondary/50 rounded" />
@@ -130,7 +130,7 @@ export function MarketplaceItemModal({
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden glass-card border-border/50">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden glass-card card-glow border-border/50">
         <DialogHeader className="border-b border-border/30 pb-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -140,7 +140,7 @@ export function MarketplaceItemModal({
                 <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
                   <span className="truncate">by {item.creator_name}</span>
                   <span>•</span>
-                  <Badge variant="outline" className="text-xs border-orange-500/30 text-orange-400">
+                  <Badge variant="outline" className="text-xs border-primary/30 text-primary">
                     {item.category}
                   </Badge>
                   <span>•</span>
@@ -155,7 +155,6 @@ export function MarketplaceItemModal({
               <Button
                 onClick={handleInstall}
                 disabled={installing}
-                className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
               >
                 <Download className="w-4 h-4 mr-2" />
                 {installing ? 'Adding...' : 'Add to Workspace'}
@@ -229,7 +228,7 @@ export function MarketplaceItemModal({
                 </div>
                 <div className="flex flex-wrap gap-2 mb-4">
                   {capabilities.map((cap: string, i: number) => (
-                    <Badge key={i} variant="outline" className="border-green-500/30 text-green-400">
+                    <Badge key={i} variant="outline" className="border-[hsl(var(--success))]/30 text-[hsl(var(--success))]">
                       {cap.replace(/_/g, ' ')}: excellent
                     </Badge>
                   ))}
@@ -241,12 +240,12 @@ export function MarketplaceItemModal({
               <div className="flex flex-wrap gap-4 text-sm">
                 {modelConfig.top_p && (
                   <div className="flex items-center gap-2">
-                    <span className="text-blue-400">✓</span>
+                    <span className="text-[hsl(var(--info))]">✓</span>
                     <span>Function Calling</span>
                   </div>
                 )}
                 <div className="flex items-center gap-2">
-                  <span className="text-blue-400">✓</span>
+                  <span className="text-[hsl(var(--info))]">✓</span>
                   <span>Streaming</span>
                 </div>
               </div>

@@ -170,11 +170,11 @@ export function DownloadProgressModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={status === 'completed' || status === 'error' || status === 'cancelled' ? handleClose : undefined}
       />
       <motion.div 
@@ -183,7 +183,7 @@ export function DownloadProgressModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-md">
+        <Card className="glass-card card-glow w-full max-w-md">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-2">
               <FileDown className="w-5 h-5 text-orange-400" />

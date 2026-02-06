@@ -192,7 +192,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Configuration Form */}
-            <Card className="glass-card">
+            <Card className="glass-card card-glow">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <Database className="w-5 h-5" />
@@ -346,7 +346,7 @@ export function ConfigureRAGModal({ isOpen, onClose, onConfigCreated }: Configur
             </Card>
 
             {/* Test Configuration */}
-            <Card className="glass-card">
+            <Card className="glass-card card-glow">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
                   <TestTube className="w-5 h-5" />

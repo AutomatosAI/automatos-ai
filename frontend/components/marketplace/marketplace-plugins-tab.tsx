@@ -12,14 +12,19 @@ import {
   Zap,
   Cpu,
   ArrowUpDown,
-  Check,
-  Trash2,
-  Ban,
-  Github,
+  MoreVertical,
+  Eye,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/shared'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import {
   Select,
@@ -415,24 +420,12 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10"
-              onClick={() => setShowImportModal(true)}
-            >
-              <Github className="w-3.5 h-3.5 mr-1.5" />
-              Import from GitHub
-            </Button>
-          )}
-          <Badge variant="outline" className="text-green-400 border-green-500/30">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
+          <StatusBadge size="sm" status="success" dot>
             {enabledPluginIds.size} Enabled
-          </Badge>
-          <Badge variant="outline" className="text-blue-400 border-blue-500/30">
+          </StatusBadge>
+          <StatusBadge size="sm" status="info">
             {plugins.length} Available
-          </Badge>
+          </StatusBadge>
         </div>
       </div>
 
@@ -440,8 +433,8 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       {featuredPlugins.length > 0 && selectedCategory === 'all' && !searchQuery && (
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <Star className="w-4 h-4 text-orange-400" />
-            <h4 className="text-sm font-semibold text-orange-400 uppercase tracking-wider">Featured Plugins</h4>
+            <Star className="w-4 h-4 text-primary" />
+            <h4 className="text-sm font-semibold text-primary uppercase tracking-wider">Featured Plugins</h4>
           </div>
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
             {featuredPlugins.map((plugin) => (
@@ -467,7 +460,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
             onClick={() => setSelectedCategory('all')}
             className={`whitespace-nowrap flex-shrink-0 ${
               selectedCategory === 'all'
-                ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }`}
           >
@@ -481,7 +474,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
               onClick={() => setSelectedCategory(cat.slug)}
               className={`whitespace-nowrap flex-shrink-0 ${
                 selectedCategory === cat.slug
-                  ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
                   : 'border-secondary text-muted-foreground hover:bg-secondary'
               }`}
             >
@@ -603,24 +596,52 @@ function FeaturedPluginCard({
 }: FeaturedPluginCardProps) {
   return (
     <Card
-      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-orange-500/10 to-secondary/30 border-orange-500/20 hover:border-orange-500/40 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-orange-500/10"
+      className="min-w-[300px] max-w-[340px] flex-shrink-0 bg-gradient-to-br from-primary/10 to-secondary/30 border-primary/20 hover:border-primary/40 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-primary/10"
       onClick={onClick}
     >
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-white truncate">{plugin.name}</h4>
-              <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 text-[10px] h-5 flex-shrink-0">
-                <Star className="w-2.5 h-2.5 mr-0.5" />
-                Featured
-              </Badge>
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <Puzzle className="w-8 h-8 text-primary shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h4 className="font-semibold text-foreground truncate">{plugin.name}</h4>
+                <StatusBadge size="sm" status="primary" className="flex-shrink-0">
+                  <Star className="w-2.5 h-2.5 mr-0.5" />
+                  Featured
+                </StatusBadge>
+              </div>
+              <p className="text-xs text-muted-foreground">v{plugin.version}</p>
             </div>
-            <p className="text-xs text-muted-foreground">v{plugin.version}</p>
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick() }}>
+                <Eye className="w-4 h-4 mr-2" />
+                View Details
+              </DropdownMenuItem>
+              {!isEnabled && (
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
+                  <Puzzle className="w-4 h-4 mr-2" />
+                  {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
+                </DropdownMenuItem>
+              )}
+              {isEnabled && (
+                <DropdownMenuItem disabled>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Enabled
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        <p className="text-sm text-gray-400 line-clamp-2">
+        <p className="text-sm text-muted-foreground line-clamp-2">
           {plugin.description || 'No description available'}
         </p>
 
@@ -649,37 +670,6 @@ function FeaturedPluginCard({
           </div>
         </div>
 
-        <div
-          onClick={(e) => e.stopPropagation()}
-        >
-          {isEnabled ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="w-full bg-secondary/50 border border-white/10"
-              disabled
-            >
-              <CheckCircle className="w-3 h-3 mr-1" />
-              Enabled
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              className="w-full bg-orange-600 hover:bg-orange-700 text-white"
-              onClick={onEnable}
-              disabled={isEnabling}
-            >
-              {isEnabling ? (
-                <>
-                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                  Enabling...
-                </>
-              ) : (
-                'Enable for Workspace'
-              )}
-            </Button>
-          )}
-        </div>
       </CardContent>
     </Card>
   )
@@ -730,100 +720,81 @@ function PluginCard({
       transition={{ delay: Math.min(index * 0.05, 0.5) }}
     >
       <Card
-        className="glass-card card-glow hover:border-orange-500/30 hover:shadow-lg hover:shadow-orange-500/20 transition-all duration-300 cursor-pointer flex flex-col"
+        className="glass-card card-glow hover:border-primary/30 hover:shadow-lg hover:shadow-primary/20 transition-all duration-300 cursor-pointer"
         onClick={onClick}
       >
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-white line-clamp-1">
-                  {plugin.name}
-                </h3>
-                {plugin.is_featured && (
-                  <Star className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
-                )}
-                {isAdmin && isPending && (
-                  <Badge variant="outline" className="text-[10px] h-5 border-yellow-500/30 text-yellow-400 flex-shrink-0">
-                    Pending
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-gray-500">
-                v{plugin.version}
-                {plugin.original_author && (
-                  <> &middot; {plugin.original_author}</>
-                )}
-              </p>
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {plugin.security_status === 'safe' && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] h-5 border-green-500/30 text-green-400"
-                >
-                  Verified
-                </Badge>
-              )}
-              {/* Admin Controls */}
-              {isAdmin && (
-                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                  {isPending && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 w-6 p-0 border-green-500/30 text-green-400 hover:bg-green-500/10"
-                      onClick={onApprove}
-                      disabled={isApproving}
-                      title="Approve"
-                    >
-                      {isApproving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                    </Button>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Puzzle className="w-10 h-10 text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-foreground line-clamp-1">
+                    {plugin.name}
+                  </h3>
+                  {plugin.is_featured && (
+                    <Star className="w-3.5 h-3.5 text-primary flex-shrink-0" />
                   )}
-                  {!isPending && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 w-6 p-0 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
-                      onClick={onDeactivate}
-                      disabled={isDeactivating}
-                      title="Deactivate"
-                    >
-                      {isDeactivating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 w-6 p-0 border-red-500/30 text-red-400 hover:bg-red-500/10"
-                    onClick={onDelete}
-                    disabled={isDeleting}
-                    title="Delete"
-                  >
-                    {isDeleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                  </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  v{plugin.version}
+                  {plugin.original_author && (
+                    <> &middot; {plugin.original_author}</>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {plugin.security_status === 'safe' && (
+                <StatusBadge size="sm" status="success" className="flex-shrink-0">
+                  Verified
+                </StatusBadge>
               )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={(e) => e.stopPropagation()}>
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onClick() }}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    View Details
+                  </DropdownMenuItem>
+                  {!isEnabled && (
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
+                      <Puzzle className="w-4 h-4 mr-2" />
+                      {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
+                    </DropdownMenuItem>
+                  )}
+                  {isEnabled && (
+                    <DropdownMenuItem disabled>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Enabled
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="flex-1 flex flex-col space-y-3">
-          <p className="text-sm text-gray-400 line-clamp-2">
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground line-clamp-2">
             {plugin.description || 'No description available'}
           </p>
 
           {/* Category + Tags */}
           <div className="flex flex-wrap gap-1.5">
             {plugin.category_name && (
-              <Badge variant="outline" className="text-[10px] h-5 border-gray-700 text-gray-400">
+              <StatusBadge size="sm" status="neutral">
                 {plugin.category_name}
-              </Badge>
+              </StatusBadge>
             )}
             {(plugin.tags || []).slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[10px] h-5 border-gray-700 text-gray-500">
+              <StatusBadge key={tag} size="sm" status="neutral">
                 {tag}
-              </Badge>
+              </StatusBadge>
             ))}
           </div>
 
@@ -853,47 +824,6 @@ function PluginCard({
             </div>
           </div>
 
-          <Separator />
-
-          {/* Action Section */}
-          <div className="flex items-center gap-2 mt-auto" onClick={(e) => e.stopPropagation()}>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 border-gray-700 text-gray-300 hover:bg-gray-800"
-              onClick={onClick}
-            >
-              Details
-            </Button>
-
-            {isEnabled ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="flex-1 bg-secondary/50 hover:bg-secondary border border-white/10"
-                disabled
-              >
-                <CheckCircle className="w-3 h-3 mr-1" />
-                Enabled
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
-                onClick={onEnable}
-                disabled={isEnabling}
-              >
-                {isEnabling ? (
-                  <>
-                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                    Enabling...
-                  </>
-                ) : (
-                  'Enable'
-                )}
-              </Button>
-            )}
-          </div>
         </CardContent>
       </Card>
     </motion.div>

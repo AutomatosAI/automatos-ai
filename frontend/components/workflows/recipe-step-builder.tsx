@@ -74,7 +74,7 @@ function VariableHighlightTextarea({
       .replace(/"/g, '&quot;')
     return escaped.replace(
       /\{(\w+)\}/g,
-      '<span class="text-orange-400 font-semibold">{$1}</span>'
+      '<span class="text-primary font-semibold">{$1}</span>'
     )
   }, [value])
 
@@ -93,7 +93,7 @@ function VariableHighlightTextarea({
         onChange={(e) => onChange(e.target.value)}
         onScroll={handleScroll}
         placeholder={placeholder}
-        className="w-full min-h-[80px] bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm font-mono text-transparent caret-orange-400 resize-y focus:outline-none focus:ring-1 focus:ring-orange-400/50"
+        className="w-full min-h-[80px] bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm font-mono text-transparent caret-primary resize-y focus:outline-none focus:ring-1 focus:ring-primary/50"
       />
       <pre
         ref={overlayRef}
@@ -217,7 +217,7 @@ export function RecipeStepBuilder() {
 
       {/* Validation Errors */}
       {validationErrors.length > 0 && steps.length > 0 && (
-        <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/20 text-xs text-[hsl(var(--destructive))]">
           <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           <div className="space-y-0.5">
             {validationErrors.map((err, i) => (
@@ -237,13 +237,13 @@ export function RecipeStepBuilder() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, x: -100 }}
             transition={{ duration: 0.2 }}
-            className="glass-card rounded-2xl p-4 space-y-3 border border-border/20 hover:border-orange-400/20 transition-colors"
+            className="glass-card rounded-2xl p-4 space-y-3 border border-border/20 hover:border-primary/20 transition-colors"
           >
             {/* Step Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <GripVertical className="w-4 h-4 text-muted-foreground/30" />
-                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-orange-400/10 text-orange-400 text-xs font-bold">
+                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary text-xs font-bold">
                   {step.order}
                 </div>
                 <span className="text-sm font-medium text-foreground/80">
@@ -275,7 +275,7 @@ export function RecipeStepBuilder() {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  className="h-7 w-7 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80 hover:bg-[hsl(var(--destructive))]/10"
                   onClick={() => removeStep(index)}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -286,12 +286,12 @@ export function RecipeStepBuilder() {
             {/* Agent Selector */}
             <div>
               <Label className="text-xs text-muted-foreground">
-                Agent <span className="text-red-400">*</span>
+                Agent <span className="text-[hsl(var(--destructive))]">*</span>
               </Label>
               <select
                 value={step.agent_id}
                 onChange={(e) => updateStep(index, 'agent_id', e.target.value)}
-                className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+                className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
               >
                 <option value="">Select an agent...</option>
                 {agentsLoading && <option disabled>Loading agents...</option>}
@@ -317,7 +317,7 @@ export function RecipeStepBuilder() {
                 const toolCount = selected.skills?.length || 0
                 return (
                   <div className="flex items-center gap-2 mt-1.5">
-                    <Bot className="w-3 h-3 text-orange-400" />
+                    <Bot className="w-3 h-3 text-primary" />
                     <span className="text-xs text-muted-foreground">
                       {selected.name} — {model} • {toolCount} tool{toolCount !== 1 ? 's' : ''}
                     </span>
@@ -345,7 +345,7 @@ export function RecipeStepBuilder() {
                 <select
                   value={step.pass_to || ''}
                   onChange={(e) => updateStep(index, 'pass_to', e.target.value || undefined)}
-                  className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+                  className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
                 >
                   <option value="">Next step (default)</option>
                   {steps
@@ -366,7 +366,7 @@ export function RecipeStepBuilder() {
                 <select
                   value={step.error_handling}
                   onChange={(e) => updateStep(index, 'error_handling', e.target.value)}
-                  className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400/50 appearance-none cursor-pointer"
+                  className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
                 >
                   {ERROR_HANDLING_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -385,7 +385,8 @@ export function RecipeStepBuilder() {
         <Button
           type="button"
           onClick={addStep}
-          className="w-full bg-gray-800 border border-orange-400/50 hover:border-orange-400 hover:bg-gray-700 text-white transition-all duration-200 rounded-2xl h-11"
+          variant="outline"
+          className="w-full transition-all duration-200 rounded-2xl h-11"
         >
           <Plus className="w-4 h-4 mr-2" />
           Add Step

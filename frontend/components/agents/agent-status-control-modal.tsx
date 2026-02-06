@@ -77,10 +77,10 @@ interface AgentImpactAnalysis {
 }
 
 const statusOptions = [
-  { value: 'active', label: 'Active', color: 'text-green-400', icon: CheckCircle },
-  { value: 'inactive', label: 'Inactive', color: 'text-gray-400', icon: Clock },
-  { value: 'maintenance', label: 'Maintenance', color: 'text-yellow-400', icon: Settings },
-  { value: 'paused', label: 'Paused', color: 'text-orange-400', icon: Pause }
+  { value: 'active', label: 'Active', color: 'text-[hsl(var(--success))]', icon: CheckCircle },
+  { value: 'inactive', label: 'Inactive', color: 'text-muted-foreground', icon: Clock },
+  { value: 'maintenance', label: 'Maintenance', color: 'text-[hsl(var(--warning))]', icon: Settings },
+  { value: 'paused', label: 'Paused', color: 'text-primary', icon: Pause }
 ]
 
 const shutdownOptions = [
@@ -231,11 +231,11 @@ export function AgentStatusControlModal({
 
   return (
     <AnimatePresence>
-      <motion.div 
-        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        exit={{ opacity: 0 }} 
+      <motion.div
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         onClick={onClose}
       />
       <motion.div 
@@ -244,10 +244,10 @@ export function AgentStatusControlModal({
         animate={{ opacity: 1, scale: 1 }} 
         exit={{ opacity: 0, scale: 0.95 }}
       >
-        <Card className="glass-card w-full max-w-4xl max-h-[90vh] overflow-hidden">
+        <Card className="glass-card card-glow w-full max-w-4xl max-h-[90vh] overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/30">
             <CardTitle className="flex items-center space-x-3">
-              <Activity className="w-6 h-6 text-orange-400" />
+              <Activity className="w-6 h-6 text-primary" />
               <div>
                 <span className="text-xl">Agent Status Control</span>
                 <p className="text-sm text-muted-foreground font-normal">
@@ -276,10 +276,10 @@ export function AgentStatusControlModal({
                         })
                       )}
                       <Badge className={`${
-                        currentStatus === 'active' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                        currentStatus === 'inactive' ? 'bg-gray-500/10 text-gray-400 border-gray-500/20' :
-                        currentStatus === 'maintenance' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                        'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                        currentStatus === 'active' ? 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20' :
+                        currentStatus === 'inactive' ? 'bg-secondary/50 text-muted-foreground border-border/30' :
+                        currentStatus === 'maintenance' ? 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20' :
+                        'bg-primary/10 text-primary border-primary/20'
                       }`}>
                         {currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)}
                       </Badge>
@@ -288,7 +288,7 @@ export function AgentStatusControlModal({
                   
                   <div className="text-right">
                     <p className="text-sm text-muted-foreground">Agent ID</p>
-                    <p className="font-semibold text-orange-400">#{agentId}</p>
+                    <p className="font-semibold text-primary">#{agentId}</p>
                   </div>
                 </div>
               </CardContent>
@@ -363,7 +363,7 @@ export function AgentStatusControlModal({
                       <Card className="bg-secondary/30 border-border/30">
                         <CardHeader>
                           <CardTitle className="text-base flex items-center space-x-2">
-                            <Users className="w-5 h-5 text-blue-400" />
+                            <Users className="w-5 h-5 text-[hsl(var(--info))]" />
                             <span>Active Workflows Impact</span>
                           </CardTitle>
                         </CardHeader>
@@ -391,26 +391,26 @@ export function AgentStatusControlModal({
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base flex items-center space-x-2">
-                          <Database className="w-5 h-5 text-purple-400" />
+                          <Database className="w-5 h-5 text-[hsl(var(--agent))]" />
                           <span>System Impact Analysis</span>
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-2xl font-bold text-red-400">
+                            <p className="text-2xl font-bold text-[hsl(var(--destructive))]">
                               {impactAnalysis.impact_analysis.system_impact.performance_degradation}%
                             </p>
                             <p className="text-sm text-muted-foreground">Performance Impact</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-lg font-bold text-yellow-400">
+                            <p className="text-lg font-bold text-[hsl(var(--warning))]">
                               {impactAnalysis.impact_analysis.system_impact.availability_impact}
                             </p>
                             <p className="text-sm text-muted-foreground">Availability Impact</p>
                           </div>
                           <div className="text-center p-3 bg-background/50 rounded-lg">
-                            <p className="text-lg font-bold text-blue-400">
+                            <p className="text-lg font-bold text-[hsl(var(--info))]">
                               {impactAnalysis.impact_analysis.system_impact.recovery_time_estimate}
                             </p>
                             <p className="text-sm text-muted-foreground">Recovery Time</p>
@@ -434,7 +434,7 @@ export function AgentStatusControlModal({
                       <Card className="bg-secondary/30 border-border/30">
                         <CardHeader>
                           <CardTitle className="text-base flex items-center space-x-2">
-                            <Info className="w-5 h-5 text-blue-400" />
+                            <Info className="w-5 h-5 text-[hsl(var(--info))]" />
                             <span>Recommendations</span>
                           </CardTitle>
                         </CardHeader>
@@ -442,16 +442,16 @@ export function AgentStatusControlModal({
                           <div className="space-y-3">
                             {impactAnalysis.impact_analysis.recommendations.map((rec, index) => (
                               <div key={index} className={`flex items-start space-x-3 p-3 rounded-lg ${
-                                rec.type === 'critical' ? 'bg-red-500/10 border border-red-500/20' :
-                                rec.type === 'warning' ? 'bg-yellow-500/10 border border-yellow-500/20' :
-                                'bg-blue-500/10 border border-blue-500/20'
+                                rec.type === 'critical' ? 'bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/20' :
+                                rec.type === 'warning' ? 'bg-[hsl(var(--warning))]/10 border border-[hsl(var(--warning))]/20' :
+                                'bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20'
                               }`}>
                                 {rec.type === 'critical' ? (
-                                  <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                                  <AlertTriangle className="w-5 h-5 text-[hsl(var(--destructive))] flex-shrink-0 mt-0.5" />
                                 ) : rec.type === 'warning' ? (
-                                  <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                  <AlertTriangle className="w-5 h-5 text-[hsl(var(--warning))] flex-shrink-0 mt-0.5" />
                                 ) : (
-                                  <Info className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                                  <Info className="w-5 h-5 text-[hsl(var(--info))] flex-shrink-0 mt-0.5" />
                                 )}
                                 <p className="text-sm">{rec.message}</p>
                               </div>
@@ -466,7 +466,7 @@ export function AgentStatusControlModal({
                       <Card className="bg-secondary/30 border-border/30">
                         <CardHeader>
                           <CardTitle className="text-base flex items-center space-x-2">
-                            <Shield className="w-5 h-5 text-orange-400" />
+                            <Shield className="w-5 h-5 text-primary" />
                             <span>Required Confirmations</span>
                           </CardTitle>
                           <p className="text-sm text-muted-foreground">
@@ -540,8 +540,8 @@ export function AgentStatusControlModal({
                         onClick={handleConfirmStatusChange}
                         disabled={!canProceed() || updateAgentMutation.isPending}
                         className={`${
-                          targetStatus === 'inactive' ? 'bg-red-600 hover:bg-red-700' : 
-                          targetStatus === 'maintenance' ? 'bg-yellow-600 hover:bg-yellow-700' :
+                          targetStatus === 'inactive' ? 'bg-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/90' :
+                          targetStatus === 'maintenance' ? 'bg-[hsl(var(--warning))] hover:bg-[hsl(var(--warning))]/90' :
                           'bg-primary hover:bg-primary/90'
                         }`}
                       >
@@ -566,11 +566,11 @@ export function AgentStatusControlModal({
                     </div>
 
                     {(agentError || updateAgentMutation.error) && (
-                      <Card className="bg-red-500/10 border-red-500/20">
+                      <Card className="bg-[hsl(var(--destructive))]/10 border-[hsl(var(--destructive))]/20">
                         <CardContent className="py-4">
                           <div className="flex items-center space-x-2">
-                            <AlertTriangle className="w-5 h-5 text-red-400" />
-                            <p className="text-red-400 text-sm">
+                            <AlertTriangle className="w-5 h-5 text-[hsl(var(--destructive))]" />
+                            <p className="text-[hsl(var(--destructive))] text-sm">
                               {agentError?.message || updateAgentMutation.error?.message || 'An error occurred'}
                             </p>
                           </div>
@@ -582,7 +582,7 @@ export function AgentStatusControlModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardContent className="py-8">
                       <div className="text-center">
-                        <AlertTriangle className="h-8 w-8 text-yellow-400 mx-auto mb-4" />
+                        <AlertTriangle className="h-8 w-8 text-[hsl(var(--warning))] mx-auto mb-4" />
                         <p className="text-muted-foreground">Unable to analyze impact at this time</p>
                       </div>
                     </CardContent>

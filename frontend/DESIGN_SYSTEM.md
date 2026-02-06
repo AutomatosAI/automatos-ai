@@ -27,6 +27,7 @@
 18. [Dark Theme](#18-dark-theme)
 19. [Light Theme](#19-light-theme)
 20. [Do's and Don'ts](#20-dos-and-donts)
+21. [Shared Components](#21-shared-components)
 
 ---
 
@@ -257,6 +258,8 @@ Buttons use the `Button` component from `components/ui/button.tsx` with CVA vari
 
 ## 8. Inputs & Search Bars
 
+**Use the shared `SearchInput` component** (`components/shared/search-input.tsx`) for ALL search bars across the platform. See [Section 21: Shared Components](#21-shared-components).
+
 ### Standard Input
 ```tsx
 // Uses rounded-2xl, glass background, orange focus ring
@@ -398,6 +401,8 @@ Modals are the **highest-elevation** element. They MUST have the strongest glass
 
 ## 13. Page Headers
 
+**Use the shared `PageHeader` component** (`components/shared/page-header.tsx`) for ALL page-level headers. See [Section 21: Shared Components](#21-shared-components).
+
 Every page in the platform has a header following the **two-color pattern**.
 
 ### Pattern
@@ -424,6 +429,8 @@ Subtitle description text in muted foreground
 ---
 
 ## 14. Badges & Labels
+
+**Use the shared `StatusBadge` component for semantic status colors** (`components/shared/status-badge.tsx`). See [Section 21: Shared Components](#21-shared-components).
 
 Badges are **always pill-shaped** (`rounded-full`).
 
@@ -617,6 +624,287 @@ Light theme must be clean, high-contrast, and clearly readable.
 
 ---
 
+## 21. Shared Components
+
+Six reusable shared components live in `frontend/components/shared/`. These encapsulate the most commonly repeated UI patterns across pages so that every instance is brand-consistent by default. **Always prefer these over hand-rolling the same layout.**
+
+Import them from the barrel export:
+
+```tsx
+import {
+  SearchInput,
+  StatusBadge,
+  PageHeader,
+  StatsBar,
+  FilterTabs,
+  ItemCard,
+} from '@/components/shared';
+```
+
+---
+
+### 21.1 SearchInput (`search-input.tsx`)
+
+Wraps the shadcn `Input` with a Lucide `Search` icon, optional loading spinner, and pill shape.
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `value` | `string` | — | Controlled input value |
+| `onChange` | `(value: string) => void` | — | Change handler (receives the string, not the event) |
+| `placeholder` | `string` | `"Search..."` | Placeholder text |
+| `loading` | `boolean` | `false` | Shows a spinner in place of the search icon |
+| `className` | `string` | — | Additional classes merged onto the wrapper |
+
+**Styling**
+
+- `pl-10 rounded-full bg-secondary/50 border-secondary focus:border-primary/50`
+- Orange glow on focus (matches the search bar spec in [Section 8](#8-inputs--search-bars))
+- Search icon positioned absolutely on the left (`h-4 w-4 text-muted-foreground`)
+
+**Usage**
+
+```tsx
+<SearchInput
+  value={query}
+  onChange={setQuery}
+  placeholder="Search agents..."
+/>
+```
+
+**Rule:** Use this for ALL search bars across the platform. Do not build one-off search inputs.
+
+---
+
+### 21.2 StatusBadge (`status-badge.tsx`)
+
+Semantic badge with predefined status variants that map to the design system's semantic color tokens.
+
+**Status Variants**
+
+| Variant | Color Token | Example Use |
+|---------|-------------|-------------|
+| `success` | `--success` | Completed, verified, connected |
+| `active` | `--primary` | Enabled, running |
+| `warning` | `--warning` | Pending, caution |
+| `error` | `--destructive` | Failed, error |
+| `info` | `--info` | Informational |
+| `neutral` | `--muted-foreground` | Disabled, inactive |
+| `purple` | `--agent` | Agent-related |
+| `primary` | `--primary` | Brand accent |
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `status` | `StatusVariant` | — | One of the variants above |
+| `children` | `ReactNode` | — | Badge label text |
+| `dot` | `boolean` | `false` | Renders a small colored dot before the label |
+| `size` | `'sm' \| 'default'` | `'default'` | Badge size |
+
+**Usage**
+
+```tsx
+<StatusBadge status="success" dot>Connected</StatusBadge>
+<StatusBadge status="error">Failed</StatusBadge>
+<StatusBadge status="warning" size="sm">Pending</StatusBadge>
+```
+
+**Rule:** Use instead of manually styling `Badge` with hardcoded colors. Every status indicator should go through `StatusBadge`.
+
+---
+
+### 21.3 PageHeader (`page-header.tsx`)
+
+Page-level header with the two-color title pattern (white + orange gradient on the accent word), subtitle, and an actions slot.
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `title` | `string` | — | The non-accented portion of the title (e.g. `"Agent"`) |
+| `titleAccent` | `string` | — | The gradient-orange word (e.g. `"Management"`) |
+| `subtitle` | `string` | — | Muted description below the title |
+| `actions` | `ReactNode` | — | Right-aligned slot for buttons, badges, etc. |
+
+**Styling**
+
+- `h1` with `text-3xl font-bold`
+- `titleAccent` rendered with `gradient-text` class (orange gradient, `bg-clip-text text-transparent`)
+- Subtitle: `text-sm text-muted-foreground`
+- Includes Framer Motion `fade-in` animation on mount
+- Flex layout: title/subtitle on left, actions on right
+
+**Usage**
+
+```tsx
+<PageHeader
+  title="Workflow"
+  titleAccent="Builder"
+  subtitle="Create and manage automated workflows"
+  actions={
+    <>
+      <Button variant="outline">Export</Button>
+      <Button>+ New Workflow</Button>
+    </>
+  }
+/>
+```
+
+**Rule:** Use on ALL page-level headers to ensure identical structure and animation.
+
+---
+
+### 21.4 StatsBar (`stats-bar.tsx`)
+
+A responsive grid of stat cards (1-4 columns) with icon box, value, label, and optional change indicator.
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `stats` | `StatItem[]` | — | Array of stat items to render |
+| `loading` | `boolean` | `false` | Shows skeleton placeholders |
+| `glow` | `boolean` | `true` | Enables `card-glow` on each stat card |
+
+**StatItem Shape**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `label` | `string` | yes | Stat label (e.g. "Total Agents") |
+| `value` | `string \| number` | yes | Display value |
+| `change` | `string` | no | Change text (e.g. "+12% from last week") |
+| `icon` | `LucideIcon` | yes | Lucide icon component |
+| `iconColor` | `string` | no | Tailwind color class for the icon (e.g. `text-primary`) |
+
+**Styling**
+
+- Each stat card uses `glass-card card-glow`
+- Icon box: `w-10 h-10 rounded-2xl` with subtle background tint
+- Icons: `w-5 h-5`
+- Icon colors should use semantic tokens: `text-primary`, `text-[hsl(var(--success))]`, etc.
+- Grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6`
+
+**Usage**
+
+```tsx
+<StatsBar
+  stats={[
+    { label: 'Total Agents', value: 24, icon: Bot, iconColor: 'text-primary' },
+    { label: 'Active', value: 18, change: '+3 this week', icon: Activity, iconColor: 'text-[hsl(var(--success))]' },
+    { label: 'Errors', value: 2, icon: AlertCircle, iconColor: 'text-destructive' },
+    { label: 'Uptime', value: '99.7%', icon: Clock, iconColor: 'text-[hsl(var(--info))]' },
+  ]}
+/>
+```
+
+---
+
+### 21.5 FilterTabs (`filter-tabs.tsx`)
+
+Wraps the shadcn `Tabs` component with consistent `TabsList` styling and a trailing slot for search/sort controls.
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `tabs` | `FilterTab[]` | — | Tab definitions |
+| `value` | `string` | — | Controlled active tab value |
+| `onValueChange` | `(v: string) => void` | — | Tab change handler |
+| `trailing` | `ReactNode` | — | Slot rendered after the tabs (e.g. `SearchInput`, sort dropdown) |
+| `children` | `ReactNode` | — | `TabsContent` panels |
+
+**FilterTab Shape**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `value` | `string` | yes | Tab value |
+| `label` | `string` | yes | Display label |
+| `icon` | `LucideIcon` | no | Optional Lucide icon before the label |
+| `count` | `number` | no | Optional count badge |
+
+**Styling**
+
+- `TabsList` uses `bg-secondary/40 backdrop-blur` with `rounded-full` (pill-in-pill pattern from [Section 10](#10-tabs--sub-navigation))
+- Icons render at `h-4 w-4`, text is responsive (hidden on small screens if icon present)
+- Trailing slot is right-aligned with `ml-auto`
+
+**Re-exports:** `TabsContent` from shadcn for convenience.
+
+**Usage**
+
+```tsx
+<FilterTabs
+  tabs={[
+    { value: 'all', label: 'All', icon: LayoutGrid, count: 42 },
+    { value: 'active', label: 'Active', icon: Zap, count: 18 },
+    { value: 'error', label: 'Errors', icon: AlertCircle, count: 2 },
+  ]}
+  value={activeTab}
+  onValueChange={setActiveTab}
+  trailing={<SearchInput value={query} onChange={setQuery} />}
+>
+  <TabsContent value="all">...</TabsContent>
+  <TabsContent value="active">...</TabsContent>
+  <TabsContent value="error">...</TabsContent>
+</FilterTabs>
+```
+
+---
+
+### 21.6 ItemCard (`item-card.tsx`)
+
+Slot-based card for grid/list items. Enforces consistent card structure across all item listings (agents, tools, workflows, documents, etc.).
+
+**Props**
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `icon` | `ReactNode` | — | Top-left icon or avatar |
+| `title` | `ReactNode` | — | Card title |
+| `subtitle` | `ReactNode` | — | Muted subtitle below title |
+| `titleBadges` | `ReactNode` | — | Badges rendered inline after the title |
+| `description` | `ReactNode` | — | Body description text |
+| `meta` | `ReactNode` | — | Metadata row (dates, counts, etc.) |
+| `actions` | `ReactNode` | — | Footer action buttons |
+| `children` | `ReactNode` | — | Arbitrary extra content before actions |
+| `animated` | `boolean` | `true` | Enables Framer Motion entrance animation |
+| `animationDelay` | `number` | `0` | Stagger delay in seconds for grid animations |
+| `onClick` | `() => void` | — | Makes the entire card clickable |
+
+**Styling**
+
+- Uses `glass-card card-glow` classes
+- `CardHeader` with `pb-3` for tighter spacing
+- `Separator` rendered before the actions slot
+- Hover: orange glow intensifies (inherited from `glass-card`)
+- When `onClick` is provided, card gets `cursor-pointer` and `group` class for nested hover effects
+
+**Usage**
+
+```tsx
+<ItemCard
+  icon={<Bot className="h-5 w-5 text-primary" />}
+  title="Research Agent"
+  titleBadges={<StatusBadge status="active" size="sm">Active</StatusBadge>}
+  subtitle="GPT-4 Turbo"
+  description="Performs deep research across multiple sources and synthesizes findings."
+  meta={<span className="text-xs text-muted-foreground">Updated 2h ago</span>}
+  actions={
+    <>
+      <Button variant="outline" size="sm">Details</Button>
+      <Button size="sm">Configure</Button>
+    </>
+  }
+  animationDelay={0.1}
+/>
+```
+
+**Rule:** Use for all grid/list item cards to enforce consistent card structure. Do not hand-build card layouts with raw `Card` + `CardHeader` + `CardContent` when this component fits.
+
+---
+
 ## File Reference
 
 | File | Purpose |
@@ -632,6 +920,13 @@ Light theme must be clean, high-contrast, and clearly readable.
 | `components/ui/badge.tsx` | Badge/label component |
 | `components/theme-provider.tsx` | Dark/light theme provider |
 | `components/providers.tsx` | Root providers including Clerk theme |
+| `components/shared/index.ts` | Barrel export for all shared components |
+| `components/shared/search-input.tsx` | SearchInput component |
+| `components/shared/status-badge.tsx` | StatusBadge component |
+| `components/shared/page-header.tsx` | PageHeader component |
+| `components/shared/stats-bar.tsx` | StatsBar component |
+| `components/shared/filter-tabs.tsx` | FilterTabs component |
+| `components/shared/item-card.tsx` | ItemCard component |
 
 ---
 
