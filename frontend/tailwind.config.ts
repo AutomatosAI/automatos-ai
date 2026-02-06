@@ -49,6 +49,22 @@ const config: Config = {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))',
+        },
+        agent: {
+          DEFAULT: 'hsl(var(--agent))',
+          foreground: 'hsl(var(--agent-foreground))',
+        },
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -99,18 +115,18 @@ const config: Config = {
         },
         'pulse-glow': {
           '0%, 100%': {
-            boxShadow: '0 0 20px rgba(255, 107, 53, 0.1)',
+            boxShadow: '0 0 20px hsla(var(--primary) / 0.1)',
           },
           '50%': {
-            boxShadow: '0 0 40px rgba(255, 107, 53, 0.3)',
+            boxShadow: '0 0 40px hsla(var(--primary) / 0.3)',
           },
         },
         'glow-pulse': {
           '0%, 100%': {
-            boxShadow: '0 0 15px rgba(255, 107, 53, 0.2)',
+            boxShadow: '0 0 15px hsla(var(--primary) / 0.2)',
           },
           '50%': {
-            boxShadow: '0 0 30px rgba(255, 107, 53, 0.4)',
+            boxShadow: '0 0 30px hsla(var(--primary) / 0.4)',
           },
         },
       },
