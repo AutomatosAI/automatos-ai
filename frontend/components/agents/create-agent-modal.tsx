@@ -10,7 +10,7 @@ import {
   ChevronUp,
   User,
   PenLine,
-  Puzzle,
+  Sparkles,
   Terminal,
   Zap,
   Coins,
@@ -31,6 +31,7 @@ import { useTools } from '@/hooks/use-tools-api'
 
 // API hooks
 import { useCreateAgent } from '@/hooks/use-agent-api'
+import { useTourTabBridge } from '@/hooks/use-tour-tab-bridge'
 import { useModels, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { ModelSelector } from './model-selector'
 import { ToolLogo } from '@/components/ui/tool-logo'
@@ -104,6 +105,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
   const availableTools = toolsResponse?.data || []
   const { data: models = [], isLoading: modelsLoading } = useModels()
   const updateModelConfigMutation = useUpdateAgentModelConfig()
+
+  // Allow Shepherd tour to drive which tab is active
+  useTourTabBridge(setStep)
 
   // Fetch workspace-enabled plugins when modal opens
   useEffect(() => {
@@ -213,13 +217,11 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       }
 
       console.log('Creating agent with payload:', JSON.stringify(agentPayload, null, 2))
-      alert('Creating agent: ' + agentData.name)
 
       // Create the agent
       const newAgent: any = await (createAgentMutation as any).mutateAsync(agentPayload)
 
       console.log('Agent created successfully:', newAgent)
-      alert('Agent created! ID: ' + newAgent.id)
 
       // PRD-15: Update model configuration
       if (newAgent?.id) {
@@ -346,7 +348,6 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
       console.error('❌ CREATE AGENT ERROR:', error)
       const errorMsg = error?.response?.data?.detail || error?.message || JSON.stringify(error)
       console.error('Error details:', errorMsg)
-      alert('FAILED TO CREATE: ' + errorMsg)
       toast.error('Failed: ' + errorMsg)
     }
   }
@@ -404,7 +405,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       4. Tools
                     </TabsTrigger>
                     <TabsTrigger value="step-5" disabled={step < 5}>
-                      5. Plugins
+                      5. Capabilities
                     </TabsTrigger>
                   </TabsList>
 
@@ -426,7 +427,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             value={agentData.category}
                             onValueChange={(value) => setAgentData(prev => ({ ...prev, category: value }))}
                           >
-                            <SelectTrigger id="agent-category" className="bg-secondary/50">
+                            <SelectTrigger id="agent-category" data-tour="agent-category-select" className="bg-secondary/50">
                               {agentData.category ? (
                                 <div className="flex items-center gap-2">
                                   {(() => {
@@ -539,7 +540,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 2: Persona Selection (US-021) */}
-                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  <TabsContent value="step-2" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-persona-section">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Agent Persona</CardTitle>
@@ -609,26 +610,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         exit={{ opacity: 0, height: 0 }}
                         className="space-y-4"
                       >
-                        {/* Category Filter */}
-                        <div>
-                          <Label>Filter by Category</Label>
-                          <Select
-                            value={personaCategoryFilter}
-                            onValueChange={setPersonaCategoryFilter}
-                          >
-                            <SelectTrigger className="bg-secondary/50">
-                              <SelectValue placeholder="All categories" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All Categories</SelectItem>
-                              {[...new Set(personas.map(p => p.category).filter(Boolean))].map(cat => (
-                                <SelectItem key={cat} value={cat!}>{cat}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {/* Persona List */}
+                        {/* Persona list — auto-filtered by agentData.category from Config tab */}
+                        {agentData.category && (
+                          <div className="text-xs text-muted-foreground">
+                            Showing personas for <strong>{agentData.category}</strong> category.
+                          </div>
+                        )}
                         {personasLoading ? (
                           <div className="space-y-2">
                             {[1, 2, 3].map(i => (
@@ -638,7 +625,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                         ) : (
                           <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-1">
                             {personas
-                              .filter(p => personaCategoryFilter === 'all' || p.category === personaCategoryFilter)
+                              .filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase())
                               .map(persona => (
                                 <motion.div
                                   key={persona.id}
@@ -706,9 +693,9 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                                   )}
                                 </motion.div>
                               ))}
-                            {personas.filter(p => personaCategoryFilter === 'all' || p.category === personaCategoryFilter).length === 0 && (
+                            {personas.filter(p => !agentData.category || agentData.category === 'custom' || p.category?.toLowerCase() === agentData.category.toLowerCase()).length === 0 && (
                               <div className="text-center py-6 text-muted-foreground">
-                                No personas found{personaCategoryFilter !== 'all' ? ` in category "${personaCategoryFilter}"` : ''}.
+                                No personas found{agentData.category ? ` for "${agentData.category}" category` : ''}.
                               </div>
                             )}
                           </div>
@@ -766,7 +753,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 3: Model Configuration (PRD-15) */}
-                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  <TabsContent value="step-3" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-model-section">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Model Configuration</CardTitle>
@@ -893,7 +880,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 4: Tool Selection */}
-                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  <TabsContent value="step-4" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-tools-section">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
                         <CardTitle className="text-base">Select Tools</CardTitle>
@@ -954,12 +941,12 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                   </TabsContent>
 
                   {/* Step 5: Plugins */}
-                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto">
+                  <TabsContent value="step-5" className="space-y-6 max-h-[50vh] overflow-y-auto" data-tour="agent-plugins-section">
                     <Card className="bg-secondary/30 border-border/30">
                       <CardHeader>
-                        <CardTitle className="text-base">Skills & Advanced Settings</CardTitle>
+                        <CardTitle className="text-base">Agent Capabilities</CardTitle>
                         <p className="text-sm text-muted-foreground">
-                          Customize the agent's skills and advanced configuration
+                          Teach your agent new skills and expertise
                         </p>
                       </CardHeader>
                       <CardContent>
@@ -988,7 +975,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2 min-w-0">
-                                  <Puzzle className="w-5 h-5 text-orange-400 shrink-0" />
+                                  <Sparkles className="w-5 h-5 text-orange-400 shrink-0" />
                                   <span className="font-medium truncate">{plugin.name}</span>
                                   <Badge variant="outline" className="text-xs shrink-0">
                                     v{plugin.version}
@@ -1029,19 +1016,19 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
                       </div>
                     ) : (
                       <div className="text-center py-8">
-                        <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                        <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
                         <p className="text-muted-foreground">
-                          No plugins are enabled for this workspace yet. You can assign plugins later.
+                          No capabilities are enabled for this workspace yet. You can assign capabilities later.
                         </p>
                       </div>
                     )}
 
                     <div className="flex justify-between items-center pt-6 border-t border-border/30">
                       <div>
-                        <p className="font-medium">Selected Plugins: {agentData.plugins.length}</p>
+                        <p className="font-medium">Selected Capabilities: {agentData.plugins.length}</p>
                         <p className="text-sm text-muted-foreground">
-                          Agent will be created with these plugins
+                          Agent will be created with these capabilities
                         </p>
                       </div>
                     </div>

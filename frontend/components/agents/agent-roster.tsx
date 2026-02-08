@@ -291,7 +291,7 @@ export function AgentRoster({
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" data-tour="agent-card-menu">
                       <MoreVertical className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -400,13 +400,13 @@ export function AgentRoster({
                 </div>
                 <div>
                   <p className="text-lg font-bold">{agent.plugins?.length || 0}</p>
-                  <p className="text-xs text-muted-foreground">Plugins</p>
+                  <p className="text-xs text-muted-foreground">Capabilities</p>
                 </div>
               </div>
 
               {/* Plugins Preview */}
               <div className="mb-4">
-                <p className="text-xs text-muted-foreground mb-2">Plugins</p>
+                <p className="text-xs text-muted-foreground mb-2">Capabilities</p>
                 <div className="flex flex-wrap gap-1">
                   {agent.plugins && agent.plugins.length > 0 ? (
                     <>
@@ -422,7 +422,7 @@ export function AgentRoster({
                       )}
                     </>
                   ) : (
-                    <span className="text-xs text-muted-foreground italic">No plugins assigned</span>
+                    <span className="text-xs text-muted-foreground italic">No capabilities assigned</span>
                   )}
                 </div>
               </div>

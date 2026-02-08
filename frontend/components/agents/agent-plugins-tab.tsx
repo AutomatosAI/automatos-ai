@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Puzzle, Terminal, Zap, Shield, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
+import { Sparkles, Terminal, Zap, Shield, ExternalLink, AlertCircle, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,9 +52,9 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Plugin Management</h2>
+          <h2 className="text-2xl font-bold">Capability Management</h2>
           <p className="text-muted-foreground">
-            View and manage plugins assigned to your agents
+            View and manage capabilities assigned to your agents
           </p>
         </div>
         <Select
@@ -77,10 +77,10 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
       {!selectedAgentId ? (
         <Card className="glass-card">
           <CardContent className="p-12 text-center">
-            <Puzzle className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+            <Sparkles className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">Select an Agent</h3>
             <p className="text-muted-foreground">
-              Choose an agent above to view its assigned plugins
+              Choose an agent above to view its assigned capabilities
             </p>
           </CardContent>
         </Card>
@@ -92,7 +92,7 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
         <Card className="glass-card border-red-500/20">
           <CardContent className="p-12 text-center">
             <AlertCircle className="w-16 h-16 mx-auto text-red-400 mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Failed to Load Plugins</h3>
+            <h3 className="text-lg font-semibold mb-2">Failed to Load Capabilities</h3>
             <p className="text-muted-foreground mb-4">{error}</p>
             <Button
               variant="outline"
@@ -111,7 +111,7 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Puzzle className="w-5 h-5 text-orange-400" />
+                    <Sparkles className="w-5 h-5 text-orange-400" />
                     {plugin.name}
                   </CardTitle>
                   <Badge variant="outline" className="text-xs">v{plugin.version}</Badge>
@@ -144,10 +144,10 @@ export function AgentPlugins({ agents, selectedAgentId, onAgentSelect }: AgentPl
       ) : (
         <Card className="glass-card">
           <CardContent className="p-12 text-center">
-            <Puzzle className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Plugins Assigned</h3>
+            <Sparkles className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Capabilities Assigned</h3>
             <p className="text-muted-foreground mb-4">
-              This agent doesn't have any plugins yet. Assign plugins from the agent's configuration.
+              This agent doesn't have any capabilities yet. Assign capabilities from the agent's configuration.
             </p>
             <Button
               variant="outline"

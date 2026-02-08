@@ -17,7 +17,7 @@ import {
   Database,
   Bot,
   Wrench,
-  Puzzle,
+  Sparkles,
   Terminal,
   Coins
 } from 'lucide-react'
@@ -725,12 +725,12 @@ export function AgentConfiguration({
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Puzzle className="w-5 h-5 text-orange-400" />
-              Plugin Assignment
+              <Sparkles className="w-5 h-5 text-orange-400" />
+              Capability Assignment
             </CardTitle>
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                Select marketplace plugins to assign to this agent
+                Select marketplace capabilities to assign to this agent
               </p>
               {assignedPluginIds.size > 0 && (
                 <div className="flex items-center gap-2">
@@ -803,10 +803,10 @@ export function AgentConfiguration({
               </div>
             ) : (
               <div className="text-center py-8">
-                <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
                 <p className="text-muted-foreground">
-                  No plugins are enabled for this workspace yet.
+                  No capabilities are enabled for this workspace yet.
                 </p>
               </div>
             )}
