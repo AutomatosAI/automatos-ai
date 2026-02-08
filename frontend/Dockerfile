@@ -11,7 +11,7 @@
 # =============================================================================
 # Base Stage - Dependencies
 # =============================================================================
-FROM node:18-alpine as base
+FROM node:20-alpine as base
 
 WORKDIR /app
 
@@ -72,7 +72,7 @@ RUN npm run build
 # =============================================================================
 # Production Stage - Optimized
 # =============================================================================
-FROM node:18-alpine as production
+FROM node:20-alpine as production
 
 WORKDIR /app
 

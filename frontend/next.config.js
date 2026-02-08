@@ -6,10 +6,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
-  experimental: {
-    turbo: {
-      root: __dirname,
-    },
+  turbopack: {
+    root: __dirname,
   },
   // Rewrites disabled - using absolute URLs from client instead
   // Next.js rewrites require env vars at build time, which is problematic on Railway

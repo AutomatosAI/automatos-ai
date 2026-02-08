@@ -7,18 +7,20 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/seed.ts"
   },
   "devDependencies": {
-    "@next/swc-wasm-nodejs": "14.2.25",
     "@types/node": "20.6.2",
     "@types/react": "18.2.22",
     "@types/react-dom": "18.2.7",
     "@typescript-eslint/eslint-plugin": "6.7.2",
     "@typescript-eslint/parser": "6.7.2",
     "eslint": "8.49.0",
-    "eslint-config-next": "14.2.25",
+    "eslint-config-next": "^15.5.12",
     "eslint-plugin-prettier": "5.0.0",
     "eslint-plugin-react-hooks": "4.6.0",
     "postcss": "8.4.30",
@@ -33,7 +35,7 @@
   "dependencies": {
     "@ai-sdk/react": "^2.0.87",
     "@anthropic-ai/sdk": "^0.65.0",
-    "@clerk/nextjs": "^4.29.0",
+    "@clerk/nextjs": "^6.37.3",
     "@floating-ui/react": "0.26.0",
     "@headlessui/react": "1.7.18",
     "@hookform/resolvers": "3.3.1",
@@ -100,7 +102,7 @@
     "lodash": "4.17.21",
     "lucide-react": "0.279.0",
     "mapbox-gl": "1.13.3",
-    "next": "14.2.25",
+    "next": "^15.5.12",
     "next-themes": "0.2.1",
     "plotly.js": "2.26.2",
     "prismjs": "^1.30.0",
