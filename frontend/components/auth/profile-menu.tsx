@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
 import { User, Settings, LogOut, ChevronDown, Sparkles } from 'lucide-react'
-import { createFirstLoginTour } from '@/lib/shepherd/first-login-tour'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 /**
@@ -128,8 +127,9 @@ export function ProfileMenu() {
                         onSelect={() => {
                             setOpen(false)
                             // Small delay so the dropdown closes first
-                            setTimeout(() => {
+                            setTimeout(async () => {
                                 if (user) {
+                                    const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
                                     const tour = createFirstLoginTour(user.id)
                                     tour.start()
                                 }
