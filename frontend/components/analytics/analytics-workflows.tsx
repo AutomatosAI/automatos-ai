@@ -16,6 +16,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend } from 'recharts'
 import { useWorkflowAnalytics } from '@/hooks/use-unified-analytics'
 
@@ -95,25 +96,12 @@ export function AnalyticsWorkflows({ days }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, color: 'text-purple-400' },
-          { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, color: 'text-blue-400' },
-          { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, color: 'text-green-400' },
-          { label: 'Avg Duration', value: data?.summary?.avgDuration || '0s', icon: Clock, color: 'text-orange-400' },
-        ].map((card, i) => (
-          <motion.div key={card.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="glass-card">
-              <CardContent className="p-6">
-                <card.icon className={`w-5 h-5 ${card.color} mb-2`} />
-                <h3 className="text-2xl font-bold">{card.value}</h3>
-                <p className="text-sm text-muted-foreground">{card.label}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        { label: 'Total Workflows', value: data?.summary?.totalWorkflows || 0, icon: GitBranch, iconColor: 'text-primary' },
+        { label: 'Executions', value: data?.summary?.totalExecutions || 0, icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Success Rate', value: `${(data?.summary?.successRate || 0).toFixed(0)}%`, icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Avg Duration', value: data?.summary?.avgDuration || '0s', icon: Clock, iconColor: 'text-[hsl(var(--agent))]' },
+      ]} loading={isLoading} />
 
       {/* Execution Trend Chart */}
       {data?.stats && (data.stats as any)?.recent_executions?.length > 0 && (

@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Puzzle,
+  Sparkles,
   CheckCircle,
   Loader2,
   Star,
@@ -216,11 +216,11 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
     setApprovingId(pluginId)
     try {
       await apiClient.post(`/api/admin/plugins/${pluginId}/approve`)
-      toast({ title: 'Plugin approved and published to marketplace!' })
+      toast({ title: 'Capability approved and published to marketplace!' })
       fetchAllPlugins()
     } catch (error: any) {
       toast({
-        title: 'Failed to approve plugin',
+        title: 'Failed to approve capability',
         description: error?.message || 'An error occurred',
         variant: 'destructive',
       })
@@ -233,11 +233,11 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
     setDeactivatingId(pluginId)
     try {
       await apiClient.post(`/api/admin/plugins/${pluginId}/deactivate`)
-      toast({ title: 'Plugin deactivated' })
+      toast({ title: 'Capability deactivated' })
       fetchAllPlugins()
     } catch (error: any) {
       toast({
-        title: 'Failed to deactivate plugin',
+        title: 'Failed to deactivate capability',
         description: error?.message || 'An error occurred',
         variant: 'destructive',
       })
@@ -247,17 +247,17 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
   }
 
   const handleDelete = async (pluginId: string) => {
-    if (!confirm('Are you sure you want to permanently delete this plugin? This cannot be undone.')) {
+    if (!confirm('Are you sure you want to permanently delete this capability? This cannot be undone.')) {
       return
     }
     setDeletingId(pluginId)
     try {
       await apiClient.delete(`/api/admin/plugins/${pluginId}`)
-      toast({ title: 'Plugin deleted permanently' })
+      toast({ title: 'Capability deleted permanently' })
       fetchAllPlugins()
     } catch (error: any) {
       toast({
-        title: 'Failed to delete plugin',
+        title: 'Failed to delete capability',
         description: error?.message || 'An error occurred',
         variant: 'destructive',
       })
@@ -314,7 +314,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       )
 
       toast({
-        title: 'Plugin Enabled',
+        title: 'Capability Enabled',
         description: `${pluginName} has been enabled for your workspace.`,
       })
     } catch (err: any) {
@@ -365,13 +365,13 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       )
 
       toast({
-        title: 'Plugin Disabled',
+        title: 'Capability Disabled',
         description: `${pluginName} has been disabled for your workspace.`,
       })
     } catch (err: any) {
       toast({
         title: 'Error',
-        description: err?.message || 'Failed to disable plugin',
+        description: err?.message || 'Failed to disable capability',
         variant: 'destructive',
       })
     }
@@ -414,9 +414,9 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       {/* Header Stats */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold">Plugin Marketplace</h3>
+          <h3 className="text-xl font-semibold">Capabilities Marketplace</h3>
           <p className="text-sm text-muted-foreground">
-            Extend your agents with community-curated skills, commands, and hooks
+            Teach your agents new skills with community-curated capabilities
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -434,7 +434,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Star className="w-4 h-4 text-primary" />
-            <h4 className="text-sm font-semibold text-primary uppercase tracking-wider">Featured Plugins</h4>
+            <h4 className="text-sm font-semibold text-primary uppercase tracking-wider">Featured Capabilities</h4>
           </div>
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent">
             {featuredPlugins.map((plugin) => (
@@ -464,7 +464,7 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
                 : 'border-secondary text-muted-foreground hover:bg-secondary'
             }`}
           >
-            All Plugins
+            All Capabilities
           </Button>
           {categories.map((cat) => (
             <Button
@@ -501,13 +501,13 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
       {filteredPlugins.length === 0 ? (
         <div className="text-center py-12">
           <div className="w-16 h-16 rounded-lg bg-secondary/30 flex items-center justify-center mx-auto mb-4">
-            <Puzzle className="w-8 h-8 text-muted-foreground" />
+            <Sparkles className="w-8 h-8 text-muted-foreground" />
           </div>
-          <h3 className="text-lg font-semibold mb-2">No plugins found</h3>
+          <h3 className="text-lg font-semibold mb-2">No capabilities found</h3>
           <p className="text-muted-foreground mb-4">
             {searchQuery
-              ? `No plugins match "${searchQuery}"`
-              : 'No plugins available in this category'}
+              ? `No capabilities match "${searchQuery}"`
+              : 'No capabilities available in this category'}
           </p>
           <Button
             variant="outline"
@@ -602,7 +602,7 @@ function FeaturedPluginCard({
       <CardContent className="p-4 space-y-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <Puzzle className="w-8 h-8 text-primary shrink-0" />
+            <Sparkles className="w-8 h-8 text-primary shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <h4 className="font-semibold text-foreground truncate">{plugin.name}</h4>
@@ -627,7 +627,7 @@ function FeaturedPluginCard({
               </DropdownMenuItem>
               {!isEnabled && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
-                  <Puzzle className="w-4 h-4 mr-2" />
+                  <Sparkles className="w-4 h-4 mr-2" />
                   {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
                 </DropdownMenuItem>
               )}
@@ -726,7 +726,7 @@ function PluginCard({
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              <Puzzle className="w-10 h-10 text-primary shrink-0" />
+              <Sparkles className="w-10 h-10 text-primary shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-foreground line-clamp-1">
@@ -763,7 +763,7 @@ function PluginCard({
                   </DropdownMenuItem>
                   {!isEnabled && (
                     <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEnable() }} disabled={isEnabling}>
-                      <Puzzle className="w-4 h-4 mr-2" />
+                      <Sparkles className="w-4 h-4 mr-2" />
                       {isEnabling ? 'Enabling...' : 'Enable for Workspace'}
                     </DropdownMenuItem>
                   )}

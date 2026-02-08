@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar, type StatItem } from '@/components/shared/stats-bar'
 import { useAgentAnalytics } from '@/hooks/use-unified-analytics'
 
 interface Props {
@@ -99,28 +100,12 @@ export function AnalyticsAgents({ days }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Agents', value: data?.summary?.totalAgents || 0, sub: `${data?.summary?.activeAgents || 0} active`, icon: Bot, color: 'text-orange-400' },
-          { label: 'Avg Success Rate', value: `${(data?.summary?.avgSuccessRate || 0).toFixed(0)}%`, sub: 'Across all agents', icon: CheckCircle, color: 'text-green-400' },
-          { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), sub: 'This period', icon: Zap, color: 'text-purple-400' },
-          { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, sub: 'This period', icon: DollarSign, color: 'text-blue-400' },
-        ].map((card, i) => (
-          <motion.div key={card.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="glass-card">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <card.icon className={`w-5 h-5 ${card.color}`} />
-                </div>
-                <h3 className="text-2xl font-bold">{card.value}</h3>
-                <p className="text-sm text-muted-foreground">{card.label}</p>
-                <p className="text-xs text-muted-foreground mt-1">{card.sub}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        { label: 'Total Agents', value: data?.summary?.totalAgents || 0, change: `${data?.summary?.activeAgents || 0} active`, icon: Bot, iconColor: 'text-primary' },
+        { label: 'Avg Success Rate', value: `${(data?.summary?.avgSuccessRate || 0).toFixed(0)}%`, change: 'Across all agents', icon: CheckCircle, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), change: 'This period', icon: Zap, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Total Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: 'This period', icon: DollarSign, iconColor: 'text-[hsl(var(--agent))]' },
+      ]} loading={isLoading} />
 
       {/* Filter */}
       <div className="flex items-center gap-3">

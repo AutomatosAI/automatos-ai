@@ -7,7 +7,6 @@ import {
   X,
   Save,
   Settings,
-  MoreVertical,
   Bot,
   AlertTriangle,
   CheckCircle,
@@ -18,7 +17,7 @@ import {
   Network,
   Clock,
   Wrench,
-  Puzzle,
+  Sparkles,
   Terminal,
   Coins,
   ExternalLink,
@@ -46,18 +45,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import { useAgent, useAgentConfig, useUpdateAgentConfig, useAgentSkills, useAddSkillToAgent, useRemoveSkillFromAgent } from '@/hooks/use-agent-api'
 import { useSkillsApi } from '@/hooks/use-skills-api'
 import { ModelSelector } from './model-selector'
 import { useAgentModelConfig, useUpdateAgentModelConfig } from '@/hooks/use-model-api'
 import { useTools } from '@/hooks/use-tools-api'
 import { apiClient } from '@/lib/api-client'
+import { toast } from 'react-hot-toast'
 
 interface AgentConfigurationModalProps {
   agentId: number | null
@@ -445,36 +439,37 @@ export function AgentConfigurationModal({
         tool_ids: formData.assigned_tools
       }
 
-      console.log('📝 Saving basic configuration...')
+      toast.loading('Saving configuration...', { id: 'agent-config-save' })
+
       // Save agent configuration
       await updateConfigMutation.mutateAsync({
         agentId: agentId.toString(),
         config: updatePayload
       })
-      console.log('✅ Basic configuration saved')
 
       // PRD-15: Save model configuration
       if (formData.model_config) {
-        console.log('🤖 Saving model configuration...', formData.model_config)
         await updateModelConfigMutation.mutateAsync({
           agentId: agentId,
           modelConfig: formData.model_config
         })
-        console.log('✅ Model configuration saved')
       }
+
+      toast.success('Configuration saved!', { id: 'agent-config-save' })
+      setHasChanges(false)
 
       if (onSave) {
         onSave(agentId, updatePayload)
       }
 
-      setHasChanges(false)
-      console.log('🎉 All changes saved successfully!')
       onClose()
 
     } catch (err) {
-      console.error('❌ Error saving agent configuration:', err)
-      // Show the full error to help debug
-      alert(`Error saving configuration: ${err instanceof Error ? err.message : String(err)}`)
+      console.error('Error saving agent configuration:', err)
+      toast.error(
+        `Save failed: ${err instanceof Error ? err.message : String(err)}`,
+        { id: 'agent-config-save' }
+      )
     }
   }
 
@@ -507,27 +502,15 @@ export function AgentConfigurationModal({
               </div>
             </CardTitle>
             <div className="flex items-center space-x-2">
-              {hasChanges && (
-                <Badge variant="secondary" className="text-xs">
-                  Unsaved Changes
-                </Badge>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <MoreVertical className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={handleSave}
-                    disabled={saving || !hasChanges}
-                  >
-                    <Save className="w-4 h-4 mr-2" />
-                    {saving ? 'Saving...' : 'Save Changes'}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={saving || !hasChanges}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {saving ? 'Saving...' : 'Save Changes'}
+              </Button>
               <Button variant="ghost" size="icon" onClick={onClose}>
                 <X className="w-5 h-5" />
               </Button>
@@ -572,8 +555,8 @@ export function AgentConfigurationModal({
                     <span>Resources</span>
                   </TabsTrigger>
                   <TabsTrigger value="plugins" className="flex items-center space-x-1">
-                    <Puzzle className="w-4 h-4" />
-                    <span>Plugins</span>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Capabilities</span>
                   </TabsTrigger>
                   <TabsTrigger value="model" className="flex items-center space-x-1">
                     <Bot className="w-4 h-4" />
@@ -1005,12 +988,12 @@ export function AgentConfigurationModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Puzzle className="h-5 w-5 text-primary" />
-                        Plugin Assignment
+                        <Sparkles className="h-5 w-5 text-primary" />
+                        Capability Assignment
                       </CardTitle>
                       <div className="flex items-center justify-between">
                         <p className="text-sm text-muted-foreground">
-                          Select marketplace plugins to assign to this agent
+                          Select marketplace capabilities to assign to this agent
                         </p>
                         {assignedPluginIds.size > 0 && (
                           <div className="flex items-center gap-2">
@@ -1098,10 +1081,10 @@ export function AgentConfigurationModal({
                         </div>
                       ) : (
                         <div className="text-center py-8">
-                          <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                          <h3 className="text-lg font-semibold mb-2">No Plugins Available</h3>
+                          <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Capabilities Available</h3>
                           <p className="text-muted-foreground text-sm mb-4">
-                            No plugins are enabled for this workspace yet.
+                            No capabilities are enabled for this workspace yet.
                           </p>
                           <Button
                             variant="outline"

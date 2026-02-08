@@ -4,11 +4,12 @@ import { AppSidebar } from '@/components/chatbot/sidebar'
 import { getChat, getChatMessages } from '@/lib/chat/api'
 import { MainLayout } from '@/components/layout/main-layout'
 
-export default async function ChatDetailPage({ params }: { params: { id: string } }) {
+export default async function ChatDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   try {
     const [chat, messages] = await Promise.all([
-      getChat(params.id),
-      getChatMessages(params.id),
+      getChat(id),
+      getChatMessages(id),
     ])
 
     return (

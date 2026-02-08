@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation'
 
 // Legacy route. Canonical sign-up URL is `/sign-up`.
-export default function SignUpCatchAllPage({
+export default async function SignUpCatchAllPage({
   params,
 }: {
-  params: { rest?: string[] }
+  params: Promise<{ rest?: string[] }>
 }) {
-  const suffix = params?.rest?.length ? `/${params.rest.join('/')}` : ''
+  const { rest } = await params
+  const suffix = rest?.length ? `/${rest.join('/')}` : ''
   redirect(`/sign-up${suffix}`)
 }
-

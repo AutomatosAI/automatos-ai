@@ -26,20 +26,19 @@ export function useAnalyticsOverview(days: number = 30) {
     queryKey: unifiedAnalyticsKeys.overview(days),
     queryFn: async () => {
       // Aggregate from existing endpoints
-      const [metrics, costData, workflowStats, docStats] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+      const [agents, costData, workflowStats, docStats] = await Promise.all([
+        apiClient.getAgents().catch(() => []),
         apiClient.getCostAnalysis().catch(() => null),
         apiClient.getWorkflowStatsDashboard().catch(() => null),
         apiClient.getAnalyticsOverview().catch(() => null),
       ])
 
-      const agentStats = (metrics as any)?.agents || {}
-      const systemMetrics = (metrics as any)?.system || {}
+      const agentList = Array.isArray(agents) ? agents : []
 
       return {
         agents: {
-          total: agentStats.total_agents || 0,
-          active: agentStats.active_agents || 0,
+          total: agentList.length,
+          active: agentList.filter((a: any) => a.status === 'active').length,
         },
         workflows: {
           total: (workflowStats as any)?.overview?.total_workflows || 0,
@@ -54,7 +53,7 @@ export function useAnalyticsOverview(days: number = 30) {
           currentPeriod: (costData as any)?.total_cost || 0,
           previousPeriod: (costData as any)?.previous_cost || 0,
         },
-        system: systemMetrics,
+        system: {},
       }
     },
     staleTime: 60000,
@@ -261,8 +260,7 @@ export function usePlanUsage() {
     queryKey: unifiedAnalyticsKeys.planUsage,
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
-      const [metrics, agents, workflows, documents] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+      const [agents, workflows, documents] = await Promise.all([
         apiClient.getAgents().catch(() => []),
         apiClient.getWorkflows().catch(() => []),
         apiClient.getDocuments().catch(() => []),
@@ -375,8 +373,7 @@ export function useAdminWorkspaceAnalytics(days: number = 30) {
     queryFn: async () => {
       // Admin-only endpoint — will need backend support
       // For now, return current workspace data as placeholder
-      const [metrics, agents] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+      const [agents] = await Promise.all([
         apiClient.getAgents().catch(() => []),
       ])
 

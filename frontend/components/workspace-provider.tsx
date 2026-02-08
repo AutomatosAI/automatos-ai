@@ -14,6 +14,7 @@ interface Workspace {
     slug: string
     plan: 'starter' | 'business' | 'enterprise'
     role: 'owner' | 'member'
+    isNewWorkspace: boolean
     planLimits: {
         max_agents: number
         max_workflows: number
@@ -78,6 +79,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 slug: data.slug,
                 plan: data.plan,
                 role: data.role,
+                isNewWorkspace: data.is_new_workspace ?? false,
                 planLimits: data.plan_limits,
             })
 

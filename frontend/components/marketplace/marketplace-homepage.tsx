@@ -116,7 +116,7 @@ export function MarketplaceHomepage() {
             <TabsTrigger value="agents">Agents</TabsTrigger>
             <TabsTrigger value="recipes">Recipes</TabsTrigger>
             <TabsTrigger value="llms">LLMs</TabsTrigger>
-            <TabsTrigger value="plugins">Plugins</TabsTrigger>
+            <TabsTrigger value="plugins">Capabilities</TabsTrigger>
           </TabsList>
         </Tabs>
 

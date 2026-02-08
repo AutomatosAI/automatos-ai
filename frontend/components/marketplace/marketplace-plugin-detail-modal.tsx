@@ -206,7 +206,7 @@ export function MarketplacePluginDetailModal({
               {loading && (
                 <div className="p-12 flex flex-col items-center justify-center">
                   <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mb-4" />
-                  <p className="text-sm text-muted-foreground">Loading plugin details...</p>
+                  <p className="text-sm text-muted-foreground">Loading capability details...</p>
                 </div>
               )}
 
@@ -501,7 +501,7 @@ export function MarketplacePluginDetailModal({
                     {plugin.is_active === false ? (
                       <div className="flex items-center justify-center gap-2 p-3 rounded-lg border border-[hsl(var(--destructive))]/30 bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))]">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                        <span className="text-sm font-medium">This plugin has been deactivated</span>
+                        <span className="text-sm font-medium">This capability has been deactivated</span>
                       </div>
                     ) : (
                       <div className="flex gap-3">
@@ -513,7 +513,7 @@ export function MarketplacePluginDetailModal({
                               className="flex-1 border-[hsl(var(--destructive))]/30 text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
                             >
                               <X className="w-4 h-4 mr-2" />
-                              Disable Plugin
+                              Disable Capability
                             </Button>
                           ) : (
                             <Button

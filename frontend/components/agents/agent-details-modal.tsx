@@ -24,7 +24,9 @@ import {
   Users,
   Brain,
   Share2,
-  MoreVertical
+  MoreVertical,
+  Sparkles,
+  Terminal
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -331,8 +333,8 @@ export function AgentDetailsModal({
                     <span>Workload</span>
                   </TabsTrigger>
                   <TabsTrigger value="plugins" className="flex items-center space-x-2">
-                    <Puzzle className="w-4 h-4" />
-                    <span>Plugins</span>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Capabilities</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -424,9 +426,9 @@ export function AgentDetailsModal({
                         </div>
                         <div className="text-center p-3 bg-background/50 rounded-lg">
                           <p className="text-2xl font-bold text-primary">
-                            {skills?.length || 0}
+                            {plugins?.length || 0}
                           </p>
-                          <p className="text-sm text-muted-foreground">Plugins</p>
+                          <p className="text-sm text-muted-foreground">Capabilities</p>
                         </div>
                       </div>
                     </CardContent>
@@ -596,8 +598,8 @@ export function AgentDetailsModal({
                   <Card className="bg-secondary/30 border-border/30">
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
-                        <Puzzle className="h-5 w-5 text-orange-400" />
-                        Assigned Plugins
+                        <Sparkles className="h-5 w-5 text-orange-400" />
+                        Assigned Capabilities
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
@@ -607,14 +609,14 @@ export function AgentDetailsModal({
                         </div>
                       ) : plugins && plugins.length > 0 ? (
                         <div className="space-y-4">
-                          {skills.map((skill: any) => (
-                            <div key={skill.id} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
+                          {plugins.map((plugin: any) => (
+                            <div key={plugin.plugin_id || plugin.id} className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
                               <div className="flex items-center space-x-3">
                                 <div className="w-3 h-3 rounded-full bg-[hsl(var(--success))]" />
                                 <div>
-                                  <h4 className="font-medium">{skill.name}</h4>
+                                  <h4 className="font-medium">{plugin.name}</h4>
                                   <p className="text-sm text-muted-foreground">
-                                    {skill.description || 'No description available'}
+                                    {plugin.description || 'No description available'}
                                   </p>
                                 </div>
                               </div>
@@ -633,10 +635,10 @@ export function AgentDetailsModal({
                         </div>
                       ) : (
                         <div className="text-center py-8">
-                          <Puzzle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                          <h3 className="text-lg font-semibold mb-2">No Plugins Assigned</h3>
+                          <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                          <h3 className="text-lg font-semibold mb-2">No Capabilities Assigned</h3>
                           <p className="text-muted-foreground">
-                            This agent doesn't have any plugins assigned yet. Use the configuration modal to assign plugins.
+                            This agent doesn't have any capabilities assigned yet. Use the configuration modal to assign capabilities.
                           </p>
                         </div>
                       )}

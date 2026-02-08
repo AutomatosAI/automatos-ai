@@ -107,14 +107,14 @@ export function MarketplaceToolsTab({ searchQuery }: MarketplaceToolsTabProps) {
     useEffect(() => {
         setIsLoadingApps(true)
 
-        // Build query params - pass category filter to backend
-        const params: any = { limit: 1000 }
+        // Build query string - pass category filter and limit to backend
+        const queryParts: string[] = ['limit=1000']
         if (selectedCategory !== 'all') {
-            params.category = selectedCategory
+            queryParts.push(`category=${encodeURIComponent(selectedCategory)}`)
         }
 
         // Use the faster DB-cached endpoint with category filter
-        apiClient.get('/api/tools/marketplace', params)
+        apiClient.get(`/api/tools/marketplace?${queryParts.join('&')}`)
             .then((data: any) => {
                 console.log('📦 [MARKETPLACE] Fetched from DB cache:', data)
                 // Transform the response to match ComposioApp interface

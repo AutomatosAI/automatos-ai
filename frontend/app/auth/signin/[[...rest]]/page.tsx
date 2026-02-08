@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation'
 
 // Legacy route. Canonical sign-in URL is `/sign-in`.
-export default function SignInCatchAllPage({
+export default async function SignInCatchAllPage({
   params,
 }: {
-  params: { rest?: string[] }
+  params: Promise<{ rest?: string[] }>
 }) {
-  const suffix = params?.rest?.length ? `/${params.rest.join('/')}` : ''
+  const { rest } = await params
+  const suffix = rest?.length ? `/${rest.join('/')}` : ''
   redirect(`/sign-in${suffix}`)
 }
-

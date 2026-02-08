@@ -10,6 +10,7 @@ import { WorkspaceProvider } from './workspace-provider'
 import { ClerkApiClientProvider } from './clerk-api-client-provider'
 import { RoleProvider } from '../contexts/role-context'
 import { FirstLoginGuard } from './onboarding/first-login-guard'
+import { Toaster } from 'react-hot-toast'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -64,6 +65,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
                 <MockProvider>
                   <FirstLoginGuard />
                   {children}
+                  <Toaster
+                    position="top-right"
+                    toastOptions={{
+                      style: {
+                        background: 'hsl(var(--card))',
+                        color: 'hsl(var(--foreground))',
+                        border: '1px solid hsl(var(--border))',
+                      },
+                    }}
+                  />
                 </MockProvider>
               </WorkspaceProvider>
             </QueryClientProvider>

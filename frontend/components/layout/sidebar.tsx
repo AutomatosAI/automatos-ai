@@ -15,7 +15,9 @@ import {
   PanelLeft,
   Wrench,
   Database,
-  Store
+  Store,
+  BarChart3,
+  LayoutDashboard
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSystemRole } from '@/contexts/role-context'
@@ -85,13 +87,19 @@ const navigationItems = [
     requiredRole: 'admin' as const,  // Admin only
   },
   {
+    name: 'Dashboard',
+    href: '/dashboard',
+    icon: LayoutDashboard,
+    iconColor: 'text-emerald-400',
+    description: 'System metrics & health',
+  },
+  {
     name: 'Analytics',
     href: '/analytics',
     icon: BarChart3,
     iconColor: 'text-cyan-400',
     description: 'Performance, costs & insights',
   },
-  // Dashboard removed — analytics consolidated into /analytics
 ]
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
