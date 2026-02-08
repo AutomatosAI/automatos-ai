@@ -1,15 +1,15 @@
 'use client'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { MainLayout } from '@/components/layout/main-layout'
+import { Dashboard } from '@/components/dashboard/dashboard'
+import { usePageAPI } from '@/hooks/use-page-api'
 
-// Dashboard removed — redirects to unified analytics page
 export default function DashboardPage() {
-  const router = useRouter()
+  usePageAPI('dashboard')
 
-  useEffect(() => {
-    router.replace('/analytics')
-  }, [router])
-
-  return null
+  return (
+    <MainLayout>
+      <Dashboard />
+    </MainLayout>
+  )
 }

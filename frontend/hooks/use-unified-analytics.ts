@@ -27,7 +27,7 @@ export function useAnalyticsOverview(days: number = 30) {
     queryFn: async () => {
       // Aggregate from existing endpoints
       const [metrics, costData, workflowStats, docStats] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+        apiClient.getSystemMetrics().catch(() => null),
         apiClient.getCostAnalysis().catch(() => null),
         apiClient.getWorkflowStatsDashboard().catch(() => null),
         apiClient.getAnalyticsOverview().catch(() => null),
@@ -262,7 +262,7 @@ export function usePlanUsage() {
     queryFn: async () => {
       // For now, return placeholder limits (pilot phase — limits TBD)
       const [metrics, agents, workflows, documents] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+        apiClient.getSystemMetrics().catch(() => null),
         apiClient.getAgents().catch(() => []),
         apiClient.getWorkflows().catch(() => []),
         apiClient.getDocuments().catch(() => []),
@@ -376,7 +376,7 @@ export function useAdminWorkspaceAnalytics(days: number = 30) {
       // Admin-only endpoint — will need backend support
       // For now, return current workspace data as placeholder
       const [metrics, agents] = await Promise.all([
-        apiClient.getAllMetrics().catch(() => null),
+        apiClient.getSystemMetrics().catch(() => null),
         apiClient.getAgents().catch(() => []),
       ])
 

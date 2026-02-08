@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser, useClerk } from '@clerk/nextjs'
-import { User, Settings, LogOut, ChevronDown } from 'lucide-react'
+import { User, Settings, LogOut, ChevronDown, Sparkles } from 'lucide-react'
+import { createFirstLoginTour } from '@/lib/shepherd/first-login-tour'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 /**
@@ -120,6 +121,23 @@ export function ProfileMenu() {
                     >
                         <Settings className="w-4 h-4 text-orange-400" />
                         <span>Settings</span>
+                    </DropdownMenu.Item>
+
+                    <DropdownMenu.Item
+                        className="flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 cursor-pointer outline-none transition-colors"
+                        onSelect={() => {
+                            setOpen(false)
+                            // Small delay so the dropdown closes first
+                            setTimeout(() => {
+                                if (user) {
+                                    const tour = createFirstLoginTour(user.id)
+                                    tour.start()
+                                }
+                            }, 150)
+                        }}
+                    >
+                        <Sparkles className="w-4 h-4 text-orange-400" />
+                        <span>Start Tour</span>
                     </DropdownMenu.Item>
 
                     <DropdownMenu.Separator className="h-px bg-slate-700/50 my-2" />

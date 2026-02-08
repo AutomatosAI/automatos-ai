@@ -12,6 +12,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
 import { useCostAnalyticsUnified } from '@/hooks/use-unified-analytics'
 
@@ -43,52 +44,12 @@ export function AnalyticsCosts({ days }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          {
-            label: 'Total Tokens',
-            value: formatNumber(data?.summary?.totalTokens || 0),
-            sub: 'Input + Output',
-            icon: Zap,
-            color: 'text-purple-400',
-          },
-          {
-            label: 'Total LLM Cost',
-            value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`,
-            sub: 'This period',
-            icon: DollarSign,
-            color: 'text-green-400',
-          },
-          {
-            label: 'Cost per Task',
-            value: `$${(data?.summary?.costPerTask || 0).toFixed(4)}`,
-            sub: `${data?.summary?.totalRequests || 0} total requests`,
-            icon: TrendingUp,
-            color: 'text-blue-400',
-          },
-          {
-            label: 'Most Expensive',
-            value: data?.summary?.mostExpensiveAgent?.name || 'None',
-            sub: data?.summary?.mostExpensiveAgent
-              ? `$${data.summary.mostExpensiveAgent.cost.toFixed(2)} • ${data.summary.mostExpensiveAgent.model}`
-              : 'No agent data',
-            icon: AlertTriangle,
-            color: 'text-orange-400',
-          },
-        ].map((card, i) => (
-          <motion.div key={card.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="glass-card">
-              <CardContent className="p-6">
-                <card.icon className={`w-5 h-5 ${card.color} mb-2`} />
-                <h3 className="text-2xl font-bold truncate">{card.value}</h3>
-                <p className="text-sm text-muted-foreground">{card.label}</p>
-                <p className="text-xs text-muted-foreground mt-1 truncate">{card.sub}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        { label: 'Total Tokens', value: formatNumber(data?.summary?.totalTokens || 0), change: 'Input + Output', icon: Zap, iconColor: 'text-primary' },
+        { label: 'Total LLM Cost', value: `$${(data?.summary?.totalCost || 0).toFixed(2)}`, change: 'This period', icon: DollarSign, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'Cost per Task', value: `$${(data?.summary?.costPerTask || 0).toFixed(4)}`, change: `${data?.summary?.totalRequests || 0} requests`, icon: TrendingUp, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Most Expensive', value: data?.summary?.mostExpensiveAgent?.name || 'None', change: data?.summary?.mostExpensiveAgent ? `$${data.summary.mostExpensiveAgent.cost.toFixed(2)}` : 'No data', icon: AlertTriangle, iconColor: 'text-[hsl(var(--agent))]' },
+      ]} loading={isLoading} />
 
       {/* Cost Trend Chart */}
       {data?.costTrend?.length > 0 && (

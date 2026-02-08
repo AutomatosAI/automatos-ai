@@ -312,17 +312,14 @@ async def create_agents_bulk(agents: List[AgentCreate], ctx: RequestContext = De
                 description=agent_data.description,
                 agent_type=agent_data.agent_type,
                 configuration=agent_data.configuration or {},
-                priority_level=agent_data.priority_level if agent_data.priority_level else "medium",
-                max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
-                auto_start=agent_data.auto_start or False,
                 tags=tags,
                 workspace_id=ctx.workspace_id,
                 created_by="api"
             )
-            
+
             db.add(agent)
             db.flush()  # Get the ID
-            
+
             # Add skills if provided
             if agent_data.skill_ids:
                 skills = db.query(Skill).filter(
@@ -379,9 +376,7 @@ async def create_agent(agent_data: AgentCreate, ctx: RequestContext = Depends(ge
             description=agent_data.description,
             agent_type=agent_data.agent_type,
             configuration=agent_data.configuration or {},
-            priority_level=agent_data.priority_level if agent_data.priority_level else "medium",
-            max_concurrent_tasks=agent_data.max_concurrent_tasks or 5,
-            auto_start=agent_data.auto_start or False,
+            marketplace_category=getattr(agent_data, 'marketplace_category', None),
             tags=tags,
             workspace_id=ctx.workspace_id,
             created_by="api"

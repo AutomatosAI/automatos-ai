@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { useAnalyticsOverview, usePlanUsage, useRecommendations, useWorkspaceMemory } from '@/hooks/use-unified-analytics'
 import { AnalyticsRecommendations } from './analytics-recommendations'
 import { AnalyticsPlanUsage } from './analytics-plan-usage'
@@ -72,45 +73,16 @@ export function AnalyticsOverview({ days }: OverviewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {isLoading
-          ? Array.from({ length: 4 }).map((_, i) => (
-              <Card key={i} className="glass-card">
-                <CardContent className="p-6">
-                  <Skeleton className="h-4 w-20 mb-3" />
-                  <Skeleton className="h-8 w-16 mb-2" />
-                  <Skeleton className="h-3 w-24" />
-                </CardContent>
-              </Card>
-            ))
-          : summaryCards.map((card, index) => (
-              <motion.div
-                key={card.label}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
-              >
-                <Card className={`glass-card card-glow hover:border-primary/20 transition-all duration-300 bg-gradient-to-br ${card.bgColor}`}>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-10 h-10 rounded-lg bg-secondary/50 flex items-center justify-center">
-                        <card.icon className={`w-5 h-5 ${card.color}`} />
-                      </div>
-                      {card.trend && (
-                        <div className={`flex items-center text-xs ${card.trend === 'down' ? 'text-green-400' : 'text-orange-400'}`}>
-                          {card.trend === 'down' ? <TrendingDown className="w-3 h-3 mr-1" /> : <TrendingUp className="w-3 h-3 mr-1" />}
-                        </div>
-                      )}
-                    </div>
-                    <h3 className="text-2xl font-bold mb-1">{card.value}</h3>
-                    <p className="text-sm text-muted-foreground">{card.label}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{card.sub}</p>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
-      </div>
+      <StatsBar stats={summaryCards.map(card => ({
+        label: card.label,
+        value: card.value,
+        change: card.sub,
+        icon: card.icon,
+        iconColor: card.color.replace('text-orange-400', 'text-primary')
+          .replace('text-purple-400', 'text-[hsl(var(--info))]')
+          .replace('text-green-400', 'text-[hsl(var(--success))]')
+          .replace('text-blue-400', 'text-[hsl(var(--agent))]'),
+      }))} loading={isLoading} />
 
       {/* Plan Usage */}
       <motion.div

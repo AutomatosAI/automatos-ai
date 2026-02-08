@@ -518,9 +518,7 @@ class AgentCreate(BaseModel):
     skill_ids: Optional[List[int]] = []
     tool_ids: Optional[List[int]] = []  # NEW: Phase 3 - Tools
     tags: Optional[List[str]] = []
-    priority_level: Optional[PriorityLevel] = None
-    max_concurrent_tasks: Optional[int] = 5
-    auto_start: Optional[bool] = False
+    marketplace_category: Optional[str] = None
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None

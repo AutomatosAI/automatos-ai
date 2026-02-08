@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import logging
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
@@ -79,17 +79,121 @@ def _workspace_exists(workspace_id: UUID) -> bool:
         db.close()
 
 
-def _resolve_workspace_for_clerk_user(clerk_user_id: Optional[str], org_id: Optional[str]) -> Optional[UUID]:
+def _user_has_workspace_access(clerk_user_id: Optional[str], workspace_id: UUID) -> bool:
+    """
+    Verify that a Clerk user actually has access to the requested workspace.
+
+    Prevents users from accessing other workspaces by spoofing X-Workspace-ID.
+    Access is granted if the user owns the workspace OR is a member.
+    """
+    if not clerk_user_id:
+        return False
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                "SELECT 1 FROM users u "
+                "LEFT JOIN workspaces w ON w.owner_id = u.id AND w.id = :ws_id "
+                "LEFT JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = :ws_id AND wm.is_active = true "
+                "WHERE u.clerk_user_id = :cid AND (w.id IS NOT NULL OR wm.id IS NOT NULL) "
+                "LIMIT 1"
+            ),
+            {"cid": clerk_user_id, "ws_id": str(workspace_id)},
+        ).fetchone()
+        return bool(row)
+    finally:
+        db.close()
+
+
+def _provision_new_user_workspace(
+    db, clerk_user_id: str, email: Optional[str] = None, name: Optional[str] = None,
+) -> UUID:
+    """
+    Auto-provision a personal workspace for a new Clerk user.
+
+    Creates:
+    1. A `users` row (if missing) linked via clerk_user_id
+    2. A personal `workspaces` row owned by that user
+    3. A `workspace_members` row with role='owner'
+
+    Returns the new workspace UUID.
+    """
+    # 1) Upsert user
+    user_row = db.execute(
+        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+        {"cid": clerk_user_id},
+    ).fetchone()
+
+    if user_row and user_row[0]:
+        uid = user_row[0]
+    else:
+        username = email or clerk_user_id
+        db.execute(
+            text(
+                "INSERT INTO users (username, email, clerk_user_id, name, is_active) "
+                "VALUES (:username, :email, :cid, :name, true)"
+            ),
+            {"username": username, "email": email or f"{clerk_user_id}@pending", "cid": clerk_user_id, "name": name},
+        )
+        uid_row = db.execute(
+            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+            {"cid": clerk_user_id},
+        ).fetchone()
+        uid = uid_row[0]
+        logger.info("Provisioned new user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
+
+    # 2) Create personal workspace
+    ws_id = uuid4()
+    ws_name = f"{name or email or 'My'}'s Workspace"
+    slug = (email or clerk_user_id).split("@")[0].lower().replace(" ", "-")[:50]
+    db.execute(
+        text(
+            "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits) "
+            "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits)"
+        ),
+        {
+            "id": str(ws_id),
+            "name": ws_name,
+            "slug": slug,
+            "owner_id": uid,
+            "plan_limits": '{"max_agents": 10, "max_workflows": 10, "max_documents": 100, "max_members": 5}',
+        },
+    )
+
+    # 3) Create workspace_members row
+    db.execute(
+        text(
+            "INSERT INTO workspace_members (workspace_id, user_id, role, is_active) "
+            "VALUES (:ws_id, :uid, 'owner', true)"
+        ),
+        {"ws_id": str(ws_id), "uid": uid},
+    )
+
+    db.commit()
+    logger.info(
+        "Provisioned personal workspace %s (%s) for user %s (%s)",
+        ws_id, ws_name, uid, email or clerk_user_id,
+    )
+    return ws_id
+
+
+def _resolve_workspace_for_clerk_user(
+    clerk_user_id: Optional[str],
+    org_id: Optional[str],
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+) -> Optional[UUID]:
     """
     Resolve a user's workspace from the DB when the client didn't send X-Workspace-ID.
 
     Priority:
-    - org workspace (workspaces.clerk_org_id == org_id)
-    - personal workspace owned by mapped user (users.clerk_user_id -> workspaces.owner_id)
-    - if exactly one active workspace exists globally, use it (dev-friendly)
+    1. Org workspace (workspaces.clerk_org_id == org_id)
+    2. Personal workspace owned by mapped user
+    3. Auto-provision a new personal workspace (new user signup)
     """
     db = SessionLocal()
     try:
+        # 1) Org workspace
         if org_id:
             row = db.execute(
                 text(
@@ -103,6 +207,7 @@ def _resolve_workspace_for_clerk_user(clerk_user_id: Optional[str], org_id: Opti
             if row and row[0]:
                 return row[0]
 
+        # 2) Personal workspace via existing user record
         if clerk_user_id:
             user_row = db.execute(
                 text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
@@ -122,13 +227,18 @@ def _resolve_workspace_for_clerk_user(clerk_user_id: Optional[str], org_id: Opti
                 if ws_row and ws_row[0]:
                     return ws_row[0]
 
-        # Dev fallback (but still a real workspace from DB): only if unambiguous.
-        rows = db.execute(
-            text("SELECT id FROM workspaces WHERE is_active = true ORDER BY updated_at DESC NULLS LAST LIMIT 2")
-        ).fetchall()
-        if len(rows) == 1 and rows[0] and rows[0][0]:
-            return rows[0][0]
+        # 3) No workspace found — auto-provision for authenticated Clerk users
+        if clerk_user_id:
+            logger.info(
+                "No workspace found for clerk_user_id=%s — provisioning new personal workspace",
+                clerk_user_id,
+            )
+            return _provision_new_user_workspace(db, clerk_user_id, email=email, name=name)
 
+        return None
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to resolve/provision workspace for clerk_user_id=%s", clerk_user_id)
         return None
     finally:
         db.close()
@@ -190,9 +300,23 @@ async def get_request_context_hybrid(request: Request) -> RequestContext:
         if claims:
             # ... (successful resolution logic)
             info = clerk.extract_user_info(claims)
+            clerk_uid = info.get("clerk_user_id")
+
+            # If client sent a workspace ID via header, verify the user has access
+            if workspace_id:
+                if not _workspace_exists(workspace_id):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid workspace_id")
+                if not _user_has_workspace_access(clerk_uid, workspace_id):
+                    logger.warning("Access denied: user %s tried to access workspace %s", clerk_uid, workspace_id)
+                    # Fall through to resolver instead of blocking — user may have a stale
+                    # localStorage value from the old shared-workspace bug
+                    workspace_id = None
+
             resolved = workspace_id or _resolve_workspace_for_clerk_user(
-                clerk_user_id=info.get("clerk_user_id"),
+                clerk_user_id=clerk_uid,
                 org_id=info.get("org_id"),
+                email=info.get("email"),
+                name=info.get("name"),
             )
             if not resolved:
                  logger.warning(f"Auth failed: Workspace not resolved for user {info.get('email')}")

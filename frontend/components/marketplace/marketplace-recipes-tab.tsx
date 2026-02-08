@@ -241,8 +241,8 @@ export function MarketplaceRecipesTab({ searchQuery }: MarketplaceRecipesTabProp
                     <Badge variant="outline" className="text-xs border-border text-muted-foreground w-fit">
                       {recipe.marketplace_category}
                     </Badge>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Stats Row */}
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">

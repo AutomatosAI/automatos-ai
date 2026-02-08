@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { useAdminWorkspaceAnalytics } from '@/hooks/use-unified-analytics'
 
 interface Props {
@@ -94,26 +95,12 @@ export function AnalyticsAdmin({ days }: Props) {
         </Button>
       </div>
 
-      {/* Platform Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        {[
-          { label: 'Workspaces', value: data?.platformSummary?.totalWorkspaces || 0, icon: Building, color: 'text-blue-400' },
-          { label: 'Total Users', value: data?.platformSummary?.totalUsers || 0, icon: Users, color: 'text-green-400' },
-          { label: 'API Calls', value: formatNumber(data?.platformSummary?.totalApiCalls || 0), icon: Activity, color: 'text-purple-400' },
-          { label: 'Total Tokens', value: formatNumber(data?.platformSummary?.totalTokens || 0), icon: Zap, color: 'text-orange-400' },
-          { label: 'Platform Cost', value: `$${(data?.platformSummary?.totalCost || 0).toFixed(2)}`, icon: DollarSign, color: 'text-red-400' },
-        ].map((card, i) => (
-          <motion.div key={card.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="glass-card">
-              <CardContent className="p-6">
-                <card.icon className={`w-5 h-5 ${card.color} mb-2`} />
-                <h3 className="text-2xl font-bold">{card.value}</h3>
-                <p className="text-sm text-muted-foreground">{card.label}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        { label: 'Workspaces', value: data?.platformSummary?.totalWorkspaces || 0, icon: Building, iconColor: 'text-primary' },
+        { label: 'Total Users', value: data?.platformSummary?.totalUsers || 0, icon: Users, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'API Calls', value: formatNumber(data?.platformSummary?.totalApiCalls || 0), icon: Activity, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Total Tokens', value: formatNumber(data?.platformSummary?.totalTokens || 0), icon: Zap, iconColor: 'text-[hsl(var(--agent))]' },
+      ]} loading={isLoading} />
 
       {/* Workspace Table */}
       <Card className="glass-card overflow-hidden">

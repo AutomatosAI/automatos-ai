@@ -1,29 +1,34 @@
 const TOUR_COMPLETED_KEY = 'automatos-onboarding-completed'
 const TOUR_SKIPPED_KEY = 'automatos-onboarding-skipped'
 const TOUR_DISMISSED_KEY = 'automatos-tour-dismissed-at'
+const TOUR_COMPLETED_AT_KEY = 'automatos-tour-completed-at'
 
-export function hasCompletedOnboarding(): boolean {
-  if (typeof window === 'undefined') return false
+function userKey(base: string, userId: string) {
+  return `${base}:${userId}`
+}
+
+export function hasCompletedOnboarding(userId: string): boolean {
+  if (typeof window === 'undefined' || !userId) return false
 
   return !!(
-    localStorage.getItem(TOUR_COMPLETED_KEY) ||
-    localStorage.getItem(TOUR_SKIPPED_KEY)
+    localStorage.getItem(userKey(TOUR_COMPLETED_KEY, userId)) ||
+    localStorage.getItem(userKey(TOUR_SKIPPED_KEY, userId))
   )
 }
 
-export function markOnboardingComplete() {
-  localStorage.setItem(TOUR_COMPLETED_KEY, 'true')
-  localStorage.setItem('automatos-tour-completed-at', new Date().toISOString())
+export function markOnboardingComplete(userId: string) {
+  localStorage.setItem(userKey(TOUR_COMPLETED_KEY, userId), 'true')
+  localStorage.setItem(userKey(TOUR_COMPLETED_AT_KEY, userId), new Date().toISOString())
 }
 
-export function markOnboardingSkipped() {
-  localStorage.setItem(TOUR_SKIPPED_KEY, 'true')
-  localStorage.setItem(TOUR_DISMISSED_KEY, new Date().toISOString())
+export function markOnboardingSkipped(userId: string) {
+  localStorage.setItem(userKey(TOUR_SKIPPED_KEY, userId), 'true')
+  localStorage.setItem(userKey(TOUR_DISMISSED_KEY, userId), new Date().toISOString())
 }
 
-export function resetOnboarding() {
-  localStorage.removeItem(TOUR_COMPLETED_KEY)
-  localStorage.removeItem(TOUR_SKIPPED_KEY)
-  localStorage.removeItem(TOUR_DISMISSED_KEY)
-  localStorage.removeItem('automatos-tour-completed-at')
+export function resetOnboarding(userId: string) {
+  localStorage.removeItem(userKey(TOUR_COMPLETED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_SKIPPED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_DISMISSED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_COMPLETED_AT_KEY, userId))
 }

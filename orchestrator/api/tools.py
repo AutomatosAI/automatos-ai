@@ -78,7 +78,7 @@ class ConnectIn(BaseModel):
 async def marketplace(
     category: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
@@ -595,123 +595,12 @@ async def remove_from_workspace(
     }
 
 
-@router.delete("/debug/connections/{app_name}")
-async def delete_connection_record(
-    app_name: str,
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    DEBUG: Delete a specific connection record
-    """
-    _assert_workspace_admin(ctx)
-    entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
-    if not entity:
-        return {"error": "No entity found"}
 
-    # Delete the connection
-    from core.models.composio_cache import ComposioConnection
-    deleted = db.query(ComposioConnection).filter(
-        ComposioConnection.entity_id == entity["id"],
-        ComposioConnection.app_name.ilike(app_name)
-    ).delete()
-
-    db.commit()
-
-    return {
-        "deleted": deleted,
-        "app_name": app_name
-    }
-
-
-@router.post("/cleanup-pending")
-async def cleanup_pending_connections(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    Clean up stale pending connections (OAuth started but never completed).
-
-    Removes connections with status='pending' that are older than 1 hour.
-    This allows users to retry OAuth flows that failed or were abandoned.
-    """
-    _assert_workspace_admin(ctx)
-    entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
-    if not entity:
-        return {"error": "No entity found"}
-
-    from core.models.composio import ComposioConnection
-    from datetime import datetime, timedelta
-
-    # Find pending connections older than 1 hour
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-
-    stale_pending = db.query(ComposioConnection).filter(
-        ComposioConnection.entity_id == entity["id"],
-        ComposioConnection.status == 'pending',
-        ComposioConnection.updated_at < one_hour_ago
-    ).all()
-
-    deleted_apps = [c.app_name for c in stale_pending]
-    deleted_count = len(stale_pending)
-
-    # Delete stale pending connections
-    for conn in stale_pending:
-        db.delete(conn)
-
-    db.commit()
-
-    logger.info(f"Cleaned up {deleted_count} stale pending connections for workspace {ctx.workspace_id}: {deleted_apps}")
-
-    return {
-        "deleted_count": deleted_count,
-        "deleted_apps": deleted_apps,
-        "message": f"Removed {deleted_count} stale pending connections (older than 1 hour)"
-    }
-
-
-@router.post("/debug/cleanup")
-async def cleanup_connections(
-    ctx: RequestContext = Depends(get_request_context_hybrid),
-    db: Session = Depends(get_db),
-):
-    """
-    DEBUG: Clean up all non-active connection records (removes failed, error, pending, added)
-    Keeps only 'active' connections
-    """
-    _assert_workspace_admin(ctx)
-    entity_manager = EntityManager(db)
-    entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
-    if not entity:
-        return {"error": "No entity found"}
-
-    from core.models.composio import ComposioConnection
-
-    # Get all non-active connections
-    connections_to_delete = db.query(ComposioConnection).filter(
-        ComposioConnection.entity_id == entity["id"],
-        ComposioConnection.status != 'active'
-    ).all()
-
-    deleted_apps = [c.app_name for c in connections_to_delete]
-
-    # Delete them
-    deleted_count = db.query(ComposioConnection).filter(
-        ComposioConnection.entity_id == entity["id"],
-        ComposioConnection.status != 'active'
-    ).delete()
-
-    db.commit()
-
-    logger.info(f"Cleaned up {deleted_count} non-active connections for workspace {ctx.workspace_id}")
-
-    return {
-        "deleted_count": deleted_count,
-        "deleted_apps": deleted_apps,
-        "message": f"Removed {deleted_count} non-active connection records"
-    }
+# REMOVED: debug/connections/{app_name}, cleanup-pending, debug/cleanup
+# These endpoints destructively deleted user connection records.
+# A temporary status blip (OAuth expiry, pending state) would cause
+# permanent data loss for users. Never delete connections — use status
+# transitions instead (e.g. active → expired → active on re-auth).
 
 
 @router.post("/sync")

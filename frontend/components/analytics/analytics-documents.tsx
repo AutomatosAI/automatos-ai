@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
+import { StatsBar } from '@/components/shared/stats-bar'
 import { useDocumentAnalyticsUnified } from '@/hooks/use-unified-analytics'
 
 interface Props {
@@ -82,25 +83,12 @@ export function AnalyticsDocuments({ days }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          { label: 'Total Documents', value: data?.summary?.totalDocuments || 0, icon: FileText, color: 'text-blue-400' },
-          { label: 'Storage Used', value: `${(data?.summary?.totalStorageMb || 0).toFixed(1)} MB`, icon: HardDrive, color: 'text-green-400' },
-          { label: 'RAG Queries', value: data?.summary?.totalRagQueries || 0, sub: 'This period', icon: Search, color: 'text-purple-400' },
-          { label: 'Never Accessed', value: data?.neverAccessed || 0, sub: 'Documents unused by RAG', icon: AlertTriangle, color: data?.neverAccessed ? 'text-yellow-400' : 'text-green-400' },
-        ].map((card, i) => (
-          <motion.div key={card.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}>
-            <Card className="glass-card">
-              <CardContent className="p-6">
-                <card.icon className={`w-5 h-5 ${card.color} mb-2`} />
-                <h3 className="text-2xl font-bold">{card.value}</h3>
-                <p className="text-sm text-muted-foreground">{card.label}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
-      </div>
+      <StatsBar stats={[
+        { label: 'Total Documents', value: data?.summary?.totalDocuments || 0, icon: FileText, iconColor: 'text-primary' },
+        { label: 'Storage Used', value: `${(data?.summary?.totalStorageMb || 0).toFixed(1)} MB`, icon: HardDrive, iconColor: 'text-[hsl(var(--success))]' },
+        { label: 'RAG Queries', value: data?.summary?.totalRagQueries || 0, change: 'This period', icon: Search, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Never Accessed', value: data?.neverAccessed || 0, change: 'Unused by RAG', icon: AlertTriangle, iconColor: data?.neverAccessed ? 'text-yellow-400' : 'text-[hsl(var(--success))]' },
+      ]} loading={isLoading} />
 
       {/* Unused Documents Alert */}
       {(data?.neverAccessed || 0) > 0 && (
