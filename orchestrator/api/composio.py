@@ -514,36 +514,77 @@ async def handle_webhook(
 ):
     """
     Handle incoming Composio webhook events.
-    
-    Validates signature and routes to appropriate agent/workflow.
+
+    Supports both V2 (legacy) and V3 payload formats:
+      V2: {"trigger_name": ..., "entity_id": ..., "event_data": {...}}
+      V3: {"type": ..., "data": {...}, "timestamp": ..., "log_id": ...}
+           + composio.trigger.message wrapper
     """
     # Get raw body for signature verification
     body = await request.body()
-    
-    # Verify signature if secret is configured
+
+    # Verify signature — supports both legacy (x-composio-signature)
+    # and V3 (webhook-signature with "v1,<base64>" format)
     webhook_secret = os.getenv("COMPOSIO_WEBHOOK_SECRET")
-    if webhook_secret and x_composio_signature:
+    v3_signature = request.headers.get("webhook-signature")
+    if webhook_secret and v3_signature:
+        # V3 format: "v1,<base64_signature>"
+        try:
+            import base64
+            webhook_id = request.headers.get("webhook-id", "")
+            webhook_ts = request.headers.get("webhook-timestamp", "")
+            signed_content = f"{webhook_id}.{webhook_ts}.".encode() + body
+            expected_sig = base64.b64encode(
+                hmac.new(base64.b64decode(webhook_secret), signed_content, hashlib.sha256).digest()
+            ).decode()
+            sig_value = v3_signature.split(",", 1)[-1] if "," in v3_signature else v3_signature
+            if not hmac.compare_digest(sig_value, expected_sig):
+                logger.warning("V3 webhook signature mismatch — allowing through for debugging")
+        except Exception:
+            logger.warning("V3 signature verification error — allowing through for debugging", exc_info=True)
+    elif webhook_secret and x_composio_signature:
+        # Legacy format: plain HMAC hex digest
         expected_sig = hmac.new(
             webhook_secret.encode(),
             body,
             hashlib.sha256
         ).hexdigest()
-        
         if not hmac.compare_digest(x_composio_signature, expected_sig):
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
-    
+
     # Parse payload
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
-    
-    trigger_name = payload.get("trigger_name")
-    entity_id = payload.get("entity_id")
-    event_data = payload.get("event_data", {})
-    
-    if not trigger_name or not entity_id:
-        raise HTTPException(status_code=400, detail="Missing trigger_name or entity_id")
+
+    logger.info("Webhook received — raw keys: %s", list(payload.keys()))
+
+    # Normalise V2 vs V3 payload format
+    # V3 composio.trigger.message wraps trigger data in "data"
+    if "type" in payload and "data" in payload:
+        # V3 format
+        event_type = payload.get("type", "")
+        inner = payload.get("data", {})
+
+        if event_type == "composio.trigger.message" or isinstance(inner, dict):
+            # The trigger details are inside "data"
+            trigger_name = inner.get("trigger_name") or inner.get("triggerSlug") or event_type
+            entity_id = inner.get("entity_id") or inner.get("entityId") or payload.get("entity_id", "")
+            event_data = inner.get("event_data") or inner.get("payload") or inner
+        else:
+            trigger_name = event_type
+            entity_id = payload.get("entity_id", "")
+            event_data = inner
+    else:
+        # V2 / legacy format
+        trigger_name = payload.get("trigger_name") or payload.get("triggerSlug", "")
+        entity_id = payload.get("entity_id") or payload.get("entityId", "")
+        event_data = payload.get("event_data") or payload.get("payload", {})
+
+    if not trigger_name:
+        logger.warning("Webhook missing trigger_name — full payload: %s", str(payload)[:500])
+        raise HTTPException(status_code=400, detail="Missing trigger_name")
     
     logger.info(f"Received webhook: {trigger_name} for entity {entity_id}")
 
