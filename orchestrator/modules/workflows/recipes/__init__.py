@@ -78,7 +78,7 @@ def _register_builtins() -> None:
     """Eagerly register all built-in recipes."""
     from modules.workflows.recipes.jira_bug_triage import JiraBugTriageRecipe
 
-    register_recipe("jira_bug_triage", JiraBugTriageRecipe)
+    register_recipe("jira_bug_triage", JiraBugTriageRecipe, workflow_id=9000)
 
 
 _register_builtins()
