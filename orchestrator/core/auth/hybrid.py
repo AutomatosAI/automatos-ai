@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import logging
+import secrets
 from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from core.auth.clerk import get_clerk_auth
 from core.auth.dependencies import RequestContext, UserContext
@@ -118,47 +120,55 @@ def _provision_new_user_workspace(
 
     Returns the new workspace UUID.
     """
-    # 1) Upsert user
-    user_row = db.execute(
-        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-        {"cid": clerk_user_id},
-    ).fetchone()
-
-    if user_row and user_row[0]:
-        uid = user_row[0]
-    else:
-        username = email or clerk_user_id
+    # 1) Atomic upsert user — INSERT ON CONFLICT to avoid race conditions
+    username = email or clerk_user_id
+    try:
         db.execute(
             text(
                 "INSERT INTO users (username, email, clerk_user_id, name, is_active) "
-                "VALUES (:username, :email, :cid, :name, true)"
+                "VALUES (:username, :email, :cid, :name, true) "
+                "ON CONFLICT (clerk_user_id) DO NOTHING"
             ),
             {"username": username, "email": email or f"{clerk_user_id}@pending", "cid": clerk_user_id, "name": name},
         )
-        uid_row = db.execute(
-            text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
-            {"cid": clerk_user_id},
-        ).fetchone()
-        uid = uid_row[0]
-        logger.info("Provisioned new user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
 
-    # 2) Create personal workspace
+    uid_row = db.execute(
+        text("SELECT id FROM users WHERE clerk_user_id = :cid LIMIT 1"),
+        {"cid": clerk_user_id},
+    ).fetchone()
+    uid = uid_row[0]
+    logger.info("Resolved user record id=%s for clerk_user_id=%s", uid, clerk_user_id)
+
+    # 2) Create personal workspace with slug collision handling
     ws_id = uuid4()
     ws_name = f"{name or email or 'My'}'s Workspace"
-    slug = (email or clerk_user_id).split("@")[0].lower().replace(" ", "-")[:50]
-    db.execute(
-        text(
-            "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits) "
-            "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits)"
-        ),
-        {
-            "id": str(ws_id),
-            "name": ws_name,
-            "slug": slug,
-            "owner_id": uid,
-            "plan_limits": '{"max_agents": 10, "max_workflows": 10, "max_documents": 100, "max_members": 5}',
-        },
-    )
+    base_slug = (email or clerk_user_id).split("@")[0].lower().replace(" ", "-")[:50]
+
+    for attempt in range(5):
+        slug = base_slug if attempt == 0 else f"{base_slug}-{secrets.token_hex(3)}"
+        try:
+            db.execute(
+                text(
+                    "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits) "
+                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits)"
+                ),
+                {
+                    "id": str(ws_id),
+                    "name": ws_name,
+                    "slug": slug,
+                    "owner_id": uid,
+                    "plan_limits": '{"max_agents": 10, "max_workflows": 10, "max_documents": 100, "max_members": 5}',
+                },
+            )
+            db.flush()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == 4:
+                raise
 
     # 3) Create workspace_members row
     db.execute(
@@ -171,8 +181,8 @@ def _provision_new_user_workspace(
 
     db.commit()
     logger.info(
-        "Provisioned personal workspace %s (%s) for user %s (%s)",
-        ws_id, ws_name, uid, email or clerk_user_id,
+        "Provisioned personal workspace %s (%s) for user %s (clerk=%s)",
+        ws_id, ws_name, uid, clerk_user_id,
     )
     return ws_id
 

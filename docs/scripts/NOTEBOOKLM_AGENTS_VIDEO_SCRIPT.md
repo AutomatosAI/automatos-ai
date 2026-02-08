@@ -178,7 +178,7 @@ If all this sounds like a lot — which agent, which model, which tools, how to 
 
 The Automatos Marketplace has five sections:
 
-1. **Applications** — 8050+ app integrations (Gmail, Slack, Salesforce, Jira, HubSpot, Notion, GitHub, Stripe, Shopify and hundreds more). Browse and connect in one click.
+1. **Applications** — 850+ app integrations (Gmail, Slack, Salesforce, Jira, HubSpot, Notion, GitHub, Stripe, Shopify and hundreds more). Browse and connect in one click.
 2. **Agents** — Pre-built by the Automatos team or experienced community members. Each comes with a persona, recommended model, and tools already configured. Install with one click, customise to fit.
 3. **Recipes** — Ready-made multi-agent workflows. Install a recipe and it sets up the full pipeline — agents, tools, logic, scheduling, everything.
 4. **LLMs** — Browse and compare all available AI models side by side. Strengths, pricing, speed, ideal use cases.

@@ -20,7 +20,8 @@ export function FirstLoginGuard() {
 
     if (!onboardingComplete && workspace.isNewWorkspace) {
       // Small delay to let the app render first
-      setTimeout(() => setShowWelcome(true), 1000)
+      const timerId = setTimeout(() => setShowWelcome(true), 1000)
+      return () => clearTimeout(timerId)
     }
   }, [isLoaded, user, wsLoading, workspace])
 

@@ -4,7 +4,7 @@
 Single comprehensive tour triggered **once** on first login, with easy dismissal. ChatWidget handles all ongoing help.
 
 ## User Journey
-```
+```text
 User logs in for first time
   → Welcome modal appears
     → [Skip Tour] → Set flag, go to /chat
@@ -27,7 +27,7 @@ npm install shepherd.js react-shepherd
 ```
 
 ### 2. File Structure
-```
+```text
 frontend/
 ├── lib/
 │   └── shepherd/
@@ -50,7 +50,7 @@ frontend/
 import Shepherd from 'shepherd.js'
 import { shepherdTheme } from './shepherd-theme'
 
-export function createFirstLoginTour() {
+export function createFirstLoginTour(userId: string) {
   const tour = new Shepherd.Tour({
     ...shepherdTheme,
     exitOnEsc: true,
@@ -81,7 +81,7 @@ export function createFirstLoginTour() {
         classes: 'shepherd-button-secondary',
         action: () => {
           tour.complete()
-          markTourSkipped()
+          markOnboardingSkipped(userId)
         }
       },
       {
@@ -337,10 +337,8 @@ function waitForElement(selector: string, timeout = 5000): Promise<void> {
   })
 }
 
-function markTourSkipped() {
-  localStorage.setItem('automatos-tour-skipped', 'true')
-  localStorage.setItem('automatos-tour-completed-at', new Date().toISOString())
-}
+// Tour completion/skip now handled by shared helpers in tour-storage.ts:
+// markOnboardingComplete(userId) and markOnboardingSkipped(userId)
 ```
 
 ### 4. Tour Storage Helper
@@ -352,27 +350,35 @@ const TOUR_COMPLETED_KEY = 'automatos-onboarding-completed'
 const TOUR_SKIPPED_KEY = 'automatos-onboarding-skipped'
 const TOUR_DISMISSED_KEY = 'automatos-tour-dismissed-at'
 
-export function haCompletedOnboarding(): boolean {
+const TOUR_COMPLETED_AT_KEY = 'automatos-tour-completed-at'
+
+function userKey(base: string, userId: string) {
+  return `${base}:${userId}`
+}
+
+export function hasCompletedOnboarding(userId: string): boolean {
+  if (typeof window === 'undefined' || !userId) return false
   return !!(
-    localStorage.getItem(TOUR_COMPLETED_KEY) ||
-    localStorage.getItem(TOUR_SKIPPED_KEY)
+    localStorage.getItem(userKey(TOUR_COMPLETED_KEY, userId)) ||
+    localStorage.getItem(userKey(TOUR_SKIPPED_KEY, userId))
   )
 }
 
-export function markOnboardingComplete() {
-  localStorage.setItem(TOUR_COMPLETED_KEY, 'true')
-  localStorage.setItem('automatos-tour-completed-at', new Date().toISOString())
+export function markOnboardingComplete(userId: string) {
+  localStorage.setItem(userKey(TOUR_COMPLETED_KEY, userId), 'true')
+  localStorage.setItem(userKey(TOUR_COMPLETED_AT_KEY, userId), new Date().toISOString())
 }
 
-export function markOnboardingSkipped() {
-  localStorage.setItem(TOUR_SKIPPED_KEY, 'true')
-  localStorage.setItem(TOUR_DISMISSED_KEY, new Date().toISOString())
+export function markOnboardingSkipped(userId: string) {
+  localStorage.setItem(userKey(TOUR_SKIPPED_KEY, userId), 'true')
+  localStorage.setItem(userKey(TOUR_DISMISSED_KEY, userId), new Date().toISOString())
 }
 
-export function resetOnboarding() {
-  localStorage.removeItem(TOUR_COMPLETED_KEY)
-  localStorage.removeItem(TOUR_SKIPPED_KEY)
-  localStorage.removeItem(TOUR_DISMISSED_KEY)
+export function resetOnboarding(userId: string) {
+  localStorage.removeItem(userKey(TOUR_COMPLETED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_SKIPPED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_DISMISSED_KEY, userId))
+  localStorage.removeItem(userKey(TOUR_COMPLETED_AT_KEY, userId))
 }
 ```
 
@@ -393,13 +399,14 @@ import { markOnboardingSkipped, markOnboardingComplete } from '@/lib/shepherd/to
 interface WelcomeModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  userId: string
 }
 
-export function WelcomeModal({ open, onOpenChange }: WelcomeModalProps) {
+export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) {
   const [isStarting, setIsStarting] = useState(false)
 
   const handleSkip = () => {
-    markOnboardingSkipped()
+    markOnboardingSkipped(userId)
     onOpenChange(false)
   }
 
@@ -409,16 +416,7 @@ export function WelcomeModal({ open, onOpenChange }: WelcomeModalProps) {
 
     // Small delay for modal close animation
     setTimeout(() => {
-      const tour = createFirstLoginTour()
-
-      tour.on('complete', () => {
-        markOnboardingComplete()
-      })
-
-      tour.on('cancel', () => {
-        markOnboardingSkipped()
-      })
-
+      const tour = createFirstLoginTour(userId)
       tour.start()
       setIsStarting(false)
     }, 300)
@@ -545,14 +543,12 @@ export function FirstLoginGuard() {
   useEffect(() => {
     if (!isLoaded || !user) return
 
-    // Check if this is truly first login
-    const onboardingComplete = hasCompletedOnboarding()
-    const userCreatedRecently = user.createdAt &&
-      (Date.now() - new Date(user.createdAt).getTime()) < 5 * 60 * 1000 // 5 mins
+    const onboardingComplete = hasCompletedOnboarding(user.id)
 
-    if (!onboardingComplete && userCreatedRecently) {
+    if (!onboardingComplete) {
       // Small delay to let the app render first
-      setTimeout(() => setShowWelcome(true), 1000)
+      const timerId = setTimeout(() => setShowWelcome(true), 1000)
+      return () => clearTimeout(timerId)
     }
   }, [isLoaded, user])
 
@@ -560,6 +556,7 @@ export function FirstLoginGuard() {
     <WelcomeModal
       open={showWelcome}
       onOpenChange={setShowWelcome}
+      userId={user?.id ?? ''}
     />
   )
 }
