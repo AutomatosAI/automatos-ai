@@ -4,11 +4,12 @@ export const runtime = 'edge'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// Get API key helper
-function getApiKey(request: NextRequest): string {
-  return process.env.NEXT_PUBLIC_API_KEY || 
+// Get API key helper — uses server-side API_KEY (not NEXT_PUBLIC_ since this is an edge route)
+function getApiKey(request: NextRequest): string | null {
+  return process.env.API_KEY ||
+         process.env.ORCHESTRATOR_API_KEY ||
          request.headers.get('x-api-key') ||
-         'test_api_key_for_backend_validation_2025' // Fallback for Railway
+         null
 }
 
 export async function POST(request: NextRequest) {
@@ -21,22 +22,25 @@ export async function POST(request: NextRequest) {
       request.headers.get('x-workspace') ||
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
-    
-    // Log for debugging (remove in production)
-    if (!process.env.NEXT_PUBLIC_API_KEY) {
-      console.warn('[Chat Proxy] Using fallback API key - set NEXT_PUBLIC_API_KEY in Railway')
+
+    // Build auth headers — prefer Clerk JWT, fall back to API key
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'text/plain',
     }
-    
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    } else if (apiKey) {
+      headers['x-api-key'] = apiKey
+    }
+    if (workspaceId) {
+      headers['X-Workspace-ID'] = workspaceId
+    }
+
     // Forward to Python backend
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/plain',
-        'x-api-key': apiKey, // Always send API key
-        ...(authHeader ? { 'Authorization': authHeader } : {}),
-        ...(workspaceId ? { 'X-Workspace-ID': workspaceId } : {}),
-      },
+      headers,
       body: JSON.stringify(body),
     })
 
@@ -93,15 +97,23 @@ export async function PATCH(request: NextRequest) {
     const url = new URL(request.url)
     const path = url.pathname.replace('/api/chat', '') // Remove /api/chat prefix
     
+    // Build auth headers — prefer Clerk JWT, fall back to API key
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (authHeader) {
+      headers['Authorization'] = authHeader
+    } else if (apiKey) {
+      headers['x-api-key'] = apiKey
+    }
+    if (workspaceId) {
+      headers['X-Workspace-ID'] = workspaceId
+    }
+
     // Forward to Python backend with the same path
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat${path}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        ...(authHeader ? { 'Authorization': authHeader } : {}),
-        ...(workspaceId ? { 'X-Workspace-ID': workspaceId } : {}),
-      },
+      headers,
       body: JSON.stringify(body),
     })
 
