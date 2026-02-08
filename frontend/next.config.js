@@ -6,6 +6,9 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true
   },
+  experimental: {
+    typedRoutes: true,
+  },
   turbopack: {
     root: __dirname,
   },
