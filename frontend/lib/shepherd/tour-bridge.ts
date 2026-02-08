@@ -14,6 +14,7 @@ export const TOUR_EVENTS = {
 
 /** Dispatch a request for the modal to switch to a specific tab */
 export function requestModalTab(step: number) {
+  if (typeof window === 'undefined') return
   window.dispatchEvent(
     new CustomEvent(TOUR_EVENTS.SET_MODAL_TAB, { detail: { step } })
   )
@@ -28,6 +29,7 @@ export function switchTabAndWaitForElement(
   selector: string,
   timeout = 5000
 ): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve()
   return new Promise((resolve, reject) => {
     const el = document.querySelector(selector)
     // If element is already visible, resolve immediately

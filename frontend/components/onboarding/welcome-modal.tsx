@@ -5,7 +5,6 @@ import Image from 'next/image'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Sparkles } from 'lucide-react'
-import { createFirstLoginTour } from '@/lib/shepherd/first-login-tour'
 import { markOnboardingSkipped } from '@/lib/shepherd/tour-storage'
 
 interface WelcomeModalProps {
@@ -27,7 +26,10 @@ export function WelcomeModal({ open, onOpenChange, userId }: WelcomeModalProps) 
     onOpenChange(false)
 
     // Small delay for modal close animation
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Dynamic import — shepherd.js accesses `window` at module init,
+      // so it must NOT be imported at the top level (breaks SSR).
+      const { createFirstLoginTour } = await import('@/lib/shepherd/first-login-tour')
       const tour = createFirstLoginTour(userId)
       tour.start()
       setIsStarting(false)
