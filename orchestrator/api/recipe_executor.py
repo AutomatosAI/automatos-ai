@@ -133,7 +133,7 @@ async def _execute_step(
     # 7. Generate + tool loop — same pattern as chatbot (service.py:1382-1428)
     tool_router = get_tool_router()
     all_tool_calls = []
-    max_iterations = 3
+    max_iterations = 6
     response = None
 
     for iteration in range(max_iterations):
@@ -309,13 +309,13 @@ def _format_step_data(step_outputs: Dict[str, Dict[str, Any]]) -> str:
                         if isinstance(tc_result, (dict, list))
                         else str(tc_result)
                     )
-                    if len(result_str) > 1500:
-                        result_str = result_str[:1500] + "\n... (truncated)"
+                    if len(result_str) > 8000:
+                        result_str = result_str[:8000] + "\n... (truncated)"
                     parts.append(f"[Tool: {action}]\n{result_str}")
 
         if sr_output:
-            output_preview = sr_output[:3000]
-            if len(sr_output) > 3000:
+            output_preview = sr_output[:12000]
+            if len(sr_output) > 12000:
                 output_preview += "\n... (truncated)"
             parts.append(f"[Agent Output]\n{output_preview}")
 
