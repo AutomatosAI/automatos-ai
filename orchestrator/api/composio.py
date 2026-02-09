@@ -28,7 +28,7 @@ from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
-from core.models.composio import AgentAppFeature, TriggerSubscription
+from core.models.composio import AgentAppFeature, ComposioConnection, ComposioEntity, TriggerSubscription
 from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
@@ -561,26 +561,32 @@ async def handle_webhook(
     logger.info("Webhook received — raw keys: %s", list(payload.keys()))
 
     # Normalise V3 payload format.
-    # V3 structure: {id, timestamp, type: "composio.trigger.message", metadata: {triggerName, connectionId, ...}, data: {actual event fields}}
+    # Real V3 structure: {id, timestamp, type: "composio.trigger.message",
+    #   metadata: {log_id, trigger_slug, trigger_id, connected_account_id, auth_config_id, user_id},
+    #   data: {actual event fields like issue_key, summary, etc.}}
     if "type" in payload and "data" in payload:
         event_type = payload.get("type", "")
         inner = payload.get("data", {})
         meta = payload.get("metadata", {})
 
-        logger.info("V3 webhook: event_type=%s metadata_keys=%s data_keys=%s",
+        logger.info("V3 webhook: event_type=%s metadata_keys=%s data_keys=%s connected_account=%s trigger_slug=%s",
                      event_type, list(meta.keys()) if isinstance(meta, dict) else "N/A",
-                     list(inner.keys()) if isinstance(inner, dict) else "N/A")
+                     list(inner.keys()) if isinstance(inner, dict) else "N/A",
+                     meta.get("connected_account_id", "N/A") if isinstance(meta, dict) else "N/A",
+                     meta.get("trigger_slug", "N/A") if isinstance(meta, dict) else "N/A")
 
-        # Trigger name: check metadata first (V3), then data (V2-in-V3), then event_type
+        # Trigger name: check metadata.trigger_slug (real V3), then camelCase variants, then data, then event_type
         trigger_name = (
-            (meta.get("triggerName") if isinstance(meta, dict) else None)
-            or (inner.get("triggerName") if isinstance(inner, dict) else None)
+            (meta.get("trigger_slug") if isinstance(meta, dict) else None)
+            or (meta.get("triggerName") if isinstance(meta, dict) else None)
             or (inner.get("trigger_name") if isinstance(inner, dict) else None)
+            or (inner.get("triggerName") if isinstance(inner, dict) else None)
             or (inner.get("triggerSlug") if isinstance(inner, dict) else None)
             or event_type
         )
 
-        # Entity ID: check metadata, then data, then top-level
+        # Entity ID: real V3 doesn't include entityId directly.
+        # Try explicit entity fields first, then resolve via connected_account_id.
         entity_id = (
             (meta.get("entityId") if isinstance(meta, dict) else None)
             or (meta.get("entity_id") if isinstance(meta, dict) else None)
@@ -590,8 +596,28 @@ async def handle_webhook(
             or ""
         )
 
+        # V3 fallback: resolve entity_id from connected_account_id via DB
+        if not entity_id and isinstance(meta, dict):
+            connected_account_id = meta.get("connected_account_id") or meta.get("connectionId")
+            if connected_account_id:
+                conn_row = (
+                    db.query(ComposioConnection)
+                    .filter(ComposioConnection.connection_id == connected_account_id)
+                    .first()
+                )
+                if conn_row:
+                    entity_row = db.query(ComposioEntity).filter(ComposioEntity.id == conn_row.entity_id).first()
+                    if entity_row:
+                        entity_id = entity_row.composio_entity_id
+                        logger.info("V3: resolved entity_id=%s from connected_account_id=%s",
+                                    entity_id, connected_account_id)
+                    else:
+                        logger.warning("V3: ComposioConnection found (id=%s) but no ComposioEntity for entity_id=%s",
+                                       conn_row.id, conn_row.entity_id)
+                else:
+                    logger.warning("V3: No ComposioConnection found for connected_account_id=%s", connected_account_id)
+
         # Event data: the actual trigger payload is in "data"
-        # For V3, data IS the event data (Jira issue fields, etc.)
         event_data = inner if isinstance(inner, dict) else {}
 
     else:
