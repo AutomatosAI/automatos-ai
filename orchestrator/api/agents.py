@@ -74,10 +74,12 @@ def _resolve_tool_ids_to_app_names(db: Session, ctx: RequestContext, tool_ids: L
     entity = entity_manager.get_entity_by_workspace(ctx.workspace_id)
     connected_app_names: List[str] = []
     if entity:
+        # Match the same status set as /api/tools/connected endpoint
+        allowed_statuses = {"active", "added", "pending"}
         connected_app_names = [
             (c.get("app_name") or "").upper()
             for c in entity_manager.get_entity_connections(entity["id"])
-            if c.get("status") == "active"
+            if (c.get("status") or "").lower() in allowed_statuses
         ]
 
     connected_set = {a for a in connected_app_names if a}

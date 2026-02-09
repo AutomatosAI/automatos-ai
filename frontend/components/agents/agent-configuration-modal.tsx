@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
@@ -134,6 +134,17 @@ export function AgentConfigurationModal({
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
 
+  // Track whether form has been initialized for this modal session.
+  // Prevents polling refetches from overwriting user's in-progress edits.
+  const formInitializedRef = useRef(false)
+
+  // Reset when modal closes or agent changes
+  useEffect(() => {
+    if (!open) {
+      formInitializedRef.current = false
+    }
+  }, [open, agentId])
+
   // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
   useEffect(() => {
     if (!open || !agentId) return
@@ -240,7 +251,13 @@ export function AgentConfigurationModal({
   }, [personaMode, selectedPersonaId, personas, customPersonaPrompt])
 
   useEffect(() => {
+    // Only initialize form data once per modal session.
+    // useAgent polls every 10s — without this guard, refetches overwrite
+    // the user's in-progress edits and reset hasChanges to false.
+    if (formInitializedRef.current) return
     if (agentConfig && agent && typeof agent === 'object') {
+      formInitializedRef.current = true
+
       // PRD-15: Get model config from agentModelConfig or use defaults
       const modelConfig = (agentModelConfig as any)?.model_config || {
         provider: 'openai',
@@ -277,8 +294,8 @@ export function AgentConfigurationModal({
         assigned_skills: (agent as any).skills?.map((skill: any) => skill.id) || [],
         // PRD-15: Model configuration
         model_config: modelConfig,
-        // Tools configuration
-        assigned_tools: (agent as any).tools?.map((tool: any) => tool.id) || []
+        // Tools configuration — filter out null IDs (tools without cache entries)
+        assigned_tools: ((agent as any).tools || []).map((tool: any) => tool.id).filter((id: any) => id != null)
       })
       setHasChanges(false)
     }
@@ -436,7 +453,7 @@ export function AgentConfigurationModal({
           tags
         },
         skill_assignments: formData.assigned_skills,
-        tool_ids: formData.assigned_tools
+        tool_ids: (formData.assigned_tools || []).filter((id: any) => id != null)
       }
 
       toast.loading('Saving configuration...', { id: 'agent-config-save' })

@@ -296,11 +296,10 @@ export function useUpdateAgentConfig() {
       // Invalidate agent config and agent data
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agentConfig(variables.agentId) })
       queryClient.invalidateQueries({ queryKey: agentQueryKeys.agent(variables.agentId) })
-      toast.success('Configuration updated successfully!')
+      // Toast handled by the caller (agent-configuration-modal) to avoid duplicates
       return data
     },
     onError: (error) => {
-      toast.error(`Failed to update configuration: ${error.message}`)
       throw error
     },
   })
