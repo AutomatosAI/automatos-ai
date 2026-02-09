@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 
 interface RecipeExecutionHistoryItem {
   id: number | string
+  execution_id?: string
   status: 'pending' | 'running' | 'completed' | 'failed'
   current_step?: number
   total_steps?: number
@@ -28,6 +29,7 @@ interface ViewRecipeModalProps {
   onEdit?: () => void
   onExecute?: () => void
   onShare?: () => void
+  onViewExecution?: (executionId: string) => void
 }
 
 export function ViewRecipeModal({
@@ -40,6 +42,7 @@ export function ViewRecipeModal({
   onEdit,
   onExecute,
   onShare,
+  onViewExecution,
 }: ViewRecipeModalProps) {
   const [activeTab, setActiveTab] = React.useState<'details' | 'suggestions'>('details')
 
@@ -264,7 +267,11 @@ export function ViewRecipeModal({
                         {executions.slice(0, 5).map((exec) => (
                           <div
                             key={exec.id}
-                            className="flex items-center gap-3 bg-secondary/30 rounded-lg px-4 py-3 border border-border/30"
+                            className={cn(
+                              "flex items-center gap-3 bg-secondary/30 rounded-lg px-4 py-3 border border-border/30",
+                              onViewExecution && "cursor-pointer hover:border-primary/30 hover:bg-secondary/50 transition-colors"
+                            )}
+                            onClick={() => onViewExecution?.(exec.execution_id || String(exec.id))}
                           >
                             {/* Status icon */}
                             <div className={cn(
