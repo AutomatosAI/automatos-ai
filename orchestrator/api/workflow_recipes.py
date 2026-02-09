@@ -22,8 +22,87 @@ router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
 from core.models import WorkflowTemplate as WorkflowRecipe  # Aliased for transition
 from core.models import Agent
 from core.models.core import RecipeExecution
+from core.models.composio import TriggerSubscription, ComposioEntity
 from core.auth.hybrid import get_request_context_hybrid
 from core.auth.dependencies import RequestContext
+
+
+import os
+
+
+def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) -> Optional[str]:
+    """
+    If recipe.schedule_config is type=trigger with a Composio trigger,
+    subscribe via Composio API and store TriggerSubscription.
+    Returns the composio_subscription_id on success, None otherwise.
+    """
+    schedule = recipe.schedule_config
+    if not schedule or schedule.get("type") != "trigger":
+        return None
+
+    trigger_config = schedule.get("trigger_config", {})
+    trigger_name = trigger_config.get("trigger_name")
+    if not trigger_name:
+        return None
+
+    # Check if a subscription already exists for this recipe
+    existing = db.query(TriggerSubscription).filter(
+        TriggerSubscription.workflow_id == recipe.id,
+        TriggerSubscription.trigger_name == trigger_name,
+        TriggerSubscription.is_active == True,
+    ).first()
+    if existing:
+        logger.info("[trigger_auto] Subscription already exists for recipe %d trigger %s", recipe.id, trigger_name)
+        return existing.composio_subscription_id
+
+    try:
+        from core.composio.client import get_composio_client
+        from core.composio.entity_manager import EntityManager
+
+        client = get_composio_client()
+        entity_manager = EntityManager(db)
+        entity = entity_manager.get_or_create_entity(workspace_id)
+
+        backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+        callback_url = f"{backend_url}/api/composio/webhook"
+
+        result = client.subscribe_to_trigger(
+            entity_id=entity["composio_entity_id"],
+            trigger_name=trigger_name,
+            callback_url=callback_url,
+        )
+
+        subscription = TriggerSubscription(
+            entity_id=entity["id"],
+            trigger_name=trigger_name,
+            callback_url=callback_url,
+            agent_id=None,
+            workflow_id=recipe.id,
+            composio_subscription_id=result.get("id"),
+            is_active=True,
+        )
+        db.add(subscription)
+
+        logger.info(
+            "[trigger_auto] Registered trigger %s for recipe %d (subscription=%s)",
+            trigger_name, recipe.id, result.get("id"),
+        )
+        return result.get("id")
+
+    except Exception:
+        logger.exception("[trigger_auto] Failed to auto-register trigger %s for recipe %d", trigger_name, recipe.id)
+        return None
+
+
+def _cleanup_trigger_subscriptions(recipe_id: int, db: Session) -> None:
+    """Deactivate trigger subscriptions for a recipe."""
+    subs = db.query(TriggerSubscription).filter(
+        TriggerSubscription.workflow_id == recipe_id,
+        TriggerSubscription.is_active == True,
+    ).all()
+    for sub in subs:
+        sub.is_active = False
+        logger.info("[trigger_auto] Deactivated subscription %d for recipe %d", sub.id, recipe_id)
 
 
 def _enrich_steps_with_agents(steps: Optional[list], db: Session) -> Optional[list]:
@@ -226,6 +305,12 @@ async def create_workflow_recipe(
             'auto_learn': True,
         }
 
+        # Ensure webhook_id in schedule_config for trigger/webhook types
+        schedule_config = recipe_data.get('schedule_config')
+        if schedule_config and schedule_config.get('type') in ('trigger', 'webhook'):
+            if 'webhook_id' not in schedule_config:
+                schedule_config['webhook_id'] = uuid4().hex
+
         # Create recipe (validation happens after assignment)
         recipe = WorkflowRecipe(
             workspace_id=ctx.workspace_id,
@@ -238,7 +323,7 @@ async def create_workflow_recipe(
             inputs=recipe_data.get('inputs'),
             outputs=recipe_data.get('outputs'),
             execution_config=execution_config,
-            schedule_config=recipe_data.get('schedule_config'),
+            schedule_config=schedule_config,
             recommended_agents=recipe_data.get('recommended_agents', []),
             required_tools=recipe_data.get('required_tools', []),
             is_public=recipe_data.get('is_public', True),
@@ -284,6 +369,11 @@ async def create_workflow_recipe(
         db.commit()
         db.refresh(recipe)
 
+        # Auto-register Composio trigger if schedule_config is trigger type
+        trigger_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
+        if trigger_sub_id:
+            db.commit()
+
         logger.info(f"Created workflow recipe: {recipe.template_id}")
 
         return {
@@ -327,6 +417,12 @@ async def update_workflow_recipe(
                 status_code=403,
                 detail="System recipes cannot be modified"
             )
+
+        # Ensure webhook_id in schedule_config for trigger/webhook types
+        if 'schedule_config' in recipe_data:
+            sc = recipe_data['schedule_config']
+            if sc and sc.get('type') in ('trigger', 'webhook') and 'webhook_id' not in sc:
+                sc['webhook_id'] = uuid4().hex
 
         # Update fields if provided
         updatable_fields = [
@@ -383,6 +479,12 @@ async def update_workflow_recipe(
         db.commit()
         db.refresh(recipe)
 
+        # Re-register trigger if schedule_config changed
+        if 'schedule_config' in recipe_data:
+            _cleanup_trigger_subscriptions(recipe.id, db)
+            _auto_register_trigger(recipe, ctx.workspace_id, db)
+            db.commit()
+
         logger.info(f"Updated workflow recipe: {recipe_id}")
 
         return {
@@ -423,6 +525,9 @@ async def delete_workflow_recipe(
                 status_code=403,
                 detail="System recipes cannot be deleted"
             )
+
+        # Cleanup trigger subscriptions before deleting
+        _cleanup_trigger_subscriptions(recipe.id, db)
 
         db.delete(recipe)
         db.commit()
@@ -1225,3 +1330,80 @@ async def install_recipe_from_marketplace(
         logger.error(traceback.format_exc())
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error installing recipe: {str(e)}")
+
+
+# ===================================================================
+# RECIPE WEBHOOK ENDPOINT (no auth — URL is the secret)
+# ===================================================================
+
+webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+
+@webhook_router.post("/recipe/{webhook_id}")
+async def recipe_webhook(
+    webhook_id: str,
+    body: Dict[str, Any] = Body(default={}),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger a recipe execution via webhook.
+
+    The webhook_id is a persistent secret stored in the recipe's
+    schedule_config.webhook_id. No authentication required — the
+    URL itself is the credential.
+
+    Body (optional):
+    - Any JSON payload — passed as input_data to the recipe executor.
+    """
+    import asyncio
+    from api.recipe_executor import execute_recipe_direct
+
+    # Look up recipe by webhook_id in schedule_config
+    recipe = db.query(WorkflowRecipe).filter(
+        WorkflowRecipe.schedule_config["webhook_id"].astext == webhook_id,
+        WorkflowRecipe.owner_type == "workspace",
+    ).first()
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    if not recipe.steps:
+        raise HTTPException(status_code=400, detail="Recipe has no steps")
+
+    execution_id = f"webhook-{uuid4().hex[:12]}"
+    execution = RecipeExecution(
+        execution_id=execution_id,
+        recipe_id=recipe.id,
+        workspace_id=recipe.workspace_id,
+        status="pending",
+        input_data=body,
+        triggered_by="webhook",
+        execution_metadata={
+            "execution_type": "webhook",
+            "webhook_id": webhook_id,
+            "total_steps": len(recipe.steps),
+        },
+    )
+    db.add(execution)
+    recipe.use_count += 1
+    recipe.last_used_at = datetime.now()
+    db.commit()
+
+    logger.info("[webhook] Recipe %d (%s) triggered via webhook %s, execution=%s",
+                recipe.id, recipe.name, webhook_id, execution_id)
+
+    asyncio.create_task(
+        execute_recipe_direct(
+            recipe_execution_id=execution_id,
+            recipe_id=recipe.id,
+            workspace_id=recipe.workspace_id,
+            input_data=body,
+        )
+    )
+
+    return {
+        "status": "started",
+        "execution_id": execution_id,
+        "recipe_name": recipe.name,
+        "total_steps": len(recipe.steps),
+    }

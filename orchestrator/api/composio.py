@@ -29,6 +29,7 @@ from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
 from core.models.composio import AgentAppFeature, ComposioConnection, ComposioEntity, TriggerSubscription
+from core.models.core import WorkflowTemplate as WorkflowRecipe, RecipeExecution
 from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
@@ -752,7 +753,7 @@ async def _dispatch_workflow(
 
         recipe_cls = get_recipe(workflow_id=workflow_id)
         if recipe_cls is not None:
-            # Recipe-based dispatch
+            # Recipe-based dispatch (Python-registered)
             with get_db_session() as db:
                 recipe = recipe_cls()
                 result = await recipe.execute(envelope, db, envelope.workspace_id)
@@ -762,6 +763,46 @@ async def _dispatch_workflow(
                     result.success if hasattr(result, "success") else "unknown",
                 )
             return
+
+        # UI-created recipe dispatch (workflow_recipes table)
+        with get_db_session() as db:
+            recipe_row = db.query(WorkflowRecipe).filter(
+                WorkflowRecipe.id == workflow_id
+            ).first()
+            if recipe_row:
+                from uuid import uuid4 as _uuid4
+                from api.recipe_executor import execute_recipe_direct
+
+                execution_id = f"trigger-{_uuid4().hex[:12]}"
+                execution = RecipeExecution(
+                    execution_id=execution_id,
+                    recipe_id=recipe_row.id,
+                    workspace_id=envelope.workspace_id,
+                    status='pending',
+                    input_data={"content": envelope.content, "metadata": envelope.metadata},
+                    triggered_by="composio_trigger",
+                    execution_metadata={
+                        'execution_type': 'trigger_dispatch',
+                        'total_steps': len(recipe_row.steps or []),
+                        'trigger_source': envelope.source,
+                    },
+                )
+                db.add(execution)
+                recipe_row.use_count += 1
+                recipe_row.last_used_at = datetime.utcnow()
+                db.commit()
+
+                logger.info(
+                    "[webhook] Dispatching to UI recipe %d (%s), execution=%s",
+                    recipe_row.id, recipe_row.name, execution_id,
+                )
+                await execute_recipe_direct(
+                    recipe_execution_id=execution_id,
+                    recipe_id=recipe_row.id,
+                    workspace_id=envelope.workspace_id,
+                    input_data={"content": envelope.content, **envelope.metadata},
+                )
+                return
 
         # Standard workflow dispatch (no matching recipe)
         from api.workflows import execute_workflow_with_progress
