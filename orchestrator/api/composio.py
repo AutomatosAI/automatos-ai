@@ -560,22 +560,40 @@ async def handle_webhook(
 
     logger.info("Webhook received — raw keys: %s", list(payload.keys()))
 
-    # Normalise V2 vs V3 payload format
-    # V3 composio.trigger.message wraps trigger data in "data"
+    # Normalise V3 payload format.
+    # V3 structure: {id, timestamp, type: "composio.trigger.message", metadata: {triggerName, connectionId, ...}, data: {actual event fields}}
     if "type" in payload and "data" in payload:
-        # V3 format
         event_type = payload.get("type", "")
         inner = payload.get("data", {})
+        meta = payload.get("metadata", {})
 
-        if event_type == "composio.trigger.message" or isinstance(inner, dict):
-            # The trigger details are inside "data"
-            trigger_name = inner.get("trigger_name") or inner.get("triggerSlug") or event_type
-            entity_id = inner.get("entity_id") or inner.get("entityId") or payload.get("entity_id", "")
-            event_data = inner.get("event_data") or inner.get("payload") or inner
-        else:
-            trigger_name = event_type
-            entity_id = payload.get("entity_id", "")
-            event_data = inner
+        logger.info("V3 webhook: event_type=%s metadata_keys=%s data_keys=%s",
+                     event_type, list(meta.keys()) if isinstance(meta, dict) else "N/A",
+                     list(inner.keys()) if isinstance(inner, dict) else "N/A")
+
+        # Trigger name: check metadata first (V3), then data (V2-in-V3), then event_type
+        trigger_name = (
+            (meta.get("triggerName") if isinstance(meta, dict) else None)
+            or (inner.get("triggerName") if isinstance(inner, dict) else None)
+            or (inner.get("trigger_name") if isinstance(inner, dict) else None)
+            or (inner.get("triggerSlug") if isinstance(inner, dict) else None)
+            or event_type
+        )
+
+        # Entity ID: check metadata, then data, then top-level
+        entity_id = (
+            (meta.get("entityId") if isinstance(meta, dict) else None)
+            or (meta.get("entity_id") if isinstance(meta, dict) else None)
+            or (inner.get("entity_id") if isinstance(inner, dict) else None)
+            or (inner.get("entityId") if isinstance(inner, dict) else None)
+            or payload.get("entity_id", "")
+            or ""
+        )
+
+        # Event data: the actual trigger payload is in "data"
+        # For V3, data IS the event data (Jira issue fields, etc.)
+        event_data = inner if isinstance(inner, dict) else {}
+
     else:
         # V2 / legacy format
         trigger_name = payload.get("trigger_name") or payload.get("triggerSlug", "")
