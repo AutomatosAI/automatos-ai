@@ -47,6 +47,7 @@ async def _execute_step(
     clean_prompt: str,
     step_outputs: Dict[str, Dict[str, Any]],
     workspace_id: UUID,
+    input_data: Optional[dict] = None,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -60,6 +61,7 @@ async def _execute_step(
         clean_prompt: Task instruction only (e.g. "post results to Slack channel X")
         step_outputs: Previous step data (for system context)
         workspace_id: Workspace UUID for tool permissions
+        input_data: Original trigger/input data (for system context on all steps)
 
     Returns:
         Dict with status, result, and execution metadata.
@@ -101,7 +103,21 @@ async def _execute_step(
     except Exception as exc:
         logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
 
-    # 3. Step data as system context (if prior steps exist)
+    # 3a. Original trigger/input data as persistent context
+    if input_data:
+        input_content = input_data.get("content", "")
+        input_meta = {k: v for k, v in input_data.items() if k not in ("content", "metadata")}
+        if input_content or input_meta:
+            ctx_parts = ["=" * 40, "ORIGINAL REQUEST / TRIGGER DATA", "=" * 40]
+            if input_content:
+                ctx_parts.append(input_content)
+            if input_meta:
+                ctx_parts.append("\nMetadata:")
+                for mk, mv in input_meta.items():
+                    ctx_parts.append(f"  {mk}: {mv}")
+            messages.append({"role": "system", "content": "\n".join(ctx_parts)})
+
+    # 3b. Step data as system context (if prior steps exist)
     if step_outputs:
         messages.append({"role": "system", "content": _format_step_data(step_outputs)})
 
@@ -427,12 +443,25 @@ async def execute_recipe_direct(
                 "retries": 0,
             }
 
-            # Build clean step prompt: input substitutions only, no step data.
+            # Build clean step prompt: input substitutions + trigger context.
             # Step data goes into system message via _execute_step.
             clean_step_prompt = prompt_template
             if input_data:
                 for key, value in input_data.items():
                     clean_step_prompt = clean_step_prompt.replace(f"{{input.{key}}}", str(value))
+
+            # Inject trigger/input context so agents know what they're working on.
+            # Only add if input_data has real content and prompt doesn't already
+            # contain the substituted values (i.e. no {input.xxx} placeholders used).
+            trigger_content = input_data.get("content", "") if input_data else ""
+            trigger_metadata = {k: v for k, v in (input_data or {}).items() if k not in ("content", "metadata")}
+            if trigger_content and clean_step_prompt == prompt_template:
+                # No placeholders were used — prepend context to prompt
+                context_block = f"## Trigger Context\n{trigger_content}"
+                if trigger_metadata:
+                    meta_lines = "\n".join(f"- {k}: {v}" for k, v in trigger_metadata.items())
+                    context_block += f"\n\n## Metadata\n{meta_lines}"
+                clean_step_prompt = f"{context_block}\n\n## Your Task\n{clean_step_prompt}"
 
             # Execute with retries
             attempt = 0
@@ -451,6 +480,7 @@ async def execute_recipe_direct(
                         clean_prompt=clean_step_prompt,
                         step_outputs=step_outputs,
                         workspace_id=workspace_id,
+                        input_data=input_data,
                     )
 
                     if result.get("status") == "success":
