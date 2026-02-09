@@ -41,8 +41,13 @@ def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) ->
         return None
 
     trigger_config = schedule.get("trigger_config", {})
-    trigger_name = trigger_config.get("trigger_name")
+    # Support both "trigger_name" (canonical) and "trigger" (UI shorthand)
+    trigger_name = (
+        trigger_config.get("trigger_name")
+        or trigger_config.get("trigger")
+    )
     if not trigger_name:
+        logger.warning("[trigger_auto] No trigger_name in trigger_config: %s", trigger_config)
         return None
 
     # Check if a subscription already exists for this recipe
@@ -480,9 +485,19 @@ async def update_workflow_recipe(
         db.refresh(recipe)
 
         # Re-register trigger if schedule_config changed
+        # Only deactivate old subscriptions if new registration succeeds
         if 'schedule_config' in recipe_data:
-            _cleanup_trigger_subscriptions(recipe.id, db)
-            _auto_register_trigger(recipe, ctx.workspace_id, db)
+            new_sub_id = _auto_register_trigger(recipe, ctx.workspace_id, db)
+            if new_sub_id:
+                # New subscription created — deactivate old ones (except the new one)
+                _cleanup_trigger_subscriptions(recipe.id, db)
+                # Re-activate the newly created one (cleanup may have caught it)
+                new_sub = db.query(TriggerSubscription).filter(
+                    TriggerSubscription.composio_subscription_id == new_sub_id,
+                    TriggerSubscription.workflow_id == recipe.id,
+                ).first()
+                if new_sub:
+                    new_sub.is_active = True
             db.commit()
 
         logger.info(f"Updated workflow recipe: {recipe_id}")
