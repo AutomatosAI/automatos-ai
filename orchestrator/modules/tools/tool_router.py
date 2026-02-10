@@ -211,7 +211,6 @@ def get_tools_for_agent(
                             session_used.query(ComposioActionCache)
                             .filter(
                                 ComposioActionCache.app_name.in_(app_names),
-                                ComposioActionCache.enabled == True
                             )
                             .order_by(ComposioActionCache.app_name, ComposioActionCache.display_name)
                             .limit(50)  # Top 50 actions across all assigned apps

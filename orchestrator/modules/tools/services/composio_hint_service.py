@@ -141,6 +141,8 @@ class ComposioHintService:
                 "the EXACT action name from the list below. Do NOT guess or invent action names — "
                 "only use the exact names listed here. Do NOT use search_codebase to look for code "
                 "when your task is to interact with external apps.",
+                "Usage: composio_execute({\"action\": \"ACTION_NAME\", \"params\": {<action-specific fields>}}). "
+                "All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.",
             ]
 
             # Step 4: Resolve actions
@@ -182,7 +184,7 @@ class ComposioHintService:
                 result.matched_actions.extend(actions)
 
             if top_action_params:
-                hint_lines.append("\nParameter hints for key actions:")
+                hint_lines.append("\nParameter hints (pass these inside `params`):")
                 for action_name, params in list(top_action_params.items())[:5]:
                     hint_lines.append(f"\n{action_name}:")
                     hint_lines.append(params)
