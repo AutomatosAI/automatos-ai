@@ -105,6 +105,8 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
   const watchedName = methods.watch('name')
   const watchedSteps = methods.watch('steps')
   const watchedInputs = methods.watch('inputs')
+  const watchedSchedule = methods.watch('schedule_config')
+  const hasTrigger = !!(watchedSchedule?.trigger_config && Object.keys(watchedSchedule.trigger_config).length > 0)
 
   // Populate form when initialData is provided (edit mode)
   React.useEffect(() => {
@@ -269,6 +271,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                                 value={watchedInputs}
                                 onChange={(val) => methods.setValue('inputs', val)}
                                 onValidation={(valid) => setInputsValid(valid)}
+                                hasTrigger={hasTrigger}
                               />
                             </div>
                           </motion.div>
