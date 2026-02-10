@@ -423,11 +423,17 @@ class ComposioHintService:
             )
 
             scored_actions = []
+            params_empty_count = 0
             for r in rows:
                 if not r or not r[0]:
                     continue
                 action_name = str(r[0])
                 desc = str(r[1] or "").lower()
+                raw_params = r[2]
+
+                # Track empty parameters
+                if not raw_params or (isinstance(raw_params, dict) and not raw_params.get("properties")):
+                    params_empty_count += 1
 
                 # Normalize legacy display names
                 if " " in action_name and not action_name.startswith(f"{app}_"):
@@ -446,7 +452,13 @@ class ComposioHintService:
                 desc_hits = sum(1 for tok in analysis.tokens if tok in desc)
                 score = name_hits * 3 + desc_hits
 
-                scored_actions.append((action_name, score, r[2]))
+                scored_actions.append((action_name, score, raw_params))
+
+            if params_empty_count:
+                logger.warning(
+                    f"[recipe_hints] {app}: {params_empty_count}/{len(scored_actions)} "
+                    f"actions have empty/no-properties parameters in cache"
+                )
 
             # Sort by score, deduplicate, take top N
             scored_actions.sort(key=lambda x: x[1], reverse=True)
@@ -634,5 +646,11 @@ class ComposioHintService:
             param_hints = ParameterHintExtractor.extract_hints(params_json, max_params=MAX_PARAMS_PER_ACTION)
             if param_hints:
                 top_action_params[action_name] = param_hints
-        except Exception:
-            pass
+            else:
+                logger.debug(
+                    f"[param_hints] {action_name}: extract_hints returned empty. "
+                    f"Schema type={params_json.get('type') if isinstance(params_json, dict) else 'N/A'}, "
+                    f"has_properties={'properties' in params_json if isinstance(params_json, dict) else False}"
+                )
+        except Exception as exc:
+            logger.warning(f"[param_hints] {action_name}: extraction failed: {exc}")
