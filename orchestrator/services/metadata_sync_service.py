@@ -18,7 +18,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, or_, cast, String
 from sqlalchemy.orm import Session
 
 from core.composio.client import get_composio_client
@@ -240,7 +240,13 @@ class MetadataSyncService:
             # Find all apps with empty parameters
             rows = (
                 self.db.query(ComposioActionCache.app_name)
-                .filter(ComposioActionCache.parameters.in_([{}, None]))
+                .filter(
+                    or_(
+                        ComposioActionCache.parameters == None,  # noqa: E711
+                        cast(ComposioActionCache.parameters, String) == '{}',
+                        cast(ComposioActionCache.parameters, String) == 'null',
+                    )
+                )
                 .distinct()
                 .all()
             )
@@ -468,7 +474,11 @@ class MetadataSyncService:
             )
             .filter(
                 ComposioActionCache.app_name.in_(list(synced_app_names)),
-                ComposioActionCache.parameters.in_([{}, None]),
+                or_(
+                    ComposioActionCache.parameters == None,  # noqa: E711
+                    cast(ComposioActionCache.parameters, String) == '{}',
+                    cast(ComposioActionCache.parameters, String) == 'null',
+                ),
             )
             .group_by(ComposioActionCache.app_name)
             .order_by(func.count(ComposioActionCache.id).desc())
@@ -508,7 +518,11 @@ class MetadataSyncService:
                     self.db.query(ComposioActionCache)
                     .filter(
                         ComposioActionCache.app_name == app_name,
-                        ComposioActionCache.parameters.in_([{}, None]),
+                        or_(
+                            ComposioActionCache.parameters == None,  # noqa: E711
+                            cast(ComposioActionCache.parameters, String) == '{}',
+                            cast(ComposioActionCache.parameters, String) == 'null',
+                        ),
                     )
                     .all()
                 )
