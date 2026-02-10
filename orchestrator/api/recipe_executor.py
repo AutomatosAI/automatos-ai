@@ -50,6 +50,7 @@ async def _execute_step(
     step_order: int = 1,
     input_data: Optional[dict] = None,
     recipe_memories: Optional[dict] = None,
+    prompt_for_hints: Optional[str] = None,
 ) -> dict:
     """
     Execute a single recipe step using the chatbot's exact component path.
@@ -57,12 +58,14 @@ async def _execute_step(
     Args:
         db: Database session
         agent: The Agent ORM object for this step
-        clean_prompt: Task instruction only
+        clean_prompt: Task instruction (may include trigger context)
         workspace_id: Workspace UUID for tool permissions
         scratchpad: RecipeScratchpad instance (replaces step_outputs)
         step_order: Current step order number
         input_data: Original trigger/input data (for system context on all steps)
         recipe_memories: Mem0 memories to inject (first step only)
+        prompt_for_hints: Clean task-only prompt for hint generation (avoids
+            trigger metadata polluting action matching). Falls back to clean_prompt.
 
     Returns:
         Dict with status, result, and execution metadata.
@@ -91,13 +94,27 @@ async def _execute_step(
     system_prompt = await _build_system_prompt(agent, db)
     messages = [{"role": "system", "content": system_prompt}]
 
-    # 2. Hints — same service, same call signature as chatbot
+    # 1b. Recipe step scope — prevent agent from wandering into other steps' tasks
+    scope_instruction = (
+        f"## Recipe Step Scope\n"
+        f"You are executing step {step_order} of a multi-step recipe. "
+        f"Focus ONLY on the task described in the user message below. "
+        f"Do NOT perform tasks that belong to other steps (e.g., sending notifications, "
+        f"creating PRs, or any action not explicitly required by YOUR task). "
+        f"Use ONLY the external app actions that are directly relevant to your specific task."
+    )
+    messages.append({"role": "system", "content": scope_instruction})
+
+    # 2. Hints — use task-only prompt + recipe_mode to avoid trigger metadata
+    #    polluting action matching. Recipe mode skips taxonomy/capability gate
+    #    and uses prompt tokens directly — scales to any number of tools.
     try:
         hint_service = ComposioHintService(db)
         hint_result = hint_service.build_hints(
             agent_id=agent.id,
-            prompt=clean_prompt,
+            prompt=prompt_for_hints or clean_prompt,
             workspace_id=workspace_id,
+            recipe_mode=True,
         )
         if hint_result.hint_lines:
             messages.append({"role": "system", "content": "\n".join(hint_result.hint_lines)})
@@ -597,6 +614,7 @@ async def execute_recipe_direct(
                         step_order=step_order,
                         input_data=input_data,
                         recipe_memories=recipe_memories if idx == 0 else None,
+                        prompt_for_hints=prompt_template,
                     )
 
                     if result.get("status") == "success":
