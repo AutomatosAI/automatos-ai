@@ -619,6 +619,21 @@ async def sync(
     return result
 
 
+@router.post("/sync/backfill-params")
+async def backfill_params(
+    apps: str = Query(None, description="Comma-separated app names (e.g. JIRA,GITHUB,SLACK). Omit for auto."),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Backfill parameter schemas for actions with empty params (no full sync needed)."""
+    service = MetadataSyncService(db)
+    app_list = [a.strip().upper() for a in apps.split(",") if a.strip()] if apps else None
+    logger.info(f"Parameter backfill requested: apps={app_list or 'auto'}")
+    result = service.backfill_parameters_only(app_list)
+    logger.info(f"Parameter backfill completed: {result}")
+    return result
+
+
 @router.post("/refresh-connections")
 async def refresh_connections(
     ctx: RequestContext = Depends(get_request_context_hybrid),

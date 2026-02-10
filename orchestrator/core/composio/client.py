@@ -910,10 +910,27 @@ class ComposioClient:
                 arguments=params,
                 dangerously_skip_version_check=True
             )
+
+            # Composio API may return errors in the response data without
+            # raising an exception.  Detect {"successful": false} responses
+            # so callers see a proper failure instead of a false success.
+            api_success = True
+            api_error = None
+            if isinstance(result, dict):
+                api_success = result.get("successful", result.get("success", True))
+                api_error = result.get("error") or result.get("message")
+            elif isinstance(result, list):
+                # Batch responses: check first item
+                for item in result:
+                    if isinstance(item, dict) and item.get("successful") is False:
+                        api_success = False
+                        api_error = item.get("error") or item.get("message")
+                        break
+
             return {
-                "success": True,
+                "success": bool(api_success),
                 "data": result,
-                "error": None
+                "error": api_error,
             }
         except Exception as e:
             logger.error(f"Failed to execute action {action}: {e}")
