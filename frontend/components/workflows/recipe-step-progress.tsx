@@ -11,9 +11,12 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  Download,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { apiClient } from '@/lib/api-client'
 
 export interface RecipeStepResult {
   step_id: string
@@ -22,18 +25,21 @@ export interface RecipeStepResult {
   agent_name: string
   status: 'pending' | 'running' | 'success' | 'failed'
   output?: string
+  output_preview?: string
   tool_calls?: Array<{
     action: string
     params?: any
     result?: any
     duration_ms?: number
   }>
+  tool_calls_summary?: string[]
   duration_ms?: number
   tokens_used?: number
   started_at?: string
   completed_at?: string
   error?: string
   retries?: number
+  log_url?: string
 }
 
 interface RecipeStepProgressProps {
@@ -42,6 +48,8 @@ interface RecipeStepProgressProps {
   status: 'pending' | 'running' | 'completed' | 'failed'
   stepResults: RecipeStepResult[]
   steps?: Array<{ step_id: string; order: number; prompt_template: string; agent_id: number }>
+  recipeId?: string
+  executionId?: string
 }
 
 export function RecipeStepProgress({
@@ -50,8 +58,12 @@ export function RecipeStepProgress({
   status,
   stepResults,
   steps,
+  recipeId,
+  executionId,
 }: RecipeStepProgressProps) {
   const [expandedSteps, setExpandedSteps] = React.useState<Set<number>>(new Set())
+  const [fullLogs, setFullLogs] = React.useState<Record<number, any>>({})
+  const [loadingLogs, setLoadingLogs] = React.useState<Set<number>>(new Set())
 
   const toggleStep = (order: number) => {
     setExpandedSteps(prev => {
@@ -60,6 +72,23 @@ export function RecipeStepProgress({
       else next.add(order)
       return next
     })
+  }
+
+  const loadFullLogs = async (stepOrder: number) => {
+    if (!recipeId || !executionId || fullLogs[stepOrder] || loadingLogs.has(stepOrder)) return
+    setLoadingLogs(prev => new Set(prev).add(stepOrder))
+    try {
+      const data: any = await apiClient.getRecipeStepFullLogs(recipeId, executionId, stepOrder)
+      setFullLogs(prev => ({ ...prev, [stepOrder]: data?.log_data || data }))
+    } catch (err) {
+      console.error(`Failed to load full logs for step ${stepOrder}:`, err)
+    } finally {
+      setLoadingLogs(prev => {
+        const next = new Set(prev)
+        next.delete(stepOrder)
+        return next
+      })
+    }
   }
 
   // Build step data: merge recipe steps definition with execution results
@@ -152,7 +181,7 @@ export function RecipeStepProgress({
         <AnimatePresence initial={false}>
           {stepData.map((step, idx) => {
             const isExpanded = expandedSteps.has(step.order)
-            const hasOutput = step.result?.output || step.result?.error || (step.result?.tool_calls?.length || 0) > 0
+            const hasOutput = step.result?.output || step.result?.output_preview || step.result?.error || (step.result?.tool_calls?.length || 0) > 0 || (step.result?.tool_calls_summary?.length || 0) > 0 || step.result?.log_url
 
             return (
               <motion.div
@@ -255,43 +284,91 @@ export function RecipeStepProgress({
                           </div>
                         )}
 
-                        {/* Tool calls */}
-                        {step.result.tool_calls && step.result.tool_calls.length > 0 && (
+                        {/* Tool calls summary (compact from DB) */}
+                        {step.result.tool_calls_summary && step.result.tool_calls_summary.length > 0 && !fullLogs[step.order] && (
                           <div className="space-y-1">
                             <span className="text-[10px] uppercase text-muted-foreground font-medium">Tool Calls</span>
-                            {step.result.tool_calls.map((tc, tcIdx) => (
-                              <div key={tcIdx} className="bg-white/5 rounded-lg p-2 text-xs">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Badge variant="outline" className="text-[10px] h-4 bg-primary/10 text-primary border-primary/30">
-                                    {tc.action}
-                                  </Badge>
-                                  {tc.duration_ms != null && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {(tc.duration_ms / 1000).toFixed(1)}s
-                                    </span>
-                                  )}
-                                </div>
-                                {tc.result && (
-                                  <pre className="text-[10px] text-muted-foreground max-h-20 overflow-auto whitespace-pre-wrap mt-1">
-                                    {typeof tc.result === 'string' ? tc.result.slice(0, 300) : JSON.stringify(tc.result, null, 2).slice(0, 300)}
-                                  </pre>
-                                )}
-                              </div>
-                            ))}
+                            <div className="flex flex-wrap gap-1">
+                              {step.result.tool_calls_summary.map((summary, tcIdx) => (
+                                <Badge key={tcIdx} variant="outline" className="text-[10px] h-5 bg-primary/10 text-primary border-primary/30">
+                                  {summary}
+                                </Badge>
+                              ))}
+                            </div>
                           </div>
                         )}
 
-                        {/* Output preview */}
-                        {step.result.output && (
-                          <div className="space-y-1">
-                            <span className="text-[10px] uppercase text-muted-foreground font-medium">Output</span>
-                            <div className="bg-white/5 rounded-lg p-2">
-                              <pre className="text-xs text-foreground/80 max-h-32 overflow-auto whitespace-pre-wrap">
-                                {step.result.output.slice(0, 500)}
-                                {step.result.output.length > 500 && '...'}
-                              </pre>
+                        {/* Detailed tool calls (from DB step_results or full logs) */}
+                        {(() => {
+                          const toolCalls = fullLogs[step.order]?.tool_calls || step.result.tool_calls
+                          if (!toolCalls || toolCalls.length === 0) return null
+                          return (
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase text-muted-foreground font-medium">
+                                {fullLogs[step.order] ? 'Full Tool Calls' : 'Tool Calls'}
+                              </span>
+                              {toolCalls.map((tc: any, tcIdx: number) => (
+                                <div key={tcIdx} className="bg-white/5 rounded-lg p-2 text-xs">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <Badge variant="outline" className="text-[10px] h-4 bg-primary/10 text-primary border-primary/30">
+                                      {tc.action || tc.action_name || 'action'}
+                                    </Badge>
+                                    {tc.duration_ms != null && (
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {(tc.duration_ms / 1000).toFixed(1)}s
+                                      </span>
+                                    )}
+                                  </div>
+                                  {tc.result && (
+                                    <pre className="text-[10px] text-muted-foreground max-h-20 overflow-auto whitespace-pre-wrap mt-1">
+                                      {typeof tc.result === 'string' ? tc.result.slice(0, 500) : JSON.stringify(tc.result, null, 2).slice(0, 500)}
+                                    </pre>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          </div>
+                          )
+                        })()}
+
+                        {/* Output — full from S3 or preview from DB */}
+                        {(() => {
+                          const fullOutput = fullLogs[step.order]?.agent_output
+                          const output = fullOutput || step.result.output || step.result.output_preview
+                          if (!output) return null
+                          return (
+                            <div className="space-y-1">
+                              <span className="text-[10px] uppercase text-muted-foreground font-medium">
+                                {fullOutput ? 'Full Output' : 'Output Preview'}
+                              </span>
+                              <div className="bg-white/5 rounded-lg p-2">
+                                <pre className="text-xs text-foreground/80 max-h-48 overflow-auto whitespace-pre-wrap">
+                                  {fullOutput ? fullOutput : output.slice(0, 500)}
+                                  {!fullOutput && output.length > 500 && '...'}
+                                </pre>
+                              </div>
+                            </div>
+                          )
+                        })()}
+
+                        {/* Load full logs button — only when S3 log_url exists and not yet loaded */}
+                        {step.result.log_url && !fullLogs[step.order] && recipeId && executionId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-primary/80 hover:text-primary gap-1.5 h-7"
+                            disabled={loadingLogs.has(step.order)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              loadFullLogs(step.order)
+                            }}
+                          >
+                            {loadingLogs.has(step.order) ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Download className="w-3 h-3" />
+                            )}
+                            {loadingLogs.has(step.order) ? 'Loading...' : 'Load full logs'}
+                          </Button>
                         )}
 
                         {/* Retries indicator */}

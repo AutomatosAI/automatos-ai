@@ -344,14 +344,27 @@ class ComposioToolExecutor:
                         if examples:
                             examples_clause = f" Examples of mapped actions: {examples}"
 
-                    # DISABLED: Auto-mapper was using display names from broken sync
-                    # Just use the raw action name from LLM and let Composio validate it
+                    # Auto-map if top suggestion has high confidence (ratio > 0.7 AND token overlap > 0)
                     auto_mapped_from: Optional[str] = None
                     auto_selected_action: Optional[str] = None
 
-                    # Skip auto-mapping entirely - use raw action name
-                    if False:  # Disabled
-                        pass
+                    if scored and scored[0][0] > 0 and scored[0][1] > 0.7:
+                        auto_selected_action = scored[0][2]
+                        auto_mapped_from = raw_action
+                        logger.info(
+                            f"[composio_exec] Auto-mapped '{raw_action}' → '{auto_selected_action}' "
+                            f"(overlap={scored[0][0]}, ratio={scored[0][1]:.2f})"
+                        )
+                        action_upper = auto_selected_action.upper()
+                        # Re-query to get the mapped record for downstream use
+                        mapped = (
+                            self.db.query(ComposioActionCache)
+                            .filter(
+                                ComposioActionCache.app_name == app_name,
+                                func.lower(ComposioActionCache.action_name) == auto_selected_action.lower(),
+                            )
+                            .first()
+                        )
                     else:
                         return {
                             "success": False,

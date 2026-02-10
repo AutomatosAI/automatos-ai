@@ -1051,7 +1051,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             
             # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
             CONTEXT_MAP = {
-                "general": ["communication", "research", "productivity", "system", "collaboration", "developer"],
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api"],
                 "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
                 "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
                 "communication": ["communication", "slack", "email", "chat", "collaboration"],

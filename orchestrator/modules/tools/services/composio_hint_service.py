@@ -130,9 +130,12 @@ class ComposioHintService:
 
             # Step 3: Build hint header
             hint_lines = [
-                "You have these external apps assigned for this agent (via Composio): "
+                "You have these external apps connected (via Composio): "
                 + ", ".join(sorted(set(allowed_apps))) + ".",
-                "When you need external data/actions (email, Slack, etc.), use `composio_execute`.",
+                "IMPORTANT: To interact with these apps, call `composio_execute` with "
+                "the EXACT action name from the list below. Do NOT guess or invent action names — "
+                "only use the exact names listed here. Do NOT use search_codebase to look for code "
+                "when your task is to interact with external apps.",
             ]
 
             # Step 4: Resolve actions (3-tier)
@@ -162,7 +165,7 @@ class ComposioHintService:
             # Step 5: Format output
             app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
             for app, actions in app_matches[:6]:
-                hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
+                hint_lines.append(f"- {app} available actions (use these EXACT names): {', '.join(actions)}")
                 result.matched_actions.extend(actions)
 
             if top_action_params:

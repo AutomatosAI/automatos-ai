@@ -544,6 +544,26 @@ async def delete_workflow_recipe(
         # Cleanup trigger subscriptions before deleting
         _cleanup_trigger_subscriptions(recipe.id, db)
 
+        # Cleanup Mem0 memories scoped to this recipe
+        try:
+            from core.services.recipe_memory_service import RecipeMemoryService
+            from modules.memory.integrations.mem0_client import Mem0Client
+            mem0 = Mem0Client()
+            template_id = recipe.template_id or str(recipe.id)
+            recipe_scope = f"ws_{ctx.workspace_id}_recipe_{template_id}"
+            # Delete all memories under the recipe scope
+            all_mems = mem0.get_all(user_id=recipe_scope, limit=200)
+            deleted_count = 0
+            for mem in all_mems:
+                mem_id = mem.get("id") if isinstance(mem, dict) else None
+                if mem_id:
+                    mem0.delete(mem_id)
+                    deleted_count += 1
+            if deleted_count:
+                logger.info(f"[delete_recipe] Cleaned up {deleted_count} Mem0 memories for scope {recipe_scope}")
+        except Exception as e:
+            logger.info(f"[delete_recipe] Mem0 cleanup skipped: {e}")
+
         db.delete(recipe)
         db.commit()
 
@@ -824,6 +844,96 @@ async def get_recipe_execution_detail(
     except Exception as e:
         logger.error(f"Error getting execution detail: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting execution: {str(e)}")
+
+
+# ===================================================================
+# STEP LOG ENDPOINT (Lazy-load full logs from S3)
+# ===================================================================
+
+@router.get("/{recipe_id}/executions/{execution_id}/steps/{step_order}/logs")
+async def get_step_full_logs(
+    recipe_id: str,
+    execution_id: str,
+    step_order: int,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch full verbose step log from S3 on demand.
+
+    The DB stores only compact summaries. This endpoint fetches the
+    full agent output, tool call results, and message history from S3.
+    """
+    try:
+        # Validate recipe ownership
+        recipe = db.query(WorkflowRecipe).filter(
+            WorkflowRecipe.owner_type == 'workspace',
+            WorkflowRecipe.workspace_id == ctx.workspace_id,
+            WorkflowRecipe.template_id == recipe_id
+        ).first()
+
+        if not recipe:
+            raise HTTPException(status_code=404, detail=f"Recipe '{recipe_id}' not found")
+
+        # Validate execution
+        execution = db.query(RecipeExecution).filter(
+            RecipeExecution.execution_id == execution_id,
+            RecipeExecution.recipe_id == recipe.id
+        ).first()
+
+        if not execution:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Execution '{execution_id}' not found for recipe '{recipe_id}'"
+            )
+
+        # Check if step result has a log_url
+        step_results = execution.step_results or []
+        log_url = None
+        for sr in step_results:
+            if isinstance(sr, dict) and sr.get("order") == step_order:
+                log_url = sr.get("log_url")
+                break
+
+        if not log_url:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No S3 log found for step {step_order}"
+            )
+
+        # Fetch from S3
+        import boto3
+        import json as json_mod
+        from config import config
+
+        # Parse s3://bucket/key from log_url
+        s3_path = log_url.replace("s3://", "")
+        bucket = s3_path.split("/", 1)[0]
+        key = s3_path.split("/", 1)[1]
+
+        s3 = boto3.client(
+            "s3",
+            region_name=config.AWS_REGION or "us-east-1",
+            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+        )
+
+        response = s3.get_object(Bucket=bucket, Key=key)
+        body = response["Body"].read().decode("utf-8")
+        log_data = json_mod.loads(body)
+
+        return {
+            "step_order": step_order,
+            "execution_id": execution_id,
+            "log_url": log_url,
+            "log_data": log_data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching step logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching step logs: {str(e)}")
 
 
 # ===================================================================

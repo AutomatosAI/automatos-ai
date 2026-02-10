@@ -103,11 +103,25 @@ class EntityManager:
         if not entity:
             return []
         conns = self.get_entity_connections(str(entity["id"]))
-        return [
-            (c.get("app_name") or "").upper()
-            for c in conns
-            if (c.get("status") or "").lower() == "active"
-        ]
+        result = []
+        for c in conns:
+            status = (c.get("status") or "").lower()
+            app = (c.get("app_name") or "").upper()
+            if not app:
+                continue
+            if status == "active":
+                result.append(app)
+            elif status == "pending" and c.get("connection_id"):
+                # OAuth completed on Composio side but our callback missed —
+                # treat as connected and lazily upgrade status to 'active'.
+                self.update_connection_status(
+                    entity_id=str(entity["id"]),
+                    app_name=app,
+                    status="active",
+                    connection_id=c["connection_id"],
+                )
+                result.append(app)
+        return result
 
     def add_connection(
         self,
