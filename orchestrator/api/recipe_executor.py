@@ -395,6 +395,7 @@ def _build_compact_step_result(
         "order": step_result.get("order"),
         "agent_id": step_result.get("agent_id"),
         "agent_name": step_result.get("agent_name"),
+        "prompt_template": step_result.get("prompt_template", ""),
         "status": step_result.get("status"),
         "duration_ms": step_result.get("duration_ms"),
         "tokens_used": step_result.get("tokens_used"),
@@ -538,6 +539,7 @@ async def execute_recipe_direct(
                 "order": step_order,
                 "agent_id": agent_id,
                 "agent_name": agent_name,
+                "prompt_template": prompt_template,
                 "output_key": output_key,
                 "status": "running",
                 "output": None,
@@ -691,12 +693,16 @@ async def execute_recipe_direct(
         total_duration = int((time.time() - execution_start) * 1000)
         total_tokens = sum(s.get("tokens_used", 0) for s in step_results)
 
-        # Determine final output: last completed step's output_preview
+        # Determine final output: last completed step's full output
+        # (step_results are compact, but we still have the last step_result dict in scope)
         final_output = None
-        for sr in reversed(step_results):
-            if sr.get("status") == "completed":
-                final_output = sr.get("output_preview", "")
-                break
+        if step_result.get("status") == "completed":
+            final_output = step_result.get("output", "")
+        if not final_output:
+            for sr in reversed(step_results):
+                if sr.get("status") == "completed":
+                    final_output = sr.get("output_preview", "")
+                    break
 
         execution.status = 'completed'
         execution.completed_at = datetime.now(timezone.utc)

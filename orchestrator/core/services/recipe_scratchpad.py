@@ -303,7 +303,14 @@ class RecipeScratchpad:
             if result_dict:
                 key_data = self._extract_key_fields(action, result_dict)
             elif isinstance(result, str) and result:
-                # Extract URLs and KV patterns from text
+                # llm_context format often has headers then JSON:
+                #   "Tool: composio_execute\nStatus: success\n...\n[\n  {...}\n]"
+                # Try to find embedded JSON array or object
+                json_extracted = self._try_extract_json_from_text(result)
+                if json_extracted:
+                    key_data = self._extract_key_fields(action, json_extracted)
+
+                # Also extract URLs and KV patterns from text
                 urls = _URL_RE.findall(result[:2000])
                 if urls:
                     key_data["urls"] = urls[:3]
@@ -317,6 +324,41 @@ class RecipeScratchpad:
             })
 
         return summaries
+
+    @staticmethod
+    def _try_extract_json_from_text(text: str) -> Optional[dict]:
+        """
+        Try to find and parse an embedded JSON object or array from formatted
+        tool result text (e.g. llm_context from Composio tool executor).
+
+        Returns the first JSON object found (unwraps single-element arrays),
+        or None if no JSON found.
+        """
+        # Look for first [ or { in the text
+        for start_char, end_char in [("[", "]"), ("{", "}")]:
+            idx = text.find(start_char)
+            if idx == -1:
+                continue
+            # Find matching end — try from the end of string backwards
+            end_idx = text.rfind(end_char)
+            if end_idx <= idx:
+                continue
+            try:
+                parsed = json.loads(text[idx:end_idx + 1])
+                if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+                    return parsed[0]  # Unwrap single-element array
+                if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+                    # Merge key fields from all items
+                    merged: dict = {}
+                    for item in parsed[:3]:
+                        if isinstance(item, dict):
+                            merged.update(item)
+                    return merged
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return None
 
     def _extract_key_fields(
         self, action: str, data: dict

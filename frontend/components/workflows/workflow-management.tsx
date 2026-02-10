@@ -625,7 +625,7 @@ export function WorkflowManagement() {
                   recipeSteps: (run.step_results || []).map((s: any) => ({
                     step_id: s.step_id,
                     order: s.order,
-                    prompt_template: '',
+                    prompt_template: s.prompt_template || '',
                     agent_id: s.agent_id ?? 0,
                   })),
                   recipeName: run.recipe_name,
