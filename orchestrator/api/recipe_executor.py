@@ -172,7 +172,7 @@ async def _execute_step(
     # 7. Generate + tool loop
     tool_router = get_tool_router()
     all_tool_calls = []
-    max_iterations = 3
+    max_iterations = 6
     response = None
 
     for iteration in range(max_iterations):
