@@ -3,7 +3,10 @@
 > **"From Atoms to Organisms: The Future of Multi-Agent Orchestration"**
 > 🎓 **Research-Backed**: Implements [Context Engineering 2.0](RESEARCH.md) principles based on peer-reviewed research (SJTU/GAIR, 2025)
 
-![Automatos AI Dashboard](docs/assets/images/main_dashboard.png)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/AutomatosAI/automatos-ai?label=CodeRabbit&link=https://coderabbit.ai)](https://coderabbit.ai)
+
 
 **Automatos AI** is an enterprise-grade platform for creating, managing, and orchestrating intelligent AI agents. It goes beyond simple "chains" to create **autonomous software teams** that can plan, reason, collaborate, and execute complex workflows.
 

@@ -73,6 +73,7 @@ async def _execute_step(
     # Lazy imports to avoid circular deps
     from modules.tools.tool_router import get_agent_tools as get_chat_tools, get_tool_router
     from modules.tools.services.composio_hint_service import ComposioHintService
+    from modules.tools.services.composio_tool_service import ComposioToolService
     from modules.agents.factory.agent_factory import AgentFactory
     from modules.tools.builtin.scratchpad_tool import (
         SCRATCHPAD_WRITE_TOOL_DEF,
@@ -105,25 +106,47 @@ async def _execute_step(
     )
     messages.append({"role": "system", "content": scope_instruction})
 
-    # 2. Hints — use task-only prompt + recipe_mode to avoid trigger metadata
-    #    polluting action matching. Recipe mode skips taxonomy/capability gate
-    #    and uses prompt tokens directly — scales to any number of tools.
+    # 2. Composio tools — SDK semantic search for per-action function-calling tools.
+    #    Falls back to hint-based composio_execute if SDK search returns empty.
+    tool_service = ComposioToolService(db)
+    composio_result = None
     try:
-        hint_service = ComposioHintService(db)
-        hint_result = hint_service.build_hints(
+        composio_result = tool_service.get_tools_for_step(
             agent_id=agent.id,
-            prompt=prompt_for_hints or clean_prompt,
             workspace_id=workspace_id,
-            recipe_mode=True,
+            task_prompt=prompt_for_hints or clean_prompt,
         )
-        if hint_result.hint_lines:
-            messages.append({"role": "system", "content": "\n".join(hint_result.hint_lines)})
-            logger.info(
-                f"[recipe_step] Hints: strategy={hint_result.strategy_used} "
-                f"actions={len(hint_result.matched_actions)}"
-            )
     except Exception as exc:
-        logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
+        logger.warning(f"[recipe_step] ComposioToolService failed: {exc}", exc_info=True)
+
+    # If SDK search returned tools, inject a simpler scope message.
+    # Otherwise fall back to hint-based composio_execute mega-tool.
+    if composio_result and composio_result.tools:
+        messages.append({"role": "system", "content": _composio_scope_message(composio_result.app_names)})
+        logger.info(
+            f"[recipe_step] SDK search: strategy={composio_result.strategy} "
+            f"actions={len(composio_result.action_set)} search_ms={composio_result.search_ms}"
+        )
+    else:
+        # Fallback: existing hint service with composio_execute mega-tool
+        if composio_result:
+            composio_result.strategy = "hint_fallback"
+        try:
+            hint_service = ComposioHintService(db)
+            hint_result = hint_service.build_hints(
+                agent_id=agent.id,
+                prompt=prompt_for_hints or clean_prompt,
+                workspace_id=workspace_id,
+                recipe_mode=True,
+            )
+            if hint_result.hint_lines:
+                messages.append({"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                logger.info(
+                    f"[recipe_step] Hints fallback: strategy={hint_result.strategy_used} "
+                    f"actions={len(hint_result.matched_actions)}"
+                )
+        except Exception as exc:
+            logger.warning(f"[recipe_step] Hint injection failed: {exc}", exc_info=True)
 
     # 3a. Mem0 memories (first step only)
     if recipe_memories and step_order == 1:
@@ -161,8 +184,17 @@ async def _execute_step(
     # 4. User message — clean task prompt
     messages.append({"role": "user", "content": clean_prompt})
 
-    # 5. Tools — same function as chatbot + scratchpad_write builtin
-    tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
+    # 5. Tools — per-action SDK tools (or composio_execute fallback) + builtins
+    if composio_result and composio_result.tools:
+        # SDK search succeeded: strip composio_execute mega-tool, add per-action tools
+        builtin_tools = [
+            t for t in get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
+            if t.get("function", {}).get("name") != "composio_execute"
+        ]
+        tools = builtin_tools + composio_result.tools
+    else:
+        # Fallback: composio_execute + hints (existing behavior)
+        tools = get_chat_tools(agent_id=agent.id, workspace_id=workspace_id)
     if scratchpad:
         tools = list(tools) + [SCRATCHPAD_WRITE_TOOL_DEF]
 
@@ -218,6 +250,46 @@ async def _execute_step(
                 })
                 continue
 
+            # Direct Composio action execution (SDK search path)
+            if composio_result and composio_result.entity_id and tool_name in composio_result.action_set:
+                try:
+                    t0 = time.time()
+                    exec_result = tool_service.execute_action(
+                        action_name=tool_name,
+                        params=tool_args,
+                        entity_id=composio_result.entity_id,
+                    )
+                    exec_ms = int((time.time() - t0) * 1000)
+
+                    success = exec_result.get("success", False)
+                    data = exec_result.get("data")
+                    error = exec_result.get("error")
+
+                    if success:
+                        result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                        logger.info(f"[recipe_step] Composio direct OK: {tool_name} in {exec_ms}ms")
+                    else:
+                        result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
+                        logger.warning(f"[recipe_step] Composio direct failed: {tool_name} — {error}")
+                except Exception as exc:
+                    exec_ms = int((time.time() - t0) * 1000)
+                    result_text = f"Error executing {tool_name}: {exc}"
+                    logger.error(f"[recipe_step] Composio direct exception: {tool_name}: {exc}", exc_info=True)
+
+                all_tool_calls.append({
+                    "action": tool_name,
+                    "params": tool_args,
+                    "result": result_text[:4000],
+                    "duration_ms": exec_ms,
+                    "composio_direct": True,
+                })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_id,
+                    "content": result_text[:8000],
+                })
+                continue
+
             result = await tool_router.execute_and_format(
                 tool_name,
                 tool_args,
@@ -246,6 +318,18 @@ async def _execute_step(
     if response and hasattr(response, 'usage') and response.usage:
         tokens = response.usage.get("total_tokens", 0) if isinstance(response.usage, dict) else 0
 
+    # Composio metrics for tracking
+    composio_metrics = {}
+    if composio_result:
+        composio_metrics = {
+            "composio_strategy": composio_result.strategy,
+            "composio_search_ms": composio_result.search_ms,
+            "composio_tools_offered": len(composio_result.tools),
+            "composio_tools_called": [
+                tc["action"] for tc in all_tool_calls if tc.get("composio_direct")
+            ],
+        }
+
     return {
         "status": "success",
         "result": content,
@@ -253,8 +337,25 @@ async def _execute_step(
             "tokens_used": tokens,
             "tool_calls": all_tool_calls,
             "messages": messages,
+            **composio_metrics,
         },
     }
+
+
+def _composio_scope_message(app_names: List[str]) -> str:
+    """
+    Build a concise system message for SDK-search mode.
+
+    When per-action tools are available (e.g. JIRA_GET_ISSUE as its own function),
+    the LLM doesn't need action lists or param hints — just a note about which
+    apps are connected and that it should use the provided tools directly.
+    """
+    apps = ", ".join(sorted(set(app_names))) if app_names else "your connected apps"
+    return (
+        f"You have these external apps connected: {apps}.\n"
+        "The relevant actions are available as individual tools with their "
+        "parameter schemas. Call them directly by name — do NOT use composio_execute."
+    )
 
 
 async def _build_system_prompt(agent: Agent, db: Session) -> str:
