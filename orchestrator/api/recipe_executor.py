@@ -250,8 +250,17 @@ async def _execute_step(
                 })
                 continue
 
-            # Direct Composio action execution (SDK search path)
-            if composio_result and composio_result.entity_id and tool_name in composio_result.action_set:
+            # Direct Composio action execution (SDK search path).
+            # Also catches LLM-inferred actions beyond search results —
+            # if the tool name matches a connected app prefix (e.g. JIRA_*),
+            # route to Composio direct execution instead of tool_router.
+            _is_composio_action = (
+                composio_result and composio_result.entity_id and (
+                    tool_name in composio_result.action_set
+                    or any(tool_name.startswith(f"{app}_") for app in composio_result.app_names)
+                )
+            )
+            if _is_composio_action:
                 try:
                     t0 = time.time()
                     exec_result = tool_service.execute_action(
