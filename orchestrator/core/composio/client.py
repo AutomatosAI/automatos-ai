@@ -881,7 +881,7 @@ class ComposioClient:
             raw_tools = self.toolset.tools.get(
                 user_id=entity_id,
                 toolkits=[app_name.lower()],
-                limit=500,
+                limit=2000,
             )
             for tool in raw_tools:
                 if isinstance(tool, dict):
