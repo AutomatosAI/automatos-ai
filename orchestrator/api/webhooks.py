@@ -33,6 +33,23 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 _background_tasks: Set[asyncio.Task] = set()
 
 
+@router.get("/ws/{workspace_key}")
+async def workspace_webhook_verify(
+    workspace_key: str,
+    db: Session = Depends(get_db),
+):
+    """Verification endpoint — external services send GET to validate the URL exists."""
+    workspace = db.query(Workspace).filter(
+        Workspace.webhook_key == workspace_key,
+        Workspace.is_active == True,
+    ).first()
+
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    return {"status": "ok"}
+
+
 @router.post("/ws/{workspace_key}")
 async def general_workspace_webhook(
     workspace_key: str,

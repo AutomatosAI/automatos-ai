@@ -1474,6 +1474,23 @@ async def install_recipe_from_marketplace(
 webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 
+@webhook_router.get("/recipe/{webhook_id}")
+async def recipe_webhook_verify(
+    webhook_id: str,
+    db: Session = Depends(get_db),
+):
+    """Verification endpoint — Jira/GitHub/Slack send GET to validate the URL exists."""
+    recipe = db.query(WorkflowRecipe).filter(
+        WorkflowRecipe.schedule_config["webhook_id"].astext == webhook_id,
+        WorkflowRecipe.owner_type == "workspace",
+    ).first()
+
+    if not recipe:
+        raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    return {"status": "ok", "recipe": recipe.name}
+
+
 @webhook_router.post("/recipe/{webhook_id}")
 async def recipe_webhook(
     webhook_id: str,
