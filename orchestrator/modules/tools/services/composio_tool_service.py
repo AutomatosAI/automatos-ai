@@ -111,30 +111,26 @@ class ComposioToolService:
             client = get_composio_client()
             t0 = time.monotonic()
 
-            # 3a. Extract explicit action names from prompt and fetch exact schemas.
-            #     Only include actions whose app prefix matches an allowed app.
+            # 3. Build a focused search query.
+            #    If the prompt names explicit actions (e.g. GITHUB_CREATE_A_REFERENCE),
+            #    convert them to natural language search terms. This gives Composio's
+            #    semantic search a much better signal than the full 2000-char prompt.
             explicit_names = self._extract_action_names(task_prompt, app_prefixes)
             if explicit_names:
-                explicit_results = client.search_actions_for_step(
-                    search_query="",
-                    app_names=[a.lower() for a in allowed_apps],
-                    entity_id=entity_id,
-                    explicit_actions=list(explicit_names),
-                )
-                for item in explicit_results:
-                    action_name = item.get("action_name", "")
-                    schema = item.get("schema")
-                    if action_name and schema and action_name not in result.action_set:
-                        result.tools.append(schema)
-                        result.action_set.add(action_name)
-                logger.info(
-                    "[ComposioToolService] Explicit actions from prompt: %s → resolved %d",
-                    sorted(explicit_names), len(result.action_set),
-                )
+                search_query = self._action_names_to_search_query(explicit_names)
+            else:
+                # No explicit actions — use first ~200 chars of prompt (avoids
+                # flooding the search API with the full template)
+                search_query = task_prompt[:200].strip()
 
-            # 3b. SDK semantic search for additional relevant actions.
+            logger.info(
+                "[ComposioToolService] Search query: explicit_actions=%s query=%r",
+                sorted(explicit_names) if explicit_names else "none",
+                search_query[:120],
+            )
+
             search_results = client.search_actions_for_step(
-                search_query=task_prompt,
+                search_query=search_query,
                 app_names=[a.lower() for a in allowed_apps],
                 entity_id=entity_id,
                 limit=limit,
@@ -151,10 +147,8 @@ class ComposioToolService:
             if result.tools:
                 result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] OK: agent=%s explicit=%d search=%d "
-                    "total_actions=%s search_ms=%d",
-                    agent_id, len(explicit_names), len(search_results),
-                    sorted(result.action_set), result.search_ms,
+                    "[ComposioToolService] OK: agent=%s actions=%s search_ms=%d",
+                    agent_id, sorted(result.action_set), result.search_ms,
                 )
             else:
                 logger.info(
@@ -208,6 +202,28 @@ class ComposioToolService:
             name for name in candidates
             if name.split("_", 1)[0] in app_prefixes
         }
+
+    @staticmethod
+    def _action_names_to_search_query(action_names: Set[str]) -> str:
+        """
+        Convert explicit action names to a focused semantic search query.
+
+        ``GITHUB_CREATE_A_REFERENCE`` → ``"create a reference"``
+        ``JIRA_GET_ISSUE`` → ``"get issue"``
+
+        Strips the app prefix and joins with spaces. This gives Composio's
+        semantic search a clean signal instead of a 2000-char prompt dump.
+        """
+        terms = []
+        for name in sorted(action_names):
+            # Strip app prefix: GITHUB_CREATE_A_REFERENCE → CREATE_A_REFERENCE
+            parts = name.split("_", 1)
+            if len(parts) > 1:
+                action_part = parts[1].lower().replace("_", " ")
+            else:
+                action_part = name.lower()
+            terms.append(action_part)
+        return " ".join(terms)
 
     def _resolve_allowed_apps(self, agent_id: int, workspace_id: UUID) -> List[str]:
         """
