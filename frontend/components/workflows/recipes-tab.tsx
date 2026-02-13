@@ -216,6 +216,7 @@ export function RecipesTab({
         type: backendSchedule.type || 'manual',
         cron_expression: backendSchedule.cron_expression || '',
         trigger_config: backendSchedule.trigger_config || {},
+        webhook_id: backendSchedule.webhook_id,
       },
     }
 

@@ -315,7 +315,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.trigger_config?.webhook_id as string | undefined)} />
+                            <RecipeScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
                           </motion.div>
                         </TabsContent>
                       </Tabs>
