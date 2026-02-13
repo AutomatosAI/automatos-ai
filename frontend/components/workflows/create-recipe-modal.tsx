@@ -70,7 +70,7 @@ interface CreateRecipeModalProps {
 export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId }: CreateRecipeModalProps) {
   const [currentStep, setCurrentStep] = React.useState(0)
   const [inputsValid, setInputsValid] = React.useState(true)
-  const { isSubmitting, submitRecipe, updateRecipe } = useRecipeForm()
+  const { isSubmitting, lastSavedWebhookId, submitRecipe, updateRecipe } = useRecipeForm()
   const isEditMode = !!recipeId
 
   const methods = useForm<RecipeFormValues>({
@@ -157,7 +157,10 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
     } else {
       await submitRecipe(data, () => {
         onSave?.(data)
-        handleClose()
+        // For trigger recipes, stay open so user can see/copy the webhook URL
+        if (data.schedule_config.type !== 'trigger') {
+          handleClose()
+        }
       })
     }
   }
@@ -312,7 +315,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeScheduleConfig webhookId={initialData?.schedule_config?.trigger_config?.webhook_id as string | undefined} />
+                            <RecipeScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.trigger_config?.webhook_id as string | undefined)} />
                           </motion.div>
                         </TabsContent>
                       </Tabs>
