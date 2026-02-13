@@ -850,6 +850,11 @@ class ComposioClient:
                     user_id=entity_id,
                     actions=explicit_actions,
                 )
+                if raw_tools:
+                    logger.info(
+                        f"[ComposioClient] explicit_actions={explicit_actions} "
+                        f"returned {len(raw_tools)} items, types={[type(t).__name__ for t in raw_tools[:3]]}"
+                    )
             else:
                 # Semantic search scoped to the agent's connected apps
                 raw_tools = self.toolset.tools.get(
@@ -860,16 +865,30 @@ class ComposioClient:
                 )
 
             for tool in raw_tools:
-                if not isinstance(tool, dict) or tool.get("type") != "function":
+                # Composio SDK may return dicts or Pydantic/SDK objects.
+                # Normalize to dict for consistent downstream handling.
+                if isinstance(tool, dict):
+                    tool_dict = tool
+                elif hasattr(tool, "model_dump"):
+                    tool_dict = tool.model_dump()
+                elif hasattr(tool, "dict"):
+                    tool_dict = tool.dict()
+                elif hasattr(tool, "__dict__"):
+                    tool_dict = dict(tool.__dict__)
+                else:
+                    logger.debug(f"Skipping unrecognized tool type: {type(tool)}")
                     continue
-                fn = tool.get("function") or {}
+
+                if tool_dict.get("type") != "function":
+                    continue
+                fn = tool_dict.get("function") or {}
                 action_name = fn.get("name") or ""
                 if not action_name or action_name in seen:
                     continue
                 seen.add(action_name)
                 results.append({
                     "action_name": action_name,
-                    "schema": tool,  # Already in OpenAI format
+                    "schema": tool_dict,  # OpenAI function-calling format
                 })
 
         except Exception as e:
