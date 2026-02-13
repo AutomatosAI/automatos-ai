@@ -35,12 +35,22 @@ def _auto_register_trigger(recipe: WorkflowRecipe, workspace_id, db: Session) ->
     If recipe.schedule_config is type=trigger with a Composio trigger,
     subscribe via Composio API and store TriggerSubscription.
     Returns the composio_subscription_id on success, None otherwise.
+
+    Non-Composio triggers (custom webhooks) skip Composio registration entirely —
+    they only need the webhook_id stored in schedule_config.
     """
     schedule = recipe.schedule_config
     if not schedule or schedule.get("type") != "trigger":
         return None
 
     trigger_config = schedule.get("trigger_config", {})
+
+    # Only attempt Composio registration for composio-sourced triggers
+    source = trigger_config.get("source", "")
+    if source != "composio":
+        logger.info("[trigger_auto] Non-Composio trigger (source=%s), skipping Composio registration for recipe %d", source, recipe.id)
+        return None
+
     # Support both "trigger_name" (canonical) and "trigger" (UI shorthand)
     trigger_name = (
         trigger_config.get("trigger_name")

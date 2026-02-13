@@ -6,7 +6,8 @@ In this codebase, most resources are filtered by `workspace_id`, and the auth
 dependency (`get_request_context_hybrid`) provides a request-scoped workspace UUID.
 """
 
-from uuid import UUID
+import os
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -43,6 +44,15 @@ async def get_current_workspace(
     # Detect brand-new workspace: no agents created yet
     agent_count = db.query(Agent).filter(Agent.workspace_id == workspace.id).count()
 
+    # Auto-generate webhook_key if missing (for workspaces created before migration)
+    if not workspace.webhook_key:
+        workspace.webhook_key = uuid4().hex
+        db.commit()
+
+    # Compute webhook URL
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    webhook_url = f"{backend_url}/api/webhooks/ws/{workspace.webhook_key}" if workspace.webhook_key else None
+
     return {
         "id": str(workspace.id),
         "name": workspace.name,
@@ -51,5 +61,7 @@ async def get_current_workspace(
         "role": ctx.user.role,
         "plan_limits": workspace.plan_limits or {},
         "is_new_workspace": agent_count == 0,
+        "webhook_url": webhook_url,
+        "webhook_key": workspace.webhook_key,
     }
 

@@ -21,6 +21,8 @@ interface Workspace {
         max_documents: number
         max_members: number
     }
+    webhookUrl?: string
+    webhookKey?: string
 }
 
 interface WorkspaceContextType {
@@ -81,6 +83,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 role: data.role,
                 isNewWorkspace: data.is_new_workspace ?? false,
                 planLimits: data.plan_limits,
+                webhookUrl: data.webhook_url,
+                webhookKey: data.webhook_key,
             })
 
             // Persist for api-client.ts

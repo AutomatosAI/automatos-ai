@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { useFormContext } from 'react-hook-form'
-import { Play, Clock, Webhook, Copy, Check, ExternalLink } from 'lucide-react'
+import { Play, Clock, Webhook, Copy, Check } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -20,11 +20,6 @@ const CRON_QUICK_PICKS = [
   { label: 'Weekdays at 9am', value: '0 9 * * 1-5' },
   { label: 'Weekly on Monday', value: '0 9 * * 1' },
   { label: 'Custom', value: '' },
-]
-
-const TRIGGER_SOURCE_OPTIONS = [
-  { value: 'composio', label: 'Composio App' },
-  { value: 'custom', label: 'Custom Webhook' },
 ]
 
 function getNextCronRuns(expression: string, count: number): string[] {
@@ -87,30 +82,28 @@ function getNextCronRuns(expression: string, count: number): string[] {
   return runs
 }
 
-export function RecipeScheduleConfig() {
+interface RecipeScheduleConfigProps {
+  webhookId?: string
+}
+
+export function RecipeScheduleConfig({ webhookId }: RecipeScheduleConfigProps) {
   const methods = useFormContext<RecipeFormValues>()
   const scheduleConfig = methods.watch('schedule_config')
   const [copied, setCopied] = React.useState(false)
   const [cronQuick, setCronQuick] = React.useState('')
 
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
   const updateSchedule = (field: keyof RecipeFormValues['schedule_config'], value: unknown) => {
     methods.setValue('schedule_config', { ...scheduleConfig, [field]: value })
   }
 
-  const updateTriggerConfig = (field: string, value: unknown) => {
-    const current = scheduleConfig.trigger_config || {}
-    methods.setValue('schedule_config', {
-      ...scheduleConfig,
-      trigger_config: { ...current, [field]: value },
-    })
-  }
-
-  const webhookUrl = React.useMemo(() => {
-    const id = `wh-${Date.now().toString(36)}`
-    return `https://api.automatos.ai/webhooks/recipe/${id}`
-  }, [])
+  const webhookUrl = webhookId
+    ? `${apiBaseUrl}/api/webhooks/recipe/${webhookId}`
+    : null
 
   const handleCopyWebhook = () => {
+    if (!webhookUrl) return
     navigator.clipboard.writeText(webhookUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -270,128 +263,66 @@ export function RecipeScheduleConfig() {
             <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
               <span className="text-base">🔗</span> Webhook URL
             </h4>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 relative">
-                <Input
-                  readOnly
-                  value={webhookUrl}
-                  className="bg-secondary/50 rounded-xl font-mono text-xs pr-10"
-                />
+
+            {webhookUrl ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <Input
+                      readOnly
+                      value={webhookUrl}
+                      className="bg-secondary/50 rounded-xl font-mono text-xs pr-10"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyWebhook}
+                    className={`shrink-0 rounded-xl transition-all duration-200 ${
+                      copied
+                        ? 'border-[hsl(var(--success))] text-[hsl(var(--success))]'
+                        : 'border-primary/50 hover:border-primary hover:shadow-[0_0_12px_hsl(var(--primary)/0.3)]'
+                    }`}
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground/60">
+                  Configure this URL as a webhook in your external service (GitHub, Jira, Slack, etc.).
+                  The request body will be passed as input data to the recipe.
+                </p>
+              </>
+            ) : (
+              <div className="p-4 rounded-xl bg-secondary/30 border border-border/20 text-center">
+                <Webhook className="w-6 h-6 mx-auto mb-2 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground/70">
+                  Save the recipe to generate a webhook URL
+                </p>
+                <p className="text-xs text-muted-foreground/50 mt-1">
+                  A unique, persistent URL will be created when this recipe is saved.
+                </p>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={handleCopyWebhook}
-                className={`shrink-0 rounded-xl transition-all duration-200 ${
-                  copied
-                    ? 'border-[hsl(var(--success))] text-[hsl(var(--success))]'
-                    : 'border-primary/50 hover:border-primary hover:shadow-[0_0_12px_hsl(var(--primary)/0.3)]'
-                }`}
-              >
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground/60">
-              Send a POST request to this URL to trigger your recipe. The request body will be passed as input data.
-            </p>
+            )}
           </div>
 
-          {/* Trigger Source */}
+          {/* POST Example */}
           <div className="glass-card rounded-2xl p-5 space-y-4 border border-border/20">
             <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-              <span className="text-base">⚡</span> Trigger Source
+              <span className="text-base">⚡</span> Usage
             </h4>
-
-            <div className="grid grid-cols-2 gap-3">
-              {TRIGGER_SOURCE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => updateTriggerConfig('source', opt.value)}
-                  className={`p-3 rounded-xl border text-left text-sm transition-all duration-200 ${
-                    (scheduleConfig.trigger_config as Record<string, unknown>)?.source === opt.value
-                      ? 'border-primary bg-primary/10 text-foreground'
-                      : 'border-border/30 bg-secondary/50 text-muted-foreground hover:border-border/60'
-                  }`}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  <div className="text-xs mt-0.5 opacity-70">
-                    {opt.value === 'composio'
-                      ? 'Connect to 250+ apps via Composio'
-                      : 'Use any webhook-capable service'}
-                  </div>
-                </button>
-              ))}
+            <div className="p-4 rounded-xl bg-secondary/30 border border-border/20 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Send a POST request to trigger this recipe. The JSON body is passed as input data.
+              </p>
+              <div className="font-mono text-xs text-muted-foreground/80 bg-secondary/50 rounded-lg p-3">
+                <span className="text-primary">POST</span> {webhookUrl || `{webhook_url}`}
+                <br />
+                <span className="text-muted-foreground/50">Content-Type:</span> application/json
+                <br />
+                <span className="text-muted-foreground/50">Body:</span> {'{ "your_input": "data" }'}
+              </div>
             </div>
-
-            {/* Composio Integration */}
-            {(scheduleConfig.trigger_config as Record<string, unknown>)?.source === 'composio' && (
-              <div className="space-y-3 p-4 rounded-xl bg-secondary/30 border border-border/20">
-                <div>
-                  <Label className="text-xs text-muted-foreground">Composio App</Label>
-                  <select
-                    value={((scheduleConfig.trigger_config as Record<string, unknown>)?.app as string) || ''}
-                    onChange={(e) => updateTriggerConfig('app', e.target.value)}
-                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
-                  >
-                    <option value="">Select an app...</option>
-                    <option value="github">GitHub</option>
-                    <option value="slack">Slack</option>
-                    <option value="gmail">Gmail</option>
-                    <option value="jira">Jira</option>
-                    <option value="notion">Notion</option>
-                    <option value="linear">Linear</option>
-                    <option value="salesforce">Salesforce</option>
-                    <option value="hubspot">HubSpot</option>
-                  </select>
-                </div>
-
-                <div>
-                  <Label className="text-xs text-muted-foreground">Trigger</Label>
-                  <select
-                    value={((scheduleConfig.trigger_config as Record<string, unknown>)?.trigger as string) || ''}
-                    onChange={(e) => updateTriggerConfig('trigger', e.target.value)}
-                    className="w-full mt-1 bg-secondary/50 rounded-xl border border-border/30 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none cursor-pointer"
-                  >
-                    <option value="">Select a trigger...</option>
-                    <option value="new_issue">New Issue</option>
-                    <option value="new_pr">New Pull Request</option>
-                    <option value="new_message">New Message</option>
-                    <option value="new_email">New Email</option>
-                    <option value="new_event">New Event</option>
-                    <option value="status_change">Status Change</option>
-                    <option value="webhook">Webhook Event</option>
-                  </select>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                >
-                  <ExternalLink className="w-3 h-3 mr-1.5" />
-                  Configure in Composio
-                </Button>
-              </div>
-            )}
-
-            {/* Custom Webhook Info */}
-            {(scheduleConfig.trigger_config as Record<string, unknown>)?.source === 'custom' && (
-              <div className="p-4 rounded-xl bg-secondary/30 border border-border/20 space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Use the webhook URL above to integrate with any external service. The webhook accepts POST requests with JSON body.
-                </p>
-                <div className="font-mono text-xs text-muted-foreground/80 bg-secondary/50 rounded-lg p-3">
-                  <span className="text-primary">POST</span> {webhookUrl}
-                  <br />
-                  <span className="text-muted-foreground/50">Content-Type:</span> application/json
-                  <br />
-                  <span className="text-muted-foreground/50">Body:</span> {'{ "your_input": "data" }'}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}

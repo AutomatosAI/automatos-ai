@@ -36,6 +36,9 @@ class Workspace(Base):
     is_personal = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
 
+    # General workspace webhook key (URL-as-secret pattern)
+    webhook_key = Column(String(64), unique=True, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 

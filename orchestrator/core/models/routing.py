@@ -33,6 +33,7 @@ class ChannelSource(str, Enum):
     WHATSAPP = "whatsapp"
     API = "api"
     WORKFLOW = "workflow"
+    WEBHOOK = "webhook"
 
 
 # ---------------------------------------------------------------------------

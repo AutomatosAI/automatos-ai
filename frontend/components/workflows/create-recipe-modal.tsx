@@ -55,6 +55,7 @@ export interface RecipeFormValues {
     type: string
     cron_expression: string
     trigger_config: Record<string, unknown>
+    webhook_id?: string
   }
 }
 
@@ -311,7 +312,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeScheduleConfig />
+                            <RecipeScheduleConfig webhookId={initialData?.schedule_config?.trigger_config?.webhook_id as string | undefined} />
                           </motion.div>
                         </TabsContent>
                       </Tabs>
