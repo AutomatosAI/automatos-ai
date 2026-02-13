@@ -253,9 +253,15 @@ def _extract_response_text(result: Any) -> str:
 @router.get("/ws/{workspace_key}")
 async def workspace_webhook_verify(
     workspace_key: str,
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    """Verification endpoint — external services send GET to validate the URL exists."""
+    """Verification endpoint — handles GET validation from external services.
+
+    Supports:
+    - Meta/WhatsApp webhook verification (hub.mode, hub.verify_token, hub.challenge)
+    - Generic URL validation (Jira, GitHub, etc.)
+    """
     workspace = db.query(Workspace).filter(
         Workspace.webhook_key == workspace_key,
         Workspace.is_active == True,
@@ -263,6 +269,19 @@ async def workspace_webhook_verify(
 
     if not workspace:
         raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    # Meta/WhatsApp webhook verification
+    params = request.query_params
+    hub_mode = params.get("hub.mode")
+    hub_challenge = params.get("hub.challenge")
+    hub_verify_token = params.get("hub.verify_token")
+
+    if hub_mode == "subscribe" and hub_challenge:
+        # Meta sends a verify_token — we accept any token since the URL itself is the secret
+        # (The workspace_key in the URL is the credential)
+        logger.info("[webhook/ws] Meta webhook verification for workspace %s", workspace.id)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(hub_challenge)
 
     return {"status": "ok"}
 
