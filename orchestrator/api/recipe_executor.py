@@ -204,6 +204,7 @@ async def _execute_step(
     # 7. Generate + tool loop
     tool_router = get_tool_router()
     all_tool_calls = []
+    _composio_call_cache: Dict[str, str] = {}  # dedup: "ACTION|args_hash" → cached result
     max_iterations = 6
     response = None
 
@@ -261,29 +262,38 @@ async def _execute_step(
                 )
             )
             if _is_composio_action:
-                try:
-                    t0 = time.time()
-                    exec_result = tool_service.execute_action(
-                        action_name=tool_name,
-                        params=tool_args,
-                        entity_id=composio_result.entity_id,
-                    )
-                    exec_ms = int((time.time() - t0) * 1000)
+                # Dedup: if the LLM calls the same action with the same args
+                # again, return the cached result instead of hitting the API.
+                _dedup_key = f"{tool_name}|{json.dumps(tool_args, sort_keys=True, default=str)}"
+                if _dedup_key in _composio_call_cache:
+                    result_text = _composio_call_cache[_dedup_key]
+                    exec_ms = 0
+                    logger.info(f"[recipe_step] Composio dedup hit: {tool_name} (skipped repeat call)")
+                else:
+                    try:
+                        t0 = time.time()
+                        exec_result = tool_service.execute_action(
+                            action_name=tool_name,
+                            params=tool_args,
+                            entity_id=composio_result.entity_id,
+                        )
+                        exec_ms = int((time.time() - t0) * 1000)
 
-                    success = exec_result.get("success", False)
-                    data = exec_result.get("data")
-                    error = exec_result.get("error")
+                        success = exec_result.get("success", False)
+                        data = exec_result.get("data")
+                        error = exec_result.get("error")
 
-                    if success:
-                        result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
-                        logger.info(f"[recipe_step] Composio direct OK: {tool_name} in {exec_ms}ms")
-                    else:
-                        result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
-                        logger.warning(f"[recipe_step] Composio direct failed: {tool_name} — {error}")
-                except Exception as exc:
-                    exec_ms = int((time.time() - t0) * 1000)
-                    result_text = f"Error executing {tool_name}: {exc}"
-                    logger.error(f"[recipe_step] Composio direct exception: {tool_name}: {exc}", exc_info=True)
+                        if success:
+                            result_text = json.dumps(data, default=str) if isinstance(data, (dict, list)) else str(data or "")
+                            logger.info(f"[recipe_step] Composio direct OK: {tool_name} in {exec_ms}ms")
+                        else:
+                            result_text = f"Error executing {tool_name}: {error or 'unknown error'}"
+                            logger.warning(f"[recipe_step] Composio direct failed: {tool_name} — {error}")
+                    except Exception as exc:
+                        exec_ms = int((time.time() - t0) * 1000)
+                        result_text = f"Error executing {tool_name}: {exc}"
+                        logger.error(f"[recipe_step] Composio direct exception: {tool_name}: {exc}", exc_info=True)
+                    _composio_call_cache[_dedup_key] = result_text
 
                 all_tool_calls.append({
                     "action": tool_name,

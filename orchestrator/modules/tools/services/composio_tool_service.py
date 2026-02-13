@@ -17,6 +17,7 @@ Falls back to ComposioHintService when SDK search returns empty or errors.
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
@@ -61,6 +62,10 @@ class ComposioToolService:
     def __init__(self, db: Session):
         self.db = db
 
+    # Regex to extract explicit Composio action names from prompts.
+    # Matches patterns like GITHUB_CREATE_A_REFERENCE, JIRA_GET_ISSUE, etc.
+    _ACTION_NAME_RE = re.compile(r"\b([A-Z][A-Z0-9]+(?:_[A-Z0-9]+){2,})\b")
+
     def get_tools_for_step(
         self,
         agent_id: int,
@@ -69,7 +74,12 @@ class ComposioToolService:
         limit: int = 8,
     ) -> ComposioToolResult:
         """
-        Semantic-search Composio for actions relevant to ``task_prompt``.
+        Resolve Composio tools for a recipe step using a hybrid strategy:
+
+        1. Extract explicit action names from the prompt (e.g. ``GITHUB_CREATE_A_REFERENCE``)
+           and fetch their exact schemas — these are always included.
+        2. Run SDK semantic search for additional relevant actions.
+        3. Merge results (explicit actions take priority, search fills gaps).
 
         Returns:
             ComposioToolResult with OpenAI function-calling schemas, entity_id,
@@ -87,6 +97,7 @@ class ComposioToolService:
                 )
                 return result
             result.app_names = allowed_apps
+            app_prefixes = {a.upper() for a in allowed_apps}
 
             # 2. Resolve entity_id for this workspace
             entity_id = self._resolve_entity_id(workspace_id)
@@ -97,39 +108,64 @@ class ComposioToolService:
                 return result
             result.entity_id = entity_id
 
-            # 3. SDK semantic search
-            t0 = time.monotonic()
             client = get_composio_client()
-            raw_results = client.search_actions_for_step(
+            t0 = time.monotonic()
+
+            # 3a. Extract explicit action names from prompt and fetch exact schemas.
+            #     Only include actions whose app prefix matches an allowed app.
+            explicit_names = self._extract_action_names(task_prompt, app_prefixes)
+            if explicit_names:
+                explicit_results = client.search_actions_for_step(
+                    search_query="",
+                    app_names=[a.lower() for a in allowed_apps],
+                    entity_id=entity_id,
+                    explicit_actions=list(explicit_names),
+                )
+                for item in explicit_results:
+                    action_name = item.get("action_name", "")
+                    schema = item.get("schema")
+                    if action_name and schema and action_name not in result.action_set:
+                        result.tools.append(schema)
+                        result.action_set.add(action_name)
+                logger.info(
+                    "[ComposioToolService] Explicit actions from prompt: %s → resolved %d",
+                    sorted(explicit_names), len(result.action_set),
+                )
+
+            # 3b. SDK semantic search for additional relevant actions.
+            search_results = client.search_actions_for_step(
                 search_query=task_prompt,
                 app_names=[a.lower() for a in allowed_apps],
                 entity_id=entity_id,
                 limit=limit,
             )
+            for item in search_results:
+                action_name = item.get("action_name", "")
+                schema = item.get("schema")
+                if action_name and schema and action_name not in result.action_set:
+                    result.tools.append(schema)
+                    result.action_set.add(action_name)
+
             result.search_ms = int((time.monotonic() - t0) * 1000)
 
-            if raw_results:
-                for item in raw_results:
-                    action_name = item.get("action_name", "")
-                    schema = item.get("schema")
-                    if action_name and schema:
-                        result.tools.append(schema)
-                        result.action_set.add(action_name)
+            if result.tools:
                 result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] SDK search OK: agent=%s actions=%s search_ms=%d",
-                    agent_id, sorted(result.action_set), result.search_ms,
+                    "[ComposioToolService] OK: agent=%s explicit=%d search=%d "
+                    "total_actions=%s search_ms=%d",
+                    agent_id, len(explicit_names), len(search_results),
+                    sorted(result.action_set), result.search_ms,
                 )
             else:
                 logger.info(
-                    "[ComposioToolService] SDK search returned empty for agent=%s "
+                    "[ComposioToolService] No tools resolved for agent=%s "
                     "prompt=%r search_ms=%d — will fall back to hints",
                     agent_id, task_prompt[:80], result.search_ms,
                 )
 
         except Exception as exc:
             logger.warning(
-                "[ComposioToolService] SDK search failed for agent=%s: %s",
+                "[ComposioToolService] Failed for agent=%s: %s",
                 agent_id, exc, exc_info=True,
             )
 
@@ -158,6 +194,20 @@ class ComposioToolService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @classmethod
+    def _extract_action_names(cls, prompt: str, app_prefixes: Set[str]) -> Set[str]:
+        """
+        Extract explicit Composio action names from a prompt.
+
+        Matches uppercase patterns like GITHUB_CREATE_A_REFERENCE and filters
+        to only those whose prefix (e.g. GITHUB) is in the allowed app set.
+        """
+        candidates = cls._ACTION_NAME_RE.findall(prompt)
+        return {
+            name for name in candidates
+            if name.split("_", 1)[0] in app_prefixes
+        }
 
     def _resolve_allowed_apps(self, agent_id: int, workspace_id: UUID) -> List[str]:
         """
