@@ -95,6 +95,11 @@ class ComposioClient:
         # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls
         self._auth_config_cache: Dict[str, Optional[str]] = {}
         self._auth_config_cache_ttl = 3600  # 1 hour TTL
+        # PERFORMANCE: Cache all action schemas per app for exact-name lookups.
+        # Bypasses SDK semantic search (which returns alphabetical, not semantic).
+        self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
+        self._schema_cache_ts: Dict[str, float] = {}
+        self._schema_cache_ttl = 3600  # 1 hour
     
     @property
     def composio(self):
@@ -805,7 +810,112 @@ class ComposioClient:
         count = len(actions)
         self._action_count_cache[key] = (now, count)
         return count
-    
+
+    # ------------------------------------------------------------------
+    # Exact action schema lookup (bypasses broken SDK semantic search)
+    # ------------------------------------------------------------------
+
+    def get_action_schemas_by_name(
+        self,
+        action_names: List[str],
+        entity_id: str,
+        app_names: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Get OpenAI function-calling schemas for specific Composio actions by name.
+
+        Uses a per-app cache. On first call per app, fetches all action schemas
+        from the SDK (one-time cost), then subsequent lookups are instant.
+
+        This bypasses the SDK's semantic search which returns results in
+        alphabetical order regardless of query.
+
+        Returns:
+            List of dicts with ``action_name`` and ``schema`` keys.
+        """
+        if not self.toolset:
+            logger.warning("[ComposioClient] Toolset not initialized — cannot fetch schemas")
+            return []
+
+        import time as _time
+        now = _time.monotonic()
+
+        # Ensure each relevant app is cached
+        for app in app_names:
+            app_upper = app.upper()
+            cache_age = now - self._schema_cache_ts.get(app_upper, 0)
+            if app_upper not in self._schema_cache or cache_age > self._schema_cache_ttl:
+                self._populate_schema_cache(app, entity_id)
+
+        # Look up requested actions
+        results = []
+        seen = set()
+        for name in action_names:
+            if name in seen:
+                continue
+            app_prefix = name.split("_", 1)[0]
+            app_cache = self._schema_cache.get(app_prefix, {})
+            if name in app_cache:
+                results.append({
+                    "action_name": name,
+                    "schema": app_cache[name],
+                })
+                seen.add(name)
+
+        logger.info(
+            "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
+            "actions=%s",
+            len(action_names), len(results),
+            [r["action_name"] for r in results],
+        )
+        return results
+
+    def _populate_schema_cache(self, app_name: str, entity_id: str):
+        """Fetch all action schemas for an app and cache them."""
+        import time as _time
+        app_upper = app_name.upper()
+        cache: Dict[str, Dict[str, Any]] = {}
+        t0 = _time.monotonic()
+
+        try:
+            raw_tools = self.toolset.tools.get(
+                user_id=entity_id,
+                toolkits=[app_name.lower()],
+                limit=500,
+            )
+            for tool in raw_tools:
+                if isinstance(tool, dict):
+                    tool_dict = tool
+                elif hasattr(tool, "model_dump"):
+                    tool_dict = tool.model_dump()
+                elif hasattr(tool, "dict"):
+                    tool_dict = tool.dict()
+                elif hasattr(tool, "__dict__"):
+                    tool_dict = dict(tool.__dict__)
+                else:
+                    continue
+
+                if tool_dict.get("type") != "function":
+                    continue
+                fn = tool_dict.get("function") or {}
+                name = fn.get("name") or ""
+                if name:
+                    cache[name] = tool_dict
+
+            elapsed = int((_time.monotonic() - t0) * 1000)
+            logger.info(
+                "[ComposioClient] Cached %d schemas for app=%s in %dms",
+                len(cache), app_upper, elapsed,
+            )
+        except Exception as e:
+            logger.warning(
+                "[ComposioClient] Schema cache failed for app=%s: %s",
+                app_upper, e, exc_info=True,
+            )
+
+        self._schema_cache[app_upper] = cache
+        self._schema_cache_ts[app_upper] = _time.monotonic()
+
     def search_actions_for_step(
         self,
         search_query: str,

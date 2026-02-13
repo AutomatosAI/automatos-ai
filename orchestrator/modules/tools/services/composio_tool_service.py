@@ -1,19 +1,19 @@
 """
-Composio Tool Service — SDK Semantic Search → OpenAI Function-Calling Tools
-===========================================================================
+Composio Tool Service — Per-Action OpenAI Function-Calling Tools
+================================================================
 
-Reusable service that resolves Composio actions into per-action OpenAI
-function-calling tool schemas using the SDK's server-side semantic search.
+Resolves Composio actions into per-action OpenAI function-calling tool schemas.
+Each action becomes its own top-level function with correct param names baked in
+(e.g. ``JIRA_GET_ISSUE(issue_id_or_key="PILOT-123")``).
 
-Instead of the LLM guessing action names inside a single ``composio_execute``
-mega-tool, each action becomes its own top-level function with correct param
-names baked in (e.g. ``JIRA_GET_ISSUE(issue_id_or_key="PILOT-123")``).
+Strategy:
+  1. Extract explicit action names from the prompt (e.g. GITHUB_CREATE_A_REFERENCE)
+  2. Fetch exact schemas via cached per-app lookup (bypasses broken SDK semantic search)
+  3. Fall back to SDK search only when no explicit actions found
 
 Consumers:
-  - Recipe executor (Phase 1 — this PR)
+  - Recipe executor (Phase 1)
   - Chatbot / external API (Phase 2 — PRD-50)
-
-Falls back to ComposioHintService when SDK search returns empty or errors.
 """
 
 import logging
@@ -74,12 +74,13 @@ class ComposioToolService:
         limit: int = 8,
     ) -> ComposioToolResult:
         """
-        Resolve Composio tools for a recipe step using a hybrid strategy:
+        Resolve Composio tools for a recipe step.
 
-        1. Extract explicit action names from the prompt (e.g. ``GITHUB_CREATE_A_REFERENCE``)
-           and fetch their exact schemas — these are always included.
-        2. Run SDK semantic search for additional relevant actions.
-        3. Merge results (explicit actions take priority, search fills gaps).
+        Strategy:
+          1. Extract explicit action names from the prompt (e.g. GITHUB_CREATE_A_REFERENCE).
+          2. If found → fetch their exact schemas via cached per-app lookup.
+             This bypasses the SDK's semantic search which returns alphabetical results.
+          3. If no explicit names → fall back to SDK semantic search (best effort).
 
         Returns:
             ComposioToolResult with OpenAI function-calling schemas, entity_id,
@@ -111,51 +112,76 @@ class ComposioToolService:
             client = get_composio_client()
             t0 = time.monotonic()
 
-            # 3. Build a focused search query.
-            #    If the prompt names explicit actions (e.g. GITHUB_CREATE_A_REFERENCE),
-            #    convert them to natural language search terms. This gives Composio's
-            #    semantic search a much better signal than the full 2000-char prompt.
+            # 3. Extract explicit action names from the prompt
             explicit_names = self._extract_action_names(task_prompt, app_prefixes)
+
             if explicit_names:
-                search_query = self._action_names_to_search_query(explicit_names)
-            else:
-                # No explicit actions — use first ~200 chars of prompt (avoids
-                # flooding the search API with the full template)
+                # PRIMARY PATH: Direct schema lookup from per-app cache.
+                # This gives the LLM exact parameter schemas for the actions
+                # named in the prompt — no guessing.
+                lookup_results = client.get_action_schemas_by_name(
+                    action_names=list(explicit_names),
+                    entity_id=entity_id,
+                    app_names=[a.lower() for a in allowed_apps],
+                )
+                for item in lookup_results:
+                    action_name = item.get("action_name", "")
+                    schema = item.get("schema")
+                    if action_name and schema and action_name not in result.action_set:
+                        result.tools.append(schema)
+                        result.action_set.add(action_name)
+
+                result.search_ms = int((time.monotonic() - t0) * 1000)
+
+                if result.tools:
+                    result.strategy = "exact_lookup"
+                    logger.info(
+                        "[ComposioToolService] Exact lookup OK: agent=%s "
+                        "requested=%d resolved=%d actions=%s search_ms=%d",
+                        agent_id, len(explicit_names), len(result.tools),
+                        sorted(result.action_set), result.search_ms,
+                    )
+                else:
+                    logger.warning(
+                        "[ComposioToolService] Exact lookup returned 0/%d for agent=%s "
+                        "— falling through to SDK search",
+                        len(explicit_names), agent_id,
+                    )
+
+            # FALLBACK: SDK semantic search (when no explicit names or lookup empty)
+            if not result.tools:
                 search_query = task_prompt[:200].strip()
-
-            logger.info(
-                "[ComposioToolService] Search query: explicit_actions=%s query=%r",
-                sorted(explicit_names) if explicit_names else "none",
-                search_query[:120],
-            )
-
-            search_results = client.search_actions_for_step(
-                search_query=search_query,
-                app_names=[a.lower() for a in allowed_apps],
-                entity_id=entity_id,
-                limit=limit,
-            )
-            for item in search_results:
-                action_name = item.get("action_name", "")
-                schema = item.get("schema")
-                if action_name and schema and action_name not in result.action_set:
-                    result.tools.append(schema)
-                    result.action_set.add(action_name)
-
-            result.search_ms = int((time.monotonic() - t0) * 1000)
-
-            if result.tools:
-                result.strategy = "sdk_search"
                 logger.info(
-                    "[ComposioToolService] OK: agent=%s actions=%s search_ms=%d",
-                    agent_id, sorted(result.action_set), result.search_ms,
+                    "[ComposioToolService] SDK search fallback: query=%r",
+                    search_query[:120],
                 )
-            else:
-                logger.info(
-                    "[ComposioToolService] No tools resolved for agent=%s "
-                    "prompt=%r search_ms=%d — will fall back to hints",
-                    agent_id, task_prompt[:80], result.search_ms,
+                search_results = client.search_actions_for_step(
+                    search_query=search_query,
+                    app_names=[a.lower() for a in allowed_apps],
+                    entity_id=entity_id,
+                    limit=limit,
                 )
+                for item in search_results:
+                    action_name = item.get("action_name", "")
+                    schema = item.get("schema")
+                    if action_name and schema and action_name not in result.action_set:
+                        result.tools.append(schema)
+                        result.action_set.add(action_name)
+
+                result.search_ms = int((time.monotonic() - t0) * 1000)
+
+                if result.tools:
+                    result.strategy = "sdk_search"
+                    logger.info(
+                        "[ComposioToolService] SDK search OK: agent=%s actions=%s search_ms=%d",
+                        agent_id, sorted(result.action_set), result.search_ms,
+                    )
+                else:
+                    logger.info(
+                        "[ComposioToolService] No tools resolved for agent=%s "
+                        "prompt=%r search_ms=%d — will fall back to hints",
+                        agent_id, task_prompt[:80], result.search_ms,
+                    )
 
         except Exception as exc:
             logger.warning(
