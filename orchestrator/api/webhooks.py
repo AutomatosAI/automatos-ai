@@ -88,6 +88,10 @@ async def general_workspace_webhook(
     except Exception:
         body = {}
 
+    # Slack url_verification challenge — echo back immediately
+    if isinstance(body, dict) and body.get("type") == "url_verification":
+        return {"challenge": body.get("challenge", "")}
+
     # 1. Look up workspace by webhook_key
     workspace = db.query(Workspace).filter(
         Workspace.webhook_key == workspace_key,

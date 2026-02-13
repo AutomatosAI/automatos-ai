@@ -37,13 +37,43 @@ class WebhookIngestor(BaseIngestor):
         - body.agent_id -> optional Tier-0 override
         """
         # --- Extract content text ------------------------------------------------
-        content = (
-            body.get("message")
-            or body.get("text")
-            or body.get("content")
-        )
+        # Supports: plain fields, Telegram, Slack, WhatsApp/Twilio, generic
+        content: Optional[str] = None
+
+        # 1. Direct string fields (simple webhooks, curl)
+        for key in ("message", "text", "content", "body"):
+            val = body.get(key)
+            if isinstance(val, str) and val.strip():
+                content = val.strip()
+                break
+
+        # 2. Telegram: { "message": { "text": "hello" } }
         if content is None:
-            # Stringify the full body as fallback content
+            tg_msg = body.get("message")
+            if isinstance(tg_msg, dict):
+                content = tg_msg.get("text") or tg_msg.get("caption")
+
+        # 3. Slack: { "event": { "text": "hello" } }
+        if content is None:
+            slack_event = body.get("event")
+            if isinstance(slack_event, dict):
+                content = slack_event.get("text")
+
+        # 4. WhatsApp/Twilio: { "Body": "hello" } or { "entry": [{ "changes": [...] }] }
+        if content is None:
+            content = body.get("Body")  # Twilio SMS/WhatsApp
+        if content is None:
+            entries = body.get("entry")
+            if isinstance(entries, list) and entries:
+                changes = entries[0].get("changes", [])
+                if changes:
+                    value = changes[0].get("value", {})
+                    messages = value.get("messages", [])
+                    if messages:
+                        content = messages[0].get("text", {}).get("body")
+
+        # 5. Fallback: stringify the full body
+        if not content:
             content = json.dumps(body, default=str)
 
         content = str(content)
