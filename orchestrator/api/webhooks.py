@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, Set
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
@@ -53,7 +53,7 @@ async def workspace_webhook_verify(
 @router.post("/ws/{workspace_key}")
 async def general_workspace_webhook(
     workspace_key: str,
-    body: Dict[str, Any] = Body(default={}),
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -68,6 +68,26 @@ async def general_workspace_webhook(
     - source / channel: Optional metadata for routing rules
     - Any other JSON fields are preserved in metadata
     """
+    import json as _json
+
+    # Parse body from any content type
+    content_type = request.headers.get("content-type", "")
+    try:
+        if "application/json" in content_type:
+            body = await request.json()
+        elif "form" in content_type:
+            form = await request.form()
+            payload_str = form.get("payload", "{}")
+            body = _json.loads(payload_str) if isinstance(payload_str, str) else {}
+        else:
+            raw = await request.body()
+            try:
+                body = _json.loads(raw) if raw else {}
+            except (ValueError, _json.JSONDecodeError):
+                body = {"raw": raw.decode("utf-8", errors="replace")}
+    except Exception:
+        body = {}
+
     # 1. Look up workspace by webhook_key
     workspace = db.query(Workspace).filter(
         Workspace.webhook_key == workspace_key,

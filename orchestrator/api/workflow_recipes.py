@@ -6,7 +6,7 @@ CRUD operations for workflow recipes that users can browse,
 customize, and use to create workflows.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Dict, Any, Optional
@@ -1494,7 +1494,7 @@ async def recipe_webhook_verify(
 @webhook_router.post("/recipe/{webhook_id}")
 async def recipe_webhook(
     webhook_id: str,
-    body: Dict[str, Any] = Body(default={}),
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -1506,9 +1506,31 @@ async def recipe_webhook(
 
     Body (optional):
     - Any JSON payload — passed as input_data to the recipe executor.
+    - Also accepts form-encoded payloads (GitHub ping events).
     """
     import asyncio
+    import json as _json
     from api.recipe_executor import execute_recipe_direct
+
+    # Parse body from any content type
+    content_type = request.headers.get("content-type", "")
+    try:
+        if "application/json" in content_type:
+            body = await request.json()
+        elif "form" in content_type:
+            form = await request.form()
+            # GitHub form-encoded wraps JSON in a "payload" field
+            payload_str = form.get("payload", "{}")
+            body = _json.loads(payload_str) if isinstance(payload_str, str) else {}
+        else:
+            # Try JSON first, fall back to empty dict
+            raw = await request.body()
+            try:
+                body = _json.loads(raw) if raw else {}
+            except (ValueError, _json.JSONDecodeError):
+                body = {"raw": raw.decode("utf-8", errors="replace")}
+    except Exception:
+        body = {}
 
     # Look up recipe by webhook_id in schedule_config
     recipe = db.query(WorkflowRecipe).filter(
