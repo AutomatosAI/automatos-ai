@@ -13,10 +13,11 @@ Two webhook paths:
 
 import asyncio
 import logging
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
@@ -32,6 +33,222 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 # Track background tasks to prevent GC collection
 _background_tasks: Set[asyncio.Task] = set()
 
+
+# =============================================================================
+# Platform Detection
+# =============================================================================
+
+def _detect_platform(body: Dict[str, Any]) -> Optional[str]:
+    """Detect which messaging platform sent this webhook payload."""
+    # Telegram: has update_id or message.chat.id
+    if "update_id" in body:
+        return "telegram"
+    msg = body.get("message")
+    if isinstance(msg, dict) and "chat" in msg:
+        return "telegram"
+
+    # Slack: has team_id or event.type
+    if "team_id" in body or "api_app_id" in body:
+        return "slack"
+    if isinstance(body.get("event"), dict) and "type" in body["event"]:
+        return "slack"
+
+    # WhatsApp (Meta): has entry[].changes[].value.messages
+    entries = body.get("entry")
+    if isinstance(entries, list) and entries:
+        changes = entries[0].get("changes", [])
+        if changes and "value" in changes[0]:
+            return "whatsapp"
+
+    # Twilio SMS/WhatsApp: has Body + From + To
+    if "Body" in body and "From" in body:
+        return "twilio"
+
+    return None
+
+
+def _extract_reply_context(body: Dict[str, Any], platform: str) -> Dict[str, Any]:
+    """Extract the info needed to reply back to the originating chat."""
+    ctx: Dict[str, Any] = {"platform": platform}
+
+    if platform == "telegram":
+        msg = body.get("message", {})
+        ctx["chat_id"] = msg.get("chat", {}).get("id")
+        ctx["from_user"] = msg.get("from", {}).get("first_name", "")
+
+    elif platform == "slack":
+        event = body.get("event", {})
+        ctx["channel"] = event.get("channel")
+        ctx["thread_ts"] = event.get("thread_ts") or event.get("ts")
+        ctx["user"] = event.get("user")
+
+    elif platform == "whatsapp":
+        entries = body.get("entry", [{}])
+        changes = entries[0].get("changes", [{}])
+        value = changes[0].get("value", {})
+        messages = value.get("messages", [{}])
+        ctx["from_phone"] = messages[0].get("from") if messages else None
+        ctx["phone_number_id"] = value.get("metadata", {}).get("phone_number_id")
+
+    elif platform == "twilio":
+        ctx["from_phone"] = body.get("From")
+        ctx["to_phone"] = body.get("To")
+
+    return ctx
+
+
+# =============================================================================
+# Platform Reply Functions
+# =============================================================================
+
+async def _send_telegram_reply(
+    chat_id: int,
+    text: str,
+    bot_token: str,
+) -> bool:
+    """Send a message back to a Telegram chat."""
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    # Truncate to Telegram's 4096 char limit
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n... (truncated)"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown",
+            })
+            if resp.status_code != 200:
+                # Retry without markdown in case of parse errors
+                resp = await client.post(url, json={
+                    "chat_id": chat_id,
+                    "text": text,
+                })
+            logger.info("[telegram] Reply sent to chat %s: %d", chat_id, resp.status_code)
+            return resp.status_code == 200
+    except Exception:
+        logger.exception("[telegram] Failed to send reply to chat %s", chat_id)
+        return False
+
+
+async def _send_slack_reply(
+    channel: str,
+    text: str,
+    bot_token: str,
+    thread_ts: Optional[str] = None,
+) -> bool:
+    """Send a message back to a Slack channel."""
+    url = "https://slack.com/api/chat.postMessage"
+    payload: Dict[str, Any] = {
+        "channel": channel,
+        "text": text,
+    }
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload, headers={
+                "Authorization": f"Bearer {bot_token}",
+                "Content-Type": "application/json",
+            })
+            data = resp.json()
+            ok = data.get("ok", False)
+            logger.info("[slack] Reply sent to %s: ok=%s", channel, ok)
+            return ok
+    except Exception:
+        logger.exception("[slack] Failed to send reply to %s", channel)
+        return False
+
+
+async def _send_whatsapp_reply(
+    to_phone: str,
+    text: str,
+    phone_number_id: str,
+    access_token: str,
+) -> bool:
+    """Send a message back via WhatsApp Business API."""
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "messaging_product": "whatsapp",
+                "to": to_phone,
+                "type": "text",
+                "text": {"body": text[:4096]},
+            }, headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            })
+            logger.info("[whatsapp] Reply sent to %s: %d", to_phone, resp.status_code)
+            return resp.status_code == 200
+    except Exception:
+        logger.exception("[whatsapp] Failed to send reply to %s", to_phone)
+        return False
+
+
+async def _deliver_reply(
+    reply_text: str,
+    reply_ctx: Dict[str, Any],
+    integrations: Dict[str, str],
+) -> bool:
+    """Deliver agent response back to the originating platform."""
+    platform = reply_ctx.get("platform")
+
+    if platform == "telegram":
+        token = integrations.get("telegram_bot_token")
+        chat_id = reply_ctx.get("chat_id")
+        if token and chat_id:
+            return await _send_telegram_reply(chat_id, reply_text, token)
+        logger.warning("[reply] Telegram: missing token or chat_id")
+
+    elif platform == "slack":
+        token = integrations.get("slack_bot_token")
+        channel = reply_ctx.get("channel")
+        if token and channel:
+            return await _send_slack_reply(
+                channel, reply_text, token, reply_ctx.get("thread_ts"),
+            )
+        logger.warning("[reply] Slack: missing token or channel")
+
+    elif platform == "whatsapp":
+        access_token = integrations.get("whatsapp_access_token")
+        phone_id = integrations.get("whatsapp_phone_number_id")
+        from_phone = reply_ctx.get("from_phone")
+        if access_token and phone_id and from_phone:
+            return await _send_whatsapp_reply(from_phone, reply_text, phone_id, access_token)
+        logger.warning("[whatsapp] Missing credentials or from_phone")
+
+    else:
+        logger.debug("[reply] No reply delivery for platform=%s", platform)
+
+    return False
+
+
+# =============================================================================
+# Extract agent response text from result dict
+# =============================================================================
+
+def _extract_response_text(result: Any) -> str:
+    """Extract a human-readable text response from the agent result."""
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        # Common patterns from AgentFactory
+        for key in ("response", "output", "result", "message", "text", "answer"):
+            if key in result and isinstance(result[key], str):
+                return result[key]
+        # Nested under "data"
+        data = result.get("data", {})
+        if isinstance(data, dict):
+            for key in ("response", "output", "result"):
+                if key in data and isinstance(data[key], str):
+                    return data[key]
+    return str(result)[:2000]
+
+
+# =============================================================================
+# Webhook Endpoints
+# =============================================================================
 
 @router.get("/ws/{workspace_key}")
 async def workspace_webhook_verify(
@@ -67,6 +284,11 @@ async def general_workspace_webhook(
     - agent_id: Optional explicit agent override (Tier-0)
     - source / channel: Optional metadata for routing rules
     - Any other JSON fields are preserved in metadata
+
+    Platform auto-detection:
+    - Telegram, Slack, WhatsApp payloads are auto-detected
+    - If a bot token is configured in workspace settings, the agent's
+      response is delivered back to the originating chat
     """
     import json as _json
 
@@ -101,14 +323,24 @@ async def general_workspace_webhook(
     if not workspace:
         raise HTTPException(status_code=404, detail="Unknown webhook")
 
-    # 2. Build RequestEnvelope via WebhookIngestor
+    # 2. Detect platform and extract reply context
+    platform = _detect_platform(body) if isinstance(body, dict) else None
+    reply_ctx = _extract_reply_context(body, platform) if platform else {}
+    integrations = (workspace.settings or {}).get("integrations", {})
+
+    logger.info(
+        "[webhook/ws] workspace=%s platform=%s has_integrations=%s",
+        workspace.id, platform, bool(integrations),
+    )
+
+    # 3. Build RequestEnvelope via WebhookIngestor
     ingestor = WebhookIngestor()
     envelope = ingestor.ingest(
         body=body,
         workspace_id=workspace.id,
     )
 
-    # 3. Route through UniversalRouter
+    # 4. Route through UniversalRouter
     universal_router = UniversalRouter(db, cache=get_routing_cache())
     try:
         decision = await universal_router.route(envelope)
@@ -117,13 +349,26 @@ async def general_workspace_webhook(
         decision = None
 
     if decision is None:
+        # Try to let the platform know there's no route configured
+        if platform and integrations:
+            task = asyncio.create_task(
+                _deliver_reply(
+                    "I received your message but no routing rules are configured yet. "
+                    "Please set up agents and routing in the Automatos dashboard.",
+                    reply_ctx,
+                    integrations,
+                )
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
         return {
             "status": "received",
             "routed": False,
             "reason": "No route found — configure routing rules or add agents to your workspace.",
         }
 
-    # 4. Dispatch based on routing decision
+    # 5. Dispatch based on routing decision
     if decision.route_type == "agent" and decision.agent_id is not None:
         # Execute agent synchronously for webhook callers who want a response
         try:
@@ -133,16 +378,40 @@ async def general_workspace_webhook(
                 metadata=envelope.metadata,
                 workspace_id=workspace.id,
             )
+
+            # Deliver reply back to platform (async, don't block response)
+            if platform and integrations:
+                reply_text = _extract_response_text(result)
+                task = asyncio.create_task(
+                    _deliver_reply(reply_text, reply_ctx, integrations)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+
             return {
                 "status": "completed",
                 "routed": True,
                 "route_type": "agent",
                 "agent_id": decision.agent_id,
                 "confidence": decision.confidence,
+                "platform": platform,
+                "reply_delivered": platform is not None and bool(integrations),
                 "result": result,
             }
         except Exception:
             logger.exception("[webhook/ws] Agent %d execution failed", decision.agent_id)
+
+            if platform and integrations:
+                task = asyncio.create_task(
+                    _deliver_reply(
+                        "Sorry, I encountered an error processing your request. Please try again.",
+                        reply_ctx,
+                        integrations,
+                    )
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+
             return {
                 "status": "error",
                 "routed": True,
@@ -158,6 +427,20 @@ async def general_workspace_webhook(
             envelope=envelope,
             db=db,
         )
+
+        # Let user know the workflow is running
+        if platform and integrations:
+            task = asyncio.create_task(
+                _deliver_reply(
+                    f"Your request has been dispatched to a workflow (ID: {execution_id}). "
+                    "I'll process it in the background.",
+                    reply_ctx,
+                    integrations,
+                )
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
         return {
             "status": "dispatched",
             "routed": True,
