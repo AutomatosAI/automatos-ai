@@ -23,6 +23,10 @@
 - Frontend 404 handling in hooks: catch error, check `err.message.includes('404')`, return null for "not configured" state
 - Frontend cache keys: extend `unifiedAnalyticsKeys` object with new namespaces for cache key consistency
 - Frontend mutations: use `useMutation` from tanstack + `queryClient.invalidateQueries()` for cache busting on write operations
+- tanstack react-query v4: mutations use `isLoading` (not `isPending` which is v5) — check `syncMutation.isLoading` for loading state
+- Glass card pattern: `<Card className="glass-card">` + `CardHeader`/`CardContent` for all analytics cards
+- Color-coded progress bars: green <70%, yellow 70-90%, red >90% — reuse `getUsageColor(percentage)` pattern from plan-usage
+- "Not configured" state: render centered icon + message + link to settings when hook returns null (404 = no key)
 
 ---
 
@@ -140,4 +144,37 @@
   - Backend response models: `ConnectedAppStats`, `ActionLeaderboardEntry`, `AgentToolMapping` — match field names exactly in TS interfaces
   - `AgentToolEntry` has `tool_name` (not `action_name`) — backend schema differs from the DB column name
   - Days parameter passed as query string `?days=X` — backend validates against DAYS_MAP {7, 30, 90}
+---
+
+## 2026-02-14 - US-009
+- What was implemented: Frontend React Query hooks for PandasAI charts, model comparison, and cost projections in `frontend/hooks/use-unified-analytics.ts`
+  - `useAnalyticsChart()` — mutation POST /api/analytics/charts/generate, accepts `{ query, chartType }`, returns `{ summary, charts, data }`
+  - `useChartPresets()` — query GET /api/analytics/charts/presets, staleTime 300000 (5 min)
+  - `useModelComparison(modelIds, period)` — query GET /api/analytics/llm/comparison?model_ids=...&period=..., enabled only when modelIds.length > 0, staleTime 60000
+  - `useCostProjections(period)` — query GET /api/analytics/llm/projections?period=..., staleTime 60000
+  - Added `chartPresets`, `modelComparison`, `costProjections` to `unifiedAnalyticsKeys`
+  - 5 TypeScript interfaces matching backend Pydantic schemas
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 3 cache keys, 5 interfaces, 4 hooks)
+- **Learnings for future iterations:**
+  - `useAnalyticsChart` is a mutation (not a query) because chart generation is an expensive operation triggered on demand — matches `useTriggerOpenRouterSync` pattern
+  - `useModelComparison` uses `enabled: modelIds.length > 0` to prevent empty API calls — good pattern for hooks with required params
+  - `encodeURIComponent()` needed for comma-separated model_ids query param to handle special chars in model IDs
+  - Chart presets rarely change so 5min staleTime is appropriate (vs 1min for dynamic data)
+  - Pre-existing TS errors (getCostAnalysis, getAgentRanking) still exist — don't try to fix them
+---
+
+## 2026-02-14 - US-010
+- What was implemented: OpenRouter Credits card component in `frontend/components/analytics/analytics-openrouter-credits.tsx`
+  - Credits balance display: total credits, total usage, remaining balance (large number)
+  - Color-coded progress bar: green <70%, yellow 70-90%, red >90% of credits used
+  - Usage breakdown: daily/weekly/monthly usage in 3-column grid with icons
+  - Sync Activity button: triggers OpenRouter sync mutation, shows spinner while loading, success/error feedback
+  - "Not configured" fallback: shows message with link to /settings when no OpenRouter key (404)
+  - Rate limit info display when available
+- Files changed: `frontend/components/analytics/analytics-openrouter-credits.tsx` (new)
+- **Learnings for future iterations:**
+  - tanstack react-query v4 uses `isLoading` for mutations, NOT `isPending` (v5 feature) — existing codebase has this same error in agent-confirm-delete-modal.tsx
+  - `useTriggerOpenRouterSync()` returns `{ synced, skipped, error }` on success — display in UI for user feedback
+  - Credits data: `total_credits - total_usage = remaining` — OpenRouter doesn't return `remaining` directly
+  - Component is standalone (no props) — uses hooks directly for data. Will need to be integrated into the costs tab or overview page in a later story
 ---

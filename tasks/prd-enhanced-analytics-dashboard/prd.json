@@ -152,8 +152,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": "Depends on US-004, US-005, US-006 backend endpoints"
+      "passes": true,
+      "notes": "Implemented useAnalyticsChart(), useChartPresets(), useModelComparison(), useCostProjections() in frontend/hooks/use-unified-analytics.ts"
     },
     {
       "id": "US-010",
@@ -170,8 +170,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "Depends on US-007 for hooks"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-openrouter-credits.tsx — credits balance, progress bar, daily/weekly/monthly usage, sync button, 404 fallback"
     },
     {
       "id": "US-011",
