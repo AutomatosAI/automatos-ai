@@ -16,10 +16,11 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatsBar } from '@/components/shared/stats-bar'
-import { useAnalyticsOverview, usePlanUsage, useRecommendations, useWorkspaceMemory } from '@/hooks/use-unified-analytics'
+import { useAnalyticsOverview, usePlanUsage, useRecommendations, useWorkspaceMemory, useChartPresets } from '@/hooks/use-unified-analytics'
 import { AnalyticsRecommendations } from './analytics-recommendations'
 import { AnalyticsPlanUsage } from './analytics-plan-usage'
 import { AnalyticsMemory } from './analytics-memory'
+import { AnalyticsPandasChart } from './analytics-pandas-chart'
 
 interface OverviewProps {
   days: number
@@ -30,6 +31,7 @@ export function AnalyticsOverview({ days }: OverviewProps) {
   const { data: planUsage, isLoading: planLoading } = usePlanUsage()
   const { data: recommendations, isLoading: recsLoading } = useRecommendations()
   const { data: memory, isLoading: memoryLoading } = useWorkspaceMemory()
+  const { data: chartPresets } = useChartPresets()
 
   const summaryCards = [
     {
@@ -110,6 +112,30 @@ export function AnalyticsOverview({ days }: OverviewProps) {
       >
         <AnalyticsRecommendations recommendations={recommendations || []} isLoading={recsLoading} />
       </motion.div>
+
+      {/* AI-Generated Insights — only render if presets are available */}
+      {chartPresets && chartPresets.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.7 }}
+        >
+          <Card className="glass-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                AI-Generated Insights
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <AnalyticsPandasChart presetId="cost-by-model" />
+                <AnalyticsPandasChart presetId="tokens-over-time" />
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
     </div>
   )
 }
