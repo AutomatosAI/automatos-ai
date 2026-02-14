@@ -813,6 +813,8 @@ Available Shell Tools:
             "openrouter": LLMProviderEnum.OPENROUTER,
             "grok": LLMProviderEnum.GROK,
             "huggingface": LLMProviderEnum.HUGGINGFACE,
+            "azure": LLMProviderEnum.AZURE,
+            "azure_openai": LLMProviderEnum.AZURE,
             "aws_bedrock": LLMProviderEnum.AWS_BEDROCK,
             "bedrock": LLMProviderEnum.AWS_BEDROCK,
         }
@@ -834,8 +836,14 @@ Available Shell Tools:
             model=model_config.model_id,
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,
-            api_key=api_key
+            api_key=api_key,
         )
+
+        # Bedrock uses IAM auth: api_key=access_key, secret_key=secret_access_key
+        if model_config.provider in ("aws_bedrock", "bedrock"):
+            import os
+            llm_config.secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+            llm_config.base_url = os.getenv("AWS_REGION", "us-east-1")
 
         self.logger.info(
             f"Creating LLM manager for {agent_name or 'agent'}: "
@@ -912,6 +920,10 @@ Available Shell Tools:
             "openrouter": "OPENROUTER_API_KEY",
             "grok": "GROK_API_KEY",
             "huggingface": "HUGGINGFACE_API_KEY",
+            "azure": "AZURE_OPENAI_API_KEY",
+            "azure_openai": "AZURE_OPENAI_API_KEY",
+            "aws_bedrock": "AWS_ACCESS_KEY_ID",
+            "bedrock": "AWS_ACCESS_KEY_ID",
         }
         env_var = env_map.get(provider_name)
         if env_var:

@@ -8,6 +8,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
+import { useWorkspace } from '@/hooks/use-workspace'
 
 // Types
 export interface ModelInfo {
@@ -90,14 +91,15 @@ export function useModels(provider?: string, status: string = 'active', options?
  * Falls back to defaults if workspace has no installs yet.
  */
 export function useWorkspaceModels(options?: { enabled?: boolean }) {
+  const { workspaceId } = useWorkspace()
   return useQuery<ModelInfo[]>({
-    queryKey: ['workspace-models'],
+    queryKey: ['workspace-models', workspaceId],
     queryFn: async () => {
       const response = await apiClient.get('/api/marketplace/llm/installed')
       return response
     },
     staleTime: 5 * 60 * 1000,
-    enabled: options?.enabled ?? true,
+    enabled: (options?.enabled ?? true) && !!workspaceId,
   })
 }
 

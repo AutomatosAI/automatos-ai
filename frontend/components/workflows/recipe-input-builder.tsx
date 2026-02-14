@@ -62,6 +62,14 @@ function fieldsToSchema(fields: InputField[]): string {
 export function RecipeInputBuilder({ value, onChange, onValidation, hasTrigger }: RecipeInputBuilderProps) {
   const [fields, setFields] = React.useState<InputField[]>(() => parseInputsSchema(value))
 
+  // Sync incoming value prop -> local fields when parent updates value externally
+  React.useEffect(() => {
+    const incoming = parseInputsSchema(value)
+    if (JSON.stringify(incoming) !== JSON.stringify(fields)) {
+      setFields(incoming)
+    }
+  }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Sync back to parent
   React.useEffect(() => {
     const schema = fieldsToSchema(fields)

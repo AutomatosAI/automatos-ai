@@ -6,7 +6,7 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -115,7 +115,7 @@ class WorkspaceModel(Base):
 
     __table_args__ = (
         # Each workspace can install a model only once
-        CheckConstraint('1=1', name='uq_workspace_model'),
+        UniqueConstraint('workspace_id', 'model_id', name='uq_workspace_model'),
     )
 
 

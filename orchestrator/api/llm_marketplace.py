@@ -138,6 +138,9 @@ async def browse_models(
         query = query.filter(LLMModel.context_window >= min_context)
     if max_cost is not None:
         query = query.filter(LLMModel.input_cost_per_1k_tokens <= max_cost)
+    if capability:
+        # Filter models whose JSON capabilities dict contains the requested key
+        query = query.filter(LLMModel.capabilities[capability].isnot(None))
     if search:
         pattern = f"%{search}%"
         query = query.filter(
