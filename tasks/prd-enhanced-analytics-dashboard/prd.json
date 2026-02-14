@@ -1,0 +1,330 @@
+{
+  "project": "Automatos AI Platform",
+  "branchName": "ralph/enhanced-analytics-dashboard",
+  "description": "Enhanced Analytics Dashboard - Comprehensive real-data dashboards covering LLM provider usage (OpenRouter activity sync, per-model metrics, cost projections), Composio tool/action analytics, and PandasAI-powered dynamic chart generation. Users get cost optimization intelligence; Admins get cross-workspace billing and API volume metrics.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create OpenRouter activity sync service",
+      "description": "As a developer, I need a backend service that fetches usage data from OpenRouter's /api/v1/activity endpoint and stores it locally for analytics queries.",
+      "acceptanceCriteria": [
+        "Create orchestrator/core/llm/openrouter_analytics.py with OpenRouterAnalyticsService class",
+        "sync_activity(api_key, workspace_id) method fetches from GET https://openrouter.ai/api/v1/activity with Bearer auth",
+        "Parses response: date, model, provider_name, usage (cost $), requests, prompt_tokens, completion_tokens, reasoning_tokens, byok_usage_inference",
+        "Upserts rows into llm_usage table matching by workspace_id + model_id + date (avoids duplicates on re-sync)",
+        "get_credits(api_key) method fetches from GET https://openrouter.ai/api/v1/credits returning total_credits and total_usage",
+        "get_key_info(api_key) method fetches from GET https://openrouter.ai/api/v1/key returning limit, limit_remaining, usage_daily/weekly/monthly",
+        "Graceful error handling: logs warning on 401/403/500, does not crash",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Create OpenRouter analytics API endpoints",
+      "description": "As a frontend developer, I need API endpoints to access OpenRouter activity data and credits for the analytics dashboard.",
+      "acceptanceCriteria": [
+        "Add endpoints to orchestrator/api/llm_analytics.py",
+        "POST /api/analytics/openrouter/sync triggers activity sync for current workspace (requires OpenRouter API key from UserApiKey or system settings)",
+        "GET /api/analytics/openrouter/credits returns credits data (total_credits, total_usage, limit_remaining)",
+        "GET /api/analytics/openrouter/key-info returns key usage stats (daily/weekly/monthly usage, BYOK usage)",
+        "All endpoints require workspace context and hybrid auth",
+        "Returns 404 with helpful message if no OpenRouter API key configured",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Depends on US-001 for OpenRouterAnalyticsService"
+    },
+    {
+      "id": "US-003",
+      "title": "Create Composio analytics API endpoints",
+      "description": "As a frontend developer, I need API endpoints that aggregate Composio tool/action usage from existing database tables.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/composio_analytics.py with router prefix /api/analytics/composio",
+        "GET /api/analytics/composio/apps returns connected apps with: app_name, status, total_actions_used, agent_count, documents_synced, last_used_at",
+        "GET /api/analytics/composio/actions returns action leaderboard: action_name, app_name, total_usage_count, agent_count, last_used_at — sorted by usage_count desc",
+        "GET /api/analytics/composio/agent-tools returns per-agent tool mapping: agent_id, agent_name, tools list",
+        "All endpoints filter by workspace_id from request context",
+        "All endpoints accept optional ?days=7|30|90 parameter",
+        "Register router in main app",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Queries existing AgentAppFeature and ComposioConnection tables"
+    },
+    {
+      "id": "US-004",
+      "title": "Create PandasAI analytics chart generation endpoint",
+      "description": "As a frontend developer, I need an endpoint that generates charts from analytics data using PandasAI.",
+      "acceptanceCriteria": [
+        "Create orchestrator/api/analytics_charts.py with router prefix /api/analytics/charts",
+        "POST /api/analytics/charts/generate accepts JSON body: {query, chart_type: bar|line|pie|area|scatter|auto}",
+        "Endpoint queries llm_usage table based on parsed query intent, passes result rows to PandasAIService.generate_insight()",
+        "Returns {summary, charts: [base64-png-string], data: [...rows]}",
+        "GET /api/analytics/charts/presets returns list of pre-built chart configs with at least 6 presets",
+        "Requires workspace context",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Reuses existing PandasAIService from modules/tools/services/pandas_ai_service.py"
+    },
+    {
+      "id": "US-005",
+      "title": "Add enhanced LLM model comparison endpoint",
+      "description": "As a user, I need an endpoint that provides model comparison data for side-by-side analysis of models I'm using.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/llm/comparison to orchestrator/api/llm_analytics.py",
+        "Accepts ?model_ids=model1,model2,model3 (comma-separated, max 4)",
+        "Returns per-model: display_name, provider, input_cost_per_1k, output_cost_per_1k, context_window, capabilities, total_requests, total_tokens, total_cost, avg_latency_ms, error_rate, success_rate",
+        "Data scoped to workspace and optional ?period=7d|30d|90d",
+        "Falls back to model registry data if no usage data exists yet",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "Depends on US-002 for llm_analytics.py router"
+    },
+    {
+      "id": "US-006",
+      "title": "Add cost projection endpoint",
+      "description": "As a user, I need to see projected monthly costs based on current usage trajectory.",
+      "acceptanceCriteria": [
+        "Add GET /api/analytics/llm/projections to orchestrator/api/llm_analytics.py",
+        "Calculates daily average cost from llm_usage for the period",
+        "Projects to 30-day monthly cost: daily_avg * 30",
+        "Returns: current_period_cost, daily_average, projected_monthly, projected_by_model, projected_by_provider",
+        "Includes comparison to previous period: change_percent",
+        "Scoped to workspace",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "Depends on US-002 for llm_analytics.py router"
+    },
+    {
+      "id": "US-007",
+      "title": "Create frontend hooks for OpenRouter analytics",
+      "description": "As a frontend developer, I need React Query hooks to fetch OpenRouter credits and activity data.",
+      "acceptanceCriteria": [
+        "Add useOpenRouterCredits() hook to frontend/hooks/use-unified-analytics.ts calling GET /api/analytics/openrouter/credits",
+        "Add useOpenRouterKeyInfo() hook calling GET /api/analytics/openrouter/key-info",
+        "Add useTriggerOpenRouterSync() mutation hook calling POST /api/analytics/openrouter/sync",
+        "All hooks use unifiedAnalyticsKeys pattern for cache keys",
+        "Hooks handle 404 gracefully (no OpenRouter key configured) by returning null data",
+        "staleTime: 300000 (5 minutes) for credits, 60000 for key info",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "Depends on US-002 backend endpoints"
+    },
+    {
+      "id": "US-008",
+      "title": "Create frontend hooks for Composio analytics",
+      "description": "As a frontend developer, I need React Query hooks for Composio tool usage data.",
+      "acceptanceCriteria": [
+        "Add useComposioApps(days) hook to frontend/hooks/use-unified-analytics.ts calling GET /api/analytics/composio/apps?days=X",
+        "Add useComposioActions(days) hook calling GET /api/analytics/composio/actions?days=X",
+        "Add useComposioAgentTools(days) hook calling GET /api/analytics/composio/agent-tools?days=X",
+        "Cache keys follow unifiedAnalyticsKeys pattern with composio namespace",
+        "staleTime: 60000 (1 minute)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Depends on US-003 backend endpoints"
+    },
+    {
+      "id": "US-009",
+      "title": "Create frontend hooks for charts, comparison, and projections",
+      "description": "As a frontend developer, I need React Query hooks for PandasAI charts, model comparison, and cost projections.",
+      "acceptanceCriteria": [
+        "Add useAnalyticsChart(query, chartType) mutation hook calling POST /api/analytics/charts/generate",
+        "Add useChartPresets() query hook calling GET /api/analytics/charts/presets",
+        "Add useModelComparison(modelIds, period) hook calling GET /api/analytics/llm/comparison",
+        "Add useCostProjections(period) hook calling GET /api/analytics/llm/projections",
+        "All hooks follow existing pattern and cache key structure",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Depends on US-004, US-005, US-006 backend endpoints"
+    },
+    {
+      "id": "US-010",
+      "title": "Build OpenRouter Credits card component",
+      "description": "As a user, I want to see my OpenRouter credits balance and usage on the analytics page.",
+      "acceptanceCriteria": [
+        "Create frontend/components/analytics/analytics-openrouter-credits.tsx",
+        "Shows card with: total credits, total usage, remaining balance, daily/weekly/monthly usage",
+        "Progress bar showing credits used vs total (color-coded: green <70%, yellow 70-90%, red >90%)",
+        "Sync Activity button that triggers OpenRouter sync and shows loading state",
+        "Uses glass-card styling, Automatos brand chart colors",
+        "Shows 'No OpenRouter key configured' message with link to settings if 404",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Depends on US-007 for hooks"
+    },
+    {
+      "id": "US-011",
+      "title": "Enhance LLM & Costs tab with model comparison section",
+      "description": "As a user, I want to compare models I'm using side-by-side with cost, performance, and capability data.",
+      "acceptanceCriteria": [
+        "Add Model Comparison section to frontend/components/analytics/analytics-costs.tsx",
+        "Multi-select dropdown (max 4 models) populated from models in user's llm_usage data",
+        "Comparison table showing per-model: cost/1K tokens, total requests, total tokens, total cost, avg latency, error rate, capabilities badges",
+        "Uses Recharts RadarChart to visualize capability ratings across selected models",
+        "Uses glass-card styling with brand colors",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Depends on US-009 for useModelComparison hook"
+    },
+    {
+      "id": "US-012",
+      "title": "Add cost projection section to LLM & Costs tab",
+      "description": "As a user, I want to see projected monthly costs and period-over-period comparison.",
+      "acceptanceCriteria": [
+        "Add Cost Projections section to analytics-costs.tsx below the existing cost trend chart",
+        "Shows: current period cost, daily average, projected monthly cost (large number), change % vs previous period",
+        "Shows projected cost per model as horizontal bar chart using Recharts BarChart",
+        "Green/red color coding based on cost direction",
+        "Uses glass-card styling",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "Depends on US-009 for useCostProjections hook"
+    },
+    {
+      "id": "US-013",
+      "title": "Build Composio Tools analytics tab",
+      "description": "As a user, I want a dedicated tab showing which Composio apps/actions my agents use and how often.",
+      "acceptanceCriteria": [
+        "Create frontend/components/analytics/analytics-composio.tsx",
+        "StatsBar with 4 cards: Connected Apps, Total Actions Used, Most Used App, Active Integrations",
+        "Connected Apps section: grid of app cards with status badges, action counts, agent count, docs synced",
+        "Action Leaderboard section: sortable table with Action Name, App, Usage Count, Agents Using, Last Used",
+        "Agent Tool Mapping section: expandable rows showing each agent and its Composio tools with usage counts",
+        "Uses glass-card styling, existing Badge component for status",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "Depends on US-008 for Composio hooks"
+    },
+    {
+      "id": "US-014",
+      "title": "Add Composio tab to analytics page navigation",
+      "description": "As a user, I want to access Composio analytics from the main analytics page tabs.",
+      "acceptanceCriteria": [
+        "In frontend/components/analytics/analytics-page.tsx, add new tab 'Tools & Integrations' between 'LLM & Costs' and 'Admin'",
+        "Tab renders <AnalyticsComposio days={days} /> component",
+        "Tab icon uses Wrench from lucide-react",
+        "Tab visible to all users (not admin-only)",
+        "Lazy-loads data only when tab is selected (matches existing pattern)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "Depends on US-013 for AnalyticsComposio component"
+    },
+    {
+      "id": "US-015",
+      "title": "Build PandasAI chart widget component",
+      "description": "As a user, I want to see AI-generated charts on the analytics page that visualize my data in rich ways.",
+      "acceptanceCriteria": [
+        "Create frontend/components/analytics/analytics-pandas-chart.tsx",
+        "Component accepts props: presetId?, query?, chartType?",
+        "Fetches chart from POST /api/analytics/charts/generate or uses preset config",
+        "Renders base64 chart image with NL summary text below",
+        "Loading skeleton while generating (shows 'Generating chart...' message)",
+        "Error state if chart generation fails",
+        "Uses glass-card wrapper with CardHeader title",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "Depends on US-009 for useAnalyticsChart hook"
+    },
+    {
+      "id": "US-016",
+      "title": "Add PandasAI preset charts to Overview tab",
+      "description": "As a user, I want to see pre-generated AI charts on the analytics overview tab.",
+      "acceptanceCriteria": [
+        "In frontend/components/analytics/analytics-overview.tsx, add 'AI Insights' section below recommendations",
+        "Renders 2-3 AnalyticsPandasChart components using presets: cost-by-model and tokens-over-time",
+        "Charts display in 2-column grid on desktop, single column on tablet",
+        "Each chart has a title from the preset config",
+        "Section header 'AI-Generated Insights' with sparkle icon",
+        "Only renders if PandasAI endpoint returns data (graceful fallback if service unavailable)",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "Depends on US-015 for AnalyticsPandasChart component"
+    },
+    {
+      "id": "US-017",
+      "title": "Enhance Admin tab with cross-workspace cost aggregation endpoint",
+      "description": "As an admin, I need to see total platform costs, per-workspace cost breakdown, and API call volumes for billing.",
+      "acceptanceCriteria": [
+        "Add GET /api/admin/analytics/costs endpoint in orchestrator/api/llm_analytics.py (admin-only auth check)",
+        "Returns: total_platform_cost, total_tokens, total_requests, cost_by_workspace list, cost_by_provider, daily_cost_trend",
+        "Queries llm_usage table across ALL workspaces (no workspace filter)",
+        "Accepts ?period=7d|30d|90d",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Depends on US-002 for llm_analytics.py router"
+    },
+    {
+      "id": "US-018",
+      "title": "Build admin cost dashboard frontend section",
+      "description": "As an admin, I want to see platform-wide cost analytics with per-workspace breakdown in the Admin tab.",
+      "acceptanceCriteria": [
+        "Update frontend/components/analytics/analytics-admin.tsx to add 'Platform Costs' section",
+        "StatsBar cards: Total Platform Cost ($), Total Tokens, Total API Requests, Active Providers",
+        "Stacked area chart showing daily cost trend by provider using Recharts AreaChart with brand colors",
+        "Per-workspace cost table: Workspace Name, Plan, Total Cost, Total Tokens, Requests, Top Model — sortable by cost",
+        "Provider distribution pie chart using PieChart from Recharts",
+        "Add useAdminCostAnalytics(days) hook in use-unified-analytics.ts",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Depends on US-017 for admin cost endpoint"
+    },
+    {
+      "id": "US-019",
+      "title": "Register all new API routers in main app",
+      "description": "As a developer, I need all new analytics routers registered in the FastAPI app so endpoints are accessible.",
+      "acceptanceCriteria": [
+        "In main app setup, import and include: composio_analytics.router, analytics_charts.router",
+        "Verify all new endpoints appear in API docs at /docs",
+        "No import errors or circular dependencies",
+        "Typecheck passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Depends on US-003 and US-004 for the routers. Should be done after all backend routes are created."
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+## Codebase Patterns
+- (To be populated as patterns are discovered)
+
+---
