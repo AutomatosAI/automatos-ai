@@ -216,3 +216,21 @@
   - `_entry` prefix for unused map params to avoid lint warnings
   - Projection data `change_percent` can be null (no previous period data) — always null-check before rendering
 ---
+
+## 2026-02-14 - US-013
+- What was implemented: Composio Tools analytics tab component in `frontend/components/analytics/analytics-composio.tsx`
+  - StatsBar with 4 cards: Connected Apps count, Total Actions Used, Most Used App, Active Integrations
+  - Connected Apps section: responsive grid of app cards showing app_name, status badge (active/disconnected/error), total actions used, agent count, documents synced, last used
+  - Action Leaderboard section: sortable table (click column headers) with columns: Action Name, App, Usage Count, Agents Using, Last Used — default sorted by usage count desc
+  - Agent Tool Mapping section: expandable rows showing each agent and its Composio tools with usage counts + disabled badge
+  - Loading skeletons, empty states for all sections
+  - Uses glass-card styling, Badge component for status, StatsBar for summary
+- Files changed: `frontend/components/analytics/analytics-composio.tsx` (new)
+- **Learnings for future iterations:**
+  - Composio hooks return arrays directly (not wrapped objects) — `apps`, `actions`, `agentTools` are directly iterable
+  - `ComposioAgentToolEntry` has `tool_name` and `enabled` fields — `enabled` is useful for showing disabled tools
+  - `getStatusVariant()` maps status strings to Badge variant types — reuse pattern for other status displays
+  - Sorting table columns: use `SortKey` type union + `SortDir` state, toggle direction on same-column click
+  - `Fragment` import needed from React for expandable table rows (adjacent `<tr>` elements without wrapper div)
+  - Component accepts `days` prop but doesn't need it for internal logic — passed through to hooks which handle the API param
+---
