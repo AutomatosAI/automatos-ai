@@ -622,6 +622,58 @@ export function useCostProjections(period: string = '30d') {
   })
 }
 
+// ============= ADMIN: COST ANALYTICS =============
+
+interface AdminWorkspaceCostEntry {
+  workspace_id: string
+  workspace_name: string
+  plan: string
+  total_cost: number
+  total_tokens: number
+  total_requests: number
+  top_model: string | null
+}
+
+interface AdminCostBreakdown {
+  key: string
+  input_cost: number
+  output_cost: number
+  total_cost: number
+  request_count: number
+}
+
+interface AdminDailyCostTrend {
+  date: string
+  cost: number
+  requests: number
+}
+
+interface AdminCostAnalyticsData {
+  total_platform_cost: number
+  total_tokens: number
+  total_requests: number
+  cost_by_workspace: AdminWorkspaceCostEntry[]
+  cost_by_provider: AdminCostBreakdown[]
+  daily_cost_trend: AdminDailyCostTrend[]
+}
+
+export function useAdminCostAnalytics(period: string = '30d') {
+  return useQuery<AdminCostAnalyticsData | null>({
+    queryKey: ['unified-analytics', 'admin', 'costs', period],
+    queryFn: async () => {
+      const data = await apiClient.request<AdminCostAnalyticsData>(
+        `/api/admin/analytics/costs?period=${period}`
+      ).catch((err: any) => {
+        // 403 = not admin, 401 = unauthenticated
+        if (err?.message?.includes('403') || err?.message?.includes('401')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 120000, // 2 minutes
+  })
+}
+
 // ============= ADMIN: CROSS-WORKSPACE =============
 export function useAdminWorkspaceAnalytics(days: number = 30) {
   return useQuery({
