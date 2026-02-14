@@ -239,8 +239,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "Depends on US-013 for AnalyticsComposio component"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-page.tsx — added 'Tools & Integrations' tab with Wrench icon between 'LLM & Costs' and 'Admin', renders AnalyticsComposio component, visible to all users, lazy-loads via Radix TabsContent"
     },
     {
       "id": "US-015",
@@ -258,8 +258,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": "Depends on US-009 for useAnalyticsChart hook"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-pandas-chart.tsx — accepts presetId/query/chartType props, auto-generates chart via mutation, renders base64 chart images with NL summary, loading skeleton with 'Generating chart...' message, error state, glass-card styling"
     },
     {
       "id": "US-016",

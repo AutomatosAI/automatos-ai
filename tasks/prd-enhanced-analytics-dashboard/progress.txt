@@ -234,3 +234,35 @@
   - `Fragment` import needed from React for expandable table rows (adjacent `<tr>` elements without wrapper div)
   - Component accepts `days` prop but doesn't need it for internal logic — passed through to hooks which handle the API param
 ---
+
+## 2026-02-14 - US-014
+- What was implemented: Added "Tools & Integrations" tab to analytics page navigation in `frontend/components/analytics/analytics-page.tsx`
+  - New tab with `Wrench` icon from lucide-react, placed between "LLM & Costs" and "Admin"
+  - Renders `<AnalyticsComposio days={days} />` component in a `TabsContent` block
+  - Tab visible to all users (not admin-gated)
+  - Lazy-loads via Radix `TabsContent` — only renders when tab is active (matches existing pattern)
+- Files changed: `frontend/components/analytics/analytics-page.tsx` (modified — added Wrench import, AnalyticsComposio import, tab def, TabsContent)
+- **Learnings for future iterations:**
+  - `FilterTabs` re-exports Radix `TabsContent` — inherently lazy (only active tab DOM-mounted), no extra lazy-loading needed
+  - Tab ordering: add new entries to `tabDefs` array at the desired position; admin tab uses spread operator so always ends up last
+  - Pre-existing TS errors in the codebase (admin plugins, api-debug, auth pages) — none related to analytics; safe to ignore
+---
+
+## 2026-02-14 - US-015
+- What was implemented: PandasAI chart widget component in `frontend/components/analytics/analytics-pandas-chart.tsx`
+  - Accepts props: `presetId?`, `query?`, `chartType?` — resolves preset config from `useChartPresets()` when presetId provided
+  - Auto-generates chart via `useAnalyticsChart()` mutation when query is resolved (useEffect trigger)
+  - Renders base64 PNG chart images with `<img>` tags
+  - Shows NL summary text below charts
+  - Loading skeleton with "Generating chart..." message and spinner
+  - Error state with error message display
+  - Fallback "No chart data available" when no charts or summary returned
+  - Uses glass-card wrapper with CardHeader title from preset
+- Files changed: `frontend/components/analytics/analytics-pandas-chart.tsx` (new)
+- **Learnings for future iterations:**
+  - `useAnalyticsChart()` is a mutation — must use `useEffect` to auto-trigger on mount/query change, with guards to prevent re-firing (`!isLoading && !isSuccess && !isError`)
+  - Mutation object ref changes every render — must NOT include it in useEffect deps, only the resolved query/chartType values
+  - Base64 chart images render as `data:image/png;base64,${base64}` in img src — no wrapper object, just the base64 string directly from the charts array
+  - Component is standalone with optional props — can be used as preset-driven (pass presetId) or ad-hoc (pass query + chartType)
+  - tanstack v4 mutation: `isLoading` for in-flight, `isSuccess` + `data` for result, `isError` + `error` for failures
+---
