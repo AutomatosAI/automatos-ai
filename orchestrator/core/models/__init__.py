@@ -1,6 +1,6 @@
 # Import all models from core.py
 # This allows imports like: from models import Agent, Skill, Workflow, Base
-from .core import *
+from .core import *  # noqa: includes LLMModel, WorkspaceModel, UserApiKey, LLMUsage
 
 # PRD-37: Workspace model (required for FK resolution)
 from .workspaces import *

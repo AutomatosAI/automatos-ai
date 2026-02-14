@@ -713,7 +713,7 @@ async def update_agent_model_config(
                 detail=f"Agent {agent_id} not found"
             )
         
-        # Validate model exists
+        # Validate model exists and auto-resolve provider from registry
         model_id = model_config.get("model_id")
         if model_id:
             registry = ModelRegistry(db)
@@ -723,7 +723,10 @@ async def update_agent_model_config(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid model_id: {model_id}"
                 )
-        
+            # PRD-54: Always use the provider from the model registry
+            # The frontend may not know the correct provider for aggregated models
+            model_config["provider"] = model.provider
+
         # Update model config
         agent.model_config = model_config
         

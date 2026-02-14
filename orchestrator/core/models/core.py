@@ -6,7 +6,7 @@ Database Models for Automotas AI System
 Comprehensive data models for agents, skills, workflows, documents, and system configuration.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, JSON, ForeignKey, Table, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB, UUID
 # Base moved to core/database/base.py to avoid circular imports
 from core.database.base import Base
@@ -76,12 +76,97 @@ class LLMModel(Base):
     default_temperature = Column(Float, default=0.7)
     min_temperature = Column(Float, default=0.0)
     max_temperature = Column(Float, default=2.0)
-    
+
+    # PRD-54: Marketplace & multi-tier fields
+    tier = Column(String(50), default='direct')  # direct, aggregator, byok_only
+    tags = Column(JSON, default=list)
+    category = Column(String(100))  # general, coding, creative, fast, premium
+    popularity_score = Column(Integer, default=0)
+    install_count = Column(Integer, default=0)
+    avg_rating = Column(Float)
+    is_featured = Column(Boolean, default=False)
+    is_default = Column(Boolean, default=False)  # included in all workspaces
+    requires_plan = Column(String(50))  # NULL (all plans), pro, enterprise
+    external_id = Column(String(255))  # OpenRouter model ID
+    pricing_updated_at = Column(DateTime)
+
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     # PRD-37: Workspace isolation (nullable for system-wide models)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=True)
+
+    # Relationships
+    workspace_installs = relationship("WorkspaceModel", back_populates="model", cascade="all, delete-orphan")
+
+
+class WorkspaceModel(Base):
+    """Tracks which models a workspace has installed from the marketplace."""
+    __tablename__ = 'workspace_models'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    model_id = Column(Integer, ForeignKey('llm_models.id', ondelete='CASCADE'), nullable=False)
+    installed_at = Column(DateTime, default=func.now())
+    is_active = Column(Boolean, default=True)
+    source = Column(String(50), default='marketplace')  # default, marketplace, admin
+
+    model = relationship("LLMModel", back_populates="workspace_installs")
+
+    __table_args__ = (
+        # Each workspace can install a model only once
+        UniqueConstraint('workspace_id', 'model_id', name='uq_workspace_model'),
+    )
+
+
+class UserApiKey(Base):
+    """BYOK (Bring Your Own Key) — user-provided API keys per workspace."""
+    __tablename__ = 'user_api_keys'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=False)
+    provider = Column(String(50), nullable=False)  # openai, anthropic, google, openrouter
+    encrypted_key = Column(Text, nullable=False)
+    display_name = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    last_used_at = Column(DateTime)
+    usage_count = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class LLMUsage(Base):
+    """Per-request LLM usage tracking for analytics and billing."""
+    __tablename__ = 'llm_usage'
+
+    id = Column(Integer, primary_key=True)  # will be BIGSERIAL in migration
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id'), nullable=False, index=True)
+    model_id = Column(String(255), nullable=False, index=True)
+    provider = Column(String(100), nullable=False)
+    tier = Column(String(50), nullable=False)  # direct, aggregator, byok
+
+    # Request details
+    agent_id = Column(Integer)
+    execution_id = Column(String(255))
+    request_type = Column(String(50))  # chat, agent, recipe, routing, embedding
+
+    # Token usage
+    input_tokens = Column(Integer, nullable=False)
+    output_tokens = Column(Integer, nullable=False)
+    total_tokens = Column(Integer, nullable=False)
+
+    # Cost
+    input_cost = Column(Float, nullable=False)
+    output_cost = Column(Float, nullable=False)
+    total_cost = Column(Float, nullable=False)
+    is_byok = Column(Boolean, default=False)
+
+    # Performance
+    latency_ms = Column(Integer)
+    status = Column(String(50))  # success, error, timeout, rate_limited
+    error_message = Column(Text)
+
+    created_at = Column(DateTime, default=func.now())
 
 # Database Models
 class Agent(Base):

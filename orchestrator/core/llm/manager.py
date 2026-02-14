@@ -19,6 +19,7 @@ from .clients.azure_client import AzureProvider
 from .clients.huggingface_client import HuggingFaceProvider
 from .clients.bedrock_client import BedrockProvider
 from .clients.grok_client import GrokProvider
+from .clients.openrouter_client import OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,8 @@ def get_credential_data(provider: str, environment: str = None, service_name: st
             "aws_bedrock": "aws_bedrock_api",
             "bedrock": "aws_bedrock_api",
             "grok": "xai_api",
-            "xai": "xai_api"
+            "xai": "xai_api",
+            "openrouter": "openrouter_api"
         }
         
         credential_type = credential_type_map.get(provider.lower())
@@ -452,7 +454,8 @@ class LLMManager:
                     LLMProvider.GOOGLE: "gemini-pro",
                     LLMProvider.AZURE: "gpt-4",
                     LLMProvider.HUGGINGFACE: "mistralai/Mistral-7B-Instruct-v0.2",
-                    LLMProvider.GROK: "grok-2-latest"
+                    LLMProvider.GROK: "grok-2-latest",
+                    LLMProvider.OPENROUTER: "meta-llama/llama-3.1-70b-instruct"
                 }
                 model = default_models.get(provider, "gpt-4")
         
@@ -510,7 +513,9 @@ class LLMManager:
             base_url = aws_region  # Store region in base_url field
         elif provider == LLMProvider.GROK:
             api_key = cred_data.get("api_key") or cred_data.get("api_token")
-        
+        elif provider == LLMProvider.OPENROUTER:
+            api_key = cred_data.get("api_key") or cred_data.get("api_token")
+
         # Fallback to environment variables if credentials not found (except HuggingFace)
         if not api_key and provider != LLMProvider.HUGGINGFACE:
             fallback_env_vars = {
@@ -519,7 +524,8 @@ class LLMManager:
                 LLMProvider.GOOGLE: "GOOGLE_API_KEY",
                 LLMProvider.AZURE: "AZURE_OPENAI_API_KEY",
                 LLMProvider.AWS_BEDROCK: "AWS_ACCESS_KEY_ID",
-                LLMProvider.GROK: "XAI_API_KEY"
+                LLMProvider.GROK: "XAI_API_KEY",
+                LLMProvider.OPENROUTER: "OPENROUTER_API_KEY"
             }
             env_var = fallback_env_vars.get(provider)
             if env_var:
@@ -563,6 +569,8 @@ class LLMManager:
             return BedrockProvider(self.config)
         elif self.config.provider == LLMProvider.GROK:
             return GrokProvider(self.config)
+        elif self.config.provider == LLMProvider.OPENROUTER:
+            return OpenRouterProvider(self.config)
         else:
             raise ValueError(f"Unsupported provider: {self.config.provider}")
     

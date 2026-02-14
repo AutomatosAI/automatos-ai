@@ -43,6 +43,7 @@ class LLMProvider(Enum):
     HUGGINGFACE = "huggingface"
     AWS_BEDROCK = "aws_bedrock"  # Cost-effective gateway to multiple models
     GROK = "grok"  # xAI Grok models
+    OPENROUTER = "openrouter"  # OpenRouter aggregator (200+ models)
 
 
 class EmbeddingProvider(Enum):

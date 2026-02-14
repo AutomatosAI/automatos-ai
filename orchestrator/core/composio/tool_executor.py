@@ -365,6 +365,14 @@ class ComposioToolExecutor:
                             )
                             .first()
                         )
+                        if not mapped:
+                            return {
+                                "success": False,
+                                "error": f"Auto-mapped action '{auto_selected_action}' could not be resolved from cache for {app_name}.",
+                                "error_type": "composio_action_not_mapped",
+                                "data": None,
+                                "execution_time_ms": int((time.time() - start_time) * 1000),
+                            }
                     else:
                         return {
                             "success": False,

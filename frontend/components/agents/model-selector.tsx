@@ -1,24 +1,26 @@
 /**
- * Model Selector Component (PRD-15)
- * =================================
- * 
+ * Model Selector Component (PRD-15, PRD-54)
+ * ==========================================
+ *
  * React component for selecting and displaying LLM models.
- * Shows model details, capabilities, costs, and recommendations.
+ * Groups models by tier, shows inline cost/context, and model details.
  */
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  Brain, 
-  Zap, 
-  DollarSign, 
+import {
+  Brain,
+  Zap,
+  DollarSign,
   Info,
   Check,
   AlertCircle,
   Sparkles,
-  ChevronDown
+  Star,
+  Globe,
+  Key
 } from 'lucide-react'
 import {
   Select,
@@ -33,7 +35,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useModels, ModelInfo } from '@/hooks/use-model-api'
+import { useWorkspaceModels, ModelInfo } from '@/hooks/use-model-api'
 
 interface ModelSelectorProps {
   value: string  // model_id
@@ -43,15 +45,22 @@ interface ModelSelectorProps {
   className?: string
 }
 
-export function ModelSelector({ 
-  value, 
-  onChange, 
-  agentType, 
+// Tier ordering and display config
+const TIER_CONFIG: Record<string, { label: string; icon: typeof Star; order: number }> = {
+  direct: { label: 'Direct Providers', icon: Star, order: 1 },
+  openrouter: { label: 'OpenRouter', icon: Globe, order: 2 },
+  byok: { label: 'Your Keys (BYOK)', icon: Key, order: 3 },
+}
+
+export function ModelSelector({
+  value,
+  onChange,
+  agentType,
   provider,
   className = ''
 }: ModelSelectorProps) {
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
-  const { data: models, isLoading, error } = useModels(provider)
+  const { data: models, isLoading, error } = useWorkspaceModels()
 
   useEffect(() => {
     if (value && models && models.length > 0) {
@@ -66,6 +75,37 @@ export function ModelSelector({
     setSelectedModel(model || null)
   }
 
+  // Group models by tier, then by provider within each tier
+  const tieredModels = useMemo(() => {
+    if (!models) return null
+
+    const tiers: Record<string, Record<string, ModelInfo[]>> = {}
+
+    for (const model of models) {
+      const tier = model.tier || 'direct'
+      if (!tiers[tier]) tiers[tier] = {}
+      if (!tiers[tier][model.provider]) tiers[tier][model.provider] = []
+      tiers[tier][model.provider].push(model)
+    }
+
+    // Sort tiers by configured order
+    const sorted = Object.entries(tiers).sort(([a], [b]) => {
+      const orderA = TIER_CONFIG[a]?.order ?? 99
+      const orderB = TIER_CONFIG[b]?.order ?? 99
+      return orderA - orderB
+    })
+
+    // Put recommended models (matching agentType) at top if agentType given
+    if (agentType) {
+      const recommended = models.filter(m => m.recommended_for?.includes(agentType))
+      if (recommended.length > 0) {
+        return { recommended, tiers: sorted }
+      }
+    }
+
+    return { recommended: [] as ModelInfo[], tiers: sorted }
+  }, [models, agentType])
+
   const getProviderColor = (provider: string) => {
     const colors: Record<string, string> = {
       openai: 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/20',
@@ -74,25 +114,36 @@ export function ModelSelector({
       azure: 'bg-[hsl(var(--info))]/10 text-[hsl(var(--info))] border-[hsl(var(--info))]/20',
       huggingface: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20',
       aws_bedrock: 'bg-primary/10 text-primary border-primary/20',
-      bedrock: 'bg-primary/10 text-primary border-primary/20'
+      bedrock: 'bg-primary/10 text-primary border-primary/20',
+      openrouter: 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))] border-[hsl(var(--warning))]/20',
+      grok: 'bg-[hsl(var(--destructive))]/10 text-[hsl(var(--destructive))] border-[hsl(var(--destructive))]/20'
     }
     return colors[provider.toLowerCase()] || 'bg-secondary/50 text-muted-foreground border-border/50'
+  }
+
+  const getTierColor = (tier: string) => {
+    const colors: Record<string, string> = {
+      direct: 'text-[hsl(var(--success))]',
+      openrouter: 'text-[hsl(var(--warning))]',
+      byok: 'text-[hsl(var(--info))]',
+    }
+    return colors[tier] || 'text-muted-foreground'
   }
 
   const getCapabilityBadge = (capability: string, rating: string) => {
     const isExcellent = rating.toLowerCase().includes('excellent')
     const isGood = rating.toLowerCase().includes('good')
     const isFast = rating.toLowerCase().includes('fast')
-    
+
     let colorClass = 'border-border/50 text-muted-foreground'
     if (isExcellent) colorClass = 'border-[hsl(var(--success))]/30 text-[hsl(var(--success))]'
     else if (isGood) colorClass = 'border-[hsl(var(--info))]/30 text-[hsl(var(--info))]'
     else if (isFast) colorClass = 'border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]'
-    
+
     return (
-      <Badge 
+      <Badge
         key={capability}
-        variant="outline" 
+        variant="outline"
         className={`text-xs ${colorClass}`}
       >
         {capability}: {rating}
@@ -101,18 +152,43 @@ export function ModelSelector({
   }
 
   const formatNumber = (num: number) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
     if (num >= 1000) return `${(num / 1000).toFixed(0)}K`
     return num.toString()
   }
 
-  // Group models by provider
-  const groupedModels = models?.reduce((acc, model) => {
-    if (!acc[model.provider]) {
-      acc[model.provider] = []
-    }
-    acc[model.provider].push(model)
-    return acc
-  }, {} as Record<string, ModelInfo[]>)
+  const formatCost = (cost: number) => {
+    if (cost === 0) return 'Free'
+    if (cost < 0.001) return `$${cost.toFixed(5)}`
+    return `$${cost.toFixed(4)}`
+  }
+
+  const renderModelItem = (model: ModelInfo) => (
+    <SelectItem
+      key={model.model_id}
+      value={model.model_id}
+      className="text-foreground focus:bg-secondary focus:text-foreground py-2"
+    >
+      <div className="flex items-center gap-2 w-full">
+        <span className="truncate">{model.display_name}</span>
+        <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+          {formatNumber(model.context_window)}ctx
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {formatCost(model.input_cost_per_1k)}/1K
+        </span>
+        {model.status === 'beta' && (
+          <Badge variant="outline" className="text-[10px] h-4 px-1">Beta</Badge>
+        )}
+        {model.is_featured && (
+          <Star className="h-3 w-3 text-[hsl(var(--warning))] shrink-0" />
+        )}
+        {agentType && model.recommended_for?.includes(agentType) && (
+          <Sparkles className="h-3 w-3 text-[hsl(var(--warning))] shrink-0" />
+        )}
+      </div>
+    </SelectItem>
+  )
 
   if (error) {
     return (
@@ -134,45 +210,54 @@ export function ModelSelector({
           <SelectTrigger className="w-full bg-secondary/30 border-border/50">
             <SelectValue placeholder={isLoading ? "Loading models..." : "Select a model..."} />
           </SelectTrigger>
-          <SelectContent className="bg-popover/95 border-border/50">
+          <SelectContent className="bg-popover/95 border-border/50 max-h-[400px]">
             {isLoading ? (
-              <div className="p-4">
+              <div className="p-4 space-y-2">
                 <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
               </div>
-            ) : (
-              groupedModels && Object.entries(groupedModels).map(([provider, providerModels]) => (
-                <SelectGroup key={provider}>
-                  <SelectLabel className="text-xs uppercase text-muted-foreground px-2 py-1.5">
-                    {provider}
-                  </SelectLabel>
-                  {providerModels.map((model) => (
-                    <SelectItem 
-                      key={model.model_id} 
-                      value={model.model_id}
-                      className="text-foreground focus:bg-secondary focus:text-foreground"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span>{model.display_name}</span>
-                        {model.status === 'beta' && (
-                          <Badge variant="outline" className="text-xs">Beta</Badge>
+            ) : tieredModels && (
+              <>
+                {/* Recommended models section */}
+                {tieredModels.recommended.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel className="text-xs uppercase px-2 py-1.5 flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-[hsl(var(--warning))]" />
+                      <span className="text-[hsl(var(--warning))]">Recommended for {agentType}</span>
+                    </SelectLabel>
+                    {tieredModels.recommended.map(renderModelItem)}
+                  </SelectGroup>
+                )}
+
+                {/* Tier-grouped models */}
+                {tieredModels.tiers.map(([tier, providers]) => (
+                  <div key={tier}>
+                    <SelectGroup>
+                      <SelectLabel className={`text-xs uppercase px-2 py-1.5 flex items-center gap-1 ${getTierColor(tier)}`}>
+                        {TIER_CONFIG[tier] ? (
+                          <>
+                            {(() => {
+                              const Icon = TIER_CONFIG[tier].icon
+                              return <Icon className="h-3 w-3" />
+                            })()}
+                            <span>{TIER_CONFIG[tier].label}</span>
+                          </>
+                        ) : (
+                          <span>{tier}</span>
                         )}
-                        {agentType && model.recommended_for.includes(agentType) && (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <Sparkles className="h-3 w-3 text-[hsl(var(--warning))]" />
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p className="text-xs">Recommended for {agentType}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))
+                      </SelectLabel>
+                    </SelectGroup>
+                    {Object.entries(providers).map(([providerName, providerModels]) => (
+                      <SelectGroup key={`${tier}-${providerName}`}>
+                        <SelectLabel className="text-[10px] uppercase text-muted-foreground/60 px-4 py-0.5">
+                          {providerName}
+                        </SelectLabel>
+                        {providerModels.map(renderModelItem)}
+                      </SelectGroup>
+                    ))}
+                  </div>
+                ))}
+              </>
             )}
           </SelectContent>
         </Select>
@@ -197,9 +282,16 @@ export function ModelSelector({
                     {selectedModel.model_family} by {selectedModel.provider}
                   </p>
                 </div>
-                <Badge className={getProviderColor(selectedModel.provider)}>
-                  {selectedModel.provider}
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  {selectedModel.tier && selectedModel.tier !== 'direct' && (
+                    <Badge variant="outline" className={`text-xs ${getTierColor(selectedModel.tier)}`}>
+                      {selectedModel.tier}
+                    </Badge>
+                  )}
+                  <Badge className={getProviderColor(selectedModel.provider)}>
+                    {selectedModel.provider}
+                  </Badge>
+                </div>
               </div>
 
               {/* Key Metrics */}
@@ -222,7 +314,7 @@ export function ModelSelector({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                
+
                 <div className="space-y-1">
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Zap className="h-3 w-3" />
@@ -241,7 +333,7 @@ export function ModelSelector({
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                
+
                 <div className="space-y-1">
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <DollarSign className="h-3 w-3" />
@@ -251,13 +343,13 @@ export function ModelSelector({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <p className="text-sm font-medium text-foreground cursor-help">
-                          ${selectedModel.input_cost_per_1k.toFixed(4)}/1K
+                          {formatCost(selectedModel.input_cost_per_1k)}/1K
                         </p>
                       </TooltipTrigger>
                       <TooltipContent>
                         <div className="text-xs space-y-1">
-                          <div>Input: ${selectedModel.input_cost_per_1k.toFixed(4)}/1K tokens</div>
-                          <div>Output: ${selectedModel.output_cost_per_1k.toFixed(4)}/1K tokens</div>
+                          <div>Input: {formatCost(selectedModel.input_cost_per_1k)}/1K tokens</div>
+                          <div>Output: {formatCost(selectedModel.output_cost_per_1k)}/1K tokens</div>
                         </div>
                       </TooltipContent>
                     </Tooltip>
@@ -273,7 +365,7 @@ export function ModelSelector({
                     <span>Capabilities</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {Object.entries(selectedModel.capabilities).map(([cap, rating]) => 
+                    {Object.entries(selectedModel.capabilities).map(([cap, rating]) =>
                       getCapabilityBadge(cap, rating as string)
                     )}
                   </div>
@@ -303,13 +395,13 @@ export function ModelSelector({
               </div>
 
               {/* Recommended For */}
-              {selectedModel.recommended_for.length > 0 && (
+              {selectedModel.recommended_for && selectedModel.recommended_for.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs text-muted-foreground">Recommended for:</div>
                   <div className="flex flex-wrap gap-1">
                     {selectedModel.recommended_for.map((task) => (
-                      <Badge 
-                        key={task} 
+                      <Badge
+                        key={task}
                         variant="secondary"
                         className="text-xs bg-secondary/50 text-muted-foreground"
                       >
@@ -336,7 +428,7 @@ export function ModelSelector({
                   </div>
                 </div>
               )}
-              
+
               {/* Beta warning */}
               {selectedModel.status === 'beta' && (
                 <div className="flex items-start gap-2 p-2 rounded-lg bg-[hsl(var(--info))]/10 border border-[hsl(var(--info))]/20">
@@ -353,4 +445,3 @@ export function ModelSelector({
     </div>
   )
 }
-
