@@ -9,6 +9,14 @@
 - API routers in `orchestrator/api/` — FastAPI pattern with `RequestContext` + `get_request_context_hybrid`
 - Resolve BYOK keys via `_resolve_openrouter_key` pattern: query `UserApiKey` (workspace + provider + is_active), decrypt, fallback to env var, 404 if missing
 - llm_analytics.py router prefix: `/api/analytics/llm` — already registered in main.py
+- Composio workspace scoping: Agent.workspace_id for agent filtering, ComposioEntity.workspace_id → ComposioConnection.entity_id for connections
+- AgentAppFeature has no direct workspace_id — join through Agent.id to scope by workspace
+- composio_analytics.py router prefix: `/api/analytics/composio` — registered in main.py
+- analytics_charts.py router prefix: `/api/analytics/charts` — registered in main.py
+- PandasAI service accessed via lazy `get_pandasai_service()` — returns None if not installed/configured, use 404 for unavailable
+- `generate_insight(question, rows, columns)` returns `{"summary": str, "charts": [{"filename", "mime_type", "base64"}]}`
+- `LLMModel` registry: `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `capabilities` (JSON dict), `display_name`, `provider` — query by `model_id` for metadata fallback
+- PERIOD_MAP in llm_analytics.py supports: 1h, 24h, 7d, 30d, 90d
 
 ---
 
@@ -36,4 +44,48 @@
   - Use lazy import for `OpenRouterAnalyticsService` inside endpoints to avoid circular imports
   - `_resolve_openrouter_key` pattern: BYOK first (decrypt via `get_encryption_service()`), then env var, then 404 — reuse for other providers
   - Added `os` import and `UserApiKey`/`get_encryption_service` imports to the file
+---
+
+## 2026-02-14 - US-003
+- What was implemented: Composio analytics API endpoints in `orchestrator/api/composio_analytics.py`
+  - `GET /api/analytics/composio/apps` — connected apps with action counts, agent count, documents synced
+  - `GET /api/analytics/composio/actions` — action leaderboard sorted by usage count desc
+  - `GET /api/analytics/composio/agent-tools` — per-agent tool mapping with usage counts
+  - All endpoints accept `?days=7|30|90` parameter, scoped by workspace_id
+- Files changed: `orchestrator/api/composio_analytics.py` (new), `orchestrator/main.py` (import + router registration)
+- **Learnings for future iterations:**
+  - AgentAppFeature has no workspace_id column — must join through Agent table to filter by workspace
+  - ComposioConnection links to workspace via ComposioEntity (entity_id FK → composio_entities.workspace_id)
+  - ComposioConnection stores app_name in uppercase — match against AgentAppFeature.app_name which is also stored as-is
+  - ComposioConnection has `total_documents_synced` field (PRD-42 cloud doc sync) useful for analytics
+  - Use `func.distinct()` inside `func.count()` for accurate agent_count across grouped features
+---
+
+## 2026-02-14 - US-004
+- What was implemented: PandasAI analytics chart generation API in `orchestrator/api/analytics_charts.py`
+  - `POST /api/analytics/charts/generate` — accepts {query, chart_type}, queries llm_usage, passes to PandasAI, returns {summary, charts: [base64], data: [rows]}
+  - `GET /api/analytics/charts/presets` — returns 6 pre-built chart configs (cost-by-model, tokens-over-time, cost-trend-daily, requests-by-provider, latency-by-model, cost-by-request-type)
+  - NL query parser extracts time range + grouping intent (over-time, by-provider, by-model, latency, request-type)
+  - Router registered in main.py
+- Files changed: `orchestrator/api/analytics_charts.py` (new), `orchestrator/main.py` (import + router registration)
+- **Learnings for future iterations:**
+  - PandasAI `get_pandasai_service()` returns None when disabled — check and 404, don't crash
+  - `generate_insight()` returns charts as list of dicts with `base64` key — extract for response
+  - SQLAlchemy row `._fields` gives column names for named tuples from `.label()` queries
+  - Chart type hint can be prepended to the query string to guide PandasAI visualization
+---
+
+## 2026-02-14 - US-005
+- What was implemented: LLM model comparison endpoint in `orchestrator/api/llm_analytics.py`
+  - `GET /api/analytics/llm/comparison?model_ids=a,b,c&period=30d` — compares up to 4 models
+  - Returns per-model: display_name, provider, input/output cost per 1K, context_window, capabilities, total_requests, total_tokens, total_cost, avg_latency_ms, error_rate, success_rate
+  - Falls back to LLMModel registry data if no usage data exists yet
+  - Added `90d` to PERIOD_MAP for broader date range support
+  - `ModelComparisonItem` Pydantic response model
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added ModelComparisonItem schema, comparison endpoint, extended PERIOD_MAP)
+- **Learnings for future iterations:**
+  - `LLMModel` registry has `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `capabilities` (JSON), `display_name`, `provider` — use as fallback when no usage data
+  - Usage aggregates (count, sum, avg) return None for empty result sets — always default with `or 0`
+  - Error rate calculation: separate query filtering `status == "error"` is cleaner than a CASE expression for py_compile compat
+  - PERIOD_MAP now includes `90d` — reuse for any endpoint needing 90-day range
 ---

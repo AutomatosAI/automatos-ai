@@ -70,6 +70,7 @@ PERIOD_MAP = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
+    "90d": timedelta(days=90),
 }
 
 
@@ -309,6 +310,103 @@ async def get_recommendations(
         ))
 
     return recs
+
+
+# ── Model Comparison ─────────────────────────────────────────────────
+
+
+class ModelComparisonItem(BaseModel):
+    model_id: str
+    display_name: str
+    provider: str
+    input_cost_per_1k: Optional[float] = None
+    output_cost_per_1k: Optional[float] = None
+    context_window: Optional[int] = None
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
+    total_requests: int = 0
+    total_tokens: int = 0
+    total_cost: float = 0.0
+    avg_latency_ms: Optional[float] = None
+    error_rate: float = 0.0
+    success_rate: float = 1.0
+
+
+@router.get("/comparison", response_model=List[ModelComparisonItem])
+async def get_model_comparison(
+    model_ids: str = Query(..., description="Comma-separated model IDs (max 4)"),
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Compare selected models side-by-side with cost, usage, and capability data."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    ids = [m.strip() for m in model_ids.split(",") if m.strip()]
+    if len(ids) > 4:
+        raise HTTPException(400, "Maximum 4 models for comparison")
+    if not ids:
+        raise HTTPException(400, "At least one model_id required")
+
+    since = _period_start(period)
+    results: List[ModelComparisonItem] = []
+
+    for mid in ids:
+        # Get registry data (fallback info if no usage exists)
+        registry = db.query(LLMModel).filter(LLMModel.model_id == mid).first()
+
+        # Get usage stats scoped to workspace + period
+        usage = (
+            db.query(
+                func.count(LLMUsage.id).label("total_requests"),
+                func.sum(LLMUsage.total_tokens).label("total_tokens"),
+                func.sum(LLMUsage.total_cost).label("total_cost"),
+                func.avg(LLMUsage.latency_ms).label("avg_latency_ms"),
+            )
+            .filter(
+                LLMUsage.workspace_id == ctx.workspace_id,
+                LLMUsage.model_id == mid,
+                LLMUsage.created_at >= since,
+            )
+            .first()
+        )
+
+        total_requests = usage.total_requests or 0 if usage else 0
+
+        # Error rate
+        error_count = 0
+        if total_requests > 0:
+            error_count = (
+                db.query(func.count(LLMUsage.id))
+                .filter(
+                    LLMUsage.workspace_id == ctx.workspace_id,
+                    LLMUsage.model_id == mid,
+                    LLMUsage.created_at >= since,
+                    LLMUsage.status == "error",
+                )
+                .scalar() or 0
+            )
+
+        error_rate = error_count / total_requests if total_requests > 0 else 0.0
+        success_rate = 1.0 - error_rate
+
+        results.append(ModelComparisonItem(
+            model_id=mid,
+            display_name=registry.display_name if registry else mid,
+            provider=registry.provider if registry else (usage and getattr(usage, "provider", None)) or "unknown",
+            input_cost_per_1k=registry.input_cost_per_1k_tokens if registry else None,
+            output_cost_per_1k=registry.output_cost_per_1k_tokens if registry else None,
+            context_window=registry.context_window if registry else None,
+            capabilities=registry.capabilities or {} if registry else {},
+            total_requests=total_requests,
+            total_tokens=int(usage.total_tokens or 0) if usage else 0,
+            total_cost=float(usage.total_cost or 0) if usage else 0.0,
+            avg_latency_ms=float(usage.avg_latency_ms) if usage and usage.avg_latency_ms else None,
+            error_rate=round(error_rate, 4),
+            success_rate=round(success_rate, 4),
+        ))
+
+    return results
 
 
 # ── OpenRouter helpers ────────────────────────────────────────────────

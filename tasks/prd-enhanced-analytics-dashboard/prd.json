@@ -53,8 +53,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Queries existing AgentAppFeature and ComposioConnection tables"
+      "passes": true,
+      "notes": "Implemented in orchestrator/api/composio_analytics.py — GET /apps, GET /actions, GET /agent-tools under /api/analytics/composio/"
     },
     {
       "id": "US-004",
@@ -70,8 +70,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "Reuses existing PandasAIService from modules/tools/services/pandas_ai_service.py"
+      "passes": true,
+      "notes": "Implemented in orchestrator/api/analytics_charts.py — POST /generate, GET /presets under /api/analytics/charts/"
     },
     {
       "id": "US-005",
@@ -86,8 +86,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": "Depends on US-002 for llm_analytics.py router"
+      "passes": true,
+      "notes": "Implemented GET /api/analytics/llm/comparison in orchestrator/api/llm_analytics.py — accepts ?model_ids=a,b,c&period=7d|30d|90d, returns per-model registry + usage data"
     },
     {
       "id": "US-006",
