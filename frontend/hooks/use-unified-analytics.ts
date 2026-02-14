@@ -4,7 +4,7 @@
  * Reuses existing API endpoints and adds new ones for costs, plans, and recommendations.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
 // ============= QUERY KEYS =============
@@ -18,6 +18,8 @@ export const unifiedAnalyticsKeys = {
   planUsage: ['unified-analytics', 'plan-usage'] as const,
   memory: ['unified-analytics', 'memory'] as const,
   adminWorkspaces: (days: number) => ['unified-analytics', 'admin', 'workspaces', days] as const,
+  openrouterCredits: ['unified-analytics', 'openrouter', 'credits'] as const,
+  openrouterKeyInfo: ['unified-analytics', 'openrouter', 'key-info'] as const,
 }
 
 // ============= OVERVIEW =============
@@ -363,6 +365,80 @@ export function useWorkspaceMemory() {
       }
     },
     staleTime: 60000,
+  })
+}
+
+// ============= OPENROUTER ANALYTICS =============
+
+interface OpenRouterCreditsData {
+  total_credits: number
+  total_usage: number
+}
+
+interface OpenRouterKeyInfoData {
+  limit: number | null
+  limit_remaining: number | null
+  usage_daily: number
+  usage_weekly: number
+  usage_monthly: number
+  is_free_tier: boolean
+  rate_limit: Record<string, any>
+}
+
+interface OpenRouterSyncResult {
+  synced: number
+  skipped: number
+  error: string | null
+}
+
+export function useOpenRouterCredits() {
+  return useQuery<OpenRouterCreditsData | null>({
+    queryKey: unifiedAnalyticsKeys.openrouterCredits,
+    queryFn: async () => {
+      const data = await apiClient.request<OpenRouterCreditsData>(
+        '/api/analytics/llm/openrouter/credits'
+      ).catch((err: any) => {
+        // 404 = no OpenRouter key configured — return null gracefully
+        if (err?.message?.includes('404')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 300000, // 5 minutes
+  })
+}
+
+export function useOpenRouterKeyInfo() {
+  return useQuery<OpenRouterKeyInfoData | null>({
+    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo,
+    queryFn: async () => {
+      const data = await apiClient.request<OpenRouterKeyInfoData>(
+        '/api/analytics/llm/openrouter/key-info'
+      ).catch((err: any) => {
+        if (err?.message?.includes('404')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useTriggerOpenRouterSync() {
+  const queryClient = useQueryClient()
+  return useMutation<OpenRouterSyncResult, Error>({
+    mutationFn: async () => {
+      return apiClient.request<OpenRouterSyncResult>(
+        '/api/analytics/llm/openrouter/sync',
+        { method: 'POST' }
+      )
+    },
+    onSuccess: () => {
+      // Invalidate related queries so they refetch with fresh data
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo })
+      queryClient.invalidateQueries({ queryKey: ['unified-analytics', 'costs'] })
+    },
   })
 }
 

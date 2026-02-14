@@ -120,8 +120,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": "Depends on US-002 backend endpoints"
+      "passes": true,
+      "notes": "Implemented useOpenRouterCredits(), useOpenRouterKeyInfo(), useTriggerOpenRouterSync() in frontend/hooks/use-unified-analytics.ts"
     },
     {
       "id": "US-008",

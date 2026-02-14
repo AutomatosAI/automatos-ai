@@ -19,6 +19,10 @@
 - PERIOD_MAP in llm_analytics.py supports: 1h, 24h, 7d, 30d, 90d
 - Previous period comparison: `prev_start = since - delta`, filter `created_at >= prev_start AND < since` for period-over-period change %
 - Use `func.count(func.distinct(func.date(col)))` for days-with-data count — more accurate than raw period length for daily averages
+- Frontend hooks: `apiClient.request<T>(endpoint, options)` for API calls, handles auth + workspace headers
+- Frontend 404 handling in hooks: catch error, check `err.message.includes('404')`, return null for "not configured" state
+- Frontend cache keys: extend `unifiedAnalyticsKeys` object with new namespaces for cache key consistency
+- Frontend mutations: use `useMutation` from tanstack + `queryClient.invalidateQueries()` for cache busting on write operations
 
 ---
 
@@ -105,4 +109,19 @@
   - Use `func.count(func.distinct(func.date(col)))` to get days with data rather than dividing by period length — avoids inflated averages when usage is sparse
   - Previous period comparison pattern: `prev_start = since - delta`, filter `>= prev_start AND < since`
   - Round financial values with `round(val, 6)` to avoid floating point noise in JSON responses
+---
+
+## 2026-02-14 - US-007
+- What was implemented: Frontend React Query hooks for OpenRouter analytics in `frontend/hooks/use-unified-analytics.ts`
+  - `useOpenRouterCredits()` — GET /api/analytics/llm/openrouter/credits, staleTime 300000 (5 min)
+  - `useOpenRouterKeyInfo()` — GET /api/analytics/llm/openrouter/key-info, staleTime 60000 (1 min)
+  - `useTriggerOpenRouterSync()` — mutation POST /api/analytics/llm/openrouter/sync, invalidates credits + key-info + costs queries on success
+  - Added `openrouterCredits` and `openrouterKeyInfo` to `unifiedAnalyticsKeys`
+  - All hooks handle 404 gracefully (no key configured) by returning null
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added useMutation import, 3 hooks, 3 interfaces, 2 cache keys)
+- **Learnings for future iterations:**
+  - `apiClient.request<T>(endpoint, options)` is the standard way to call backend — handles auth + workspace headers automatically
+  - Hooks returning null on 404: catch the error in queryFn, check `err.message.includes('404')`, return null — consumers check `data === null` for "not configured" state
+  - `useMutation` from tanstack requires explicit `queryClient.invalidateQueries()` for cache busting — pass `{ queryKey: [...] }` object form
+  - Pre-existing TS errors exist in this file (getCostAnalysis, getAgentRanking missing from ApiClient type) — don't try to fix them
 ---
