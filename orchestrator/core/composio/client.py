@@ -907,14 +907,14 @@ class ComposioClient:
                 "[ComposioClient] Cached %d schemas for app=%s in %dms",
                 len(cache), app_upper, elapsed,
             )
+            # Only update cache on success — preserve existing data on failure
+            self._schema_cache[app_upper] = cache
+            self._schema_cache_ts[app_upper] = _time.monotonic()
         except Exception as e:
             logger.warning(
                 "[ComposioClient] Schema cache failed for app=%s: %s",
                 app_upper, e, exc_info=True,
             )
-
-        self._schema_cache[app_upper] = cache
-        self._schema_cache_ts[app_upper] = _time.monotonic()
 
     def search_actions_for_step(
         self,
