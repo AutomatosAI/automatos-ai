@@ -29,6 +29,10 @@
 - "Not configured" state: render centered icon + message + link to settings when hook returns null (404 = no key)
 - Brand chart colors for comparison/multi-series: `#60B5FF` (blue), `#72BF78` (green), `#ff6b35` (orange), `#a78bfa` (purple)
 - TS narrowing: use `data && data.x?.length` NOT `data?.x?.length` when `data` is used inside the conditional block
+- Admin auth: `getattr(ctx.user, "system_role", "user") == "admin"` — use `_assert_admin(ctx)` helper at endpoint start
+- Multiple routers per file: `admin_router = APIRouter(prefix=...)` can coexist with `router` in the same file
+- Workspace model: `core.models.workspaces.Workspace` — fields: id (UUID), name, plan, slug, is_active
+- admin_router prefix: `/api/admin/analytics` — registered in main.py alongside the llm_analytics router
 
 ---
 
@@ -265,4 +269,41 @@
   - Base64 chart images render as `data:image/png;base64,${base64}` in img src — no wrapper object, just the base64 string directly from the charts array
   - Component is standalone with optional props — can be used as preset-driven (pass presetId) or ad-hoc (pass query + chartType)
   - tanstack v4 mutation: `isLoading` for in-flight, `isSuccess` + `data` for result, `isError` + `error` for failures
+---
+
+## 2026-02-14 - US-016
+- What was implemented: Added "AI-Generated Insights" section to `frontend/components/analytics/analytics-overview.tsx`
+  - Section header with Sparkles icon and "AI-Generated Insights" title
+  - 2-column responsive grid (`grid-cols-1 md:grid-cols-2`) with `AnalyticsPandasChart` components
+  - Uses presets: `cost-by-model` and `tokens-over-time`
+  - Wrapped in glass-card with `Card`/`CardHeader`/`CardContent`
+  - Only renders when `useChartPresets()` returns data (graceful fallback if PandasAI unavailable)
+  - Animated entry with `motion.div` matching existing section pattern (delay: 0.7)
+- Files changed: `frontend/components/analytics/analytics-overview.tsx` (modified — added imports for useChartPresets + AnalyticsPandasChart, added chartPresets query, added AI Insights section)
+- **Learnings for future iterations:**
+  - `Sparkles` icon was already imported in the file — always check existing imports before adding new ones
+  - `useChartPresets()` returns `undefined` when loading/error and `ChartPreset[]` on success — condition `chartPresets && chartPresets.length > 0` handles both loading state and empty presets
+  - The overview component doesn't accept or use `days` for chart presets — presets are time-agnostic since the chart generation endpoint handles its own time filtering
+  - Pattern: wrap conditional sections in `{condition && (<motion.div>...)}` for graceful degradation
+---
+
+## 2026-02-14 - US-017
+- What was implemented: Admin cross-workspace cost aggregation endpoint `GET /api/admin/analytics/costs` in `orchestrator/api/llm_analytics.py`
+  - Created `admin_router` with prefix `/api/admin/analytics` in the same file as the existing llm analytics router
+  - `_is_admin(ctx)` and `_assert_admin(ctx)` helpers checking `ctx.user.system_role == "admin"`
+  - Returns: `total_platform_cost`, `total_tokens`, `total_requests` — platform-wide aggregates (no workspace filter)
+  - `cost_by_workspace`: per-workspace breakdown with workspace name, plan, cost, tokens, requests, top model
+  - `cost_by_provider`: reuses existing `CostBreakdown` schema for provider-level aggregation
+  - `daily_cost_trend`: date + cost + requests per day for time-series charts
+  - Workspace metadata lookup via `Workspace` model join (name, plan)
+  - Accepts `?period=7d|30d|90d`
+  - Registered `admin_router` in `main.py`
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added admin_router, Workspace import, admin helpers, 2 schemas, 1 endpoint), `orchestrator/main.py` (modified — import + register admin_router)
+- **Learnings for future iterations:**
+  - Admin auth pattern: `getattr(ctx.user, "system_role", "user") == "admin"` — same as admin_plugins.py and marketplace.py
+  - Can add multiple routers to a single file — `admin_router` coexists with `router` in llm_analytics.py, each with different prefix
+  - Import pattern for multiple routers: `from api.llm_analytics import router as X, admin_router as Y`
+  - Workspace model at `core.models.workspaces.Workspace` — fields: id (UUID), name, plan (string), slug, is_active
+  - Cross-workspace queries: simply omit the `workspace_id` filter from LLMUsage queries
+  - Top model per workspace: separate sub-query grouped by model_id, ordered by cost desc, `.first()` — avoids complex window functions
 ---

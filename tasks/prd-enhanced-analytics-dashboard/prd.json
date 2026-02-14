@@ -276,8 +276,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 16,
-      "passes": false,
-      "notes": "Depends on US-015 for AnalyticsPandasChart component"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-overview.tsx — AI-Generated Insights section with Sparkles icon, 2-column grid of AnalyticsPandasChart (cost-by-model, tokens-over-time), renders only when presets available via useChartPresets()"
     },
     {
       "id": "US-017",
@@ -291,8 +291,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": "Depends on US-002 for llm_analytics.py router"
+      "passes": true,
+      "notes": "Implemented GET /api/admin/analytics/costs in orchestrator/api/llm_analytics.py — admin_router with prefix /api/admin/analytics, admin-only auth check, returns total_platform_cost, total_tokens, total_requests, cost_by_workspace, cost_by_provider, daily_cost_trend across all workspaces"
     },
     {
       "id": "US-018",

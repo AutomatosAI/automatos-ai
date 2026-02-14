@@ -20,10 +20,12 @@ from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
 from core.models.core import LLMUsage, LLMModel, UserApiKey
+from core.models.workspaces import Workspace
 from core.credentials.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics/llm", tags=["LLM Analytics"])
+admin_router = APIRouter(prefix="/api/admin/analytics", tags=["Admin Analytics"])
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -669,3 +671,179 @@ async def get_openrouter_key_info(
         raise HTTPException(502, "Failed to fetch key info from OpenRouter")
 
     return OpenRouterKeyInfoResponse(**data)
+
+
+# ── Admin helpers ────────────────────────────────────────────────────
+
+
+def _is_admin(ctx: RequestContext) -> bool:
+    if not ctx.user:
+        return False
+    return getattr(ctx.user, "system_role", "user") == "admin"
+
+
+def _assert_admin(ctx: RequestContext) -> None:
+    if not _is_admin(ctx):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+# ── Admin Analytics schemas ──────────────────────────────────────────
+
+
+class WorkspaceCostEntry(BaseModel):
+    workspace_id: str
+    workspace_name: str
+    plan: str
+    total_cost: float
+    total_tokens: int
+    total_requests: int
+    top_model: Optional[str] = None
+
+
+class AdminCostAnalyticsResponse(BaseModel):
+    total_platform_cost: float
+    total_tokens: int
+    total_requests: int
+    cost_by_workspace: List[WorkspaceCostEntry] = Field(default_factory=list)
+    cost_by_provider: List[CostBreakdown] = Field(default_factory=list)
+    daily_cost_trend: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+# ── Admin Analytics endpoints ────────────────────────────────────────
+
+
+@admin_router.get("/costs", response_model=AdminCostAnalyticsResponse)
+async def get_admin_cost_analytics(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Platform-wide cost analytics across all workspaces (admin only)."""
+    _assert_admin(ctx)
+
+    delta = PERIOD_MAP.get(period, timedelta(days=30))
+    since = datetime.utcnow() - delta
+
+    # Platform-wide aggregates (no workspace filter)
+    agg = (
+        db.query(
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.sum(LLMUsage.total_tokens).label("total_tokens"),
+            func.count(LLMUsage.id).label("total_requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .first()
+    )
+
+    total_platform_cost = float(agg.total_cost or 0) if agg else 0.0
+    total_tokens = int(agg.total_tokens or 0) if agg else 0
+    total_requests = agg.total_requests or 0 if agg else 0
+
+    # Cost by workspace
+    ws_rows = (
+        db.query(
+            LLMUsage.workspace_id,
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.sum(LLMUsage.total_tokens).label("total_tokens"),
+            func.count(LLMUsage.id).label("total_requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.workspace_id)
+        .order_by(desc("total_cost"))
+        .all()
+    )
+
+    # Lookup workspace names and plans
+    ws_ids = [r.workspace_id for r in ws_rows if r.workspace_id]
+    ws_map: Dict[Any, Any] = {}
+    if ws_ids:
+        workspaces = db.query(Workspace).filter(Workspace.id.in_(ws_ids)).all()
+        ws_map = {str(w.id): w for w in workspaces}
+
+    # Top model per workspace (subquery for each)
+    cost_by_workspace = []
+    for r in ws_rows:
+        ws_id_str = str(r.workspace_id) if r.workspace_id else "unknown"
+        ws = ws_map.get(ws_id_str)
+
+        # Find top model for this workspace in the period
+        top_model_row = (
+            db.query(
+                LLMUsage.model_id,
+                func.sum(LLMUsage.total_cost).label("cost"),
+            )
+            .filter(
+                LLMUsage.workspace_id == r.workspace_id,
+                LLMUsage.created_at >= since,
+            )
+            .group_by(LLMUsage.model_id)
+            .order_by(desc("cost"))
+            .first()
+        )
+
+        cost_by_workspace.append(WorkspaceCostEntry(
+            workspace_id=ws_id_str,
+            workspace_name=ws.name if ws else ws_id_str,
+            plan=ws.plan if ws else "unknown",
+            total_cost=round(float(r.total_cost or 0), 6),
+            total_tokens=int(r.total_tokens or 0),
+            total_requests=r.total_requests or 0,
+            top_model=top_model_row.model_id if top_model_row else None,
+        ))
+
+    # Cost by provider (platform-wide)
+    provider_rows = (
+        db.query(
+            LLMUsage.provider.label("key"),
+            func.sum(LLMUsage.input_cost).label("input_cost"),
+            func.sum(LLMUsage.output_cost).label("output_cost"),
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.count(LLMUsage.id).label("request_count"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.provider)
+        .order_by(desc("total_cost"))
+        .all()
+    )
+
+    cost_by_provider = [
+        CostBreakdown(
+            key=str(r.key or "unknown"),
+            input_cost=float(r.input_cost or 0),
+            output_cost=float(r.output_cost or 0),
+            total_cost=float(r.total_cost or 0),
+            request_count=r.request_count,
+        )
+        for r in provider_rows
+    ]
+
+    # Daily cost trend (platform-wide)
+    trend_rows = (
+        db.query(
+            func.date(LLMUsage.created_at).label("day"),
+            func.sum(LLMUsage.total_cost).label("cost"),
+            func.count(LLMUsage.id).label("requests"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(func.date(LLMUsage.created_at))
+        .order_by("day")
+        .all()
+    )
+
+    daily_cost_trend = [
+        {
+            "date": str(t.day),
+            "cost": round(float(t.cost or 0), 6),
+            "requests": t.requests or 0,
+        }
+        for t in trend_rows
+    ]
+
+    return AdminCostAnalyticsResponse(
+        total_platform_cost=round(total_platform_cost, 6),
+        total_tokens=total_tokens,
+        total_requests=total_requests,
+        cost_by_workspace=cost_by_workspace,
+        cost_by_provider=cost_by_provider,
+        daily_cost_trend=daily_cost_trend,
+    )
