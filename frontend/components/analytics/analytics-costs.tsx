@@ -8,17 +8,35 @@ import {
   TrendingUp,
   AlertTriangle,
   Bot,
+  GitCompare,
+  X,
+  ChevronDown,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatsBar } from '@/components/shared/stats-bar'
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
-import { useCostAnalyticsUnified } from '@/hooks/use-unified-analytics'
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Legend,
+} from 'recharts'
+import { useCostAnalyticsUnified, useModelComparison } from '@/hooks/use-unified-analytics'
 
 interface Props {
   days: number
 }
+
+const COMPARISON_COLORS = ['#60B5FF', '#72BF78', '#ff6b35', '#a78bfa']
 
 function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -28,6 +46,10 @@ function formatNumber(n: number): string {
 
 export function AnalyticsCosts({ days }: Props) {
   const { data, isLoading } = useCostAnalyticsUnified(days)
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([])
+  const [comparisonPeriod, setComparisonPeriod] = useState('30d')
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const { data: comparisonData, isLoading: comparisonLoading } = useModelComparison(selectedModelIds, comparisonPeriod)
 
   if (isLoading) {
     return (
@@ -52,7 +74,7 @@ export function AnalyticsCosts({ days }: Props) {
       ]} loading={isLoading} />
 
       {/* Cost Trend Chart */}
-      {data?.costTrend?.length > 0 && (
+      {data && data.costTrend?.length > 0 && (
         <Card className="glass-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -171,6 +193,268 @@ export function AnalyticsCosts({ days }: Props) {
             </tbody>
           </table>
         </div>
+      </Card>
+
+      {/* Model Comparison */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <GitCompare className="w-5 h-5 text-blue-400" />
+              Model Comparison
+            </span>
+            <select
+              value={comparisonPeriod}
+              onChange={(e) => setComparisonPeriod(e.target.value)}
+              className="text-xs bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-foreground"
+            >
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="90d">Last 90 days</option>
+            </select>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Model selector */}
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">Select up to 4 models to compare</p>
+            <div className="flex flex-wrap gap-2 items-center">
+              {selectedModelIds.map((id, idx) => (
+                <Badge
+                  key={id}
+                  variant="secondary"
+                  className="font-mono text-xs flex items-center gap-1"
+                  style={{ borderColor: COMPARISON_COLORS[idx] }}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ background: COMPARISON_COLORS[idx] }} />
+                  {id}
+                  <button
+                    onClick={() => setSelectedModelIds(prev => prev.filter(m => m !== id))}
+                    className="ml-1 hover:text-destructive"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              ))}
+              {selectedModelIds.length < 4 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setModelDropdownOpen(prev => !prev)}
+                    className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border border-dashed border-border/50 text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+                  >
+                    Add Model
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {modelDropdownOpen && (
+                    <div className="absolute z-50 mt-1 w-64 max-h-48 overflow-y-auto rounded-md border border-border bg-card shadow-lg">
+                      {data?.byModel
+                        ?.filter(m => !selectedModelIds.includes(m.model))
+                        .map(m => (
+                          <button
+                            key={m.model}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-secondary/50 transition-colors font-mono"
+                            onClick={() => {
+                              setSelectedModelIds(prev => [...prev, m.model])
+                              setModelDropdownOpen(false)
+                            }}
+                          >
+                            {m.model}
+                            <span className="text-muted-foreground ml-2">({m.requests} req)</span>
+                          </button>
+                        ))}
+                      {(!data?.byModel || data.byModel.filter(m => !selectedModelIds.includes(m.model)).length === 0) && (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">No more models available</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Comparison content */}
+          {selectedModelIds.length === 0 ? (
+            <div className="text-center py-8">
+              <GitCompare className="w-10 h-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Select models above to compare cost, performance, and capabilities</p>
+            </div>
+          ) : comparisonLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-48 w-full" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          ) : comparisonData && comparisonData.length > 0 ? (
+            <>
+              {/* Comparison Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-border/50">
+                      <th className="text-left p-3 text-xs font-medium text-muted-foreground">Metric</th>
+                      {comparisonData.map((model, idx) => (
+                        <th key={model.model_id} className="text-left p-3 text-xs font-medium" style={{ color: COMPARISON_COLORS[idx] }}>
+                          {model.display_name || model.model_id}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Provider</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">{m.provider || '—'}</td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Input Cost / 1K</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm font-mono">
+                          {m.input_cost_per_1k != null ? `$${m.input_cost_per_1k.toFixed(4)}` : '—'}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Output Cost / 1K</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm font-mono">
+                          {m.output_cost_per_1k != null ? `$${m.output_cost_per_1k.toFixed(4)}` : '—'}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Total Requests</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">{formatNumber(m.total_requests)}</td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Total Tokens</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">{formatNumber(m.total_tokens)}</td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Total Cost</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm font-medium">${m.total_cost.toFixed(2)}</td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Avg Latency</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">
+                          {m.avg_latency_ms != null ? `${m.avg_latency_ms.toFixed(0)}ms` : '—'}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Error Rate</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">
+                          <span className={m.error_rate > 5 ? 'text-red-400' : m.error_rate > 1 ? 'text-yellow-400' : 'text-green-400'}>
+                            {m.error_rate.toFixed(1)}%
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                    <tr className="border-b border-border/30">
+                      <td className="p-3 text-xs text-muted-foreground">Success Rate</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3 text-sm">{m.success_rate.toFixed(1)}%</td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="p-3 text-xs text-muted-foreground">Capabilities</td>
+                      {comparisonData.map(m => (
+                        <td key={m.model_id} className="p-3">
+                          <div className="flex flex-wrap gap-1">
+                            {m.capabilities && Object.entries(m.capabilities)
+                              .filter(([, v]) => v === true || (typeof v === 'number' && v > 0))
+                              .map(([cap]) => (
+                                <Badge key={cap} variant="outline" className="text-[10px] px-1.5 py-0">
+                                  {cap}
+                                </Badge>
+                              ))}
+                            {(!m.capabilities || Object.keys(m.capabilities).length === 0) && (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Radar Chart for capabilities */}
+              {(() => {
+                // Build radar data from capabilities across selected models
+                const allCaps = new Set<string>()
+                comparisonData.forEach(m => {
+                  if (m.capabilities) {
+                    Object.entries(m.capabilities).forEach(([k, v]) => {
+                      if (typeof v === 'number' || v === true) allCaps.add(k)
+                    })
+                  }
+                })
+                const capsList = Array.from(allCaps)
+                if (capsList.length < 3) return null
+
+                const radarData = capsList.map(cap => {
+                  const entry: Record<string, any> = { capability: cap }
+                  comparisonData.forEach(m => {
+                    const val = m.capabilities?.[cap]
+                    entry[m.model_id] = typeof val === 'number' ? val : val === true ? 1 : 0
+                  })
+                  return entry
+                })
+
+                return (
+                  <div className="mt-4">
+                    <p className="text-xs text-muted-foreground mb-2">Capability Comparison</p>
+                    <div className="h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RadarChart data={radarData}>
+                          <PolarGrid stroke="hsl(var(--border))" />
+                          <PolarAngleAxis
+                            dataKey="capability"
+                            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                          />
+                          <PolarRadiusAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                          {comparisonData.map((m, idx) => (
+                            <Radar
+                              key={m.model_id}
+                              name={m.display_name || m.model_id}
+                              dataKey={m.model_id}
+                              stroke={COMPARISON_COLORS[idx]}
+                              fill={COMPARISON_COLORS[idx]}
+                              fillOpacity={0.15}
+                            />
+                          ))}
+                          <Legend
+                            wrapperStyle={{ fontSize: '11px' }}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--card))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                            }}
+                          />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )
+              })()}
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-sm text-muted-foreground">No comparison data available for selected models</p>
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   )
