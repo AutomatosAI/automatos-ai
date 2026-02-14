@@ -129,7 +129,7 @@ class OpenRouterAnalyticsService:
                     latency_ms=None,
                     status="success",
                     error_message=None,
-                    execution_id=f"openrouter_sync_{requests_count}",
+                    execution_id=f"openrouter_sync_{model_id}_{date_str}",
                     created_at=row_date,
                 )
                 db.add(usage_row)

@@ -210,8 +210,8 @@ export function useCostAnalyticsUnified(days: number = 30) {
           modelCosts[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
         }
         modelCosts[model].requests += agent.model_usage_stats?.total_requests || 0
-        modelCosts[model].inputTokens += (agent.model_usage_stats?.total_tokens || 0) * 0.7 // estimate input
-        modelCosts[model].outputTokens += (agent.model_usage_stats?.total_tokens || 0) * 0.3 // estimate output
+        modelCosts[model].inputTokens += agent.model_usage_stats?.input_tokens || agent.model_usage_stats?.total_tokens || 0
+        modelCosts[model].outputTokens += agent.model_usage_stats?.output_tokens || 0
         modelCosts[model].cost += agent.model_usage_stats?.total_cost || 0
         modelCosts[model].agents.add(agent.name)
       })

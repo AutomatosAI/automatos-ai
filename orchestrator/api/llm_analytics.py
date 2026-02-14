@@ -101,6 +101,8 @@ async def get_usage(
         "provider": LLMUsage.provider,
         "agent": LLMUsage.agent_id,
         "tier": LLMUsage.tier,
+        "is_byok": LLMUsage.is_byok,
+        "request_type": LLMUsage.request_type,
     }
     group_col = group_col_map.get(group_by, LLMUsage.model_id)
 
@@ -155,6 +157,7 @@ async def get_costs(
             "model": LLMUsage.model_id,
             "provider": LLMUsage.provider,
             "agent": LLMUsage.agent_id,
+            "is_byok": LLMUsage.is_byok,
         }
         group_col = col_map.get(breakdown, LLMUsage.model_id)
 
@@ -545,10 +548,11 @@ async def get_cost_projections(
 
 # ── OpenRouter helpers ────────────────────────────────────────────────
 
-def _resolve_openrouter_key(workspace_id, db: Session) -> str:
+def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) -> str:
     """
     Find the OpenRouter API key for a workspace.
     Priority: BYOK key in user_api_keys → env OPENROUTER_API_KEY.
+    If byok_only=True, only returns workspace BYOK keys (blocks env fallback).
     Raises HTTPException 404 if not found.
     """
     row = (
@@ -567,13 +571,16 @@ def _resolve_openrouter_key(workspace_id, db: Session) -> str:
         except Exception:
             logger.warning("Failed to decrypt OpenRouter key id=%s", row.id)
 
-    env_key = os.getenv("OPENROUTER_API_KEY")
-    if env_key:
-        return env_key
+    if not byok_only:
+        env_key = os.getenv("OPENROUTER_API_KEY")
+        if env_key:
+            return env_key
 
     raise HTTPException(
         404,
-        "No OpenRouter API key configured. Add one in Settings → API Keys or set OPENROUTER_API_KEY.",
+        "No OpenRouter API key configured. Add one in Settings → API Keys."
+        if byok_only
+        else "No OpenRouter API key configured. Add one in Settings → API Keys or set OPENROUTER_API_KEY.",
     )
 
 
@@ -610,11 +617,12 @@ async def sync_openrouter_activity(
     ctx: RequestContext = Depends(get_request_context_hybrid),
     db: Session = Depends(get_db),
 ):
-    """Sync OpenRouter activity data into llm_usage for the current workspace."""
+    """Sync OpenRouter activity data into llm_usage for the current workspace.
+    Only works with workspace BYOK keys to prevent cross-workspace data duplication."""
     if not ctx.workspace_id:
         raise HTTPException(400, "Workspace context required")
 
-    api_key = _resolve_openrouter_key(ctx.workspace_id, db)
+    api_key = _resolve_openrouter_key(ctx.workspace_id, db, byok_only=True)
 
     from core.llm.openrouter_analytics import OpenRouterAnalyticsService
 
@@ -700,10 +708,18 @@ class WorkspaceCostEntry(BaseModel):
     top_model: Optional[str] = None
 
 
+class ByokCostSplit(BaseModel):
+    platform_cost: float
+    platform_requests: int
+    byok_cost: float
+    byok_requests: int
+
+
 class AdminCostAnalyticsResponse(BaseModel):
     total_platform_cost: float
     total_tokens: int
     total_requests: int
+    byok_split: Optional[ByokCostSplit] = None
     cost_by_workspace: List[WorkspaceCostEntry] = Field(default_factory=list)
     cost_by_provider: List[CostBreakdown] = Field(default_factory=list)
     daily_cost_trend: List[Dict[str, Any]] = Field(default_factory=list)
@@ -839,10 +855,32 @@ async def get_admin_cost_analytics(
         for t in trend_rows
     ]
 
+    # BYOK vs platform cost split
+    byok_rows = (
+        db.query(
+            LLMUsage.is_byok,
+            func.sum(LLMUsage.total_cost).label("total_cost"),
+            func.count(LLMUsage.id).label("request_count"),
+        )
+        .filter(LLMUsage.created_at >= since)
+        .group_by(LLMUsage.is_byok)
+        .all()
+    )
+    byok_split_data = {r.is_byok: r for r in byok_rows}
+    platform_row = byok_split_data.get(False)
+    byok_row = byok_split_data.get(True)
+    byok_split = ByokCostSplit(
+        platform_cost=round(float(platform_row.total_cost or 0), 6) if platform_row else 0.0,
+        platform_requests=platform_row.request_count or 0 if platform_row else 0,
+        byok_cost=round(float(byok_row.total_cost or 0), 6) if byok_row else 0.0,
+        byok_requests=byok_row.request_count or 0 if byok_row else 0,
+    )
+
     return AdminCostAnalyticsResponse(
         total_platform_cost=round(total_platform_cost, 6),
         total_tokens=total_tokens,
         total_requests=total_requests,
+        byok_split=byok_split,
         cost_by_workspace=cost_by_workspace,
         cost_by_provider=cost_by_provider,
         daily_cost_trend=daily_cost_trend,
