@@ -2,10 +2,12 @@
 LLM Analytics & Usage Tracking API (PRD-54)
 =============================================
 
-Usage tracking, cost analytics, and optimization recommendations.
+Usage tracking, cost analytics, optimization recommendations,
+and OpenRouter integration (credits, key info, activity sync).
 """
 
 import logging
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
@@ -17,7 +19,8 @@ from sqlalchemy import func, desc, and_
 from core.auth.dependencies import RequestContext
 from core.auth.hybrid import get_request_context_hybrid
 from core.database.database import get_db
-from core.models.core import LLMUsage, LLMModel
+from core.models.core import LLMUsage, LLMModel, UserApiKey
+from core.credentials.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics/llm", tags=["LLM Analytics"])
@@ -306,3 +309,133 @@ async def get_recommendations(
         ))
 
     return recs
+
+
+# ── OpenRouter helpers ────────────────────────────────────────────────
+
+def _resolve_openrouter_key(workspace_id, db: Session) -> str:
+    """
+    Find the OpenRouter API key for a workspace.
+    Priority: BYOK key in user_api_keys → env OPENROUTER_API_KEY.
+    Raises HTTPException 404 if not found.
+    """
+    row = (
+        db.query(UserApiKey)
+        .filter(
+            UserApiKey.workspace_id == workspace_id,
+            UserApiKey.provider == "openrouter",
+            UserApiKey.is_active == True,
+        )
+        .order_by(UserApiKey.created_at.desc())
+        .first()
+    )
+    if row:
+        try:
+            return get_encryption_service().decrypt(row.encrypted_key)
+        except Exception:
+            logger.warning("Failed to decrypt OpenRouter key id=%s", row.id)
+
+    env_key = os.getenv("OPENROUTER_API_KEY")
+    if env_key:
+        return env_key
+
+    raise HTTPException(
+        404,
+        "No OpenRouter API key configured. Add one in Settings → API Keys or set OPENROUTER_API_KEY.",
+    )
+
+
+# ── OpenRouter endpoints ─────────────────────────────────────────────
+
+
+class OpenRouterSyncResponse(BaseModel):
+    synced: int
+    skipped: int
+    error: Optional[str] = None
+
+
+class OpenRouterCreditsResponse(BaseModel):
+    total_credits: float
+    total_usage: float
+
+
+class OpenRouterKeyInfoResponse(BaseModel):
+    limit: Optional[float] = None
+    limit_remaining: Optional[float] = None
+    usage_daily: float = 0
+    usage_weekly: float = 0
+    usage_monthly: float = 0
+    is_free_tier: bool = False
+    rate_limit: Dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post(
+    "/openrouter/sync",
+    response_model=OpenRouterSyncResponse,
+    summary="Trigger OpenRouter activity sync",
+)
+async def sync_openrouter_activity(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Sync OpenRouter activity data into llm_usage for the current workspace."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    api_key = _resolve_openrouter_key(ctx.workspace_id, db)
+
+    from core.llm.openrouter_analytics import OpenRouterAnalyticsService
+
+    svc = OpenRouterAnalyticsService()
+    result = await svc.sync_activity(api_key, ctx.workspace_id)
+    return OpenRouterSyncResponse(**result)
+
+
+@router.get(
+    "/openrouter/credits",
+    response_model=OpenRouterCreditsResponse,
+    summary="Get OpenRouter credits balance",
+)
+async def get_openrouter_credits(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return the OpenRouter account credits balance."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    api_key = _resolve_openrouter_key(ctx.workspace_id, db)
+
+    from core.llm.openrouter_analytics import OpenRouterAnalyticsService
+
+    svc = OpenRouterAnalyticsService()
+    data = await svc.get_credits(api_key)
+    if data is None:
+        raise HTTPException(502, "Failed to fetch credits from OpenRouter")
+
+    return OpenRouterCreditsResponse(**data)
+
+
+@router.get(
+    "/openrouter/key-info",
+    response_model=OpenRouterKeyInfoResponse,
+    summary="Get OpenRouter key usage stats",
+)
+async def get_openrouter_key_info(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return OpenRouter key limits and daily/weekly/monthly usage stats."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    api_key = _resolve_openrouter_key(ctx.workspace_id, db)
+
+    from core.llm.openrouter_analytics import OpenRouterAnalyticsService
+
+    svc = OpenRouterAnalyticsService()
+    data = await svc.get_key_info(api_key)
+    if data is None:
+        raise HTTPException(502, "Failed to fetch key info from OpenRouter")
+
+    return OpenRouterKeyInfoResponse(**data)

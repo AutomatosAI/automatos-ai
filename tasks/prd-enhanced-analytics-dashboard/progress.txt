@@ -1,4 +1,39 @@
 ## Codebase Patterns
-- (To be populated as patterns are discovered)
+- LLM services live in `orchestrator/core/llm/` — standalone classes, no base class needed for analytics services
+- Use `httpx.AsyncClient` for async HTTP calls (preferred pattern), `requests` for sync
+- DB session via `from core.database.database import SessionLocal` — create, use, close manually
+- `LLMUsage` model in `core/models/core.py` — fields: workspace_id, model_id, provider, tier, input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, is_byok, latency_ms, status, error_message, created_at
+- `UserApiKey` model — encrypted_key decrypted via `get_encryption_service().decrypt()`
+- OpenRouter headers: `Authorization: Bearer {key}`, `HTTP-Referer: https://automatos.app`, `X-Title: Automatos AI`
+- No formal mypy/pyright setup — typecheck = `python -m py_compile` succeeding
+- API routers in `orchestrator/api/` — FastAPI pattern with `RequestContext` + `get_request_context_hybrid`
+- Resolve BYOK keys via `_resolve_openrouter_key` pattern: query `UserApiKey` (workspace + provider + is_active), decrypt, fallback to env var, 404 if missing
+- llm_analytics.py router prefix: `/api/analytics/llm` — already registered in main.py
 
+---
+
+## 2026-02-14 - US-001
+- What was implemented: `OpenRouterAnalyticsService` class in `orchestrator/core/llm/openrouter_analytics.py`
+- Files changed: `orchestrator/core/llm/openrouter_analytics.py` (new)
+- **Learnings for future iterations:**
+  - OpenRouter API returns activity data in `{"data": [...]}` wrapper
+  - Activity dedup key is workspace_id + model_id + created_at date
+  - Credits endpoint returns `total_credits` and `total_usage` at root level
+  - Key endpoint wraps data in `{"data": {...}}` — need to unwrap
+  - Use `request_type="activity_sync"` to distinguish synced data from live tracking
+---
+
+## 2026-02-14 - US-002
+- What was implemented: OpenRouter analytics API endpoints in `orchestrator/api/llm_analytics.py`
+  - `POST /api/analytics/llm/openrouter/sync` — triggers activity sync for current workspace
+  - `GET /api/analytics/llm/openrouter/credits` — returns credits balance (total_credits, total_usage)
+  - `GET /api/analytics/llm/openrouter/key-info` — returns key usage stats (daily/weekly/monthly, limits, rate_limit)
+  - `_resolve_openrouter_key()` helper — resolves key from BYOK user_api_keys table (workspace-scoped, active, newest first) → falls back to env OPENROUTER_API_KEY → raises 404 with helpful message
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added imports, helper, 3 endpoints, 3 Pydantic response models)
+- **Learnings for future iterations:**
+  - The llm_analytics router prefix is `/api/analytics/llm` — OpenRouter sub-paths end up as `/api/analytics/llm/openrouter/*`
+  - Router is already registered in main.py at lines ~118 and ~482 (search further in the file if grep misses it)
+  - Use lazy import for `OpenRouterAnalyticsService` inside endpoints to avoid circular imports
+  - `_resolve_openrouter_key` pattern: BYOK first (decrypt via `get_encryption_service()`), then env var, then 404 — reuse for other providers
+  - Added `os` import and `UserApiKey`/`get_encryption_service` imports to the file
 ---

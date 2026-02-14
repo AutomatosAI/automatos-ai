@@ -18,8 +18,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in orchestrator/core/llm/openrouter_analytics.py"
     },
     {
       "id": "US-002",
@@ -35,8 +35,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Depends on US-001 for OpenRouterAnalyticsService"
+      "passes": true,
+      "notes": "Implemented in orchestrator/api/llm_analytics.py — POST /sync, GET /credits, GET /key-info under /api/analytics/llm/openrouter/"
     },
     {
       "id": "US-003",
