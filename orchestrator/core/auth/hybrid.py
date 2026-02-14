@@ -147,13 +147,15 @@ def _provision_new_user_workspace(
     ws_name = f"{name or email or 'My'}'s Workspace"
     base_slug = (email or clerk_user_id).split("@")[0].lower().replace(" ", "-")[:50]
 
+    webhook_key = uuid4().hex
+
     for attempt in range(5):
         slug = base_slug if attempt == 0 else f"{base_slug}-{secrets.token_hex(3)}"
         try:
             db.execute(
                 text(
-                    "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits) "
-                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits)"
+                    "INSERT INTO workspaces (id, name, slug, owner_id, is_personal, is_active, plan, plan_limits, webhook_key) "
+                    "VALUES (:id, :name, :slug, :owner_id, true, true, 'starter', :plan_limits, :webhook_key)"
                 ),
                 {
                     "id": str(ws_id),
@@ -161,6 +163,7 @@ def _provision_new_user_workspace(
                     "slug": slug,
                     "owner_id": uid,
                     "plan_limits": '{"max_agents": 10, "max_workflows": 10, "max_documents": 100, "max_members": 5}',
+                    "webhook_key": webhook_key,
                 },
             )
             db.flush()

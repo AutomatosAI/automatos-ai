@@ -185,6 +185,15 @@ class Config:
     PLUGIN_CACHE_TTL_SECONDS: int = int(os.getenv("PLUGIN_CACHE_TTL_SECONDS", "3600"))
 
     # =============================================================================
+    # RECIPE EXECUTION (Scratchpad, Logs, Memory)
+    # =============================================================================
+    RECIPE_SCRATCHPAD_TTL: int = int(os.getenv("RECIPE_SCRATCHPAD_TTL", "3600"))
+    RECIPE_LOG_RETENTION_DAYS: int = int(os.getenv("RECIPE_LOG_RETENTION_DAYS", "30"))
+    RECIPE_LOG_S3_BUCKET: str = os.getenv("RECIPE_LOG_S3_BUCKET", "automatos-ai")
+    MEM0_API_URL: str = os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
+    MEM0_API_KEY: str = os.getenv("MEM0_API_KEY")
+
+    # =============================================================================
     # RAG / KNOWLEDGE SERVICES API
     # =============================================================================
     KNOWLEDGE_API_BASE_URL: str = os.getenv("KNOWLEDGE_API_BASE_URL", "http://127.0.0.1:8000")

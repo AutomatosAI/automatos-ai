@@ -1,11 +1,12 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, FileText, Shield } from 'lucide-react'
+import { Settings, Key, FileText, Shield, Webhook } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import { CredentialTypesTab } from './CredentialTypesTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import SystemSettingsTab from './SystemSettingsTab'
+import WebhooksSettingsTab from './WebhooksSettingsTab'
 
 export function SettingsPanel() {
 
@@ -19,10 +20,14 @@ export function SettingsPanel() {
       </div>
 
       <Tabs defaultValue="system-settings" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="system-settings">
             <Settings className="w-4 h-4 mr-2" />
             System Settings
+          </TabsTrigger>
+          <TabsTrigger value="webhooks">
+            <Webhook className="w-4 h-4 mr-2" />
+            Webhooks
           </TabsTrigger>
           <TabsTrigger value="credentials">
             <Key className="w-4 h-4 mr-2" />
@@ -41,6 +46,11 @@ export function SettingsPanel() {
         {/* System Settings Tab */}
         <TabsContent value="system-settings">
           <SystemSettingsTab />
+        </TabsContent>
+
+        {/* Webhooks Tab */}
+        <TabsContent value="webhooks">
+          <WebhooksSettingsTab />
         </TabsContent>
 
         {/* PRD-18: Credentials Management Tab */}

@@ -28,7 +28,8 @@ from core.auth.dependencies import RequestContext
 from core.composio.client import get_composio_client, ComposioClient
 from core.composio.entity_manager import EntityManager
 from core.composio.tool_executor import ComposioToolExecutor
-from core.models.composio import AgentAppFeature, TriggerSubscription
+from core.models.composio import AgentAppFeature, ComposioConnection, ComposioEntity, TriggerSubscription
+from core.models.core import WorkflowTemplate as WorkflowRecipe, RecipeExecution
 from core.models.routing import UnroutedEvent
 from core.routing.cache import get_routing_cache
 from core.routing.engine import UniversalRouter
@@ -560,22 +561,66 @@ async def handle_webhook(
 
     logger.info("Webhook received — raw keys: %s", list(payload.keys()))
 
-    # Normalise V2 vs V3 payload format
-    # V3 composio.trigger.message wraps trigger data in "data"
+    # Normalise V3 payload format.
+    # Real V3 structure: {id, timestamp, type: "composio.trigger.message",
+    #   metadata: {log_id, trigger_slug, trigger_id, connected_account_id, auth_config_id, user_id},
+    #   data: {actual event fields like issue_key, summary, etc.}}
     if "type" in payload and "data" in payload:
-        # V3 format
         event_type = payload.get("type", "")
         inner = payload.get("data", {})
+        meta = payload.get("metadata", {})
 
-        if event_type == "composio.trigger.message" or isinstance(inner, dict):
-            # The trigger details are inside "data"
-            trigger_name = inner.get("trigger_name") or inner.get("triggerSlug") or event_type
-            entity_id = inner.get("entity_id") or inner.get("entityId") or payload.get("entity_id", "")
-            event_data = inner.get("event_data") or inner.get("payload") or inner
-        else:
-            trigger_name = event_type
-            entity_id = payload.get("entity_id", "")
-            event_data = inner
+        logger.info("V3 webhook: event_type=%s metadata_keys=%s data_keys=%s connected_account=%s trigger_slug=%s",
+                     event_type, list(meta.keys()) if isinstance(meta, dict) else "N/A",
+                     list(inner.keys()) if isinstance(inner, dict) else "N/A",
+                     meta.get("connected_account_id", "N/A") if isinstance(meta, dict) else "N/A",
+                     meta.get("trigger_slug", "N/A") if isinstance(meta, dict) else "N/A")
+
+        # Trigger name: check metadata.trigger_slug (real V3), then camelCase variants, then data, then event_type
+        trigger_name = (
+            (meta.get("trigger_slug") if isinstance(meta, dict) else None)
+            or (meta.get("triggerName") if isinstance(meta, dict) else None)
+            or (inner.get("trigger_name") if isinstance(inner, dict) else None)
+            or (inner.get("triggerName") if isinstance(inner, dict) else None)
+            or (inner.get("triggerSlug") if isinstance(inner, dict) else None)
+            or event_type
+        )
+
+        # Entity ID: real V3 doesn't include entityId directly.
+        # Try explicit entity fields first, then resolve via connected_account_id.
+        entity_id = (
+            (meta.get("entityId") if isinstance(meta, dict) else None)
+            or (meta.get("entity_id") if isinstance(meta, dict) else None)
+            or (inner.get("entity_id") if isinstance(inner, dict) else None)
+            or (inner.get("entityId") if isinstance(inner, dict) else None)
+            or payload.get("entity_id", "")
+            or ""
+        )
+
+        # V3 fallback: resolve entity_id from connected_account_id via DB
+        if not entity_id and isinstance(meta, dict):
+            connected_account_id = meta.get("connected_account_id") or meta.get("connectionId")
+            if connected_account_id:
+                conn_row = (
+                    db.query(ComposioConnection)
+                    .filter(ComposioConnection.connection_id == connected_account_id)
+                    .first()
+                )
+                if conn_row:
+                    entity_row = db.query(ComposioEntity).filter(ComposioEntity.id == conn_row.entity_id).first()
+                    if entity_row:
+                        entity_id = entity_row.composio_entity_id
+                        logger.info("V3: resolved entity_id=%s from connected_account_id=%s",
+                                    entity_id, connected_account_id)
+                    else:
+                        logger.warning("V3: ComposioConnection found (id=%s) but no ComposioEntity for entity_id=%s",
+                                       conn_row.id, conn_row.entity_id)
+                else:
+                    logger.warning("V3: No ComposioConnection found for connected_account_id=%s", connected_account_id)
+
+        # Event data: the actual trigger payload is in "data"
+        event_data = inner if isinstance(inner, dict) else {}
+
     else:
         # V2 / legacy format
         trigger_name = payload.get("trigger_name") or payload.get("triggerSlug", "")
@@ -708,7 +753,7 @@ async def _dispatch_workflow(
 
         recipe_cls = get_recipe(workflow_id=workflow_id)
         if recipe_cls is not None:
-            # Recipe-based dispatch
+            # Recipe-based dispatch (Python-registered)
             with get_db_session() as db:
                 recipe = recipe_cls()
                 result = await recipe.execute(envelope, db, envelope.workspace_id)
@@ -718,6 +763,46 @@ async def _dispatch_workflow(
                     result.success if hasattr(result, "success") else "unknown",
                 )
             return
+
+        # UI-created recipe dispatch (workflow_recipes table)
+        with get_db_session() as db:
+            recipe_row = db.query(WorkflowRecipe).filter(
+                WorkflowRecipe.id == workflow_id
+            ).first()
+            if recipe_row:
+                from uuid import uuid4 as _uuid4
+                from api.recipe_executor import execute_recipe_direct
+
+                execution_id = f"trigger-{_uuid4().hex[:12]}"
+                execution = RecipeExecution(
+                    execution_id=execution_id,
+                    recipe_id=recipe_row.id,
+                    workspace_id=envelope.workspace_id,
+                    status='pending',
+                    input_data={"content": envelope.content, "metadata": envelope.metadata},
+                    triggered_by="composio_trigger",
+                    execution_metadata={
+                        'execution_type': 'trigger_dispatch',
+                        'total_steps': len(recipe_row.steps or []),
+                        'trigger_source': envelope.source,
+                    },
+                )
+                db.add(execution)
+                recipe_row.use_count += 1
+                recipe_row.last_used_at = datetime.utcnow()
+                db.commit()
+
+                logger.info(
+                    "[webhook] Dispatching to UI recipe %d (%s), execution=%s",
+                    recipe_row.id, recipe_row.name, execution_id,
+                )
+                await execute_recipe_direct(
+                    recipe_execution_id=execution_id,
+                    recipe_id=recipe_row.id,
+                    workspace_id=envelope.workspace_id,
+                    input_data={"content": envelope.content, **envelope.metadata},
+                )
+                return
 
         # Standard workflow dispatch (no matching recipe)
         from api.workflows import execute_workflow_with_progress

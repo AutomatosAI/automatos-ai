@@ -1128,6 +1128,8 @@ export function ExecutionKitchen({
             }
             stepResults={recipeStepResults}
             steps={recipeSteps}
+            recipeId={recipeId}
+            executionId={recipeExecId}
           />
         </div>
       ) : (

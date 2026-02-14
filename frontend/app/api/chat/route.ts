@@ -23,14 +23,15 @@ export async function POST(request: NextRequest) {
       request.headers.get('X-Workspace-ID') ||
       request.headers.get('X-Workspace')
 
-    // Build auth headers — prefer Clerk JWT, fall back to API key
+    // Build auth headers — send both JWT and API key (backend checks both independently)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'text/plain',
     }
     if (authHeader) {
       headers['Authorization'] = authHeader
-    } else if (apiKey) {
+    }
+    if (apiKey) {
       headers['x-api-key'] = apiKey
     }
     if (workspaceId) {
@@ -97,13 +98,14 @@ export async function PATCH(request: NextRequest) {
     const url = new URL(request.url)
     const path = url.pathname.replace('/api/chat', '') // Remove /api/chat prefix
     
-    // Build auth headers — prefer Clerk JWT, fall back to API key
+    // Build auth headers — send both JWT and API key (backend checks both independently)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
     if (authHeader) {
       headers['Authorization'] = authHeader
-    } else if (apiKey) {
+    }
+    if (apiKey) {
       headers['x-api-key'] = apiKey
     }
     if (workspaceId) {

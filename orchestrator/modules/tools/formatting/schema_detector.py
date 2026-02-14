@@ -317,10 +317,12 @@ class ParameterHintExtractor:
         if not parameters:
             return ""
 
-        if parameters.get("type") != "object":
+        # Accept schemas with or without explicit "type": "object" wrapper.
+        # Composio schemas sometimes omit the type field but still have properties.
+        properties = parameters.get("properties", {})
+        if not properties and parameters.get("type") != "object":
             return ""
 
-        properties = parameters.get("properties", {})
         required = set(parameters.get("required", []))
 
         if not properties:

@@ -98,6 +98,7 @@ interface RecipeRun {
   id: number;
   execution_id: string;
   recipe_id: number;
+  recipe_template_id: string | null;
   recipe_name: string;
   type: 'recipe';
   status: string;
@@ -132,9 +133,10 @@ interface ActiveWorkflowsData {
 
 interface ActiveWorkflowsPanelProps {
   onWorkflowClick?: (workflowId: number) => void
+  onRecipeRunClick?: (run: RecipeRun) => void
 }
 
-export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelProps) {
+export function ActiveWorkflowsPanel({ onWorkflowClick, onRecipeRunClick }: ActiveWorkflowsPanelProps) {
   const [selectedWorkflow, setSelectedWorkflow] = useState<{ id: number, name: string } | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [showCleanupDialog, setShowCleanupDialog] = useState(false)
@@ -615,10 +617,11 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
               return (
                 <motion.div
                   key={`recipe-${run.id}`}
-                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300"
+                  className="glass-card p-4 hover:border-primary/20 transition-all duration-300 cursor-pointer"
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.3, delay: index * 0.05 }}
+                  onClick={() => onRecipeRunClick?.(run)}
                 >
                   <div className="flex items-center gap-4">
                     {/* Status Indicator */}
@@ -692,6 +695,19 @@ export function ActiveWorkflowsPanel({ onWorkflowClick }: ActiveWorkflowsPanelPr
                         </div>
                       )}
                     </div>
+
+                    {/* View button */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onRecipeRunClick?.(run)
+                      }}
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span className="hidden xl:inline ml-1">View</span>
+                    </Button>
                   </div>
 
                   {/* Step Results Preview (collapsed) */}

@@ -1411,6 +1411,10 @@ class ApiClient {
     return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}`)
   }
 
+  async getRecipeStepFullLogs(recipeId: string, executionId: string, stepOrder: number) {
+    return this.request(`/api/workflow-recipes/${recipeId}/executions/${executionId}/steps/${stepOrder}/logs`)
+  }
+
   // ===== CODEGRAPH ENDPOINTS (PRD-11) =====
 
   /** Index a GitHub repository */

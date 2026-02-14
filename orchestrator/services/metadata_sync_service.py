@@ -18,7 +18,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Set, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, or_, cast, String
 from sqlalchemy.orm import Session
 
 from core.composio.client import get_composio_client
@@ -169,11 +169,21 @@ class MetadataSyncService:
                     errors.append(f"{app_name}: failed to update counts: {e}")
 
             self.db.commit()
+
+            # Backfill parameter schemas for apps that have empty parameters.
+            # The v3 bulk API doesn't return parameter schemas, but the SDK
+            # per-app endpoint does (OpenAI function-calling format).
+            logger.info("Step 5/5: Backfilling parameter schemas for actions with empty params...")
+            backfilled = self._backfill_action_parameters(set(actions_by_app.keys()))
+            if backfilled:
+                logger.info(f"  Backfilled parameters for {backfilled} actions")
+
             logger.info("Updating stats cache...")
             self._update_stats()
             job.status = "completed"
             logger.info(
                 f"✅ Sync completed: {apps_synced} apps, {actions_synced} actions, "
+                f"{backfilled} params backfilled, "
                 f"{len(errors)} errors in {int((datetime.utcnow() - started_at).total_seconds())}s"
             )
         except Exception as e:
@@ -207,6 +217,54 @@ class MetadataSyncService:
     def run_incremental_sync(self) -> Dict[str, Any]:
         """Lightweight sync placeholder (currently full sync)."""
         return self.run_full_sync()
+
+    def backfill_parameters_only(self, app_names: List[str] | None = None) -> Dict[str, Any]:
+        """Backfill parameter schemas without a full sync.
+
+        Fetches per-app actions via the SDK and updates the parameters column
+        for actions that currently have empty parameters.
+
+        Args:
+            app_names: Specific apps to backfill. If None, backfills all apps
+                       with empty parameters (capped at 30).
+
+        Returns:
+            Dict with backfill results.
+        """
+        logger.info(f"Starting parameter backfill (apps={app_names or 'auto'})...")
+        started_at = datetime.utcnow()
+
+        if app_names:
+            target_apps = {n.upper() for n in app_names}
+        else:
+            # Find all apps with empty parameters
+            rows = (
+                self.db.query(ComposioActionCache.app_name)
+                .filter(
+                    or_(
+                        ComposioActionCache.parameters == None,  # noqa: E711
+                        cast(ComposioActionCache.parameters, String) == '{}',
+                        cast(ComposioActionCache.parameters, String) == 'null',
+                    )
+                )
+                .distinct()
+                .all()
+            )
+            target_apps = {row[0] for row in rows}
+
+        if not target_apps:
+            return {"status": "no_apps_need_backfill", "backfilled": 0}
+
+        backfilled = self._backfill_action_parameters(target_apps, max_apps=len(target_apps))
+        duration_ms = int((datetime.utcnow() - started_at).total_seconds() * 1000)
+
+        logger.info(f"Parameter backfill done: {backfilled} actions in {duration_ms}ms")
+        return {
+            "status": "completed",
+            "backfilled": backfilled,
+            "apps_processed": len(target_apps),
+            "duration_ms": duration_ms,
+        }
 
     def get_sync_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         jobs = (
@@ -391,6 +449,103 @@ class MetadataSyncService:
                     last_synced_at=datetime.utcnow(),
                 )
             )
+
+    def _backfill_action_parameters(
+        self, synced_app_names: Set[str], max_apps: int = 30
+    ) -> int:
+        """Backfill parameter schemas for actions that have empty parameters.
+
+        The Composio v3 bulk tools API doesn't return parameter schemas.
+        This method fetches per-app actions via the SDK (which returns full
+        OpenAI function-calling schemas) and updates the parameters column.
+
+        Only processes apps that have actions with empty parameters in the cache.
+        Capped at ``max_apps`` to avoid adding minutes to the sync; prioritizes
+        apps with the most cached actions (most likely to be used).
+
+        Returns:
+            Number of actions that had parameters backfilled.
+        """
+        # Find apps that have actions with empty parameters, ordered by action count
+        apps_needing_params = (
+            self.db.query(
+                ComposioActionCache.app_name,
+                func.count(ComposioActionCache.id).label("cnt"),
+            )
+            .filter(
+                ComposioActionCache.app_name.in_(list(synced_app_names)),
+                or_(
+                    ComposioActionCache.parameters == None,  # noqa: E711
+                    cast(ComposioActionCache.parameters, String) == '{}',
+                    cast(ComposioActionCache.parameters, String) == 'null',
+                ),
+            )
+            .group_by(ComposioActionCache.app_name)
+            .order_by(func.count(ComposioActionCache.id).desc())
+            .limit(max_apps)
+            .all()
+        )
+        apps_to_backfill = [row[0] for row in apps_needing_params]
+        if not apps_to_backfill:
+            return 0
+
+        logger.info(
+            f"  Found {len(apps_needing_params)} apps needing parameter backfill "
+            f"(capped at {max_apps}): {apps_to_backfill[:10]}..."
+        )
+
+        total_backfilled = 0
+        for app_name in apps_to_backfill:
+            try:
+                # Use SDK per-app call which returns full OpenAI schemas
+                actions = self.client.get_app_actions(app_name) or []
+                if not actions:
+                    continue
+
+                # Build lookup: action_name -> parameters
+                param_map = {}
+                for action in actions:
+                    name = (action.get("name") or "").strip()
+                    params = action.get("parameters") or {}
+                    if name and params and isinstance(params, dict) and params.get("properties"):
+                        param_map[name] = params
+
+                if not param_map:
+                    continue
+
+                # Update actions with empty parameters
+                empty_actions = (
+                    self.db.query(ComposioActionCache)
+                    .filter(
+                        ComposioActionCache.app_name == app_name,
+                        or_(
+                            ComposioActionCache.parameters == None,  # noqa: E711
+                            cast(ComposioActionCache.parameters, String) == '{}',
+                            cast(ComposioActionCache.parameters, String) == 'null',
+                        ),
+                    )
+                    .all()
+                )
+
+                app_backfilled = 0
+                for cached in empty_actions:
+                    if cached.action_name in param_map:
+                        cached.parameters = param_map[cached.action_name]
+                        app_backfilled += 1
+
+                if app_backfilled:
+                    self.db.commit()
+                    total_backfilled += app_backfilled
+                    logger.info(f"  {app_name}: backfilled {app_backfilled}/{len(empty_actions)} action parameters")
+
+            except Exception as e:
+                logger.warning(f"  Failed to backfill parameters for {app_name}: {e}")
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+
+        return total_backfilled
 
     def _update_stats(self) -> None:
         # Stats cache must reflect what the Tools UI reads:

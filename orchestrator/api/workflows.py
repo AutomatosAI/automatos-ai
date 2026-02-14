@@ -301,6 +301,7 @@ async def get_active_workflows(ctx: RequestContext = Depends(get_request_context
                     "id": exec_rec.id,
                     "execution_id": exec_rec.execution_id,
                     "recipe_id": exec_rec.recipe_id,
+                    "recipe_template_id": recipe.template_id if recipe else None,
                     "recipe_name": recipe_name,
                     "type": "recipe",
                     "status": exec_rec.status,

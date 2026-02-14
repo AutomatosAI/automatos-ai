@@ -9,6 +9,7 @@ from .tool_capability_mapper import ToolCapabilityMapper, get_tool_capability_ma
 from .pandas_ai_service import PandasAIService, get_pandasai_service
 from .database_tool_integration import DatabaseToolIntegration, get_database_tool_integration
 from .composio_hint_service import ComposioHintService, ComposioHintResult
+from .composio_tool_service import ComposioToolService, ComposioToolResult
 
 __all__ = [
     "ToolCapabilityMapper",
@@ -19,5 +20,7 @@ __all__ = [
     "get_database_tool_integration",
     "ComposioHintService",
     "ComposioHintResult",
+    "ComposioToolService",
+    "ComposioToolResult",
 ]
 

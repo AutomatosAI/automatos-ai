@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { JsonSchemaEditor } from './json-schema-editor'
+import { RecipeInputBuilder } from './recipe-input-builder'
 import { RecipeStepBuilder } from './recipe-step-builder'
 import { RecipeExecutionConfig } from './recipe-execution-config'
 import { RecipeScheduleConfig } from './recipe-schedule-config'
@@ -55,6 +55,7 @@ export interface RecipeFormValues {
     type: string
     cron_expression: string
     trigger_config: Record<string, unknown>
+    webhook_id?: string
   }
 }
 
@@ -69,8 +70,7 @@ interface CreateRecipeModalProps {
 export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId }: CreateRecipeModalProps) {
   const [currentStep, setCurrentStep] = React.useState(0)
   const [inputsValid, setInputsValid] = React.useState(true)
-  const [outputsValid, setOutputsValid] = React.useState(true)
-  const { isSubmitting, submitRecipe, updateRecipe } = useRecipeForm()
+  const { isSubmitting, lastSavedWebhookId, submitRecipe, updateRecipe } = useRecipeForm()
   const isEditMode = !!recipeId
 
   const methods = useForm<RecipeFormValues>({
@@ -106,7 +106,8 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
   const watchedName = methods.watch('name')
   const watchedSteps = methods.watch('steps')
   const watchedInputs = methods.watch('inputs')
-  const watchedOutputs = methods.watch('outputs')
+  const watchedSchedule = methods.watch('schedule_config')
+  const hasTrigger = !!(watchedSchedule?.trigger_config && Object.keys(watchedSchedule.trigger_config).length > 0)
 
   // Populate form when initialData is provided (edit mode)
   React.useEffect(() => {
@@ -119,7 +120,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
     const values = methods.getValues()
     switch (currentStepId) {
       case 'basic':
-        return values.name.trim().length >= 3 && inputsValid && outputsValid
+        return values.name.trim().length >= 3 && inputsValid
       case 'steps':
         return (
           values.steps.length > 0 &&
@@ -132,7 +133,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
       default:
         return false
     }
-  }, [currentStepId, methods, inputsValid, outputsValid, watchedName, watchedSteps, watchedInputs, watchedOutputs])
+  }, [currentStepId, methods, inputsValid, watchedName, watchedSteps, watchedInputs])
 
   const handleNext = () => {
     if (currentStep < STEPS.length - 1) {
@@ -156,7 +157,10 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
     } else {
       await submitRecipe(data, () => {
         onSave?.(data)
-        handleClose()
+        // For trigger recipes, stay open so user can see/copy the webhook URL
+        if (data.schedule_config.type !== 'trigger') {
+          handleClose()
+        }
       })
     }
   }
@@ -267,23 +271,11 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             </div>
 
                             <div className="glass-card rounded-2xl p-6 space-y-4">
-                              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Input / Output Schemas</h3>
-                              <p className="text-xs text-muted-foreground">Define the expected input and output formats as JSON schemas. These will be used for validation during execution.</p>
-                              <JsonSchemaEditor
-                                label="Input Schema (JSON)"
+                              <RecipeInputBuilder
                                 value={watchedInputs}
                                 onChange={(val) => methods.setValue('inputs', val)}
                                 onValidation={(valid) => setInputsValid(valid)}
-                                placeholder='{"order_id": {"type": "string", "required": true}}'
-                                minHeight="120px"
-                              />
-                              <JsonSchemaEditor
-                                label="Output Schema (JSON)"
-                                value={watchedOutputs}
-                                onChange={(val) => methods.setValue('outputs', val)}
-                                onValidation={(valid) => setOutputsValid(valid)}
-                                placeholder='{"report": {"type": "string"}, "score": {"type": "number"}}'
-                                minHeight="120px"
+                                hasTrigger={hasTrigger}
                               />
                             </div>
                           </motion.div>
@@ -323,7 +315,7 @@ export function CreateRecipeModal({ open, onClose, onSave, initialData, recipeId
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <RecipeScheduleConfig />
+                            <RecipeScheduleConfig webhookId={lastSavedWebhookId || (initialData?.schedule_config?.webhook_id as string | undefined)} />
                           </motion.div>
                         </TabsContent>
                       </Tabs>

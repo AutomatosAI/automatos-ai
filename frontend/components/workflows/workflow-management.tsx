@@ -615,7 +615,26 @@ export function WorkflowManagement() {
             )}
 
             {/* Active Workflows Panel - handles its own empty state */}
-            <ActiveWorkflowsPanel onWorkflowClick={handleWorkflowClick} />
+            <ActiveWorkflowsPanel
+              onWorkflowClick={handleWorkflowClick}
+              onRecipeRunClick={(run) => {
+                if (!run.recipe_template_id) return
+                setRecipeExecInfo({
+                  recipeExecutionId: run.execution_id,
+                  recipeId: run.recipe_template_id,
+                  recipeSteps: (run.step_results || []).map((s: any) => ({
+                    step_id: s.step_id,
+                    order: s.order,
+                    prompt_template: s.prompt_template || '',
+                    agent_id: s.agent_id ?? 0,
+                  })),
+                  recipeName: run.recipe_name,
+                })
+                setSelectedWorkflowId(null)
+                setAutoStartExecution(false)
+                setShowExecutionKitchen(true)
+              }}
+            />
           </SharedTabsContent>
 
           <SharedTabsContent value="templates" className="space-y-6">

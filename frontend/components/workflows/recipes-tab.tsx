@@ -216,6 +216,7 @@ export function RecipesTab({
         type: backendSchedule.type || 'manual',
         cron_expression: backendSchedule.cron_expression || '',
         trigger_config: backendSchedule.trigger_config || {},
+        webhook_id: backendSchedule.webhook_id,
       },
     }
 
@@ -514,6 +515,21 @@ export function RecipesTab({
           ? () => handleShareToMarketplace(selectedRecipe)
           : undefined
         }
+        onViewExecution={(executionId) => {
+          if (!selectedRecipe) return
+          setShowViewModal(false)
+          onExecuteRecipe?.(0, {
+            recipeExecutionId: executionId,
+            recipeId: selectedRecipe.template_id,
+            recipeSteps: (selectedRecipe.steps || []).map((s: any) => ({
+              step_id: s.step_id,
+              order: s.order,
+              prompt_template: s.prompt_template || '',
+              agent_id: s.agent_id ?? 0,
+            })),
+            recipeName: selectedRecipe.name,
+          })
+        }}
       />
 
       {/* Delete Confirmation Dialog */}

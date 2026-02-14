@@ -95,6 +95,11 @@ class ComposioClient:
         # PERFORMANCE: Cache auth_config_id resolution to avoid repeated API calls
         self._auth_config_cache: Dict[str, Optional[str]] = {}
         self._auth_config_cache_ttl = 3600  # 1 hour TTL
+        # PERFORMANCE: Cache all action schemas per app for exact-name lookups.
+        # Bypasses SDK semantic search (which returns alphabetical, not semantic).
+        self._schema_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # {APP: {ACTION_NAME: schema}}
+        self._schema_cache_ts: Dict[str, float] = {}
+        self._schema_cache_ttl = 3600  # 1 hour
     
     @property
     def composio(self):
@@ -805,7 +810,112 @@ class ComposioClient:
         count = len(actions)
         self._action_count_cache[key] = (now, count)
         return count
-    
+
+    # ------------------------------------------------------------------
+    # Exact action schema lookup (bypasses broken SDK semantic search)
+    # ------------------------------------------------------------------
+
+    def get_action_schemas_by_name(
+        self,
+        action_names: List[str],
+        entity_id: str,
+        app_names: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Get OpenAI function-calling schemas for specific Composio actions by name.
+
+        Uses a per-app cache. On first call per app, fetches all action schemas
+        from the SDK (one-time cost), then subsequent lookups are instant.
+
+        This bypasses the SDK's semantic search which returns results in
+        alphabetical order regardless of query.
+
+        Returns:
+            List of dicts with ``action_name`` and ``schema`` keys.
+        """
+        if not self.toolset:
+            logger.warning("[ComposioClient] Toolset not initialized — cannot fetch schemas")
+            return []
+
+        import time as _time
+        now = _time.monotonic()
+
+        # Ensure each relevant app is cached
+        for app in app_names:
+            app_upper = app.upper()
+            cache_age = now - self._schema_cache_ts.get(app_upper, 0)
+            if app_upper not in self._schema_cache or cache_age > self._schema_cache_ttl:
+                self._populate_schema_cache(app, entity_id)
+
+        # Look up requested actions
+        results = []
+        seen = set()
+        for name in action_names:
+            if name in seen:
+                continue
+            app_prefix = name.split("_", 1)[0]
+            app_cache = self._schema_cache.get(app_prefix, {})
+            if name in app_cache:
+                results.append({
+                    "action_name": name,
+                    "schema": app_cache[name],
+                })
+                seen.add(name)
+
+        logger.info(
+            "[ComposioClient] get_action_schemas_by_name: requested=%d resolved=%d "
+            "actions=%s",
+            len(action_names), len(results),
+            [r["action_name"] for r in results],
+        )
+        return results
+
+    def _populate_schema_cache(self, app_name: str, entity_id: str):
+        """Fetch all action schemas for an app and cache them."""
+        import time as _time
+        app_upper = app_name.upper()
+        cache: Dict[str, Dict[str, Any]] = {}
+        t0 = _time.monotonic()
+
+        try:
+            raw_tools = self.toolset.tools.get(
+                user_id=entity_id,
+                toolkits=[app_name.lower()],
+                limit=2000,
+            )
+            for tool in raw_tools:
+                if isinstance(tool, dict):
+                    tool_dict = tool
+                elif hasattr(tool, "model_dump"):
+                    tool_dict = tool.model_dump()
+                elif hasattr(tool, "dict"):
+                    tool_dict = tool.dict()
+                elif hasattr(tool, "__dict__"):
+                    tool_dict = dict(tool.__dict__)
+                else:
+                    continue
+
+                if tool_dict.get("type") != "function":
+                    continue
+                fn = tool_dict.get("function") or {}
+                name = fn.get("name") or ""
+                if name:
+                    cache[name] = tool_dict
+
+            elapsed = int((_time.monotonic() - t0) * 1000)
+            logger.info(
+                "[ComposioClient] Cached %d schemas for app=%s in %dms",
+                len(cache), app_upper, elapsed,
+            )
+            # Only update cache on success — preserve existing data on failure
+            self._schema_cache[app_upper] = cache
+            self._schema_cache_ts[app_upper] = _time.monotonic()
+        except Exception as e:
+            logger.warning(
+                "[ComposioClient] Schema cache failed for app=%s: %s",
+                app_upper, e, exc_info=True,
+            )
+
     def search_actions_for_step(
         self,
         search_query: str,
@@ -850,6 +960,11 @@ class ComposioClient:
                     user_id=entity_id,
                     actions=explicit_actions,
                 )
+                if raw_tools:
+                    logger.info(
+                        f"[ComposioClient] explicit_actions={explicit_actions} "
+                        f"returned {len(raw_tools)} items, types={[type(t).__name__ for t in raw_tools[:3]]}"
+                    )
             else:
                 # Semantic search scoped to the agent's connected apps
                 raw_tools = self.toolset.tools.get(
@@ -860,16 +975,30 @@ class ComposioClient:
                 )
 
             for tool in raw_tools:
-                if not isinstance(tool, dict) or tool.get("type") != "function":
+                # Composio SDK may return dicts or Pydantic/SDK objects.
+                # Normalize to dict for consistent downstream handling.
+                if isinstance(tool, dict):
+                    tool_dict = tool
+                elif hasattr(tool, "model_dump"):
+                    tool_dict = tool.model_dump()
+                elif hasattr(tool, "dict"):
+                    tool_dict = tool.dict()
+                elif hasattr(tool, "__dict__"):
+                    tool_dict = dict(tool.__dict__)
+                else:
+                    logger.debug(f"Skipping unrecognized tool type: {type(tool)}")
                     continue
-                fn = tool.get("function") or {}
+
+                if tool_dict.get("type") != "function":
+                    continue
+                fn = tool_dict.get("function") or {}
                 action_name = fn.get("name") or ""
                 if not action_name or action_name in seen:
                     continue
                 seen.add(action_name)
                 results.append({
                     "action_name": action_name,
-                    "schema": tool,  # Already in OpenAI format
+                    "schema": tool_dict,  # OpenAI function-calling format
                 })
 
         except Exception as e:
@@ -910,10 +1039,27 @@ class ComposioClient:
                 arguments=params,
                 dangerously_skip_version_check=True
             )
+
+            # Composio API may return errors in the response data without
+            # raising an exception.  Detect {"successful": false} responses
+            # so callers see a proper failure instead of a false success.
+            api_success = True
+            api_error = None
+            if isinstance(result, dict):
+                api_success = result.get("successful", result.get("success", True))
+                api_error = result.get("error") or result.get("message")
+            elif isinstance(result, list):
+                # Batch responses: check first item
+                for item in result:
+                    if isinstance(item, dict) and item.get("successful") is False:
+                        api_success = False
+                        api_error = item.get("error") or item.get("message")
+                        break
+
             return {
-                "success": True,
+                "success": bool(api_success),
                 "data": result,
-                "error": None
+                "error": api_error,
             }
         except Exception as e:
             logger.error(f"Failed to execute action {action}: {e}")

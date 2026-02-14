@@ -1191,6 +1191,16 @@ class UnifiedToolExecutor:
             params = {}
         app_name = parameters.get("app_name") or parameters.get("app")
 
+        # Defensive: LLMs frequently put action-specific params at the top level
+        # instead of nesting inside `params`. Remap any unknown keys into params.
+        _KNOWN_KEYS = {"action", "action_name", "params", "parameters", "app_name", "app"}
+        stray_params = {k: v for k, v in parameters.items() if k not in _KNOWN_KEYS}
+        if stray_params:
+            params = {**stray_params, **params}  # explicit params take precedence
+            logger.info(
+                f"[composio_execute] Remapped top-level keys into params: {list(stray_params.keys())}"
+            )
+
         if not raw_action:
             return {"success": False, "error": "Missing required field: action", "tool": tool_name}
 

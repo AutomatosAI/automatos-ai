@@ -9,7 +9,9 @@ It serves marketplace metadata from local cache tables for fast loads.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -616,6 +618,35 @@ async def sync(
     else:
         result = service.run_full_sync()
     logger.info(f"Sync completed: {result}")
+    return result
+
+
+@router.post("/sync/backfill-params")
+async def backfill_params(
+    request: Request,
+    apps: str = Query(None, description="Comma-separated app names (e.g. JIRA,GITHUB,SLACK). Omit for auto."),
+    db: Session = Depends(get_db),
+):
+    """Backfill parameter schemas for actions with empty params (no full sync needed).
+
+    Admin-only endpoint. Accepts API key auth without requiring workspace context
+    (parameter backfill is a global operation, not workspace-scoped).
+    """
+    from core.auth.hybrid import _get_api_key
+    provided_key = _get_api_key(request)
+    expected = (
+        os.getenv("ORCHESTRATOR_API_KEY")
+        or os.getenv("AUTOMATOS_API_KEY")
+        or os.getenv("API_KEY")
+    )
+    if not provided_key or not expected or not hmac.compare_digest(provided_key, expected):
+        raise HTTPException(status_code=401, detail="Valid API key required")
+
+    service = MetadataSyncService(db)
+    app_list = [a.strip().upper() for a in apps.split(",") if a.strip()] if apps else None
+    logger.info(f"Parameter backfill requested: apps={app_list or 'auto'}")
+    result = service.backfill_parameters_only(app_list)
+    logger.info(f"Parameter backfill completed: {result}")
     return result
 
 

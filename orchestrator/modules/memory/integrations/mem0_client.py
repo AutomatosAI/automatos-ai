@@ -5,7 +5,6 @@ Mem0 Client Integration
 Wrapper around standard mem0ai usage to connect to internal Railway instance.
 """
 
-import os
 import logging
 from typing import List, Dict, Any, Optional
 import requests
@@ -16,10 +15,11 @@ class Mem0Client:
     """
     Client for interacting with Mem0 server.
     """
-    
+
     def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
-        self.api_url = api_url or os.getenv("MEM0_API_URL", "http://automatos-mem0-server.railway.internal")
-        self.api_key = api_key or os.getenv("MEM0_API_KEY")
+        from config import config
+        self.api_url = api_url or config.MEM0_API_URL
+        self.api_key = api_key or config.MEM0_API_KEY
         
         # Ensure URL has correct format
         if not self.api_url.startswith("http"):

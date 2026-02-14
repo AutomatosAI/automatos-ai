@@ -6,6 +6,10 @@ cover: .gitbook/assets/hero-banner.png
 
 # 🚀 Automatos AI Documentation Hub
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/AutomatosAI/automatos-ai)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/AutomatosAI/automatos-ai?label=CodeRabbit&link=https://coderabbit.ai)](https://coderabbit.ai)
+
 *Welcome to the comprehensive documentation for the world's most advanced open-source multi-agent orchestration platform*
 
 ![Automatos AI Dashboard](assets/images/main_dashboard.png)

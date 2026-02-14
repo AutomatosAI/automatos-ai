@@ -82,8 +82,8 @@ function transformFormToApiPayload(data: RecipeFormValues) {
     ...(data.schedule_config.type === 'cron' && data.schedule_config.cron_expression
       ? { cron_expression: data.schedule_config.cron_expression }
       : {}),
-    ...(data.schedule_config.type === 'trigger' && Object.keys(data.schedule_config.trigger_config).length > 0
-      ? { trigger_config: data.schedule_config.trigger_config }
+    ...(data.schedule_config.type === 'trigger'
+      ? { trigger_config: data.schedule_config.trigger_config || {} }
       : {}),
   }
 
@@ -149,6 +149,7 @@ function validateFormData(data: RecipeFormValues): string | null {
 
 export interface UseRecipeFormReturn {
   isSubmitting: boolean
+  lastSavedWebhookId: string | null
   submitRecipe: (data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
   updateRecipe: (recipeId: string, data: RecipeFormValues, onSuccess?: () => void) => Promise<void>
 }
@@ -161,6 +162,7 @@ export function useRecipeForm(): UseRecipeFormReturn {
   const createRecipeMutation = useCreateRecipe()
   const updateRecipeMutation = useUpdateRecipe()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [lastSavedWebhookId, setLastSavedWebhookId] = useState<string | null>(null)
 
   const submitRecipe = useCallback(
     async (data: RecipeFormValues, onSuccess?: () => void) => {
@@ -180,7 +182,13 @@ export function useRecipeForm(): UseRecipeFormReturn {
       try {
         const payload = transformFormToApiPayload(data)
 
-        await createRecipeMutation.mutateAsync(payload)
+        const result = await createRecipeMutation.mutateAsync(payload)
+
+        // Extract webhook_id from server response for display
+        const webhookId = result?.recipe?.schedule_config?.webhook_id
+        if (webhookId) {
+          setLastSavedWebhookId(webhookId)
+        }
 
         toast({
           title: 'Recipe Created',
@@ -226,7 +234,13 @@ export function useRecipeForm(): UseRecipeFormReturn {
       try {
         const payload = transformFormToApiPayload(data)
 
-        await updateRecipeMutation.mutateAsync({ recipeId, recipeData: payload })
+        const result = await updateRecipeMutation.mutateAsync({ recipeId, recipeData: payload })
+
+        // Extract webhook_id from server response for display
+        const webhookId = result?.recipe?.schedule_config?.webhook_id
+        if (webhookId) {
+          setLastSavedWebhookId(webhookId)
+        }
 
         toast({
           title: 'Recipe Updated',
@@ -256,6 +270,7 @@ export function useRecipeForm(): UseRecipeFormReturn {
 
   return {
     isSubmitting,
+    lastSavedWebhookId,
     submitRecipe,
     updateRecipe,
   }

@@ -905,7 +905,9 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                 category=ToolCategory.API_TOOLS,
                 description=(
                     "Execute an external app action via Composio (connected third-party apps). "
-                    "Use this for actions in email/messaging and developer tools."
+                    "Use this for actions in email/messaging and developer tools. "
+                    "IMPORTANT: Action-specific parameters (e.g. issue_key, channel, text) "
+                    "MUST go inside the `params` object, NOT at the top level."
                 ),
                 executor_class="ComposioToolExecutor",
                 executor_method="execute",
@@ -925,7 +927,11 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
                     ToolParameter(
                         name="params",
                         type="object",
-                        description="Action parameters",
+                        description=(
+                            "Action-specific parameters as a JSON object. "
+                            "All fields required by the action (e.g. issue_key, channel, text) "
+                            "MUST be placed inside this params object."
+                        ),
                         required=False,
                         default={},
                     ),
@@ -1051,7 +1057,7 @@ IMPORTANT: 2-attempt limit per turn. If a query fails with schema errors, do NOT
             
             # Context Map (TODO: make dynamic when tool taxonomy stabilizes)
             CONTEXT_MAP = {
-                "general": ["communication", "research", "productivity", "system", "collaboration", "developer"],
+                "general": ["communication", "research", "productivity", "system", "collaboration", "developer", "api"],
                 "coding": ["developer", "github", "git", "code", "file_ops", "devtools"],
                 "ops": ["cloud", "k8s", "aws", "infrastructure", "monitoring", "database", "shell"],
                 "communication": ["communication", "slack", "email", "chat", "collaboration"],

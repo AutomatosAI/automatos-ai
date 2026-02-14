@@ -105,6 +105,7 @@ class ComposioHintService:
         agent_id: int,
         prompt: str,
         workspace_id=None,
+        recipe_mode: bool = False,
     ) -> ComposioHintResult:
         """
         Build Composio action hint lines for LLM system message injection.
@@ -113,6 +114,10 @@ class ComposioHintService:
             agent_id: The agent whose app assignments to query.
             prompt: User prompt / task text to match actions against.
             workspace_id: Optional workspace UUID to filter by connected apps.
+            recipe_mode: When True, skips taxonomy/capability gate and uses
+                prompt tokens directly for ILIKE + scoring. Designed for recipe
+                steps where the prompt is curated and specific. Scales to any
+                number of tools without manual taxonomy maintenance.
 
         Returns:
             ComposioHintResult with hint_lines and metadata.
@@ -130,31 +135,44 @@ class ComposioHintService:
 
             # Step 3: Build hint header
             hint_lines = [
-                "You have these external apps assigned for this agent (via Composio): "
+                "You have these external apps connected (via Composio): "
                 + ", ".join(sorted(set(allowed_apps))) + ".",
-                "When you need external data/actions (email, Slack, etc.), use `composio_execute`.",
+                "IMPORTANT: To interact with these apps, call `composio_execute` with "
+                "the EXACT action name from the list below. Do NOT guess or invent action names — "
+                "only use the exact names listed here. Do NOT use search_codebase to look for code "
+                "when your task is to interact with external apps.",
+                "Usage: composio_execute({\"action\": \"ACTION_NAME\", \"params\": {<action-specific fields>}}). "
+                "All action parameters (issue_key, channel, text, etc.) MUST go inside the `params` object.",
             ]
 
-            # Step 4: Resolve actions (3-tier)
+            # Step 4: Resolve actions
             app_matches: List[tuple] = []
             top_action_params: Dict[str, str] = {}
 
-            # Tier 1: Capability-based
-            tier1_matched = self._capability_based_hints(
-                allowed_apps, analysis, app_matches, top_action_params
-            )
-            if tier1_matched:
-                result.strategy_used = "capability"
-            elif analysis.tokens:
-                # Tier 2: Token-filtered with mandatory capability gate
-                self._token_filtered_hints(
+            if recipe_mode and analysis.tokens:
+                # Recipe mode: skip taxonomy, use prompt tokens directly.
+                # Scales to any number of tools — no manual keyword→capability curation.
+                self._recipe_token_hints(
                     allowed_apps, analysis, app_matches, top_action_params
                 )
                 if app_matches:
-                    result.strategy_used = "token_filtered"
+                    result.strategy_used = "recipe_token"
+            else:
+                # Chatbot mode: 3-tier resolution (capability → token_filtered → fallback)
+                tier1_matched = self._capability_based_hints(
+                    allowed_apps, analysis, app_matches, top_action_params
+                )
+                if tier1_matched:
+                    result.strategy_used = "capability"
+                elif analysis.tokens:
+                    self._token_filtered_hints(
+                        allowed_apps, analysis, app_matches, top_action_params
+                    )
+                    if app_matches:
+                        result.strategy_used = "token_filtered"
 
-            # Tier 3: Top-N fallback
-            if not app_matches:
+            # Tier 3: Top-N fallback (chatbot only — recipe mode never falls back to random actions)
+            if not app_matches and not recipe_mode:
                 self._top_n_fallback(allowed_apps, app_matches, top_action_params)
                 if app_matches:
                     result.strategy_used = "fallback"
@@ -162,11 +180,11 @@ class ComposioHintService:
             # Step 5: Format output
             app_matches.sort(key=lambda x: (-len(x[1]), x[0]))
             for app, actions in app_matches[:6]:
-                hint_lines.append(f"- {app} candidate actions: {', '.join(actions)}")
+                hint_lines.append(f"- {app} available actions (use these EXACT names): {', '.join(actions)}")
                 result.matched_actions.extend(actions)
 
             if top_action_params:
-                hint_lines.append("\nParameter hints for key actions:")
+                hint_lines.append("\nParameter hints (pass these inside `params`):")
                 for action_name, params in list(top_action_params.items())[:5]:
                     hint_lines.append(f"\n{action_name}:")
                     hint_lines.append(params)
@@ -357,6 +375,113 @@ class ComposioHintService:
             return False
 
     # ------------------------------------------------------------------
+    # Recipe mode: Pure token matching (no taxonomy, no capability gate)
+    # ------------------------------------------------------------------
+    def _recipe_token_hints(
+        self,
+        allowed_apps: List[str],
+        analysis: PromptAnalysis,
+        app_matches: List[tuple],
+        top_action_params: Dict[str, str],
+    ) -> None:
+        """
+        Recipe-mode action matching — no taxonomy, no capability gate.
+
+        The LLM is smart enough to pick the right action from a reasonable list.
+        Our job is to surface relevant candidates via ILIKE on action name +
+        description using the curated prompt_template tokens. Scoring uses both
+        name and description overlap so actions like JIRA_GET_ISSUE rank properly
+        even though "get" != "read".
+
+        Scales to 850+ tools / 12k+ features — relies entirely on the action
+        names and descriptions already in composio_actions_cache.
+        """
+        if not analysis.tokens:
+            return
+
+        for app in allowed_apps[:MAX_APPS_SEARCH]:
+            # ILIKE using prompt tokens directly against name + description
+            token_filters = []
+            for tok in analysis.tokens:
+                like = f"%{tok}%"
+                token_filters.append(ComposioActionCache.action_name.ilike(like))
+                token_filters.append(ComposioActionCache.description.ilike(like))
+
+            if not token_filters:
+                continue
+
+            rows = (
+                self.db.query(
+                    ComposioActionCache.action_name,
+                    ComposioActionCache.description,
+                    ComposioActionCache.parameters,
+                )
+                .filter(ComposioActionCache.app_name == app)
+                .filter(or_(*token_filters))
+                .limit(MAX_DB_ROWS_PER_APP)
+                .all()
+            )
+
+            scored_actions = []
+            params_empty_count = 0
+            for r in rows:
+                if not r or not r[0]:
+                    continue
+                action_name = str(r[0])
+                desc = str(r[1] or "").lower()
+                raw_params = r[2]
+
+                # Track empty parameters
+                if not raw_params or (isinstance(raw_params, dict) and not raw_params.get("properties")):
+                    params_empty_count += 1
+
+                # Normalize legacy display names
+                if " " in action_name and not action_name.startswith(f"{app}_"):
+                    action_name = f"{app}_{action_name.upper().replace(' ', '_')}"
+
+                name_lower = action_name.lower()
+
+                # Safety: skip dangerous actions
+                if any(tok in name_lower for tok in DANGEROUS_TOKENS):
+                    continue
+
+                # Score: name hits (weight 3) + description hits (weight 1)
+                # This lets JIRA_GET_ISSUE score via description ("get issue details")
+                # even when prompt says "read the ticket" (no "get" in name match)
+                name_hits = sum(1 for tok in analysis.tokens if tok in name_lower)
+                desc_hits = sum(1 for tok in analysis.tokens if tok in desc)
+                score = name_hits * 3 + desc_hits
+
+                scored_actions.append((action_name, score, raw_params))
+
+            if params_empty_count:
+                logger.warning(
+                    f"[recipe_hints] {app}: {params_empty_count}/{len(scored_actions)} "
+                    f"actions have empty/no-properties parameters in cache"
+                )
+
+            # Sort by score, deduplicate, take top N
+            scored_actions.sort(key=lambda x: x[1], reverse=True)
+            seen: Set[str] = set()
+            actions = []
+            for action_name, _score, params in scored_actions:
+                if action_name in seen:
+                    continue
+                seen.add(action_name)
+                actions.append(action_name)
+                if len(top_action_params) < MAX_PARAM_HINT_ACTIONS and params:
+                    self._extract_param_hints_from_json(action_name, params, top_action_params)
+
+            # Include app if ILIKE returned any matches — trust the LLM to pick right
+            if actions:
+                app_matches.append((app, actions[:MAX_ACTIONS_PER_APP]))
+
+        logger.info(
+            f"[ComposioHintService] Recipe token matching: "
+            f"tokens={analysis.tokens} apps_matched={len(app_matches)}"
+        )
+
+    # ------------------------------------------------------------------
     # Tier 2: Token-filtered with mandatory capability gate
     # ------------------------------------------------------------------
     def _token_filtered_hints(
@@ -521,5 +646,11 @@ class ComposioHintService:
             param_hints = ParameterHintExtractor.extract_hints(params_json, max_params=MAX_PARAMS_PER_ACTION)
             if param_hints:
                 top_action_params[action_name] = param_hints
-        except Exception:
-            pass
+            else:
+                logger.debug(
+                    f"[param_hints] {action_name}: extract_hints returned empty. "
+                    f"Schema type={params_json.get('type') if isinstance(params_json, dict) else 'N/A'}, "
+                    f"has_properties={'properties' in params_json if isinstance(params_json, dict) else False}"
+                )
+        except Exception as exc:
+            logger.warning(f"[param_hints] {action_name}: extraction failed: {exc}")
