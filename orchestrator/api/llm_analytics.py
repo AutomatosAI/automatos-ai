@@ -409,6 +409,138 @@ async def get_model_comparison(
     return results
 
 
+# ── Cost Projections ─────────────────────────────────────────────────
+
+
+class ProjectedItem(BaseModel):
+    key: str
+    projected_monthly_cost: float
+    current_period_cost: float
+
+
+class CostProjectionResponse(BaseModel):
+    current_period_cost: float
+    daily_average: float
+    projected_monthly: float
+    change_percent: Optional[float] = None
+    projected_by_model: List[ProjectedItem] = Field(default_factory=list)
+    projected_by_provider: List[ProjectedItem] = Field(default_factory=list)
+
+
+@router.get("/projections", response_model=CostProjectionResponse)
+async def get_cost_projections(
+    period: str = Query("30d", description="7d|30d|90d"),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Projected monthly costs based on current usage trajectory."""
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    delta = PERIOD_MAP.get(period, timedelta(days=30))
+    since = datetime.utcnow() - delta
+
+    # Current period total cost
+    current_cost = (
+        db.query(func.sum(LLMUsage.total_cost))
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .scalar() or 0.0
+    )
+    current_cost = float(current_cost)
+
+    # Count distinct days with data for accurate daily average
+    days_with_data = (
+        db.query(func.count(func.distinct(func.date(LLMUsage.created_at))))
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .scalar() or 0
+    )
+
+    daily_avg = current_cost / days_with_data if days_with_data > 0 else 0.0
+    projected_monthly = daily_avg * 30
+
+    # Previous period for comparison
+    prev_start = since - delta
+    prev_cost = (
+        db.query(func.sum(LLMUsage.total_cost))
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= prev_start,
+            LLMUsage.created_at < since,
+        )
+        .scalar() or 0.0
+    )
+    prev_cost = float(prev_cost)
+
+    change_percent = None
+    if prev_cost > 0:
+        change_percent = round(((current_cost - prev_cost) / prev_cost) * 100, 2)
+
+    # Projected by model
+    by_model_rows = (
+        db.query(
+            LLMUsage.model_id.label("key"),
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .group_by(LLMUsage.model_id)
+        .order_by(desc("cost"))
+        .all()
+    )
+
+    projected_by_model = []
+    for r in by_model_rows:
+        model_cost = float(r.cost or 0)
+        model_daily = model_cost / days_with_data if days_with_data > 0 else 0.0
+        projected_by_model.append(ProjectedItem(
+            key=str(r.key or "unknown"),
+            projected_monthly_cost=round(model_daily * 30, 6),
+            current_period_cost=round(model_cost, 6),
+        ))
+
+    # Projected by provider
+    by_provider_rows = (
+        db.query(
+            LLMUsage.provider.label("key"),
+            func.sum(LLMUsage.total_cost).label("cost"),
+        )
+        .filter(
+            LLMUsage.workspace_id == ctx.workspace_id,
+            LLMUsage.created_at >= since,
+        )
+        .group_by(LLMUsage.provider)
+        .order_by(desc("cost"))
+        .all()
+    )
+
+    projected_by_provider = []
+    for r in by_provider_rows:
+        prov_cost = float(r.cost or 0)
+        prov_daily = prov_cost / days_with_data if days_with_data > 0 else 0.0
+        projected_by_provider.append(ProjectedItem(
+            key=str(r.key or "unknown"),
+            projected_monthly_cost=round(prov_daily * 30, 6),
+            current_period_cost=round(prov_cost, 6),
+        ))
+
+    return CostProjectionResponse(
+        current_period_cost=round(current_cost, 6),
+        daily_average=round(daily_avg, 6),
+        projected_monthly=round(projected_monthly, 6),
+        change_percent=change_percent,
+        projected_by_model=projected_by_model,
+        projected_by_provider=projected_by_provider,
+    )
+
+
 # ── OpenRouter helpers ────────────────────────────────────────────────
 
 def _resolve_openrouter_key(workspace_id, db: Session) -> str:

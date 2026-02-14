@@ -103,8 +103,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "Depends on US-002 for llm_analytics.py router"
+      "passes": true,
+      "notes": "Implemented GET /api/analytics/llm/projections — daily_average * 30 projection, change_percent vs previous period, projected_by_model and projected_by_provider breakdowns"
     },
     {
       "id": "US-007",

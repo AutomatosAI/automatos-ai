@@ -17,6 +17,8 @@
 - `generate_insight(question, rows, columns)` returns `{"summary": str, "charts": [{"filename", "mime_type", "base64"}]}`
 - `LLMModel` registry: `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `capabilities` (JSON dict), `display_name`, `provider` — query by `model_id` for metadata fallback
 - PERIOD_MAP in llm_analytics.py supports: 1h, 24h, 7d, 30d, 90d
+- Previous period comparison: `prev_start = since - delta`, filter `created_at >= prev_start AND < since` for period-over-period change %
+- Use `func.count(func.distinct(func.date(col)))` for days-with-data count — more accurate than raw period length for daily averages
 
 ---
 
@@ -88,4 +90,19 @@
   - Usage aggregates (count, sum, avg) return None for empty result sets — always default with `or 0`
   - Error rate calculation: separate query filtering `status == "error"` is cleaner than a CASE expression for py_compile compat
   - PERIOD_MAP now includes `90d` — reuse for any endpoint needing 90-day range
+---
+
+## 2026-02-14 - US-006
+- What was implemented: Cost projection endpoint `GET /api/analytics/llm/projections` in `orchestrator/api/llm_analytics.py`
+  - Calculates daily average cost from `llm_usage` for the requested period
+  - Projects to 30-day monthly cost: `daily_avg * 30`
+  - Returns: `current_period_cost`, `daily_average`, `projected_monthly`, `change_percent` (vs previous period), `projected_by_model`, `projected_by_provider`
+  - Uses `func.distinct(func.date(...))` to count actual days with data for accurate daily averages
+  - Previous period comparison: shifts window back by the same delta, computes percent change
+  - Added `CostProjectionResponse` and `ProjectedItem` Pydantic response models
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added 2 schemas + 1 endpoint)
+- **Learnings for future iterations:**
+  - Use `func.count(func.distinct(func.date(col)))` to get days with data rather than dividing by period length — avoids inflated averages when usage is sparse
+  - Previous period comparison pattern: `prev_start = since - delta`, filter `>= prev_start AND < since`
+  - Round financial values with `round(val, 6)` to avoid floating point noise in JSON responses
 ---
