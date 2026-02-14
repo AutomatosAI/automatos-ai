@@ -880,7 +880,7 @@ Available Shell Tools:
         if workspace_id:
             try:
                 from core.models.core import UserApiKey
-                from core.credentials.encryption import EncryptionService
+                from core.credentials.encryption import get_encryption_service
 
                 byok_key = (
                     self.db_session.query(UserApiKey)
@@ -893,11 +893,14 @@ Available Shell Tools:
                     .first()
                 )
                 if byok_key:
-                    decrypted = EncryptionService.decrypt(byok_key.encrypted_key)
+                    encryption = get_encryption_service()
+                    decrypted = encryption.decrypt(byok_key.encrypted_key)
                     self.logger.info(f"Resolved BYOK API key for provider '{provider_name}' workspace={workspace_id} (key: {byok_key.display_name or byok_key.id})")
                     return decrypted
+                else:
+                    self.logger.info(f"No BYOK key found for provider '{provider_name}' in workspace={workspace_id}")
             except Exception as e:
-                self.logger.debug(f"BYOK key lookup failed for {provider_name}: {e}")
+                self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
         else:
             self.logger.warning(f"No workspace_id for BYOK key lookup — skipping for provider '{provider_name}'")
 
