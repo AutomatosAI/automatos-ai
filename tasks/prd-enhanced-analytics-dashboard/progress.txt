@@ -27,6 +27,8 @@
 - Glass card pattern: `<Card className="glass-card">` + `CardHeader`/`CardContent` for all analytics cards
 - Color-coded progress bars: green <70%, yellow 70-90%, red >90% — reuse `getUsageColor(percentage)` pattern from plan-usage
 - "Not configured" state: render centered icon + message + link to settings when hook returns null (404 = no key)
+- Brand chart colors for comparison/multi-series: `#60B5FF` (blue), `#72BF78` (green), `#ff6b35` (orange), `#a78bfa` (purple)
+- TS narrowing: use `data && data.x?.length` NOT `data?.x?.length` when `data` is used inside the conditional block
 
 ---
 
@@ -177,4 +179,40 @@
   - `useTriggerOpenRouterSync()` returns `{ synced, skipped, error }` on success — display in UI for user feedback
   - Credits data: `total_credits - total_usage = remaining` — OpenRouter doesn't return `remaining` directly
   - Component is standalone (no props) — uses hooks directly for data. Will need to be integrated into the costs tab or overview page in a later story
+---
+
+## 2026-02-14 - US-011
+- What was implemented: Model Comparison section in `frontend/components/analytics/analytics-costs.tsx`
+  - Multi-select model dropdown (max 4) populated from byModel data in the costs hook
+  - Color-coded model badges with remove button, "Add Model" dropdown picker
+  - Period selector (7d/30d/90d) for comparison data
+  - Comparison table: Provider, Input/Output Cost per 1K, Total Requests, Total Tokens, Total Cost, Avg Latency, Error Rate, Success Rate, Capabilities badges
+  - RadarChart visualization for capability ratings across selected models (only renders when 3+ capabilities exist)
+  - Empty state with GitCompare icon when no models selected
+  - Loading skeleton while comparison data fetches
+  - Also fixed pre-existing TS error: `data?.costTrend?.length` → `data && data.costTrend?.length` for proper narrowing
+- Files changed: `frontend/components/analytics/analytics-costs.tsx` (modified — added imports, state, comparison section with table + radar chart)
+- **Learnings for future iterations:**
+  - `data?.x?.length > 0` does NOT narrow `data` to non-undefined inside the conditional block — use `data && data.x?.length > 0` instead for proper TS narrowing
+  - Recharts RadarChart needs: `RadarChart`, `Radar`, `PolarGrid`, `PolarAngleAxis`, `PolarRadiusAxis` from 'recharts'
+  - Brand chart colors: `#60B5FF` (blue), `#72BF78` (green), `#ff6b35` (orange), `#a78bfa` (purple) — 4 colors for max 4 model comparison
+  - `useModelComparison` has `enabled: modelIds.length > 0` — won't fire until at least one model selected
+  - Capabilities from backend are `Record<string, any>` — filter for `true` or `> 0` values, use the key as the badge label
+  - Custom dropdown for model selection (no shadcn multi-select exists) — simple `relative` positioned div with `z-50` and bg-card
+---
+
+## 2026-02-14 - US-012
+- What was implemented: Cost Projections section in `frontend/components/analytics/analytics-costs.tsx`
+  - 4-card stats grid: Current Period Cost, Daily Average, Projected Monthly (large, primary color), Change % vs Previous Period
+  - Green/red color coding on change %: red for cost increase (>0%), green for decrease (<0%), muted for no data
+  - Horizontal bar chart (Recharts BarChart, layout="vertical") for projected monthly cost by model
+  - Period selector (7d/30d/90d) for projection data
+  - Loading skeleton and empty state when no projection data
+  - Uses `useCostProjections` hook from US-009
+- Files changed: `frontend/components/analytics/analytics-costs.tsx` (modified — added BarChart/Bar/Cell imports, useCostProjections hook, projectionPeriod state, Cost Projections section)
+- **Learnings for future iterations:**
+  - Recharts horizontal bar chart: use `layout="vertical"` on BarChart, swap XAxis/YAxis types (`type="number"` on X, `type="category"` on Y)
+  - `Cell` component from recharts needed for per-bar coloring — wrap inside `<Bar>`, iterate with index to pick from color array
+  - `_entry` prefix for unused map params to avoid lint warnings
+  - Projection data `change_percent` can be null (no previous period data) — always null-check before rendering
 ---

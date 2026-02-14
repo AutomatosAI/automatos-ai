@@ -187,8 +187,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "Depends on US-009 for useModelComparison hook"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-costs.tsx — multi-select model dropdown (max 4), comparison table with cost/1K, requests, tokens, cost, latency, error rate, capabilities badges, RadarChart for capability visualization"
     },
     {
       "id": "US-012",
@@ -204,8 +204,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": "Depends on US-009 for useCostProjections hook"
+      "passes": true,
+      "notes": "Implemented in frontend/components/analytics/analytics-costs.tsx — current period cost, daily average, projected monthly (large number), change % vs previous period with green/red color coding, horizontal bar chart for projected cost by model"
     },
     {
       "id": "US-013",
