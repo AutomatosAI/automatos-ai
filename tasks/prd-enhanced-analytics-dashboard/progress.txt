@@ -1,0 +1,343 @@
+## Codebase Patterns
+- LLM services live in `orchestrator/core/llm/` — standalone classes, no base class needed for analytics services
+- Use `httpx.AsyncClient` for async HTTP calls (preferred pattern), `requests` for sync
+- DB session via `from core.database.database import SessionLocal` — create, use, close manually
+- `LLMUsage` model in `core/models/core.py` — fields: workspace_id, model_id, provider, tier, input_tokens, output_tokens, total_tokens, input_cost, output_cost, total_cost, is_byok, latency_ms, status, error_message, created_at
+- `UserApiKey` model — encrypted_key decrypted via `get_encryption_service().decrypt()`
+- OpenRouter headers: `Authorization: Bearer {key}`, `HTTP-Referer: https://automatos.app`, `X-Title: Automatos AI`
+- No formal mypy/pyright setup — typecheck = `python -m py_compile` succeeding
+- API routers in `orchestrator/api/` — FastAPI pattern with `RequestContext` + `get_request_context_hybrid`
+- Resolve BYOK keys via `_resolve_openrouter_key` pattern: query `UserApiKey` (workspace + provider + is_active), decrypt, fallback to env var, 404 if missing
+- llm_analytics.py router prefix: `/api/analytics/llm` — already registered in main.py
+- Composio workspace scoping: Agent.workspace_id for agent filtering, ComposioEntity.workspace_id → ComposioConnection.entity_id for connections
+- AgentAppFeature has no direct workspace_id — join through Agent.id to scope by workspace
+- composio_analytics.py router prefix: `/api/analytics/composio` — registered in main.py
+- analytics_charts.py router prefix: `/api/analytics/charts` — registered in main.py
+- PandasAI service accessed via lazy `get_pandasai_service()` — returns None if not installed/configured, use 404 for unavailable
+- `generate_insight(question, rows, columns)` returns `{"summary": str, "charts": [{"filename", "mime_type", "base64"}]}`
+- `LLMModel` registry: `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `capabilities` (JSON dict), `display_name`, `provider` — query by `model_id` for metadata fallback
+- PERIOD_MAP in llm_analytics.py supports: 1h, 24h, 7d, 30d, 90d
+- Previous period comparison: `prev_start = since - delta`, filter `created_at >= prev_start AND < since` for period-over-period change %
+- Use `func.count(func.distinct(func.date(col)))` for days-with-data count — more accurate than raw period length for daily averages
+- Frontend hooks: `apiClient.request<T>(endpoint, options)` for API calls, handles auth + workspace headers
+- Frontend 404 handling in hooks: catch error, check `err.message.includes('404')`, return null for "not configured" state
+- Frontend cache keys: extend `unifiedAnalyticsKeys` object with new namespaces for cache key consistency
+- Frontend mutations: use `useMutation` from tanstack + `queryClient.invalidateQueries()` for cache busting on write operations
+- tanstack react-query v4: mutations use `isLoading` (not `isPending` which is v5) — check `syncMutation.isLoading` for loading state
+- Glass card pattern: `<Card className="glass-card">` + `CardHeader`/`CardContent` for all analytics cards
+- Color-coded progress bars: green <70%, yellow 70-90%, red >90% — reuse `getUsageColor(percentage)` pattern from plan-usage
+- "Not configured" state: render centered icon + message + link to settings when hook returns null (404 = no key)
+- Brand chart colors for comparison/multi-series: `#60B5FF` (blue), `#72BF78` (green), `#ff6b35` (orange), `#a78bfa` (purple)
+- TS narrowing: use `data && data.x?.length` NOT `data?.x?.length` when `data` is used inside the conditional block
+- Admin auth: `getattr(ctx.user, "system_role", "user") == "admin"` — use `_assert_admin(ctx)` helper at endpoint start
+- Multiple routers per file: `admin_router = APIRouter(prefix=...)` can coexist with `router` in the same file
+- Workspace model: `core.models.workspaces.Workspace` — fields: id (UUID), name, plan, slug, is_active
+- admin_router prefix: `/api/admin/analytics` — registered in main.py alongside the llm_analytics router
+
+---
+
+## 2026-02-14 - US-001
+- What was implemented: `OpenRouterAnalyticsService` class in `orchestrator/core/llm/openrouter_analytics.py`
+- Files changed: `orchestrator/core/llm/openrouter_analytics.py` (new)
+- **Learnings for future iterations:**
+  - OpenRouter API returns activity data in `{"data": [...]}` wrapper
+  - Activity dedup key is workspace_id + model_id + created_at date
+  - Credits endpoint returns `total_credits` and `total_usage` at root level
+  - Key endpoint wraps data in `{"data": {...}}` — need to unwrap
+  - Use `request_type="activity_sync"` to distinguish synced data from live tracking
+---
+
+## 2026-02-14 - US-002
+- What was implemented: OpenRouter analytics API endpoints in `orchestrator/api/llm_analytics.py`
+  - `POST /api/analytics/llm/openrouter/sync` — triggers activity sync for current workspace
+  - `GET /api/analytics/llm/openrouter/credits` — returns credits balance (total_credits, total_usage)
+  - `GET /api/analytics/llm/openrouter/key-info` — returns key usage stats (daily/weekly/monthly, limits, rate_limit)
+  - `_resolve_openrouter_key()` helper — resolves key from BYOK user_api_keys table (workspace-scoped, active, newest first) → falls back to env OPENROUTER_API_KEY → raises 404 with helpful message
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added imports, helper, 3 endpoints, 3 Pydantic response models)
+- **Learnings for future iterations:**
+  - The llm_analytics router prefix is `/api/analytics/llm` — OpenRouter sub-paths end up as `/api/analytics/llm/openrouter/*`
+  - Router is already registered in main.py at lines ~118 and ~482 (search further in the file if grep misses it)
+  - Use lazy import for `OpenRouterAnalyticsService` inside endpoints to avoid circular imports
+  - `_resolve_openrouter_key` pattern: BYOK first (decrypt via `get_encryption_service()`), then env var, then 404 — reuse for other providers
+  - Added `os` import and `UserApiKey`/`get_encryption_service` imports to the file
+---
+
+## 2026-02-14 - US-003
+- What was implemented: Composio analytics API endpoints in `orchestrator/api/composio_analytics.py`
+  - `GET /api/analytics/composio/apps` — connected apps with action counts, agent count, documents synced
+  - `GET /api/analytics/composio/actions` — action leaderboard sorted by usage count desc
+  - `GET /api/analytics/composio/agent-tools` — per-agent tool mapping with usage counts
+  - All endpoints accept `?days=7|30|90` parameter, scoped by workspace_id
+- Files changed: `orchestrator/api/composio_analytics.py` (new), `orchestrator/main.py` (import + router registration)
+- **Learnings for future iterations:**
+  - AgentAppFeature has no workspace_id column — must join through Agent table to filter by workspace
+  - ComposioConnection links to workspace via ComposioEntity (entity_id FK → composio_entities.workspace_id)
+  - ComposioConnection stores app_name in uppercase — match against AgentAppFeature.app_name which is also stored as-is
+  - ComposioConnection has `total_documents_synced` field (PRD-42 cloud doc sync) useful for analytics
+  - Use `func.distinct()` inside `func.count()` for accurate agent_count across grouped features
+---
+
+## 2026-02-14 - US-004
+- What was implemented: PandasAI analytics chart generation API in `orchestrator/api/analytics_charts.py`
+  - `POST /api/analytics/charts/generate` — accepts {query, chart_type}, queries llm_usage, passes to PandasAI, returns {summary, charts: [base64], data: [rows]}
+  - `GET /api/analytics/charts/presets` — returns 6 pre-built chart configs (cost-by-model, tokens-over-time, cost-trend-daily, requests-by-provider, latency-by-model, cost-by-request-type)
+  - NL query parser extracts time range + grouping intent (over-time, by-provider, by-model, latency, request-type)
+  - Router registered in main.py
+- Files changed: `orchestrator/api/analytics_charts.py` (new), `orchestrator/main.py` (import + router registration)
+- **Learnings for future iterations:**
+  - PandasAI `get_pandasai_service()` returns None when disabled — check and 404, don't crash
+  - `generate_insight()` returns charts as list of dicts with `base64` key — extract for response
+  - SQLAlchemy row `._fields` gives column names for named tuples from `.label()` queries
+  - Chart type hint can be prepended to the query string to guide PandasAI visualization
+---
+
+## 2026-02-14 - US-005
+- What was implemented: LLM model comparison endpoint in `orchestrator/api/llm_analytics.py`
+  - `GET /api/analytics/llm/comparison?model_ids=a,b,c&period=30d` — compares up to 4 models
+  - Returns per-model: display_name, provider, input/output cost per 1K, context_window, capabilities, total_requests, total_tokens, total_cost, avg_latency_ms, error_rate, success_rate
+  - Falls back to LLMModel registry data if no usage data exists yet
+  - Added `90d` to PERIOD_MAP for broader date range support
+  - `ModelComparisonItem` Pydantic response model
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added ModelComparisonItem schema, comparison endpoint, extended PERIOD_MAP)
+- **Learnings for future iterations:**
+  - `LLMModel` registry has `input_cost_per_1k_tokens`, `output_cost_per_1k_tokens`, `context_window`, `capabilities` (JSON), `display_name`, `provider` — use as fallback when no usage data
+  - Usage aggregates (count, sum, avg) return None for empty result sets — always default with `or 0`
+  - Error rate calculation: separate query filtering `status == "error"` is cleaner than a CASE expression for py_compile compat
+  - PERIOD_MAP now includes `90d` — reuse for any endpoint needing 90-day range
+---
+
+## 2026-02-14 - US-006
+- What was implemented: Cost projection endpoint `GET /api/analytics/llm/projections` in `orchestrator/api/llm_analytics.py`
+  - Calculates daily average cost from `llm_usage` for the requested period
+  - Projects to 30-day monthly cost: `daily_avg * 30`
+  - Returns: `current_period_cost`, `daily_average`, `projected_monthly`, `change_percent` (vs previous period), `projected_by_model`, `projected_by_provider`
+  - Uses `func.distinct(func.date(...))` to count actual days with data for accurate daily averages
+  - Previous period comparison: shifts window back by the same delta, computes percent change
+  - Added `CostProjectionResponse` and `ProjectedItem` Pydantic response models
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added 2 schemas + 1 endpoint)
+- **Learnings for future iterations:**
+  - Use `func.count(func.distinct(func.date(col)))` to get days with data rather than dividing by period length — avoids inflated averages when usage is sparse
+  - Previous period comparison pattern: `prev_start = since - delta`, filter `>= prev_start AND < since`
+  - Round financial values with `round(val, 6)` to avoid floating point noise in JSON responses
+---
+
+## 2026-02-14 - US-007
+- What was implemented: Frontend React Query hooks for OpenRouter analytics in `frontend/hooks/use-unified-analytics.ts`
+  - `useOpenRouterCredits()` — GET /api/analytics/llm/openrouter/credits, staleTime 300000 (5 min)
+  - `useOpenRouterKeyInfo()` — GET /api/analytics/llm/openrouter/key-info, staleTime 60000 (1 min)
+  - `useTriggerOpenRouterSync()` — mutation POST /api/analytics/llm/openrouter/sync, invalidates credits + key-info + costs queries on success
+  - Added `openrouterCredits` and `openrouterKeyInfo` to `unifiedAnalyticsKeys`
+  - All hooks handle 404 gracefully (no key configured) by returning null
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added useMutation import, 3 hooks, 3 interfaces, 2 cache keys)
+- **Learnings for future iterations:**
+  - `apiClient.request<T>(endpoint, options)` is the standard way to call backend — handles auth + workspace headers automatically
+  - Hooks returning null on 404: catch the error in queryFn, check `err.message.includes('404')`, return null — consumers check `data === null` for "not configured" state
+  - `useMutation` from tanstack requires explicit `queryClient.invalidateQueries()` for cache busting — pass `{ queryKey: [...] }` object form
+  - Pre-existing TS errors exist in this file (getCostAnalysis, getAgentRanking missing from ApiClient type) — don't try to fix them
+---
+
+## 2026-02-14 - US-008
+- What was implemented: Frontend React Query hooks for Composio analytics in `frontend/hooks/use-unified-analytics.ts`
+  - `useComposioApps(days)` — GET /api/analytics/composio/apps?days=X, returns `ComposioAppStats[]`
+  - `useComposioActions(days)` — GET /api/analytics/composio/actions?days=X, returns `ComposioActionEntry[]`
+  - `useComposioAgentTools(days)` — GET /api/analytics/composio/agent-tools?days=X, returns `ComposioAgentToolMapping[]`
+  - Added `composioApps`, `composioActions`, `composioAgentTools` to `unifiedAnalyticsKeys` with `days` parameter
+  - All hooks use staleTime 60000 (1 minute)
+  - 4 TypeScript interfaces matching backend Pydantic schemas
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 3 cache keys, 4 interfaces, 3 hooks)
+- **Learnings for future iterations:**
+  - Composio hooks don't need 404 handling like OpenRouter — there's no "key not configured" state, just empty arrays
+  - Backend response models: `ConnectedAppStats`, `ActionLeaderboardEntry`, `AgentToolMapping` — match field names exactly in TS interfaces
+  - `AgentToolEntry` has `tool_name` (not `action_name`) — backend schema differs from the DB column name
+  - Days parameter passed as query string `?days=X` — backend validates against DAYS_MAP {7, 30, 90}
+---
+
+## 2026-02-14 - US-009
+- What was implemented: Frontend React Query hooks for PandasAI charts, model comparison, and cost projections in `frontend/hooks/use-unified-analytics.ts`
+  - `useAnalyticsChart()` — mutation POST /api/analytics/charts/generate, accepts `{ query, chartType }`, returns `{ summary, charts, data }`
+  - `useChartPresets()` — query GET /api/analytics/charts/presets, staleTime 300000 (5 min)
+  - `useModelComparison(modelIds, period)` — query GET /api/analytics/llm/comparison?model_ids=...&period=..., enabled only when modelIds.length > 0, staleTime 60000
+  - `useCostProjections(period)` — query GET /api/analytics/llm/projections?period=..., staleTime 60000
+  - Added `chartPresets`, `modelComparison`, `costProjections` to `unifiedAnalyticsKeys`
+  - 5 TypeScript interfaces matching backend Pydantic schemas
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 3 cache keys, 5 interfaces, 4 hooks)
+- **Learnings for future iterations:**
+  - `useAnalyticsChart` is a mutation (not a query) because chart generation is an expensive operation triggered on demand — matches `useTriggerOpenRouterSync` pattern
+  - `useModelComparison` uses `enabled: modelIds.length > 0` to prevent empty API calls — good pattern for hooks with required params
+  - `encodeURIComponent()` needed for comma-separated model_ids query param to handle special chars in model IDs
+  - Chart presets rarely change so 5min staleTime is appropriate (vs 1min for dynamic data)
+  - Pre-existing TS errors (getCostAnalysis, getAgentRanking) still exist — don't try to fix them
+---
+
+## 2026-02-14 - US-010
+- What was implemented: OpenRouter Credits card component in `frontend/components/analytics/analytics-openrouter-credits.tsx`
+  - Credits balance display: total credits, total usage, remaining balance (large number)
+  - Color-coded progress bar: green <70%, yellow 70-90%, red >90% of credits used
+  - Usage breakdown: daily/weekly/monthly usage in 3-column grid with icons
+  - Sync Activity button: triggers OpenRouter sync mutation, shows spinner while loading, success/error feedback
+  - "Not configured" fallback: shows message with link to /settings when no OpenRouter key (404)
+  - Rate limit info display when available
+- Files changed: `frontend/components/analytics/analytics-openrouter-credits.tsx` (new)
+- **Learnings for future iterations:**
+  - tanstack react-query v4 uses `isLoading` for mutations, NOT `isPending` (v5 feature) — existing codebase has this same error in agent-confirm-delete-modal.tsx
+  - `useTriggerOpenRouterSync()` returns `{ synced, skipped, error }` on success — display in UI for user feedback
+  - Credits data: `total_credits - total_usage = remaining` — OpenRouter doesn't return `remaining` directly
+  - Component is standalone (no props) — uses hooks directly for data. Will need to be integrated into the costs tab or overview page in a later story
+---
+
+## 2026-02-14 - US-011
+- What was implemented: Model Comparison section in `frontend/components/analytics/analytics-costs.tsx`
+  - Multi-select model dropdown (max 4) populated from byModel data in the costs hook
+  - Color-coded model badges with remove button, "Add Model" dropdown picker
+  - Period selector (7d/30d/90d) for comparison data
+  - Comparison table: Provider, Input/Output Cost per 1K, Total Requests, Total Tokens, Total Cost, Avg Latency, Error Rate, Success Rate, Capabilities badges
+  - RadarChart visualization for capability ratings across selected models (only renders when 3+ capabilities exist)
+  - Empty state with GitCompare icon when no models selected
+  - Loading skeleton while comparison data fetches
+  - Also fixed pre-existing TS error: `data?.costTrend?.length` → `data && data.costTrend?.length` for proper narrowing
+- Files changed: `frontend/components/analytics/analytics-costs.tsx` (modified — added imports, state, comparison section with table + radar chart)
+- **Learnings for future iterations:**
+  - `data?.x?.length > 0` does NOT narrow `data` to non-undefined inside the conditional block — use `data && data.x?.length > 0` instead for proper TS narrowing
+  - Recharts RadarChart needs: `RadarChart`, `Radar`, `PolarGrid`, `PolarAngleAxis`, `PolarRadiusAxis` from 'recharts'
+  - Brand chart colors: `#60B5FF` (blue), `#72BF78` (green), `#ff6b35` (orange), `#a78bfa` (purple) — 4 colors for max 4 model comparison
+  - `useModelComparison` has `enabled: modelIds.length > 0` — won't fire until at least one model selected
+  - Capabilities from backend are `Record<string, any>` — filter for `true` or `> 0` values, use the key as the badge label
+  - Custom dropdown for model selection (no shadcn multi-select exists) — simple `relative` positioned div with `z-50` and bg-card
+---
+
+## 2026-02-14 - US-012
+- What was implemented: Cost Projections section in `frontend/components/analytics/analytics-costs.tsx`
+  - 4-card stats grid: Current Period Cost, Daily Average, Projected Monthly (large, primary color), Change % vs Previous Period
+  - Green/red color coding on change %: red for cost increase (>0%), green for decrease (<0%), muted for no data
+  - Horizontal bar chart (Recharts BarChart, layout="vertical") for projected monthly cost by model
+  - Period selector (7d/30d/90d) for projection data
+  - Loading skeleton and empty state when no projection data
+  - Uses `useCostProjections` hook from US-009
+- Files changed: `frontend/components/analytics/analytics-costs.tsx` (modified — added BarChart/Bar/Cell imports, useCostProjections hook, projectionPeriod state, Cost Projections section)
+- **Learnings for future iterations:**
+  - Recharts horizontal bar chart: use `layout="vertical"` on BarChart, swap XAxis/YAxis types (`type="number"` on X, `type="category"` on Y)
+  - `Cell` component from recharts needed for per-bar coloring — wrap inside `<Bar>`, iterate with index to pick from color array
+  - `_entry` prefix for unused map params to avoid lint warnings
+  - Projection data `change_percent` can be null (no previous period data) — always null-check before rendering
+---
+
+## 2026-02-14 - US-013
+- What was implemented: Composio Tools analytics tab component in `frontend/components/analytics/analytics-composio.tsx`
+  - StatsBar with 4 cards: Connected Apps count, Total Actions Used, Most Used App, Active Integrations
+  - Connected Apps section: responsive grid of app cards showing app_name, status badge (active/disconnected/error), total actions used, agent count, documents synced, last used
+  - Action Leaderboard section: sortable table (click column headers) with columns: Action Name, App, Usage Count, Agents Using, Last Used — default sorted by usage count desc
+  - Agent Tool Mapping section: expandable rows showing each agent and its Composio tools with usage counts + disabled badge
+  - Loading skeletons, empty states for all sections
+  - Uses glass-card styling, Badge component for status, StatsBar for summary
+- Files changed: `frontend/components/analytics/analytics-composio.tsx` (new)
+- **Learnings for future iterations:**
+  - Composio hooks return arrays directly (not wrapped objects) — `apps`, `actions`, `agentTools` are directly iterable
+  - `ComposioAgentToolEntry` has `tool_name` and `enabled` fields — `enabled` is useful for showing disabled tools
+  - `getStatusVariant()` maps status strings to Badge variant types — reuse pattern for other status displays
+  - Sorting table columns: use `SortKey` type union + `SortDir` state, toggle direction on same-column click
+  - `Fragment` import needed from React for expandable table rows (adjacent `<tr>` elements without wrapper div)
+  - Component accepts `days` prop but doesn't need it for internal logic — passed through to hooks which handle the API param
+---
+
+## 2026-02-14 - US-014
+- What was implemented: Added "Tools & Integrations" tab to analytics page navigation in `frontend/components/analytics/analytics-page.tsx`
+  - New tab with `Wrench` icon from lucide-react, placed between "LLM & Costs" and "Admin"
+  - Renders `<AnalyticsComposio days={days} />` component in a `TabsContent` block
+  - Tab visible to all users (not admin-gated)
+  - Lazy-loads via Radix `TabsContent` — only renders when tab is active (matches existing pattern)
+- Files changed: `frontend/components/analytics/analytics-page.tsx` (modified — added Wrench import, AnalyticsComposio import, tab def, TabsContent)
+- **Learnings for future iterations:**
+  - `FilterTabs` re-exports Radix `TabsContent` — inherently lazy (only active tab DOM-mounted), no extra lazy-loading needed
+  - Tab ordering: add new entries to `tabDefs` array at the desired position; admin tab uses spread operator so always ends up last
+  - Pre-existing TS errors in the codebase (admin plugins, api-debug, auth pages) — none related to analytics; safe to ignore
+---
+
+## 2026-02-14 - US-015
+- What was implemented: PandasAI chart widget component in `frontend/components/analytics/analytics-pandas-chart.tsx`
+  - Accepts props: `presetId?`, `query?`, `chartType?` — resolves preset config from `useChartPresets()` when presetId provided
+  - Auto-generates chart via `useAnalyticsChart()` mutation when query is resolved (useEffect trigger)
+  - Renders base64 PNG chart images with `<img>` tags
+  - Shows NL summary text below charts
+  - Loading skeleton with "Generating chart..." message and spinner
+  - Error state with error message display
+  - Fallback "No chart data available" when no charts or summary returned
+  - Uses glass-card wrapper with CardHeader title from preset
+- Files changed: `frontend/components/analytics/analytics-pandas-chart.tsx` (new)
+- **Learnings for future iterations:**
+  - `useAnalyticsChart()` is a mutation — must use `useEffect` to auto-trigger on mount/query change, with guards to prevent re-firing (`!isLoading && !isSuccess && !isError`)
+  - Mutation object ref changes every render — must NOT include it in useEffect deps, only the resolved query/chartType values
+  - Base64 chart images render as `data:image/png;base64,${base64}` in img src — no wrapper object, just the base64 string directly from the charts array
+  - Component is standalone with optional props — can be used as preset-driven (pass presetId) or ad-hoc (pass query + chartType)
+  - tanstack v4 mutation: `isLoading` for in-flight, `isSuccess` + `data` for result, `isError` + `error` for failures
+---
+
+## 2026-02-14 - US-016
+- What was implemented: Added "AI-Generated Insights" section to `frontend/components/analytics/analytics-overview.tsx`
+  - Section header with Sparkles icon and "AI-Generated Insights" title
+  - 2-column responsive grid (`grid-cols-1 md:grid-cols-2`) with `AnalyticsPandasChart` components
+  - Uses presets: `cost-by-model` and `tokens-over-time`
+  - Wrapped in glass-card with `Card`/`CardHeader`/`CardContent`
+  - Only renders when `useChartPresets()` returns data (graceful fallback if PandasAI unavailable)
+  - Animated entry with `motion.div` matching existing section pattern (delay: 0.7)
+- Files changed: `frontend/components/analytics/analytics-overview.tsx` (modified — added imports for useChartPresets + AnalyticsPandasChart, added chartPresets query, added AI Insights section)
+- **Learnings for future iterations:**
+  - `Sparkles` icon was already imported in the file — always check existing imports before adding new ones
+  - `useChartPresets()` returns `undefined` when loading/error and `ChartPreset[]` on success — condition `chartPresets && chartPresets.length > 0` handles both loading state and empty presets
+  - The overview component doesn't accept or use `days` for chart presets — presets are time-agnostic since the chart generation endpoint handles its own time filtering
+  - Pattern: wrap conditional sections in `{condition && (<motion.div>...)}` for graceful degradation
+---
+
+## 2026-02-14 - US-017
+- What was implemented: Admin cross-workspace cost aggregation endpoint `GET /api/admin/analytics/costs` in `orchestrator/api/llm_analytics.py`
+  - Created `admin_router` with prefix `/api/admin/analytics` in the same file as the existing llm analytics router
+  - `_is_admin(ctx)` and `_assert_admin(ctx)` helpers checking `ctx.user.system_role == "admin"`
+  - Returns: `total_platform_cost`, `total_tokens`, `total_requests` — platform-wide aggregates (no workspace filter)
+  - `cost_by_workspace`: per-workspace breakdown with workspace name, plan, cost, tokens, requests, top model
+  - `cost_by_provider`: reuses existing `CostBreakdown` schema for provider-level aggregation
+  - `daily_cost_trend`: date + cost + requests per day for time-series charts
+  - Workspace metadata lookup via `Workspace` model join (name, plan)
+  - Accepts `?period=7d|30d|90d`
+  - Registered `admin_router` in `main.py`
+- Files changed: `orchestrator/api/llm_analytics.py` (modified — added admin_router, Workspace import, admin helpers, 2 schemas, 1 endpoint), `orchestrator/main.py` (modified — import + register admin_router)
+- **Learnings for future iterations:**
+  - Admin auth pattern: `getattr(ctx.user, "system_role", "user") == "admin"` — same as admin_plugins.py and marketplace.py
+  - Can add multiple routers to a single file — `admin_router` coexists with `router` in llm_analytics.py, each with different prefix
+  - Import pattern for multiple routers: `from api.llm_analytics import router as X, admin_router as Y`
+  - Workspace model at `core.models.workspaces.Workspace` — fields: id (UUID), name, plan (string), slug, is_active
+  - Cross-workspace queries: simply omit the `workspace_id` filter from LLMUsage queries
+  - Top model per workspace: separate sub-query grouped by model_id, ordered by cost desc, `.first()` — avoids complex window functions
+---
+
+## 2026-02-14 - US-018
+- What was implemented: Admin cost dashboard frontend section in `frontend/components/analytics/analytics-admin.tsx`
+  - `useAdminCostAnalytics(period)` hook in `frontend/hooks/use-unified-analytics.ts` — calls `GET /api/admin/analytics/costs?period=X`, handles 403/401 gracefully
+  - StatsBar with 4 cards: Total Platform Cost ($), Total Tokens, Total API Requests, Active Providers (count from `cost_by_provider`)
+  - Daily cost trend: `AreaChart` (Recharts) with cost dataKey, green stroke, Y-axis `$` formatter
+  - Provider distribution: `PieChart` (Recharts) with `Cell` per-provider coloring, percentage labels
+  - Per-workspace cost table: Workspace Name, Plan, Total Cost, Total Tokens, Requests, Top Model — sortable by cost (toggle asc/desc)
+  - Period selector (7d/30d/90d) for admin cost data
+  - Fallback state for non-admin users (403 → null data → "admin access required" message)
+  - Loading skeletons, empty states for all sections
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 5 interfaces, `useAdminCostAnalytics` hook), `frontend/components/analytics/analytics-admin.tsx` (modified — added Recharts imports, `useState`, `Server` icon, `PROVIDER_COLORS`, cost state, Platform Costs section with AreaChart + PieChart + table)
+- **Learnings for future iterations:**
+  - `PieChart` from Recharts needs `Pie` + `Cell` components — `Cell` inside `Pie` for per-slice coloring, same pattern as `Bar` + `Cell`
+  - Pie label function receives `{ name, percent }` — `percent` is already 0-1 range, multiply by 100 for display
+  - Admin endpoint returns 403 for non-admins — hook catches and returns null, component shows fallback
+  - `costSortDir` state with toggle button is simpler than full column-header sorting for single-column sort
+  - `AdminCostAnalyticsData.daily_cost_trend` has `{ date, cost, requests }` — flat structure, no per-provider breakdown in current endpoint (stacked area chart not possible without per-provider daily data, used single area instead)
+---
+
+## 2026-02-14 - US-019
+- What was implemented: Verified all new API routers are registered in `orchestrator/main.py`
+  - `composio_analytics.router` — imported line 119, registered line 486 (`/api/analytics/composio`)
+  - `analytics_charts.router` — imported line 120, registered line 487 (`/api/analytics/charts`)
+  - `llm_analytics router` — imported line 118, registered line 484 (`/api/analytics/llm`)
+  - `llm_admin_analytics_router` — imported line 118, registered line 485 (`/api/admin/analytics`)
+- Files verified: `orchestrator/main.py`, `orchestrator/api/composio_analytics.py`, `orchestrator/api/analytics_charts.py`, `orchestrator/api/llm_analytics.py`
+- All routers were already registered during their respective story implementations (US-003, US-004, US-017)
+- py_compile passes on all files, no circular dependency issues
+- **Learnings for future iterations:**
+  - All routers were registered incrementally during each backend story — this verification story was a formality
+  - Router registration lines in main.py are grouped around lines 484-487 with PRD-54 comments
+  - Frontend TS errors are all pre-existing (admin plugins, api-debug, auth, agent components) — none from analytics code
+---

@@ -7,6 +7,7 @@ import {
   GitBranch,
   FileText,
   DollarSign,
+  Wrench,
   Shield,
   RefreshCw,
 } from 'lucide-react'
@@ -22,6 +23,7 @@ import { AnalyticsWorkflows } from './analytics-workflows'
 import { AnalyticsDocuments } from './analytics-documents'
 import { AnalyticsCosts } from './analytics-costs'
 import { AnalyticsAdmin } from './analytics-admin'
+import { AnalyticsComposio } from './analytics-composio'
 
 const TIME_RANGES = [
   { value: '7', label: '7 days' },
@@ -46,6 +48,7 @@ export function AnalyticsPage() {
     { value: 'workflows', label: 'Workflows', icon: GitBranch },
     { value: 'documents', label: 'Documents', icon: FileText },
     { value: 'costs', label: 'LLM & Costs', icon: DollarSign },
+    { value: 'tools', label: 'Tools & Integrations', icon: Wrench },
     ...(isAdmin ? [{ value: 'admin', label: 'Admin', icon: Shield }] : []),
   ]
 
@@ -95,6 +98,10 @@ export function AnalyticsPage() {
 
         <TabsContent value="costs">
           <AnalyticsCosts days={days} />
+        </TabsContent>
+
+        <TabsContent value="tools">
+          <AnalyticsComposio days={days} />
         </TabsContent>
 
         {isAdmin && (

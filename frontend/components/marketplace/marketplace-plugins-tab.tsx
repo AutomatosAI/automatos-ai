@@ -14,6 +14,8 @@ import {
   ArrowUpDown,
   MoreVertical,
   Eye,
+  Github,
+  Upload,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -420,6 +422,18 @@ export function MarketplacePluginsTab({ searchQuery }: MarketplacePluginsTabProp
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowImportModal(true)}
+              className="gap-2"
+            >
+              <Github className="w-4 h-4" />
+              <Upload className="w-3.5 h-3.5" />
+              Import from GitHub
+            </Button>
+          )}
           <StatusBadge size="sm" status="success" dot>
             {enabledPluginIds.size} Enabled
           </StatusBadge>

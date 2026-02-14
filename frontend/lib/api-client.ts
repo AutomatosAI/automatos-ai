@@ -1860,6 +1860,10 @@ class ApiClient {
     return this.request(`/api/tools/sync?sync_type=${syncType}`, { method: 'POST' })
   }
 
+  async syncOpenRouterCache() {
+    return this.request('/api/openrouter/sync', { method: 'POST' })
+  }
+
   // ===== CHATBOT ENDPOINTS =====
   async sendChatbotQuery(params: {
     query: string

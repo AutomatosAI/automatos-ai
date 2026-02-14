@@ -107,10 +107,24 @@ async def add_api_key(
         usage_count=0,
     )
     db.add(row)
+
+    # Auto-enable BYOK for this provider on the workspace
+    from core.models.workspaces import Workspace
+    from sqlalchemy.orm.attributes import flag_modified
+
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if workspace:
+        settings = dict(workspace.settings or {})
+        overrides = dict(settings.get("byok_overrides", {}))
+        overrides[body.provider.lower()] = True
+        settings["byok_overrides"] = overrides
+        workspace.settings = settings
+        flag_modified(workspace, "settings")
+
     db.commit()
     db.refresh(row)
 
-    logger.info(f"API key added for provider={body.provider} workspace={ctx.workspace_id}")
+    logger.info(f"API key added for provider={body.provider} workspace={ctx.workspace_id} (BYOK auto-enabled)")
     return _row_to_out(row, encryption)
 
 
@@ -203,3 +217,41 @@ async def test_api_key(
 
     except Exception as e:
         return ApiKeyTestResult(valid=False, message=f"Invalid key: {str(e)[:200]}", provider=row.provider)
+
+
+@router.get("/platform-status")
+async def get_platform_key_status(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """
+    Return which providers have platform-level API keys configured.
+
+    Checks the credential store for each supported provider.
+    Returns boolean only — never exposes key values.
+    """
+    from core.credentials.resolver import get_credential_resolver
+
+    resolver = get_credential_resolver()
+    result = {}
+
+    for provider in SUPPORTED_PROVIDERS:
+        configured = False
+        cred_names = [
+            f"development_{provider}_api",
+            f"development_{provider}",
+            f"{provider}_api",
+            provider,
+        ]
+        for cred_name in cred_names:
+            try:
+                key = resolver.get_credential_field(cred_name, "api_key")
+                if not key:
+                    key = resolver.get_credential_field(cred_name, "api_token")
+                if key:
+                    configured = True
+                    break
+            except Exception:
+                continue
+        result[provider] = {"configured": configured}
+
+    return {"platform_keys": result}

@@ -4,7 +4,7 @@
  * Reuses existing API endpoints and adds new ones for costs, plans, and recommendations.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 
 // ============= QUERY KEYS =============
@@ -18,6 +18,14 @@ export const unifiedAnalyticsKeys = {
   planUsage: ['unified-analytics', 'plan-usage'] as const,
   memory: ['unified-analytics', 'memory'] as const,
   adminWorkspaces: (days: number) => ['unified-analytics', 'admin', 'workspaces', days] as const,
+  openrouterCredits: ['unified-analytics', 'openrouter', 'credits'] as const,
+  openrouterKeyInfo: ['unified-analytics', 'openrouter', 'key-info'] as const,
+  composioApps: (days: number) => ['unified-analytics', 'composio', 'apps', days] as const,
+  composioActions: (days: number) => ['unified-analytics', 'composio', 'actions', days] as const,
+  composioAgentTools: (days: number) => ['unified-analytics', 'composio', 'agent-tools', days] as const,
+  chartPresets: ['unified-analytics', 'charts', 'presets'] as const,
+  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
+  costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -202,8 +210,8 @@ export function useCostAnalyticsUnified(days: number = 30) {
           modelCosts[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
         }
         modelCosts[model].requests += agent.model_usage_stats?.total_requests || 0
-        modelCosts[model].inputTokens += (agent.model_usage_stats?.total_tokens || 0) * 0.7 // estimate input
-        modelCosts[model].outputTokens += (agent.model_usage_stats?.total_tokens || 0) * 0.3 // estimate output
+        modelCosts[model].inputTokens += agent.model_usage_stats?.input_tokens || agent.model_usage_stats?.total_tokens || 0
+        modelCosts[model].outputTokens += agent.model_usage_stats?.output_tokens || 0
         modelCosts[model].cost += agent.model_usage_stats?.total_cost || 0
         modelCosts[model].agents.add(agent.name)
       })
@@ -363,6 +371,306 @@ export function useWorkspaceMemory() {
       }
     },
     staleTime: 60000,
+  })
+}
+
+// ============= OPENROUTER ANALYTICS =============
+
+interface OpenRouterCreditsData {
+  total_credits: number
+  total_usage: number
+}
+
+interface OpenRouterKeyInfoData {
+  limit: number | null
+  limit_remaining: number | null
+  usage_daily: number
+  usage_weekly: number
+  usage_monthly: number
+  is_free_tier: boolean
+  rate_limit: Record<string, any>
+}
+
+interface OpenRouterSyncResult {
+  synced: number
+  skipped: number
+  error: string | null
+}
+
+export function useOpenRouterCredits() {
+  return useQuery<OpenRouterCreditsData | null>({
+    queryKey: unifiedAnalyticsKeys.openrouterCredits,
+    queryFn: async () => {
+      const data = await apiClient.request<OpenRouterCreditsData>(
+        '/api/analytics/llm/openrouter/credits'
+      ).catch((err: any) => {
+        // 404 = no OpenRouter key configured — return null gracefully
+        if (err?.message?.includes('404')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 300000, // 5 minutes
+  })
+}
+
+export function useOpenRouterKeyInfo() {
+  return useQuery<OpenRouterKeyInfoData | null>({
+    queryKey: unifiedAnalyticsKeys.openrouterKeyInfo,
+    queryFn: async () => {
+      const data = await apiClient.request<OpenRouterKeyInfoData>(
+        '/api/analytics/llm/openrouter/key-info'
+      ).catch((err: any) => {
+        if (err?.message?.includes('404')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useTriggerOpenRouterSync() {
+  const queryClient = useQueryClient()
+  return useMutation<OpenRouterSyncResult, Error>({
+    mutationFn: async () => {
+      return apiClient.request<OpenRouterSyncResult>(
+        '/api/analytics/llm/openrouter/sync',
+        { method: 'POST' }
+      )
+    },
+    onSuccess: () => {
+      // Invalidate related queries so they refetch with fresh data
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterCredits })
+      queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo })
+      queryClient.invalidateQueries({ queryKey: ['unified-analytics', 'costs'] })
+    },
+  })
+}
+
+// ============= COMPOSIO ANALYTICS =============
+
+interface ComposioAppStats {
+  app_name: string
+  status: string
+  total_actions_used: number
+  agent_count: number
+  documents_synced: number
+  last_used_at: string | null
+}
+
+interface ComposioActionEntry {
+  action_name: string
+  app_name: string
+  total_usage_count: number
+  agent_count: number
+  last_used_at: string | null
+}
+
+interface ComposioAgentToolEntry {
+  tool_name: string
+  app_name: string
+  usage_count: number
+  enabled: boolean
+}
+
+interface ComposioAgentToolMapping {
+  agent_id: number
+  agent_name: string
+  tools: ComposioAgentToolEntry[]
+}
+
+export function useComposioApps(days: number = 30) {
+  return useQuery<ComposioAppStats[]>({
+    queryKey: unifiedAnalyticsKeys.composioApps(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioAppStats[]>(
+        `/api/analytics/composio/apps?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useComposioActions(days: number = 30) {
+  return useQuery<ComposioActionEntry[]>({
+    queryKey: unifiedAnalyticsKeys.composioActions(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioActionEntry[]>(
+        `/api/analytics/composio/actions?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useComposioAgentTools(days: number = 30) {
+  return useQuery<ComposioAgentToolMapping[]>({
+    queryKey: unifiedAnalyticsKeys.composioAgentTools(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioAgentToolMapping[]>(
+        `/api/analytics/composio/agent-tools?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= PANDASAI CHARTS =============
+
+interface ChartGenerateResponse {
+  summary: string
+  charts: string[]
+  data: Record<string, any>[]
+}
+
+interface ChartPreset {
+  id: string
+  title: string
+  description: string
+  query: string
+  chart_type: string
+}
+
+export function useAnalyticsChart() {
+  return useMutation<ChartGenerateResponse, Error, { query: string; chartType?: string }>({
+    mutationFn: async ({ query, chartType }) => {
+      return apiClient.request<ChartGenerateResponse>(
+        '/api/analytics/charts/generate',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            query,
+            chart_type: chartType || 'auto',
+          }),
+        }
+      )
+    },
+  })
+}
+
+export function useChartPresets() {
+  return useQuery<ChartPreset[]>({
+    queryKey: unifiedAnalyticsKeys.chartPresets,
+    queryFn: async () => {
+      return apiClient.request<ChartPreset[]>(
+        '/api/analytics/charts/presets'
+      )
+    },
+    staleTime: 300000, // 5 minutes — presets rarely change
+  })
+}
+
+// ============= MODEL COMPARISON =============
+
+interface ModelComparisonItem {
+  model_id: string
+  display_name: string
+  provider: string
+  input_cost_per_1k: number | null
+  output_cost_per_1k: number | null
+  context_window: number | null
+  capabilities: Record<string, any>
+  total_requests: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_ms: number | null
+  error_rate: number
+  success_rate: number
+}
+
+export function useModelComparison(modelIds: string[], period: string = '30d') {
+  return useQuery<ModelComparisonItem[]>({
+    queryKey: unifiedAnalyticsKeys.modelComparison(modelIds, period),
+    queryFn: async () => {
+      const ids = modelIds.join(',')
+      return apiClient.request<ModelComparisonItem[]>(
+        `/api/analytics/llm/comparison?model_ids=${encodeURIComponent(ids)}&period=${period}`
+      )
+    },
+    enabled: modelIds.length > 0,
+    staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= COST PROJECTIONS =============
+
+interface ProjectedItem {
+  key: string
+  projected_monthly_cost: number
+  current_period_cost: number
+}
+
+interface CostProjectionData {
+  current_period_cost: number
+  daily_average: number
+  projected_monthly: number
+  change_percent: number | null
+  projected_by_model: ProjectedItem[]
+  projected_by_provider: ProjectedItem[]
+}
+
+export function useCostProjections(period: string = '30d') {
+  return useQuery<CostProjectionData>({
+    queryKey: unifiedAnalyticsKeys.costProjections(period),
+    queryFn: async () => {
+      return apiClient.request<CostProjectionData>(
+        `/api/analytics/llm/projections?period=${period}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= ADMIN: COST ANALYTICS =============
+
+interface AdminWorkspaceCostEntry {
+  workspace_id: string
+  workspace_name: string
+  plan: string
+  total_cost: number
+  total_tokens: number
+  total_requests: number
+  top_model: string | null
+}
+
+interface AdminCostBreakdown {
+  key: string
+  input_cost: number
+  output_cost: number
+  total_cost: number
+  request_count: number
+}
+
+interface AdminDailyCostTrend {
+  date: string
+  cost: number
+  requests: number
+}
+
+interface AdminCostAnalyticsData {
+  total_platform_cost: number
+  total_tokens: number
+  total_requests: number
+  cost_by_workspace: AdminWorkspaceCostEntry[]
+  cost_by_provider: AdminCostBreakdown[]
+  daily_cost_trend: AdminDailyCostTrend[]
+}
+
+export function useAdminCostAnalytics(period: string = '30d') {
+  return useQuery<AdminCostAnalyticsData | null>({
+    queryKey: ['unified-analytics', 'admin', 'costs', period],
+    queryFn: async () => {
+      const data = await apiClient.request<AdminCostAnalyticsData>(
+        `/api/admin/analytics/costs?period=${period}`
+      ).catch((err: any) => {
+        // 403 = not admin, 401 = unauthenticated
+        if (err?.message?.includes('403') || err?.message?.includes('401')) return null
+        throw err
+      })
+      return data
+    },
+    staleTime: 120000, // 2 minutes
   })
 }
 
