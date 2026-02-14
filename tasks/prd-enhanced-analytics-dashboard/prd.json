@@ -27,9 +27,9 @@
       "description": "As a frontend developer, I need API endpoints to access OpenRouter activity data and credits for the analytics dashboard.",
       "acceptanceCriteria": [
         "Add endpoints to orchestrator/api/llm_analytics.py",
-        "POST /api/analytics/openrouter/sync triggers activity sync for current workspace (requires OpenRouter API key from UserApiKey or system settings)",
-        "GET /api/analytics/openrouter/credits returns credits data (total_credits, total_usage, limit_remaining)",
-        "GET /api/analytics/openrouter/key-info returns key usage stats (daily/weekly/monthly usage, BYOK usage)",
+        "POST /api/analytics/llm/openrouter/sync triggers activity sync for current workspace (requires OpenRouter API key from UserApiKey or system settings)",
+        "GET /api/analytics/llm/openrouter/credits returns credits data (total_credits, total_usage, limit_remaining)",
+        "GET /api/analytics/llm/openrouter/key-info returns key usage stats (daily/weekly/monthly usage, BYOK usage)",
         "All endpoints require workspace context and hybrid auth",
         "Returns 404 with helpful message if no OpenRouter API key configured",
         "Typecheck passes"
@@ -111,9 +111,9 @@
       "title": "Create frontend hooks for OpenRouter analytics",
       "description": "As a frontend developer, I need React Query hooks to fetch OpenRouter credits and activity data.",
       "acceptanceCriteria": [
-        "Add useOpenRouterCredits() hook to frontend/hooks/use-unified-analytics.ts calling GET /api/analytics/openrouter/credits",
-        "Add useOpenRouterKeyInfo() hook calling GET /api/analytics/openrouter/key-info",
-        "Add useTriggerOpenRouterSync() mutation hook calling POST /api/analytics/openrouter/sync",
+        "Add useOpenRouterCredits() hook to frontend/hooks/use-unified-analytics.ts calling GET /api/analytics/llm/openrouter/credits",
+        "Add useOpenRouterKeyInfo() hook calling GET /api/analytics/llm/openrouter/key-info",
+        "Add useTriggerOpenRouterSync() mutation hook calling POST /api/analytics/llm/openrouter/sync",
         "All hooks use unifiedAnalyticsKeys pattern for cache keys",
         "Hooks handle 404 gracefully (no OpenRouter key configured) by returning null data",
         "staleTime: 300000 (5 minutes) for credits, 60000 for key info",

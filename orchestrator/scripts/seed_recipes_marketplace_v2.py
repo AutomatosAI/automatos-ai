@@ -400,8 +400,11 @@ def seed_recipes_v2(force: bool = False):
             recipe_names = tuple(r["name"] for r in MARKETPLACE_RECIPES_V2)
 
             if force:
-                db.execute(text("DELETE FROM marketplace_items WHERE type = 'recipe'"))
-                print("✓ Cleared ALL existing recipes (force mode)\n")
+                db.execute(text(
+                    "DELETE FROM marketplace_items WHERE type = 'recipe' "
+                    "AND creator_name = :team"
+                ), {"team": "Automatos Team"})
+                print("✓ Cleared Automatos Team recipes (force mode)\n")
             else:
                 # Only clear v2 recipes by name match
                 for name in recipe_names:

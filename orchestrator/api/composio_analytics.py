@@ -59,12 +59,13 @@ class AgentToolMapping(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
-DAYS_MAP = {7: 7, 30: 30, 90: 90}
+_ALLOWED_DAYS = {7, 30, 90}
 
 
 def _since(days: int) -> datetime:
-    d = DAYS_MAP.get(days, 30)
-    return datetime.utcnow() - timedelta(days=d)
+    if days not in _ALLOWED_DAYS:
+        raise HTTPException(400, f"Invalid days parameter: {days}. Allowed values: {sorted(_ALLOWED_DAYS)}")
+    return datetime.utcnow() - timedelta(days=days)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────

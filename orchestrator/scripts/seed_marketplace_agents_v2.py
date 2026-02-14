@@ -235,12 +235,13 @@ def seed_marketplace_agents_v2():
         trans = db.begin()
 
         try:
-            # Clear only v2 agents (identified by creator_name)
-            db.execute(text(
-                "DELETE FROM marketplace_items WHERE type = 'agent' "
-                "AND creator_name = 'Automatos Team' "
-                "AND name IN :names"
-            ).bindparams(names=tuple(a["name"] for a in MARKETPLACE_AGENTS_V2)))
+            # Clear only v2 agents (identified by creator_name), per-name deletes
+            for agent_config in MARKETPLACE_AGENTS_V2:
+                db.execute(text(
+                    "DELETE FROM marketplace_items WHERE type = 'agent' "
+                    "AND creator_name = 'Automatos Team' "
+                    "AND name = :name"
+                ), {"name": agent_config["name"]})
             print("✓ Cleared existing v2 agents (if any)\n")
 
             created = 0

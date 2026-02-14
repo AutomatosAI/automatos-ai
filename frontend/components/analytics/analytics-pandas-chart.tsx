@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { BarChart3, AlertCircle, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,6 +15,7 @@ interface AnalyticsPandasChartProps {
 export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPandasChartProps) {
   const { data: presets } = useChartPresets()
   const chartMutation = useAnalyticsChart()
+  const lastRequested = useRef<{ query: string; chartType: string | undefined } | null>(null)
 
   // Resolve preset config if presetId provided
   const preset = presetId && presets ? presets.find((p) => p.id === presetId) : null
@@ -22,17 +23,43 @@ export function AnalyticsPandasChart({ presetId, query, chartType }: AnalyticsPa
   const resolvedChartType = chartType || preset?.chart_type
   const title = preset?.title || 'AI Chart'
 
-  // Auto-generate chart when query is resolved and mutation hasn't fired
+  // Auto-generate chart when query/chartType change, even after prior success/error
   useEffect(() => {
-    if (resolvedQuery && !chartMutation.isLoading && !chartMutation.isSuccess && !chartMutation.isError) {
-      chartMutation.mutate({ query: resolvedQuery, chartType: resolvedChartType })
+    if (!resolvedQuery) return
+    const current = { query: resolvedQuery, chartType: resolvedChartType }
+    if (
+      lastRequested.current?.query === current.query &&
+      lastRequested.current?.chartType === current.chartType
+    ) {
+      return
     }
-    // Only trigger on resolvedQuery change — mutation object ref changes on every render
+    lastRequested.current = current
+    chartMutation.mutate({ query: resolvedQuery, chartType: resolvedChartType })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedQuery, resolvedChartType])
 
+  // No query provided — show empty state instead of hanging on loading skeleton
+  if (!resolvedQuery && !chartMutation.data) {
+    return (
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <BarChart3 className="w-4 h-4 text-purple-400" />
+            {title}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-6">
+            <BarChart3 className="w-8 h-8 mx-auto mb-2 opacity-30 text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">No query configured for this chart</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   // Loading skeleton
-  if (chartMutation.isLoading || (!resolvedQuery && !chartMutation.data)) {
+  if (chartMutation.isLoading) {
     return (
       <Card className="glass-card">
         <CardHeader>

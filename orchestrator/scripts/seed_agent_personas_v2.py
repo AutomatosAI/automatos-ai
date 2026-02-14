@@ -344,28 +344,33 @@ def seed_personas():
     with engine.connect() as db:
         trans = db.begin()
 
-        updated = 0
-        for agent_name, persona_prompt in CUSTOM_PERSONAS.items():
-            result = db.execute(text("""
-                UPDATE agents
-                SET custom_persona_prompt = :prompt,
-                    use_custom_persona = true
-                WHERE name = :name
-                AND owner_type = 'marketplace'
-                AND created_by = 'automatos-seed-v2'
-                RETURNING id
-            """), {"prompt": persona_prompt, "name": agent_name})
+        try:
+            updated = 0
+            for agent_name, persona_prompt in CUSTOM_PERSONAS.items():
+                result = db.execute(text("""
+                    UPDATE agents
+                    SET custom_persona_prompt = :prompt,
+                        use_custom_persona = true
+                    WHERE name = :name
+                    AND owner_type = 'marketplace'
+                    AND created_by = 'automatos-seed-v2'
+                    RETURNING id
+                """), {"prompt": persona_prompt, "name": agent_name})
 
-            row = result.first()
-            if row:
-                updated += 1
-                lines = len(persona_prompt.strip().split("\n"))
-                print(f"  {agent_name:35} ID:{row[0]} ({lines} lines)")
-            else:
-                print(f"  {agent_name:35} NOT FOUND")
+                row = result.first()
+                if row:
+                    updated += 1
+                    lines = len(persona_prompt.strip().split("\n"))
+                    print(f"  {agent_name:35} ID:{row[0]} ({lines} lines)")
+                else:
+                    print(f"  {agent_name:35} NOT FOUND")
 
-        trans.commit()
-        print(f"\nDone! Set custom personas on {updated} agents.")
+            trans.commit()
+            print(f"\nDone! Set custom personas on {updated} agents.")
+        except Exception as e:
+            trans.rollback()
+            print(f"Error setting personas: {e}")
+            raise
 
 
 if __name__ == "__main__":

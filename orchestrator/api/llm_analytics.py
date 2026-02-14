@@ -560,7 +560,7 @@ def _resolve_openrouter_key(workspace_id, db: Session, byok_only: bool = False) 
         .filter(
             UserApiKey.workspace_id == workspace_id,
             UserApiKey.provider == "openrouter",
-            UserApiKey.is_active == True,
+            UserApiKey.is_active.is_(True),
         )
         .order_by(UserApiKey.created_at.desc())
         .first()
