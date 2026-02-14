@@ -60,7 +60,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 const CAPABILITY_RATING: Record<string, { label: string; pct: number; color: string }> = {
   excellent: { label: 'Excellent', pct: 100, color: 'bg-[hsl(var(--success))]' },
   good: { label: 'Good', pct: 75, color: 'bg-[hsl(var(--info))]' },
-  moderate: { label: 'Moderate', pct: 50, color: 'bg-[hsl(var(--warning))]' },
+  moderate: { label: 'Moderate', pct: 50, color: 'bg-[hsl(var(--primary))]' },
   basic: { label: 'Basic', pct: 25, color: 'bg-muted-foreground' },
   none: { label: 'None', pct: 0, color: 'bg-muted' },
 }
@@ -159,7 +159,7 @@ export function LLMModelDetailModal({
               <DialogTitle className="flex items-center gap-2 flex-wrap">
                 <span>{model.display_name}</span>
                 {model.is_featured && (
-                  <Star className="w-4 h-4 fill-[hsl(var(--warning))] text-[hsl(var(--warning))]" />
+                  <Star className="w-4 h-4 fill-[hsl(var(--primary))] text-[hsl(var(--primary))]" />
                 )}
               </DialogTitle>
               <DialogDescription className="font-mono text-xs mt-1">
@@ -188,7 +188,7 @@ export function LLMModelDetailModal({
               </Badge>
             )}
             {model.requires_plan && (
-              <Badge variant="outline" className="text-[10px] border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]">
+              <Badge variant="outline" className="text-[10px] border-[hsl(var(--primary))]/30 text-[hsl(var(--primary))]">
                 <Shield className="w-2.5 h-2.5 mr-0.5" />
                 Requires {model.requires_plan}
               </Badge>
@@ -237,7 +237,7 @@ export function LLMModelDetailModal({
                 <div className="text-[11px] text-muted-foreground">Input / 1K</div>
               </div>
               <div className="rounded-lg border border-border/40 bg-secondary/20 p-3 text-center">
-                <div className="text-lg font-bold text-[hsl(var(--warning))]">
+                <div className="text-lg font-bold text-[hsl(var(--primary))]">
                   {outputCost.per1K}
                 </div>
                 <div className="text-[11px] text-muted-foreground">Output / 1K</div>
@@ -253,7 +253,7 @@ export function LLMModelDetailModal({
               <span className="text-border">|</span>
               <span>
                 Output{' '}
-                <span className="text-[hsl(var(--warning))] font-medium">{outputCost.per1M}</span>
+                <span className="text-[hsl(var(--primary))] font-medium">{outputCost.per1M}</span>
               </span>
             </div>
           </div>

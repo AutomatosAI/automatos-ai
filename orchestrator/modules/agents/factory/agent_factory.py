@@ -21,6 +21,7 @@ import json
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 
 from core.llm import (
     LLMManager, LLMConfig, LLMProvider, LLMResponse,
@@ -446,6 +447,14 @@ class AgentMetadata:
         }
 
 @dataclass
+class ResolvedKey:
+    """Result of API key resolution with source metadata."""
+    api_key: str
+    source: str          # "byok", "platform", "env"
+    is_byok: bool
+    provider: str = ""
+
+@dataclass
 class AgentRuntime:
     """Runtime representation of an agent"""
     agent_id: int
@@ -460,6 +469,9 @@ class AgentRuntime:
     memory: List[Dict[str, Any]] = field(default_factory=list)  # Short-term memory
     tools: List[Dict[str, Any]] = field(default_factory=list)  # Assigned external apps (Composio)
     tool_executor: Any = None  # PRD-17: Shared UnifiedToolExecutor (initialized once, reused)
+    is_byok: bool = False
+    resolved_provider: str = ""
+    workspace_id: Optional[Any] = None
     
     def update_metrics(self, execution_time: float, tokens_used: int, success: bool):
         """Update agent performance metrics"""
@@ -724,8 +736,8 @@ Available Shell Tools:
         
         # PRD-15: Initialize LLM connection with model configuration
         try:
-            llm_manager = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
-            
+            llm_manager, resolved = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
+
             # Verify connection if requested
             if auto_verify:
                 verification_result = await self._verify_llm_connection(llm_manager)
@@ -742,7 +754,7 @@ Available Shell Tools:
                             temperature=model_config.temperature,
                             max_tokens=model_config.max_tokens
                         )
-                        llm_manager = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
+                        llm_manager, resolved = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
                         verification_result = await self._verify_llm_connection(llm_manager)
                         
                         if verification_result["success"]:
@@ -772,7 +784,10 @@ Available Shell Tools:
                 llm_manager=llm_manager,
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
-                tools=agent_tools  # Assigned external apps (Composio)
+                tools=agent_tools,  # Assigned external apps (Composio)
+                is_byok=resolved.is_byok,
+                resolved_provider=resolved.provider,
+                workspace_id=db_agent.workspace_id,
             )
             
             # Update database status
@@ -796,7 +811,7 @@ Available Shell Tools:
                 self.db_session.commit()
             raise
     
-    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> LLMManager:
+    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> Tuple[LLMManager, ResolvedKey]:
         """
         Create LLM manager from model configuration (PRD-15, PRD-54).
 
@@ -824,10 +839,10 @@ Available Shell Tools:
 
         provider = provider_map[model_config.provider]
 
-        # Resolve API key: credential store → BYOK keys (workspace-scoped) → env vars
-        api_key = await self._resolve_api_key(model_config.provider, agent_name, workspace_id=workspace_id)
+        # Resolve API key: BYOK (if enabled) → platform credential → env vars
+        resolved = await self._resolve_api_key(model_config.provider, agent_name, workspace_id=workspace_id)
 
-        if not api_key:
+        if not resolved:
             raise ValueError(f"API key not found for provider: {model_config.provider}")
 
         # Create LLM config
@@ -847,24 +862,60 @@ Available Shell Tools:
 
         self.logger.info(
             f"Creating LLM manager for {agent_name or 'agent'}: "
-            f"provider={model_config.provider}, model={model_config.model_id}"
+            f"provider={model_config.provider}, model={model_config.model_id}, source={resolved.source}"
         )
 
-        return LLMManager(config=llm_config)
+        return LLMManager(config=llm_config), resolved
 
-    async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[str]:
+    async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[ResolvedKey]:
         """
-        Resolve API key for a provider using the credential chain (PRD-54):
-        1. Credential store (development_<provider>)
-        2. BYOK user_api_keys table (workspace-scoped — MUST filter by workspace_id)
-        3. Environment variables
+        Resolve API key for a provider (PRD-54 BYOK system):
+
+        New resolution chain:
+        1. If workspace has BYOK enabled for provider AND active key exists → BYOK
+        2. Else → credential store / platform key
+        3. Else → env var fallback
+
+        Returns ResolvedKey with source metadata for usage tracking.
         """
         import os
         from core.credentials.resolver import get_credential_resolver
 
         resolver = get_credential_resolver()
 
-        # Credential name patterns to try
+        # 1. Check BYOK preference and try user key first
+        if workspace_id:
+            try:
+                from core.models.workspaces import Workspace
+                from core.models.core import UserApiKey
+                from core.credentials.encryption import get_encryption_service
+
+                workspace = self.db_session.query(Workspace).get(workspace_id)
+                byok_overrides = (workspace.settings or {}).get("byok_overrides", {}) if workspace else {}
+                byok_enabled = byok_overrides.get(provider_name, False)
+
+                if byok_enabled:
+                    byok_key = (
+                        self.db_session.query(UserApiKey)
+                        .filter(
+                            UserApiKey.workspace_id == workspace_id,
+                            UserApiKey.provider == provider_name,
+                            UserApiKey.is_active == True,
+                        )
+                        .order_by(UserApiKey.last_used_at.desc().nullslast())
+                        .first()
+                    )
+                    if byok_key:
+                        encryption = get_encryption_service()
+                        decrypted = encryption.decrypt(byok_key.encrypted_key)
+                        self.logger.info(f"Resolved BYOK API key for provider '{provider_name}' workspace={workspace_id} (key: {byok_key.display_name or byok_key.id})")
+                        return ResolvedKey(api_key=decrypted, source="byok", is_byok=True, provider=provider_name)
+                    else:
+                        self.logger.info(f"BYOK enabled but no active key for '{provider_name}' in workspace={workspace_id}, falling through to platform key")
+            except Exception as e:
+                self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
+
+        # 2. Try credential store (platform keys)
         cred_names = [
             f"development_{provider_name}_api",
             f"development_{provider_name}",
@@ -872,45 +923,16 @@ Available Shell Tools:
             provider_name,
         ]
 
-        # 1. Try credential store
         for cred_name in cred_names:
             try:
                 key = resolver.get_credential_field(cred_name, "api_key")
                 if not key:
                     key = resolver.get_credential_field(cred_name, "api_token")
                 if key:
-                    self.logger.info(f"Resolved API key from credential '{cred_name}' for {agent_name}")
-                    return key
+                    self.logger.info(f"Resolved platform API key from credential '{cred_name}' for {agent_name}")
+                    return ResolvedKey(api_key=key, source="platform", is_byok=False, provider=provider_name)
             except Exception:
                 continue
-
-        # 2. Try BYOK user_api_keys (workspace-scoped encrypted keys)
-        if workspace_id:
-            try:
-                from core.models.core import UserApiKey
-                from core.credentials.encryption import get_encryption_service
-
-                byok_key = (
-                    self.db_session.query(UserApiKey)
-                    .filter(
-                        UserApiKey.workspace_id == workspace_id,
-                        UserApiKey.provider == provider_name,
-                        UserApiKey.is_active == True,
-                    )
-                    .order_by(UserApiKey.last_used_at.desc().nullslast())
-                    .first()
-                )
-                if byok_key:
-                    encryption = get_encryption_service()
-                    decrypted = encryption.decrypt(byok_key.encrypted_key)
-                    self.logger.info(f"Resolved BYOK API key for provider '{provider_name}' workspace={workspace_id} (key: {byok_key.display_name or byok_key.id})")
-                    return decrypted
-                else:
-                    self.logger.info(f"No BYOK key found for provider '{provider_name}' in workspace={workspace_id}")
-            except Exception as e:
-                self.logger.error(f"BYOK key lookup failed for {provider_name}: {e}")
-        else:
-            self.logger.warning(f"No workspace_id for BYOK key lookup — skipping for provider '{provider_name}'")
 
         # 3. Fall back to environment variables
         env_map = {
@@ -930,7 +952,7 @@ Available Shell Tools:
             key = os.getenv(env_var)
             if key:
                 self.logger.info(f"Using {env_var} from environment for {agent_name}")
-                return key
+                return ResolvedKey(api_key=key, source="env", is_byok=False, provider=provider_name)
 
         return None
     
@@ -1018,18 +1040,18 @@ Available Shell Tools:
             provider_str = llm_config_dict.get("provider", "openai")
             provider = LLMProvider(provider_str)
 
-            # Resolve API key: credential store → BYOK (workspace-scoped) → env vars
-            api_key = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
+            # Resolve API key: BYOK (if enabled) → platform credential → env vars
+            resolved = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
 
             llm_config = LLMConfig(
                 provider=provider,
                 model=llm_config_dict.get("model", "gpt-4"),
                 temperature=llm_config_dict.get("temperature", 0.7),
                 max_tokens=llm_config_dict.get("max_tokens", 2000),
-                api_key=api_key,
+                api_key=resolved.api_key if resolved else None,
             )
             llm_manager = LLMManager(llm_config)
-            
+
             # Create metadata from database agent
             metadata = AgentMetadata(
                 name=db_agent.name,
@@ -1038,10 +1060,10 @@ Available Shell Tools:
                 skills=config.get("skills", []),
                 custom_metadata=config.get("custom_metadata", {})
             )
-            
+
             # Load agent's tools
             agent_tools = await self._load_agent_tools(agent_id)
-            
+
             # Create runtime
             agent_runtime = AgentRuntime(
                 agent_id=agent_id,
@@ -1050,7 +1072,10 @@ Available Shell Tools:
                 lifecycle_state=AgentLifecycle.ACTIVE,
                 created_at=datetime.now(),
                 tools=agent_tools,
-                tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace")  # PRD-17: Initialize once, reuse
+                tool_executor=get_unified_tool_executor(self.db_session, workspace_dir or "/tmp/automatos_workspace"),  # PRD-17: Initialize once, reuse
+                is_byok=resolved.is_byok if resolved else False,
+                resolved_provider=resolved.provider if resolved else provider_str,
+                workspace_id=db_agent.workspace_id,
             )
             
             # Add to active agents

@@ -75,7 +75,7 @@ const PROVIDER_COLORS: Record<string, string> = {
 const CAPABILITY_RATING: Record<string, { label: string; width: string; color: string }> = {
   excellent: { label: 'Excellent', width: 'w-full', color: 'bg-[hsl(var(--success))]' },
   good: { label: 'Good', width: 'w-3/4', color: 'bg-[hsl(var(--info))]' },
-  moderate: { label: 'Moderate', width: 'w-1/2', color: 'bg-[hsl(var(--warning))]' },
+  moderate: { label: 'Moderate', width: 'w-1/2', color: 'bg-[hsl(var(--primary))]' },
   basic: { label: 'Basic', width: 'w-1/4', color: 'bg-muted-foreground' },
   none: { label: 'None', width: 'w-0', color: 'bg-muted' },
 }
@@ -159,7 +159,7 @@ export function LLMModelCard({
       {/* Featured star */}
       {model.is_featured && (
         <div className="absolute top-3 right-3 z-10">
-          <Star className="w-5 h-5 fill-[hsl(var(--warning))] text-[hsl(var(--warning))]" />
+          <Star className="w-5 h-5 fill-[hsl(var(--primary))] text-[hsl(var(--primary))]" />
         </div>
       )}
 
@@ -208,7 +208,7 @@ export function LLMModelCard({
           {model.requires_plan && (
             <Badge
               variant="outline"
-              className="text-[10px] border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))]"
+              className="text-[10px] border-[hsl(var(--primary))]/30 text-[hsl(var(--primary))]"
             >
               <Shield className="w-2.5 h-2.5 mr-0.5" />
               {model.requires_plan}
@@ -249,7 +249,7 @@ export function LLMModelCard({
               In: {formatCostPer1M(model.input_cost_per_1k)}
             </span>
             <span className="text-muted-foreground">/</span>
-            <span className="text-[hsl(var(--warning))] font-medium">
+            <span className="text-[hsl(var(--primary))] font-medium">
               Out: {formatCostPer1M(model.output_cost_per_1k)}
             </span>
           </div>

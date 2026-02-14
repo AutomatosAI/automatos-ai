@@ -115,6 +115,7 @@ except ImportError:
 # redis_websocket removed - using AI SDK SSE streaming instead
 from api.models_endpoints import router as models_router  # PRD-15: Model management
 from api.llm_marketplace import router as llm_marketplace_router  # PRD-54: LLM Marketplace
+from api.openrouter_marketplace import router as openrouter_marketplace_router  # OpenRouter Model Cache
 from api.llm_analytics import router as llm_analytics_router, admin_router as llm_admin_analytics_router  # PRD-54: LLM Analytics
 from api.composio_analytics import router as composio_analytics_router  # PRD-54: Composio Analytics
 from api.analytics_charts import router as analytics_charts_router  # PRD-54: PandasAI Charts
@@ -481,6 +482,7 @@ app.include_router(routing_router)  # PRD-50: Universal Orchestrator Router
 app.include_router(admin_plugins_router)  # PRD-42: Admin Plugin Marketplace
 app.include_router(marketplace_plugins_router)  # PRD-42: Public Marketplace Plugins
 app.include_router(llm_marketplace_router)  # PRD-54: LLM Provider Marketplace
+app.include_router(openrouter_marketplace_router)  # OpenRouter Model Cache (separate sync)
 app.include_router(llm_analytics_router)  # PRD-54: LLM Usage Analytics
 app.include_router(llm_admin_analytics_router)  # PRD-54: Admin Cost Analytics
 app.include_router(composio_analytics_router)  # PRD-54: Composio Analytics

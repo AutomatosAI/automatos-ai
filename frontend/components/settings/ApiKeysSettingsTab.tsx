@@ -3,7 +3,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Key, Plus, Trash2, TestTube, Loader2, CheckCircle, XCircle, Shield } from 'lucide-react'
+import {
+  Key, Plus, Trash2, TestTube, Loader2, CheckCircle, XCircle, Shield, Building2,
+} from 'lucide-react'
 import { apiClient } from '@/lib/api-client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,14 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Switch } from '@/components/ui/switch'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +49,14 @@ interface AddKeyPayload {
   provider: string
   api_key: string
   display_name: string
+}
+
+interface PlatformKeyStatus {
+  platform_keys: Record<string, { configured: boolean }>
+}
+
+interface ByokPreferences {
+  byok_overrides: Record<string, boolean>
 }
 
 const PROVIDERS = [
@@ -93,10 +96,21 @@ export function ApiKeysSettingsTab() {
     queryFn: () => apiClient.get<ApiKeyOut[]>('/api/keys'),
   })
 
+  const { data: platformStatus } = useQuery<PlatformKeyStatus>({
+    queryKey: ['platform-key-status'],
+    queryFn: () => apiClient.get<PlatformKeyStatus>('/api/keys/platform-status'),
+  })
+
+  const { data: byokPrefs } = useQuery<ByokPreferences>({
+    queryKey: ['byok-preferences'],
+    queryFn: () => apiClient.get<ByokPreferences>('/api/workspaces/current/byok-preferences'),
+  })
+
   const addKeyMutation = useMutation({
     mutationFn: (payload: AddKeyPayload) => apiClient.post('/api/keys', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+      queryClient.invalidateQueries({ queryKey: ['byok-preferences'] })
       toast.success('API key added successfully')
       resetForm()
       setDialogOpen(false)
@@ -124,10 +138,10 @@ export function ApiKeysSettingsTab() {
       return apiClient.post<{ success: boolean; message?: string }>(`/api/keys/${id}/test`)
     },
     onSuccess: (data: any) => {
-      if (data?.success) {
-        toast.success('Key is valid', { icon: <CheckCircle className="h-4 w-4 text-green-400" /> })
+      if (data?.valid) {
+        toast.success('Key is valid')
       } else {
-        toast.error(data?.message || 'Key test failed', { icon: <XCircle className="h-4 w-4 text-red-400" /> })
+        toast.error(data?.message || 'Key test failed')
       }
       setTestingKeyId(null)
     },
@@ -137,7 +151,21 @@ export function ApiKeysSettingsTab() {
     },
   })
 
+  const saveByokMutation = useMutation({
+    mutationFn: (overrides: Record<string, boolean>) =>
+      apiClient.put('/api/workspaces/current/byok-preferences', { byok_overrides: overrides }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['byok-preferences'] })
+    },
+    onError: (err: Error) => {
+      toast.error(`Failed to save preference: ${err.message}`)
+    },
+  })
+
   // ---- Helpers ------------------------------------------------------------
+
+  const byokOverrides = byokPrefs?.byok_overrides ?? {}
+  const platformKeys = platformStatus?.platform_keys ?? {}
 
   function resetForm() {
     setProvider('')
@@ -158,13 +186,22 @@ export function ApiKeysSettingsTab() {
     return PROVIDERS.find((p) => p.value === value)?.label ?? value
   }
 
-  function formatDate(iso: string | null) {
-    if (!iso) return '--'
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
+  function getProviderKeys(prov: string) {
+    return keys.filter((k) => k.provider === prov)
+  }
+
+  function toggleByok(prov: string, enabled: boolean) {
+    saveByokMutation.mutate({ ...byokOverrides, [prov]: enabled })
+  }
+
+  function getActiveSource(prov: string): 'byok' | 'platform' | 'none' {
+    const hasUserKey = keys.some((k) => k.provider === prov && k.is_active)
+    const byokEnabled = byokOverrides[prov] ?? false
+    const hasPlatform = platformKeys[prov]?.configured ?? false
+
+    if (byokEnabled && hasUserKey) return 'byok'
+    if (hasPlatform) return 'platform'
+    return 'none'
   }
 
   // ---- Render -------------------------------------------------------------
@@ -182,9 +219,8 @@ export function ApiKeysSettingsTab() {
               <div>
                 <CardTitle className="text-xl">API Keys</CardTitle>
                 <CardDescription className="mt-1">
-                  Bring Your Own Key (BYOK) — connect your own LLM provider keys for
-                  chat, agents, and workflows. Keys are encrypted at rest and never
-                  leave your workspace.
+                  Manage platform and personal (BYOK) API keys. Toggle per-provider
+                  to control which key is used for chat and agent execution.
                 </CardDescription>
               </div>
             </div>
@@ -282,112 +318,154 @@ export function ApiKeysSettingsTab() {
         </CardHeader>
       </Card>
 
-      {/* Keys Table */}
+      {/* Section 1: Platform API Keys (read-only status) */}
       <Card className="glass-card border-border/40">
-        <CardContent className="p-0">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Platform API Keys</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            Shared keys configured by the admin. Available to all workspaces.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid gap-2">
+            {PROVIDERS.map((p) => {
+              const configured = platformKeys[p.value]?.configured ?? false
+              return (
+                <div
+                  key={p.value}
+                  className="flex items-center justify-between rounded-md border border-border/30 px-3 py-2"
+                >
+                  <span className="text-sm font-medium">{p.label}</span>
+                  {configured ? (
+                    <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-xs">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Configured
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-xs opacity-60">
+                      Not configured
+                    </Badge>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section 2: Your API Keys (BYOK management) */}
+      <Card className="glass-card border-border/40">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Key className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">Your API Keys</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            Add your own keys per provider. Toggle to override platform keys.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
           {isLoading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">Loading keys...</span>
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Loading keys...</span>
             </div>
           ) : isError ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <XCircle className="h-8 w-8 mb-2 text-red-400" />
-              <p>Failed to load API keys.</p>
+            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+              <XCircle className="h-6 w-6 mb-2 text-red-400" />
+              <p className="text-sm">Failed to load API keys.</p>
               <Button
                 variant="outline"
                 size="sm"
-                className="mt-3"
+                className="mt-2"
                 onClick={() => queryClient.invalidateQueries({ queryKey: ['api-keys'] })}
               >
                 Retry
               </Button>
             </div>
-          ) : keys.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Key className="h-10 w-10 mb-3 opacity-40" />
-              <p className="font-medium">No API keys yet</p>
-              <p className="text-sm mt-1">Add a provider key to get started.</p>
-            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border/40">
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Display Name</TableHead>
-                  <TableHead>Key</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Used</TableHead>
-                  <TableHead className="text-right">Usage</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {keys.map((key) => (
-                  <TableRow key={key.id} className="border-border/30">
-                    <TableCell className="font-medium">
-                      {providerLabel(key.provider)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {key.display_name || '--'}
-                    </TableCell>
-                    <TableCell>
-                      <code className="rounded bg-muted/50 px-2 py-0.5 text-xs font-mono">
-                        {key.masked_key}
-                      </code>
-                    </TableCell>
-                    <TableCell>
-                      {key.is_active ? (
-                        <Badge className="bg-green-500/15 text-green-400 border-green-500/30">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Active
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="bg-red-500/15 text-red-400 border-red-500/30">
-                          <XCircle className="h-3 w-3 mr-1" />
-                          Inactive
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDate(key.last_used_at)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-sm">
-                      {key.usage_count.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Test */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={testingKeyId === key.id}
-                          onClick={() => testKeyMutation.mutate(key.id)}
-                          title="Test key"
-                        >
-                          {testingKeyId === key.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <TestTube className="h-4 w-4" />
-                          )}
-                        </Button>
+            <div className="space-y-2">
+              {PROVIDERS.map((p) => {
+                const provKeys = getProviderKeys(p.value)
+                const hasKey = provKeys.length > 0
+                const byokOn = byokOverrides[p.value] ?? false
+                const activeSource = getActiveSource(p.value)
 
-                        {/* Delete */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(key)}
-                          title="Delete key"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                return (
+                  <div
+                    key={p.value}
+                    className="rounded-md border border-border/30 px-3 py-3"
+                  >
+                    {/* Provider row */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium w-24">{p.label}</span>
+
+                        {/* BYOK toggle */}
+                        <Switch
+                          checked={byokOn}
+                          onCheckedChange={(checked) => toggleByok(p.value, checked)}
+                          disabled={!hasKey}
+                          aria-label={`Use your ${p.label} key`}
+                        />
+
+                        {/* Active source indicator */}
+                        {activeSource === 'byok' ? (
+                          <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-xs">
+                            Using: Your Key
+                          </Badge>
+                        ) : activeSource === 'platform' ? (
+                          <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-xs">
+                            Using: Platform Key
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-xs opacity-50">
+                            No key available
+                          </Badge>
+                        )}
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+
+                      {/* Key info + actions */}
+                      <div className="flex items-center gap-2">
+                        {hasKey && (
+                          <>
+                            <code className="rounded bg-muted/50 px-2 py-0.5 text-xs font-mono">
+                              {provKeys[0].masked_key}
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              disabled={testingKeyId === provKeys[0].id}
+                              onClick={() => testKeyMutation.mutate(provKeys[0].id)}
+                              title="Test key"
+                            >
+                              {testingKeyId === provKeys[0].id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <TestTube className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget(provKeys[0])}
+                              title="Delete key"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </CardContent>
       </Card>

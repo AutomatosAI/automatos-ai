@@ -152,3 +152,60 @@ async def save_integrations(
 
     return {"status": "saved", "configured": list(integrations.keys())}
 
+
+# ── BYOK Preferences ──────────────────────────────────────────────────
+
+_ALLOWED_PROVIDERS = {"openai", "anthropic", "google", "openrouter", "azure", "grok"}
+
+
+@router.get("/current/byok-preferences")
+async def get_byok_preferences(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return per-provider BYOK override preferences for the workspace."""
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    byok_overrides = (workspace.settings or {}).get("byok_overrides", {})
+    return {"byok_overrides": byok_overrides}
+
+
+@router.put("/current/byok-preferences")
+async def save_byok_preferences(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Save per-provider BYOK override preferences.
+
+    Body: { "byok_overrides": { "openrouter": true, "openai": false } }
+    """
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    incoming = payload.get("byok_overrides", {})
+    if not isinstance(incoming, dict):
+        raise HTTPException(400, "byok_overrides must be an object")
+
+    settings = dict(workspace.settings or {})
+    overrides = dict(settings.get("byok_overrides", {}))
+
+    for provider, enabled in incoming.items():
+        if provider not in _ALLOWED_PROVIDERS:
+            continue
+        overrides[provider] = bool(enabled)
+
+    settings["byok_overrides"] = overrides
+    workspace.settings = settings
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    logger.info("Updated BYOK preferences for workspace %s: %s", workspace.id, overrides)
+    return {"status": "saved", "byok_overrides": overrides}
+
