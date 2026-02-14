@@ -9,7 +9,9 @@ It serves marketplace metadata from local cache tables for fast loads.
 
 from __future__ import annotations
 
+import hmac
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -630,7 +632,6 @@ async def backfill_params(
     Admin-only endpoint. Accepts API key auth without requiring workspace context
     (parameter backfill is a global operation, not workspace-scoped).
     """
-    import os
     from core.auth.hybrid import _get_api_key
     provided_key = _get_api_key(request)
     expected = (
@@ -638,7 +639,7 @@ async def backfill_params(
         or os.getenv("AUTOMATOS_API_KEY")
         or os.getenv("API_KEY")
     )
-    if not provided_key or not expected or provided_key != expected:
+    if not provided_key or not expected or not hmac.compare_digest(provided_key, expected):
         raise HTTPException(status_code=401, detail="Valid API key required")
 
     service = MetadataSyncService(db)

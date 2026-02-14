@@ -138,12 +138,17 @@ export function AgentConfigurationModal({
   // Prevents polling refetches from overwriting user's in-progress edits.
   const formInitializedRef = useRef(false)
 
-  // Reset when modal closes or agent changes
+  // Reset when modal closes
   useEffect(() => {
     if (!open) {
       formInitializedRef.current = false
     }
-  }, [open, agentId])
+  }, [open])
+
+  // Reset when agentId changes (even while modal is open) so the new agent's data initializes
+  useEffect(() => {
+    formInitializedRef.current = false
+  }, [agentId])
 
   // PRD-42: Fetch workspace-enabled plugins and agent plugin assignments when modal opens
   useEffect(() => {
