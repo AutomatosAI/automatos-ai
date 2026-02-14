@@ -307,3 +307,37 @@
   - Cross-workspace queries: simply omit the `workspace_id` filter from LLMUsage queries
   - Top model per workspace: separate sub-query grouped by model_id, ordered by cost desc, `.first()` — avoids complex window functions
 ---
+
+## 2026-02-14 - US-018
+- What was implemented: Admin cost dashboard frontend section in `frontend/components/analytics/analytics-admin.tsx`
+  - `useAdminCostAnalytics(period)` hook in `frontend/hooks/use-unified-analytics.ts` — calls `GET /api/admin/analytics/costs?period=X`, handles 403/401 gracefully
+  - StatsBar with 4 cards: Total Platform Cost ($), Total Tokens, Total API Requests, Active Providers (count from `cost_by_provider`)
+  - Daily cost trend: `AreaChart` (Recharts) with cost dataKey, green stroke, Y-axis `$` formatter
+  - Provider distribution: `PieChart` (Recharts) with `Cell` per-provider coloring, percentage labels
+  - Per-workspace cost table: Workspace Name, Plan, Total Cost, Total Tokens, Requests, Top Model — sortable by cost (toggle asc/desc)
+  - Period selector (7d/30d/90d) for admin cost data
+  - Fallback state for non-admin users (403 → null data → "admin access required" message)
+  - Loading skeletons, empty states for all sections
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 5 interfaces, `useAdminCostAnalytics` hook), `frontend/components/analytics/analytics-admin.tsx` (modified — added Recharts imports, `useState`, `Server` icon, `PROVIDER_COLORS`, cost state, Platform Costs section with AreaChart + PieChart + table)
+- **Learnings for future iterations:**
+  - `PieChart` from Recharts needs `Pie` + `Cell` components — `Cell` inside `Pie` for per-slice coloring, same pattern as `Bar` + `Cell`
+  - Pie label function receives `{ name, percent }` — `percent` is already 0-1 range, multiply by 100 for display
+  - Admin endpoint returns 403 for non-admins — hook catches and returns null, component shows fallback
+  - `costSortDir` state with toggle button is simpler than full column-header sorting for single-column sort
+  - `AdminCostAnalyticsData.daily_cost_trend` has `{ date, cost, requests }` — flat structure, no per-provider breakdown in current endpoint (stacked area chart not possible without per-provider daily data, used single area instead)
+---
+
+## 2026-02-14 - US-019
+- What was implemented: Verified all new API routers are registered in `orchestrator/main.py`
+  - `composio_analytics.router` — imported line 119, registered line 486 (`/api/analytics/composio`)
+  - `analytics_charts.router` — imported line 120, registered line 487 (`/api/analytics/charts`)
+  - `llm_analytics router` — imported line 118, registered line 484 (`/api/analytics/llm`)
+  - `llm_admin_analytics_router` — imported line 118, registered line 485 (`/api/admin/analytics`)
+- Files verified: `orchestrator/main.py`, `orchestrator/api/composio_analytics.py`, `orchestrator/api/analytics_charts.py`, `orchestrator/api/llm_analytics.py`
+- All routers were already registered during their respective story implementations (US-003, US-004, US-017)
+- py_compile passes on all files, no circular dependency issues
+- **Learnings for future iterations:**
+  - All routers were registered incrementally during each backend story — this verification story was a formality
+  - Router registration lines in main.py are grouped around lines 484-487 with PRD-54 comments
+  - Frontend TS errors are all pre-existing (admin plugins, api-debug, auth, agent components) — none from analytics code
+---
