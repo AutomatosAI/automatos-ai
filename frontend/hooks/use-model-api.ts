@@ -27,6 +27,11 @@ export interface ModelInfo {
   supports_streaming: boolean
   status: string
   description?: string
+  tier?: string
+  category?: string
+  tags?: string[]
+  is_featured?: boolean
+  is_default?: boolean
 }
 
 export interface ProviderInfo {
