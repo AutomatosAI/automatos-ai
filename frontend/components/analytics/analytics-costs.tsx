@@ -20,6 +20,8 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
@@ -29,8 +31,9 @@ import {
   PolarAngleAxis,
   PolarRadiusAxis,
   Legend,
+  Cell,
 } from 'recharts'
-import { useCostAnalyticsUnified, useModelComparison } from '@/hooks/use-unified-analytics'
+import { useCostAnalyticsUnified, useModelComparison, useCostProjections } from '@/hooks/use-unified-analytics'
 
 interface Props {
   days: number
@@ -49,7 +52,9 @@ export function AnalyticsCosts({ days }: Props) {
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([])
   const [comparisonPeriod, setComparisonPeriod] = useState('30d')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [projectionPeriod, setProjectionPeriod] = useState('30d')
   const { data: comparisonData, isLoading: comparisonLoading } = useModelComparison(selectedModelIds, comparisonPeriod)
+  const { data: projections, isLoading: projectionsLoading } = useCostProjections(projectionPeriod)
 
   if (isLoading) {
     return (
@@ -103,6 +108,118 @@ export function AnalyticsCosts({ days }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* Cost Projections */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-blue-400" />
+              Cost Projections
+            </span>
+            <select
+              value={projectionPeriod}
+              onChange={(e) => setProjectionPeriod(e.target.value)}
+              className="text-xs bg-secondary/50 border border-border/50 rounded-md px-2 py-1 text-foreground"
+            >
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="90d">Last 90 days</option>
+            </select>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {projectionsLoading ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-20 w-full" />
+                ))}
+              </div>
+              <Skeleton className="h-48 w-full" />
+            </div>
+          ) : projections ? (
+            <>
+              {/* Projection Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-border/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">Current Period Cost</p>
+                  <p className="text-xl font-semibold">${projections.current_period_cost.toFixed(2)}</p>
+                </div>
+                <div className="rounded-lg border border-border/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">Daily Average</p>
+                  <p className="text-xl font-semibold">${projections.daily_average.toFixed(4)}</p>
+                </div>
+                <div className="rounded-lg border border-border/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">Projected Monthly</p>
+                  <p className="text-2xl font-bold text-primary">${projections.projected_monthly.toFixed(2)}</p>
+                </div>
+                <div className="rounded-lg border border-border/30 p-4">
+                  <p className="text-xs text-muted-foreground mb-1">vs Previous Period</p>
+                  {projections.change_percent != null ? (
+                    <p className={`text-xl font-semibold ${projections.change_percent > 0 ? 'text-red-400' : projections.change_percent < 0 ? 'text-green-400' : 'text-muted-foreground'}`}>
+                      {projections.change_percent > 0 ? '+' : ''}{projections.change_percent.toFixed(1)}%
+                    </p>
+                  ) : (
+                    <p className="text-xl font-semibold text-muted-foreground">—</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Projected Cost by Model - Horizontal Bar Chart */}
+              {projections.projected_by_model && projections.projected_by_model.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-3">Projected Monthly Cost by Model</p>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={projections.projected_by_model}
+                        layout="vertical"
+                        margin={{ left: 20, right: 20, top: 5, bottom: 5 }}
+                      >
+                        <XAxis
+                          type="number"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                          tickFormatter={(v: number) => `$${v.toFixed(2)}`}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="key"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                          width={140}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(var(--card))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                          }}
+                          formatter={(value: number) => [`$${value.toFixed(4)}`, 'Projected Monthly']}
+                        />
+                        <Bar dataKey="projected_monthly_cost" radius={[0, 4, 4, 0]}>
+                          {projections.projected_by_model.map((_entry, index) => (
+                            <Cell key={index} fill={COMPARISON_COLORS[index % COMPARISON_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <TrendingUp className="w-10 h-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No projection data available — usage data needed</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Token Usage by Model */}
       <Card className="glass-card overflow-hidden">
