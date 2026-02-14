@@ -67,7 +67,7 @@ export interface CostEstimate {
 }
 
 /**
- * Fetch all available models
+ * Fetch all available models (global catalog)
  */
 export function useModels(provider?: string, status: string = 'active', options?: { enabled?: boolean }) {
   return useQuery<ModelInfo[]>({
@@ -81,6 +81,22 @@ export function useModels(provider?: string, status: string = 'active', options?
       return response
     },
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    enabled: options?.enabled ?? true,
+  })
+}
+
+/**
+ * PRD-54: Fetch workspace-installed models (for agent model selector).
+ * Falls back to defaults if workspace has no installs yet.
+ */
+export function useWorkspaceModels(options?: { enabled?: boolean }) {
+  return useQuery<ModelInfo[]>({
+    queryKey: ['workspace-models'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/marketplace/llm/installed')
+      return response
+    },
+    staleTime: 5 * 60 * 1000,
     enabled: options?.enabled ?? true,
   })
 }

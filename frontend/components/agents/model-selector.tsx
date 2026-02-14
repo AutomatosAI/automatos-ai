@@ -35,7 +35,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useModels, ModelInfo } from '@/hooks/use-model-api'
+import { useWorkspaceModels, ModelInfo } from '@/hooks/use-model-api'
 
 interface ModelSelectorProps {
   value: string  // model_id
@@ -60,7 +60,7 @@ export function ModelSelector({
   className = ''
 }: ModelSelectorProps) {
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
-  const { data: models, isLoading, error } = useModels(provider)
+  const { data: models, isLoading, error } = useWorkspaceModels()
 
   useEffect(() => {
     if (value && models && models.length > 0) {

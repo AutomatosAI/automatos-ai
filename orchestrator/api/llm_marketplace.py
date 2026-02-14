@@ -163,6 +163,48 @@ async def browse_models(
     return [_model_to_out(m, installed) for m in models]
 
 
+@router.get("/installed", response_model=List[LLMModelOut])
+async def get_installed_models(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Get models installed in the current workspace (for agent model selector).
+    Falls back to all default models if workspace has no installs yet.
+    """
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    installed_ids = _get_installed_ids(db, ctx.workspace_id)
+
+    if installed_ids:
+        # Return only workspace-installed models
+        models = (
+            db.query(LLMModel)
+            .filter(LLMModel.id.in_(installed_ids), LLMModel.status == "active")
+            .order_by(LLMModel.provider, LLMModel.display_name)
+            .all()
+        )
+    else:
+        # No installs yet — return all default models so the agent selector isn't empty
+        models = (
+            db.query(LLMModel)
+            .filter(LLMModel.status == "active", LLMModel.is_default == True)
+            .order_by(LLMModel.provider, LLMModel.display_name)
+            .all()
+        )
+        # If no defaults either, return all active models
+        if not models:
+            models = (
+                db.query(LLMModel)
+                .filter(LLMModel.status == "active")
+                .order_by(LLMModel.provider, LLMModel.display_name)
+                .all()
+            )
+
+    return [_model_to_out(m, installed_ids) for m in models]
+
+
 @router.get("/models/{model_id:path}", response_model=LLMModelOut)
 async def get_model_detail(
     model_id: str,

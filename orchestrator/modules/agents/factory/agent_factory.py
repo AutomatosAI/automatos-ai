@@ -724,7 +724,7 @@ Available Shell Tools:
         
         # PRD-15: Initialize LLM connection with model configuration
         try:
-            llm_manager = await self._create_llm_manager(model_config, db_agent.name)
+            llm_manager = await self._create_llm_manager(model_config, db_agent.name, workspace_id=db_agent.workspace_id)
             
             # Verify connection if requested
             if auto_verify:
@@ -742,7 +742,7 @@ Available Shell Tools:
                             temperature=model_config.temperature,
                             max_tokens=model_config.max_tokens
                         )
-                        llm_manager = await self._create_llm_manager(fallback_config, db_agent.name)
+                        llm_manager = await self._create_llm_manager(fallback_config, db_agent.name, workspace_id=db_agent.workspace_id)
                         verification_result = await self._verify_llm_connection(llm_manager)
                         
                         if verification_result["success"]:
@@ -796,67 +796,38 @@ Available Shell Tools:
                 self.db_session.commit()
             raise
     
-    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "") -> LLMManager:
+    async def _create_llm_manager(self, model_config: ModelConfiguration, agent_name: str = "", workspace_id=None) -> LLMManager:
         """
-        Create LLM manager from model configuration (PRD-15).
-        
-        Args:
-            model_config: ModelConfiguration with provider and model settings
-            agent_name: Agent name for logging
-            
-        Returns:
-            Initialized LLMManager
-            
-        Raises:
-            ValueError: If provider is unsupported
+        Create LLM manager from model configuration (PRD-15, PRD-54).
+
+        Supports all providers: openai, anthropic, google, openrouter, grok, huggingface.
+        Resolves API keys from: credential store → BYOK user_api_keys (workspace-scoped) → env vars.
         """
         from core.llm import LLMConfig, LLMProvider as LLMProviderEnum
-        
+
         # Map provider string to enum
         provider_map = {
             "openai": LLMProviderEnum.OPENAI,
-            "anthropic": LLMProviderEnum.ANTHROPIC
+            "anthropic": LLMProviderEnum.ANTHROPIC,
+            "google": LLMProviderEnum.GOOGLE,
+            "openrouter": LLMProviderEnum.OPENROUTER,
+            "grok": LLMProviderEnum.GROK,
+            "huggingface": LLMProviderEnum.HUGGINGFACE,
+            "aws_bedrock": LLMProviderEnum.AWS_BEDROCK,
+            "bedrock": LLMProviderEnum.AWS_BEDROCK,
         }
-        
+
         if model_config.provider not in provider_map:
             raise ValueError(f"Unsupported provider: {model_config.provider}")
-        
+
         provider = provider_map[model_config.provider]
-        
-        # Get API key from credential resolver
-        from core.credentials.resolver import get_credential_resolver
-        import os
-        resolver = get_credential_resolver()
-        
-        api_key = None
-        if provider == LLMProviderEnum.OPENAI:
-            try:
-                api_key = resolver.get_credential_field("development_openai", "api_key")
-            except Exception as e:
-                self.logger.warning(f"Failed to retrieve/decrypt 'development_openai' credential: {e}")
-                api_key = None
-                
-            # Fallback to environment variable if credential resolver fails
-            if not api_key:
-                api_key = os.getenv("OPENAI_API_KEY")
-                if api_key:
-                    self.logger.info(f"Using OPENAI_API_KEY from environment variable for {agent_name} (fallback)")
-        elif provider == LLMProviderEnum.ANTHROPIC:
-            try:
-                api_key = resolver.get_credential_field("development_anthropic", "api_key")
-            except Exception as e:
-                self.logger.warning(f"Failed to retrieve/decrypt 'development_anthropic' credential: {e}")
-                api_key = None
-                
-            # Fallback to environment variable
-            if not api_key:
-                api_key = os.getenv("ANTHROPIC_API_KEY")
-                if api_key:
-                    self.logger.info(f"Using ANTHROPIC_API_KEY from environment variable for {agent_name} (fallback)")
-        
+
+        # Resolve API key: credential store → BYOK keys (workspace-scoped) → env vars
+        api_key = await self._resolve_api_key(model_config.provider, agent_name, workspace_id=workspace_id)
+
         if not api_key:
             raise ValueError(f"API key not found for provider: {model_config.provider}")
-        
+
         # Create LLM config
         llm_config = LLMConfig(
             provider=provider,
@@ -865,13 +836,88 @@ Available Shell Tools:
             max_tokens=model_config.max_tokens,
             api_key=api_key
         )
-        
+
         self.logger.info(
             f"Creating LLM manager for {agent_name or 'agent'}: "
             f"provider={model_config.provider}, model={model_config.model_id}"
         )
-        
+
         return LLMManager(config=llm_config)
+
+    async def _resolve_api_key(self, provider_name: str, agent_name: str = "", workspace_id=None) -> Optional[str]:
+        """
+        Resolve API key for a provider using the credential chain (PRD-54):
+        1. Credential store (development_<provider>)
+        2. BYOK user_api_keys table (workspace-scoped — MUST filter by workspace_id)
+        3. Environment variables
+        """
+        import os
+        from core.credentials.resolver import get_credential_resolver
+
+        resolver = get_credential_resolver()
+
+        # Credential name patterns to try
+        cred_names = [
+            f"development_{provider_name}_api",
+            f"development_{provider_name}",
+            f"{provider_name}_api",
+            provider_name,
+        ]
+
+        # 1. Try credential store
+        for cred_name in cred_names:
+            try:
+                key = resolver.get_credential_field(cred_name, "api_key")
+                if not key:
+                    key = resolver.get_credential_field(cred_name, "api_token")
+                if key:
+                    self.logger.info(f"Resolved API key from credential '{cred_name}' for {agent_name}")
+                    return key
+            except Exception:
+                continue
+
+        # 2. Try BYOK user_api_keys (workspace-scoped encrypted keys)
+        if workspace_id:
+            try:
+                from core.models.core import UserApiKey
+                from core.credentials.encryption import EncryptionService
+
+                byok_key = (
+                    self.db_session.query(UserApiKey)
+                    .filter(
+                        UserApiKey.workspace_id == workspace_id,
+                        UserApiKey.provider == provider_name,
+                        UserApiKey.is_active == True,
+                    )
+                    .order_by(UserApiKey.last_used_at.desc().nullslast())
+                    .first()
+                )
+                if byok_key:
+                    decrypted = EncryptionService.decrypt(byok_key.encrypted_key)
+                    self.logger.info(f"Resolved BYOK API key for provider '{provider_name}' workspace={workspace_id} (key: {byok_key.display_name or byok_key.id})")
+                    return decrypted
+            except Exception as e:
+                self.logger.debug(f"BYOK key lookup failed for {provider_name}: {e}")
+        else:
+            self.logger.warning(f"No workspace_id for BYOK key lookup — skipping for provider '{provider_name}'")
+
+        # 3. Fall back to environment variables
+        env_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google": "GOOGLE_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "grok": "GROK_API_KEY",
+            "huggingface": "HUGGINGFACE_API_KEY",
+        }
+        env_var = env_map.get(provider_name)
+        if env_var:
+            key = os.getenv(env_var)
+            if key:
+                self.logger.info(f"Using {env_var} from environment for {agent_name}")
+                return key
+
+        return None
     
     async def _verify_llm_connection(self, llm_manager: LLMManager) -> Dict[str, Any]:
         """Verify LLM connection with minimal test"""
@@ -921,32 +967,51 @@ Available Shell Tools:
                 self.logger.error(f"Agent {agent_id} not found in database")
                 return None
             
-            # Get LLM config - PRIORITIZE system settings over agent's stored config
-            # This ensures agents use the LLM provider selected in Settings UI (e.g., HuggingFace for testing)
+            # Get LLM config - PRIORITIZE agent's own model_config, fall back to system settings
+            # PRD-54: Agents can now be assigned specific models (including OpenRouter/BYOK)
+            agent_model_config = db_agent.model_config or {}
             config = db_agent.configuration or {}
             agent_llm_config = config.get("llm_config") or {}
+
+            # Check if agent has a specific model configured (PRD-15/54 model_config column)
+            agent_has_model = (
+                agent_model_config.get("model_id")
+                and agent_model_config.get("provider")
+            )
+
+            if agent_has_model:
+                # Use agent's own model config
+                llm_config_dict = {
+                    "provider": agent_model_config["provider"],
+                    "model": agent_model_config["model_id"],
+                    "temperature": agent_model_config.get("temperature", 0.7),
+                    "max_tokens": agent_model_config.get("max_tokens", 2000),
+                }
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict['provider']}/{llm_config_dict['model']} (from agent model_config)")
+            else:
+                # Fall back to system settings
+                system_llm_config = self._get_default_llm_config_from_settings()
+                llm_config_dict = {
+                    "provider": system_llm_config.get("provider"),
+                    "model": system_llm_config.get("model"),
+                    "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
+                    "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
+                }
+                self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings)")
             
-            # Always get system settings first (respects Settings UI selection)
-            system_llm_config = self._get_default_llm_config_from_settings()
-            
-            # Merge: system settings for provider/model, agent config for temperature/max_tokens (if set)
-            # This allows system-wide LLM changes while preserving agent-specific generation parameters
-            llm_config_dict = {
-                "provider": system_llm_config.get("provider"),  # Use system provider (e.g., HuggingFace)
-                "model": system_llm_config.get("model"),  # Use system model
-                "temperature": agent_llm_config.get("temperature", system_llm_config.get("temperature", 0.7)),
-                "max_tokens": agent_llm_config.get("max_tokens", system_llm_config.get("max_tokens", 2000)),
-            }
-            
-            self.logger.info(f"Agent {agent_id} using LLM: {llm_config_dict.get('provider')}/{llm_config_dict.get('model')} (from system settings)")
-            
-            # Create LLM manager
-            provider = LLMProvider(llm_config_dict.get("provider", "openai"))
+            # Create LLM manager with API key resolution (PRD-54)
+            provider_str = llm_config_dict.get("provider", "openai")
+            provider = LLMProvider(provider_str)
+
+            # Resolve API key: credential store → BYOK (workspace-scoped) → env vars
+            api_key = await self._resolve_api_key(provider_str, db_agent.name, workspace_id=db_agent.workspace_id)
+
             llm_config = LLMConfig(
                 provider=provider,
                 model=llm_config_dict.get("model", "gpt-4"),
                 temperature=llm_config_dict.get("temperature", 0.7),
                 max_tokens=llm_config_dict.get("max_tokens", 2000),
+                api_key=api_key,
             )
             llm_manager = LLMManager(llm_config)
             
