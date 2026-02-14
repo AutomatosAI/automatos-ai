@@ -6,14 +6,18 @@ CRUD operations for workflow recipes that users can browse,
 customize, and use to create workflows.
 """
 
+import hashlib
+import hmac
+import logging
+import os
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
-from typing import List, Dict, Any, Optional
-from datetime import datetime
-from uuid import uuid4
 from core.database.database import get_db
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/workflow-recipes", tags=["workflow-recipes"])
@@ -1540,6 +1544,26 @@ async def recipe_webhook(
 
     if not recipe:
         raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    # Verify HMAC signature if a webhook secret is configured
+    webhook_secret = (recipe.schedule_config or {}).get("webhook_secret") or os.getenv("WEBHOOK_SECRET")
+    if webhook_secret:
+        sig_header = (
+            request.headers.get("x-hub-signature-256")
+            or request.headers.get("x-composio-signature")
+            or request.headers.get("x-webhook-signature")
+        )
+        if sig_header:
+            raw_body = await request.body()
+            expected_sig = sig_header.removeprefix("sha256=")
+            computed = hmac.new(
+                webhook_secret.encode("utf-8"),
+                raw_body,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(computed, expected_sig):
+                logger.warning("[webhook] HMAC signature mismatch for recipe webhook %s", webhook_id)
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     if not recipe.steps:
         raise HTTPException(status_code=400, detail="Recipe has no steps")

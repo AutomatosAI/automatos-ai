@@ -123,11 +123,12 @@ export function LLMModelCard({
     e.stopPropagation()
     setInstalling(true)
     try {
+      const encodedId = encodeURIComponent(model.model_id)
       if (model.is_installed) {
-        await apiClient.post(`/api/marketplace/llm/models/${model.model_id}/uninstall`)
+        await apiClient.post(`/api/marketplace/llm/models/${encodedId}/uninstall`)
         toast.success(`${model.display_name} removed`)
       } else {
-        await apiClient.post(`/api/marketplace/llm/models/${model.model_id}/install`)
+        await apiClient.post(`/api/marketplace/llm/models/${encodedId}/install`)
         toast.success(`${model.display_name} installed`)
       }
       queryClient.invalidateQueries({ queryKey: ['marketplaceLlmModels'] })

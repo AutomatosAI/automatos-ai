@@ -12,7 +12,10 @@ Two webhook paths:
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
 from typing import Any, Dict, Optional, Set
 from uuid import UUID, uuid4
 
@@ -32,6 +35,53 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 # Track background tasks to prevent GC collection
 _background_tasks: Set[asyncio.Task] = set()
+
+
+# =============================================================================
+# HMAC-SHA256 Signature Verification
+# =============================================================================
+
+async def _verify_webhook_signature(
+    request: Request,
+    secret: Optional[str],
+) -> None:
+    """
+    Verify HMAC-SHA256 signature on an incoming webhook request.
+
+    Checks headers: X-Hub-Signature-256 (GitHub), X-Composio-Signature,
+    X-Webhook-Signature.
+
+    If a secret is configured and a signature header is present, the signature
+    must match. If no secret is configured, verification is skipped (URL-as-secret
+    pattern still applies).
+    """
+    if not secret:
+        return
+
+    # Look for signature in common headers
+    sig_header = (
+        request.headers.get("x-hub-signature-256")
+        or request.headers.get("x-composio-signature")
+        or request.headers.get("x-webhook-signature")
+    )
+    if not sig_header:
+        # No signature header present — skip if not required
+        return
+
+    raw_body = await request.body()
+
+    # Strip optional "sha256=" prefix (GitHub format)
+    expected_sig = sig_header.removeprefix("sha256=")
+
+    computed = hmac.new(
+        secret.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(computed, expected_sig):
+        logger.warning("[webhook] HMAC signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
 
 # =============================================================================
@@ -341,6 +391,10 @@ async def general_workspace_webhook(
 
     if not workspace:
         raise HTTPException(status_code=404, detail="Unknown webhook")
+
+    # 1b. Verify HMAC signature if a webhook secret is configured
+    webhook_secret = (workspace.settings or {}).get("webhook_secret") or os.getenv("WEBHOOK_SECRET")
+    await _verify_webhook_signature(request, webhook_secret)
 
     # 2. Detect platform and extract reply context
     platform = _detect_platform(body) if isinstance(body, dict) else None

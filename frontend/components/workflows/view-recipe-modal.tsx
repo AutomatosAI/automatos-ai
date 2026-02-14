@@ -267,11 +267,19 @@ export function ViewRecipeModal({
                         {executions.slice(0, 5).map((exec) => (
                           <div
                             key={exec.id}
+                            role={onViewExecution ? "button" : undefined}
+                            tabIndex={onViewExecution ? 0 : undefined}
                             className={cn(
                               "flex items-center gap-3 bg-secondary/30 rounded-lg px-4 py-3 border border-border/30",
-                              onViewExecution && "cursor-pointer hover:border-primary/30 hover:bg-secondary/50 transition-colors"
+                              onViewExecution && "cursor-pointer hover:border-primary/30 hover:bg-secondary/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             )}
                             onClick={() => onViewExecution?.(exec.execution_id || String(exec.id))}
+                            onKeyDown={(e) => {
+                              if (onViewExecution && (e.key === 'Enter' || e.key === ' ')) {
+                                e.preventDefault()
+                                onViewExecution(exec.execution_id || String(exec.id))
+                              }
+                            }}
                           >
                             {/* Status icon */}
                             <div className={cn(

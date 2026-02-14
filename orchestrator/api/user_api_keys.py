@@ -179,11 +179,7 @@ async def test_api_key(
         elif row.provider == "anthropic":
             import anthropic
             client = anthropic.Anthropic(api_key=raw_key)
-            client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=5,
-                messages=[{"role": "user", "content": "hi"}],
-            )
+            client.models.list()
         elif row.provider == "google":
             import google.generativeai as genai
             genai.configure(api_key=raw_key)
