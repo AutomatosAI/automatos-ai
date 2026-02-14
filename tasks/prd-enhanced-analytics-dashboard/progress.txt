@@ -125,3 +125,19 @@
   - `useMutation` from tanstack requires explicit `queryClient.invalidateQueries()` for cache busting — pass `{ queryKey: [...] }` object form
   - Pre-existing TS errors exist in this file (getCostAnalysis, getAgentRanking missing from ApiClient type) — don't try to fix them
 ---
+
+## 2026-02-14 - US-008
+- What was implemented: Frontend React Query hooks for Composio analytics in `frontend/hooks/use-unified-analytics.ts`
+  - `useComposioApps(days)` — GET /api/analytics/composio/apps?days=X, returns `ComposioAppStats[]`
+  - `useComposioActions(days)` — GET /api/analytics/composio/actions?days=X, returns `ComposioActionEntry[]`
+  - `useComposioAgentTools(days)` — GET /api/analytics/composio/agent-tools?days=X, returns `ComposioAgentToolMapping[]`
+  - Added `composioApps`, `composioActions`, `composioAgentTools` to `unifiedAnalyticsKeys` with `days` parameter
+  - All hooks use staleTime 60000 (1 minute)
+  - 4 TypeScript interfaces matching backend Pydantic schemas
+- Files changed: `frontend/hooks/use-unified-analytics.ts` (modified — added 3 cache keys, 4 interfaces, 3 hooks)
+- **Learnings for future iterations:**
+  - Composio hooks don't need 404 handling like OpenRouter — there's no "key not configured" state, just empty arrays
+  - Backend response models: `ConnectedAppStats`, `ActionLeaderboardEntry`, `AgentToolMapping` — match field names exactly in TS interfaces
+  - `AgentToolEntry` has `tool_name` (not `action_name`) — backend schema differs from the DB column name
+  - Days parameter passed as query string `?days=X` — backend validates against DAYS_MAP {7, 30, 90}
+---

@@ -20,6 +20,9 @@ export const unifiedAnalyticsKeys = {
   adminWorkspaces: (days: number) => ['unified-analytics', 'admin', 'workspaces', days] as const,
   openrouterCredits: ['unified-analytics', 'openrouter', 'credits'] as const,
   openrouterKeyInfo: ['unified-analytics', 'openrouter', 'key-info'] as const,
+  composioApps: (days: number) => ['unified-analytics', 'composio', 'apps', days] as const,
+  composioActions: (days: number) => ['unified-analytics', 'composio', 'actions', days] as const,
+  composioAgentTools: (days: number) => ['unified-analytics', 'composio', 'agent-tools', days] as const,
 }
 
 // ============= OVERVIEW =============
@@ -439,6 +442,74 @@ export function useTriggerOpenRouterSync() {
       queryClient.invalidateQueries({ queryKey: unifiedAnalyticsKeys.openrouterKeyInfo })
       queryClient.invalidateQueries({ queryKey: ['unified-analytics', 'costs'] })
     },
+  })
+}
+
+// ============= COMPOSIO ANALYTICS =============
+
+interface ComposioAppStats {
+  app_name: string
+  status: string
+  total_actions_used: number
+  agent_count: number
+  documents_synced: number
+  last_used_at: string | null
+}
+
+interface ComposioActionEntry {
+  action_name: string
+  app_name: string
+  total_usage_count: number
+  agent_count: number
+  last_used_at: string | null
+}
+
+interface ComposioAgentToolEntry {
+  tool_name: string
+  app_name: string
+  usage_count: number
+  enabled: boolean
+}
+
+interface ComposioAgentToolMapping {
+  agent_id: number
+  agent_name: string
+  tools: ComposioAgentToolEntry[]
+}
+
+export function useComposioApps(days: number = 30) {
+  return useQuery<ComposioAppStats[]>({
+    queryKey: unifiedAnalyticsKeys.composioApps(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioAppStats[]>(
+        `/api/analytics/composio/apps?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useComposioActions(days: number = 30) {
+  return useQuery<ComposioActionEntry[]>({
+    queryKey: unifiedAnalyticsKeys.composioActions(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioActionEntry[]>(
+        `/api/analytics/composio/actions?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+export function useComposioAgentTools(days: number = 30) {
+  return useQuery<ComposioAgentToolMapping[]>({
+    queryKey: unifiedAnalyticsKeys.composioAgentTools(days),
+    queryFn: async () => {
+      return apiClient.request<ComposioAgentToolMapping[]>(
+        `/api/analytics/composio/agent-tools?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
   })
 }
 
