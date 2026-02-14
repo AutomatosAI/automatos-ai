@@ -23,6 +23,9 @@ export const unifiedAnalyticsKeys = {
   composioApps: (days: number) => ['unified-analytics', 'composio', 'apps', days] as const,
   composioActions: (days: number) => ['unified-analytics', 'composio', 'actions', days] as const,
   composioAgentTools: (days: number) => ['unified-analytics', 'composio', 'agent-tools', days] as const,
+  chartPresets: ['unified-analytics', 'charts', 'presets'] as const,
+  modelComparison: (modelIds: string[], period: string) => ['unified-analytics', 'llm', 'comparison', modelIds, period] as const,
+  costProjections: (period: string) => ['unified-analytics', 'llm', 'projections', period] as const,
 }
 
 // ============= OVERVIEW =============
@@ -507,6 +510,112 @@ export function useComposioAgentTools(days: number = 30) {
     queryFn: async () => {
       return apiClient.request<ComposioAgentToolMapping[]>(
         `/api/analytics/composio/agent-tools?days=${days}`
+      )
+    },
+    staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= PANDASAI CHARTS =============
+
+interface ChartGenerateResponse {
+  summary: string
+  charts: string[]
+  data: Record<string, any>[]
+}
+
+interface ChartPreset {
+  id: string
+  title: string
+  description: string
+  query: string
+  chart_type: string
+}
+
+export function useAnalyticsChart() {
+  return useMutation<ChartGenerateResponse, Error, { query: string; chartType?: string }>({
+    mutationFn: async ({ query, chartType }) => {
+      return apiClient.request<ChartGenerateResponse>(
+        '/api/analytics/charts/generate',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            query,
+            chart_type: chartType || 'auto',
+          }),
+        }
+      )
+    },
+  })
+}
+
+export function useChartPresets() {
+  return useQuery<ChartPreset[]>({
+    queryKey: unifiedAnalyticsKeys.chartPresets,
+    queryFn: async () => {
+      return apiClient.request<ChartPreset[]>(
+        '/api/analytics/charts/presets'
+      )
+    },
+    staleTime: 300000, // 5 minutes — presets rarely change
+  })
+}
+
+// ============= MODEL COMPARISON =============
+
+interface ModelComparisonItem {
+  model_id: string
+  display_name: string
+  provider: string
+  input_cost_per_1k: number | null
+  output_cost_per_1k: number | null
+  context_window: number | null
+  capabilities: Record<string, any>
+  total_requests: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_ms: number | null
+  error_rate: number
+  success_rate: number
+}
+
+export function useModelComparison(modelIds: string[], period: string = '30d') {
+  return useQuery<ModelComparisonItem[]>({
+    queryKey: unifiedAnalyticsKeys.modelComparison(modelIds, period),
+    queryFn: async () => {
+      const ids = modelIds.join(',')
+      return apiClient.request<ModelComparisonItem[]>(
+        `/api/analytics/llm/comparison?model_ids=${encodeURIComponent(ids)}&period=${period}`
+      )
+    },
+    enabled: modelIds.length > 0,
+    staleTime: 60000, // 1 minute
+  })
+}
+
+// ============= COST PROJECTIONS =============
+
+interface ProjectedItem {
+  key: string
+  projected_monthly_cost: number
+  current_period_cost: number
+}
+
+interface CostProjectionData {
+  current_period_cost: number
+  daily_average: number
+  projected_monthly: number
+  change_percent: number | null
+  projected_by_model: ProjectedItem[]
+  projected_by_provider: ProjectedItem[]
+}
+
+export function useCostProjections(period: string = '30d') {
+  return useQuery<CostProjectionData>({
+    queryKey: unifiedAnalyticsKeys.costProjections(period),
+    queryFn: async () => {
+      return apiClient.request<CostProjectionData>(
+        `/api/analytics/llm/projections?period=${period}`
       )
     },
     staleTime: 60000, // 1 minute
