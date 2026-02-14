@@ -177,30 +177,28 @@ async def get_installed_models(
 
     installed_ids = _get_installed_ids(db, ctx.workspace_id)
 
-    if installed_ids:
-        # Return only workspace-installed models
+    # Always include defaults + any workspace-installed models
+    models = (
+        db.query(LLMModel)
+        .filter(
+            LLMModel.status == "active",
+            or_(
+                LLMModel.is_default == True,
+                LLMModel.id.in_(installed_ids) if installed_ids else False,
+            ),
+        )
+        .order_by(LLMModel.provider, LLMModel.display_name)
+        .all()
+    )
+
+    # If somehow no defaults exist, return all active models
+    if not models:
         models = (
             db.query(LLMModel)
-            .filter(LLMModel.id.in_(installed_ids), LLMModel.status == "active")
+            .filter(LLMModel.status == "active")
             .order_by(LLMModel.provider, LLMModel.display_name)
             .all()
         )
-    else:
-        # No installs yet — return all default models so the agent selector isn't empty
-        models = (
-            db.query(LLMModel)
-            .filter(LLMModel.status == "active", LLMModel.is_default == True)
-            .order_by(LLMModel.provider, LLMModel.display_name)
-            .all()
-        )
-        # If no defaults either, return all active models
-        if not models:
-            models = (
-                db.query(LLMModel)
-                .filter(LLMModel.status == "active")
-                .order_by(LLMModel.provider, LLMModel.display_name)
-                .all()
-            )
 
     return [_model_to_out(m, installed_ids) for m in models]
 
