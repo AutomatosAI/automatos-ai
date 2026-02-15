@@ -31,6 +31,31 @@ function formatDate(dateStr: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+/** Format Composio app names: GOOGLEDRIVE → Google Drive */
+function formatAppName(name: string): string {
+  const known: Record<string, string> = {
+    GOOGLEDRIVE: 'Google Drive',
+    GOOGLECALENDAR: 'Google Calendar',
+    GOOGLEDOCS: 'Google Docs',
+    GOOGLESHEETS: 'Google Sheets',
+    GOOGLEGMAIL: 'Gmail',
+    GITHUB: 'GitHub',
+    SLACK: 'Slack',
+    DROPBOX: 'Dropbox',
+    TELEGRAM: 'Telegram',
+    NOTION: 'Notion',
+    JIRA: 'Jira',
+    TRELLO: 'Trello',
+    DISCORD: 'Discord',
+    LINEAR: 'Linear',
+    ASANA: 'Asana',
+    WHATSAPP: 'WhatsApp',
+  }
+  if (known[name]) return known[name]
+  // Fallback: capitalize first, lowercase rest
+  return name.charAt(0) + name.slice(1).toLowerCase()
+}
+
 function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status.toLowerCase()) {
     case 'active':
@@ -118,7 +143,7 @@ export function AnalyticsComposio({ days }: Props) {
       <StatsBar stats={[
         { label: 'Connected Apps', value: connectedAppsCount, change: 'Composio integrations', icon: AppWindow, iconColor: 'text-primary' },
         { label: 'Total Actions Used', value: totalActionsUsed, change: `Last ${days} days`, icon: Zap, iconColor: 'text-[hsl(var(--success))]' },
-        { label: 'Most Used App', value: mostUsedApp?.app_name ?? 'None', change: mostUsedApp ? `${mostUsedApp.total_actions_used} actions` : 'No data', icon: Wrench, iconColor: 'text-[hsl(var(--info))]' },
+        { label: 'Most Used App', value: mostUsedApp?.total_actions_used ?? 0, change: mostUsedApp ? formatAppName(mostUsedApp.app_name) : 'No data', icon: Wrench, iconColor: 'text-[hsl(var(--info))]' },
         { label: 'Active Integrations', value: activeIntegrations, change: `of ${connectedAppsCount} total`, icon: Link2, iconColor: 'text-[hsl(var(--agent))]' },
       ]} loading={isLoading} />
 
@@ -144,7 +169,7 @@ export function AnalyticsComposio({ days }: Props) {
                   className="rounded-lg border border-border/30 p-4 hover:border-border/60 transition-colors"
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <p className="font-medium text-sm">{app.app_name}</p>
+                    <p className="font-medium text-sm">{formatAppName(app.app_name)}</p>
                     <Badge variant={getStatusVariant(app.status)} className="text-[10px]">
                       {app.status}
                     </Badge>
@@ -227,7 +252,7 @@ export function AnalyticsComposio({ days }: Props) {
                     <td className="p-4">
                       <Badge variant="secondary" className="font-mono text-xs">{action.action_name}</Badge>
                     </td>
-                    <td className="p-4 text-sm">{action.app_name}</td>
+                    <td className="p-4 text-sm">{formatAppName(action.app_name)}</td>
                     <td className="p-4 text-sm font-medium">{action.total_usage_count}</td>
                     <td className="p-4 text-sm">{action.agent_count}</td>
                     <td className="p-4 text-sm text-muted-foreground">{formatDate(action.last_used_at)}</td>
@@ -295,7 +320,7 @@ export function AnalyticsComposio({ days }: Props) {
                               <Badge variant="secondary" className="font-mono text-xs">{tool.tool_name}</Badge>
                             </div>
                           </td>
-                          <td className="p-4 text-sm text-muted-foreground">{tool.app_name}</td>
+                          <td className="p-4 text-sm text-muted-foreground">{formatAppName(tool.app_name)}</td>
                           <td className="p-4 text-sm">
                             {tool.usage_count}
                             {!tool.enabled && (
