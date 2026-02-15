@@ -1,221 +1,166 @@
 """
-Slack Channel Adapter (PRD-55: Autonomous Assistant Platform).
+Slack Channel Adapter (PRD-55 US-021)
+======================================
 
-Bridges Slack workspace messages into the universal routing pipeline
-using slack-bolt (async) with Socket Mode.
+Uses slack-bolt for async Slack bot integration.
+Converts Slack events to RequestEnvelope for routing.
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
 from typing import Any, Dict, Optional
-from uuid import UUID
+from uuid import uuid4
 
-from channels.base import BaseChannelAdapter
+from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
 
 class SlackAdapter(BaseChannelAdapter):
-    """Adapter for Slack workspaces via slack-bolt async + Socket Mode."""
+    """Slack bot adapter using slack-bolt."""
 
-    def __init__(
-        self,
-        connection_id: str,
-        workspace_id: str,
-        config: Dict[str, Any],
-    ) -> None:
+    def __init__(self, connection_id: str, workspace_id: str, config: Dict[str, Any]):
         super().__init__(connection_id, workspace_id, config)
         self._app = None
-        self._handler = None  # AsyncSocketModeHandler
-        self._task: Optional[asyncio.Task] = None
+        self._handler = None
+        self._server_task: Optional[asyncio.Task] = None
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    async def start(self):
+        """Start the Slack bot."""
+        try:
+            from slack_bolt.async_app import AsyncApp
 
-    async def start(self) -> None:
-        from slack_bolt.async_app import AsyncApp
-        from slack_bolt.adapter.socket_mode.async_handler import (
-            AsyncSocketModeHandler,
-        )
+            bot_token = self.config.get("bot_token", "")
+            signing_secret = self.config.get("signing_secret", "")
 
-        bot_token = self.config.get("bot_token")
-        signing_secret = self.config.get("signing_secret")
-        app_token = self.config.get("app_token")  # xapp-... for socket mode
+            if not bot_token:
+                raise ValueError("bot_token is required")
+            if not signing_secret:
+                raise ValueError("signing_secret is required")
 
-        if not bot_token:
-            raise ValueError("Slack adapter requires 'bot_token' in config")
-        if not app_token:
-            raise ValueError("Slack adapter requires 'app_token' for Socket Mode")
+            self._app = AsyncApp(
+                token=bot_token,
+                signing_secret=signing_secret,
+            )
 
-        self._app = AsyncApp(
-            token=bot_token,
-            signing_secret=signing_secret or "",
-        )
+            # Register message handler (responds to all messages)
+            @self._app.message("")
+            async def handle_message(message, say):
+                await self._on_message(message, say)
 
-        # Register message listener (ignores bot messages automatically
-        # when the event doesn't contain a bot_id)
-        @self._app.event("message")
-        async def _on_message(event: dict, say, client):
-            await self._handle_event(event, say, client)
+            # Start socket mode or web server depending on config
+            app_token = self.config.get("app_token")
+            if app_token:
+                from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+                self._handler = AsyncSocketModeHandler(self._app, app_token)
+                self._server_task = asyncio.create_task(self._handler.start_async())
+            else:
+                logger.warning("[Slack:%s] No app_token — using Events API mode (webhook required)", self.connection_id)
 
-        self._handler = AsyncSocketModeHandler(self._app, app_token)
-        self._task = asyncio.create_task(self._handler.start_async())
-        self._running = True
-        logger.info("Slack adapter %s started (socket mode)", self.connection_id)
+            self.is_running = True
+            logger.info("[Slack:%s] Bot started", self.connection_id)
 
-    async def stop(self) -> None:
+        except ImportError:
+            logger.error("[Slack] slack-bolt not installed. Run: pip install slack-bolt")
+            raise
+        except Exception as e:
+            logger.error("[Slack:%s] Failed to start: %s", self.connection_id, e)
+            raise
+
+    async def stop(self):
+        """Stop the Slack bot."""
         if self._handler:
             try:
                 await self._handler.close_async()
-            except Exception as exc:
-                logger.warning("Error closing Slack socket handler: %s", exc)
-        if self._task and not self._task.done():
-            self._task.cancel()
-        self._running = False
-        logger.info("Slack adapter %s stopped", self.connection_id)
+            except Exception as e:
+                logger.warning("[Slack:%s] Error during stop: %s", self.connection_id, e)
+        if self._server_task:
+            self._server_task.cancel()
+        self.is_running = False
+        logger.info("[Slack:%s] Bot stopped", self.connection_id)
 
-    # ------------------------------------------------------------------
-    # Connection test
-    # ------------------------------------------------------------------
-
-    async def test_connection(self) -> Dict[str, Any]:
-        import httpx
-
-        bot_token = self.config.get("bot_token", "")
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://slack.com/api/auth.test",
-                headers={"Authorization": f"Bearer {bot_token}"},
-            )
-            data = resp.json()
-
-        if not data.get("ok"):
-            raise ConnectionError(
-                f"Slack auth.test failed: {data.get('error', 'unknown error')}"
-            )
-        return {
-            "platform": "slack",
-            "team": data.get("team"),
-            "team_id": data.get("team_id"),
-            "bot_user_id": data.get("user_id"),
-            "bot_name": data.get("user"),
-        }
-
-    # ------------------------------------------------------------------
-    # Incoming messages
-    # ------------------------------------------------------------------
-
-    async def _handle_event(
-        self, event: dict, say: Any, client: Any
-    ) -> None:
-        """Process a Slack ``message`` event."""
-        # Filter out bot messages
-        if event.get("bot_id") or event.get("subtype") == "bot_message":
-            return
-
-        text = event.get("text", "")
-        if not text:
-            return
-
-        # Route through the universal pipeline
-        response_text = await self.handle_message(event)
-
-        # Reply in thread only if the original message was in a thread
-        thread_ts = event.get("thread_ts")
-        channel = event.get("channel", "")
-
-        if response_text:
-            if thread_ts:
-                await self.send_message(
-                    channel, response_text, thread_ts=thread_ts, _client=client
-                )
-            else:
-                await self.send_message(
-                    channel, response_text, _client=client
-                )
-
-        self._increment_message_count()
-
-    # ------------------------------------------------------------------
-    # Outbound
-    # ------------------------------------------------------------------
-
-    async def send_message(
-        self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Post a message to a Slack channel, optionally in a thread."""
-        client = kwargs.get("_client")
-        thread_ts = kwargs.get("thread_ts")
-
-        if client:
-            await client.chat_postMessage(
-                channel=channel_id,
-                text=text,
-                thread_ts=thread_ts,
-            )
-        elif self._app:
+    async def send_message(self, channel_id: str, text: str, **kwargs) -> bool:
+        """Send a message to a Slack channel or thread."""
+        if not self._app:
+            return False
+        try:
+            thread_ts = kwargs.get("thread_ts")
             await self._app.client.chat_postMessage(
                 channel=channel_id,
                 text=text,
                 thread_ts=thread_ts,
             )
-        else:
-            logger.error("No Slack client available for sending")
+            return True
+        except Exception as e:
+            logger.error("[Slack:%s] Failed to send message: %s", self.connection_id, e)
+            return False
 
-    # ------------------------------------------------------------------
-    # Envelope conversion
-    # ------------------------------------------------------------------
+    async def test_connection(self) -> Dict[str, Any]:
+        """Test Slack bot token validity."""
+        try:
+            import requests
+            token = self.config.get("bot_token", "")
+            resp = requests.post(
+                "https://slack.com/api/auth.test",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            data = resp.json()
+            if data.get("ok"):
+                return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
+            return {"status": "error", "detail": data.get("error", "Unknown")}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
 
-    def _to_envelope(self, platform_message: Any) -> Any:
-        from core.models.routing import RequestEnvelope, ChannelSource, RequestUser
+    async def _on_message(self, message: dict, say):
+        """Handle incoming Slack message."""
+        # Ignore bot messages
+        if message.get("bot_id") or message.get("subtype") == "bot_message":
+            return
 
-        event = platform_message  # dict from Slack event
+        text = message.get("text", "")
+        if not text:
+            return
+
+        try:
+            platform_msg = {
+                "channel_id": message.get("channel"),
+                "reply_channel_id": message.get("channel"),
+                "thread_ts": message.get("thread_ts") or message.get("ts"),
+                "user_id": message.get("user"),
+                "user_name": message.get("user"),
+                "text": text,
+                "message_ts": message.get("ts"),
+            }
+
+            await self.handle_message(platform_msg)
+
+        except Exception as e:
+            logger.error("[Slack:%s] Error handling message: %s", self.connection_id, e)
+            try:
+                await say("Sorry, I encountered an error processing your message.")
+            except Exception:
+                pass
+
+    def _to_envelope(self, platform_message: Dict[str, Any]):
+        """Convert Slack message to RequestEnvelope."""
+        from core.models.routing import RequestEnvelope, RequestUser, ChannelSource
 
         return RequestEnvelope(
+            id=uuid4(),
             source=ChannelSource.SLACK,
-            content=event.get("text", ""),
-            raw_payload={
-                "ts": event.get("ts"),
-                "channel": event.get("channel"),
-                "thread_ts": event.get("thread_ts"),
-                "team": event.get("team"),
-            },
+            content=platform_message.get("text", ""),
+            raw_payload=platform_message,
             user=RequestUser(
-                id=event.get("user"),
-                name=event.get("user"),  # Display name resolved later
+                id=platform_message.get("user_id"),
+                name=platform_message.get("user_name"),
+                auth_type="slack",
             ),
-            workspace_id=UUID(self.workspace_id),
+            workspace_id=self.workspace_id,
             metadata={
                 "channel_adapter": "slack",
                 "connection_id": self.connection_id,
+                "channel_id": platform_message.get("channel_id"),
+                "thread_ts": platform_message.get("thread_ts"),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _increment_message_count(self) -> None:
-        try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text as sa_text
-
-            db = SessionLocal()
-            try:
-                db.execute(
-                    sa_text(
-                        "UPDATE channel_connections "
-                        "SET message_count = message_count + 1, "
-                        "last_activity_at = NOW() "
-                        "WHERE id = :cid::uuid"
-                    ),
-                    {"cid": self.connection_id},
-                )
-                db.commit()
-            finally:
-                db.close()
-        except Exception as exc:
-            logger.debug("Failed to increment message count: %s", exc)

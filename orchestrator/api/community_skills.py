@@ -1,322 +1,231 @@
 """
-Community Skills API endpoints (PRD-55: Autonomous Assistant Platform).
+Community Skills API (PRD-55 US-016)
+=====================================
 
-Search, install, list, and uninstall community skills from skills.sh
-or the built-in skills directory.
+Search, install, and manage community skills from skills.sh ecosystem.
+Admin-only endpoints for browsing the skills.sh marketplace.
 """
-
-from __future__ import annotations
 
 import json
 import logging
 import os
-import re
-import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/skills/community", tags=["Community Skills"])
+router = APIRouter(prefix="/api/skills/community", tags=["community-skills"])
 
-# Base directories
-_SKILLS_SH_API = "https://skills.sh/api/search"
-_BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
-_USER_SKILLS_BASE = Path.home() / ".automatos" / "skills"
-
-# Security thresholds
-_RISK_AUTO_INSTALL = 20
-_RISK_REVIEW = 69
-# >= 70 is blocked
-
-_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-
-
-def _validate_skill_name(name: str) -> str:
-    """Validate a skill name to prevent path traversal."""
-    if not name or not _SAFE_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail=f"Invalid skill name: {name!r}")
-    return name
-
-
-def _safe_workspace_dir(workspace_id: str) -> Path:
-    """Build and validate workspace directory, rejecting path traversal."""
-    _validate_skill_name(workspace_id)  # workspace_id must also be safe
-    workspace_dir = (_USER_SKILLS_BASE / workspace_id).resolve()
-    try:
-        workspace_dir.relative_to(_USER_SKILLS_BASE.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid workspace ID")
-    return workspace_dir
-
-
-# ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
-
-
-class InstallRequest(BaseModel):
-    workspace_id: str
-    skill_url: str = Field(..., description="URL or slug from skills.sh")
-    force: bool = Field(False, description="Install even if risk score is in review range")
-
-
-class InstalledSkill(BaseModel):
-    name: str
-    description: str = ""
-    version: str = ""
-    category: str = ""
-    source: str = "built-in"  # "built-in" or "community"
-    path: str = ""
-
-
-# ---------------------------------------------------------------------------
-# Search
-# ---------------------------------------------------------------------------
+# skills.sh API base URL
+SKILLS_SH_API = "https://api.skills.sh/v1"
 
 
 @router.get("/search")
 async def search_skills(
     q: str = Query(..., min_length=1, description="Search query"),
-) -> Dict[str, Any]:
-    """Proxy search to skills.sh API."""
-    import httpx
+    category: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Search for community skills on skills.sh."""
+    if ctx.user.role not in ("admin", "owner"):
+        raise HTTPException(403, "Only admin users can browse community skills")
+
+    import requests
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(_SKILLS_SH_API, params={"q": q})
-            if resp.status_code != 200:
-                return {
-                    "ok": False,
-                    "error": f"skills.sh returned status {resp.status_code}",
-                    "results": [],
-                }
-            data = resp.json()
-        return {"ok": True, "results": data if isinstance(data, list) else data.get("results", [])}
-    except Exception as exc:
-        logger.warning("skills.sh search failed: %s", exc)
-        return {"ok": False, "error": str(exc), "results": []}
+        params = {"q": q, "limit": limit}
+        if category:
+            params["category"] = category
 
+        resp = requests.get(f"{SKILLS_SH_API}/skills/search", params=params, timeout=10)
 
-# ---------------------------------------------------------------------------
-# Install
-# ---------------------------------------------------------------------------
+        if resp.status_code == 200:
+            results = resp.json()
+            skills = results.get("skills", results.get("results", []))
+            return {
+                "skills": [
+                    {
+                        "name": s.get("name", ""),
+                        "description": s.get("description", ""),
+                        "author": s.get("author", "unknown"),
+                        "installs": s.get("installs", s.get("install_count", 0)),
+                        "category": s.get("category", "general"),
+                        "version": s.get("version", "1.0.0"),
+                        "url": s.get("url", s.get("repository", "")),
+                        "rating": s.get("rating"),
+                    }
+                    for s in skills[:limit]
+                ],
+                "total": results.get("total", len(skills)),
+            }
+
+        return {"skills": [], "total": 0}
+
+    except Exception as e:
+        logger.error("Skills search failed: %s", e)
+        return {"skills": [], "total": 0, "error": "skills.sh API unavailable"}
 
 
 @router.post("/install")
-async def install_skill(body: InstallRequest) -> Dict[str, Any]:
-    """Download a skill from skills.sh, run a security scan, and save locally."""
-    import httpx
+async def install_skill(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Install a community skill. Downloads, scans, and saves to workspace."""
+    if ctx.user.role not in ("admin", "owner"):
+        raise HTTPException(403, "Only admin users can install community skills")
 
-    workspace_dir = _safe_workspace_dir(body.workspace_id)
-    workspace_dir.mkdir(parents=True, exist_ok=True)
-
-    # Resolve the skill content
-    skill_url = body.skill_url
-    if not skill_url.startswith("http"):
-        # Treat as a slug -- build the download URL
-        skill_url = f"https://skills.sh/api/skills/{skill_url}/download"
-
-    try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(skill_url)
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to download skill: HTTP {resp.status_code}",
-                )
-            content = resp.text
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Download error: {exc}")
-
-    # Extract skill name from YAML frontmatter
-    skill_name = _extract_frontmatter_field(content, "name")
+    skill_name = payload.get("skill_name", "").strip()
+    force = payload.get("force", False)
     if not skill_name:
-        skill_name = body.skill_url.rstrip("/").split("/")[-1]
-    skill_name = _validate_skill_name(skill_name)
+        raise HTTPException(400, "skill_name is required")
 
-    # Security scan
-    risk_score, risk_details = _security_scan(content)
+    import requests
 
-    if risk_score >= 70 and not body.force:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": "Skill blocked due to high risk score",
-                "risk_score": risk_score,
-                "details": risk_details,
-            },
+    # 1. Fetch from skills.sh
+    try:
+        resp = requests.get(f"{SKILLS_SH_API}/skills/{skill_name}", timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(404, f"Skill '{skill_name}' not found on skills.sh")
+        skill_data = resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch from skills.sh: {str(e)}")
+
+    skill_content = skill_data.get("content", skill_data.get("skill_md", ""))
+    if not skill_content:
+        raise HTTPException(400, "Skill has no content")
+
+    # 2. Security scan
+    scan_result = None
+    risk_score = 0
+    try:
+        from core.services.plugin_security_scanner import get_plugin_scanner
+        scanner = get_plugin_scanner()
+        scan_result = await scanner.scan_content(
+            content=skill_content,
+            filename=f"{skill_name}/SKILL.md",
+            content_type="skill",
         )
+        risk_score = scan_result.get("risk_score", 0) if scan_result else 0
+    except Exception as scan_err:
+        logger.warning("Security scan unavailable: %s", scan_err)
 
-    if _RISK_AUTO_INSTALL <= risk_score < 70 and not body.force:
-        return {
-            "ok": False,
-            "status": "review_required",
-            "risk_score": risk_score,
-            "details": risk_details,
-            "message": (
-                f"Skill has a risk score of {risk_score}. "
-                "Set force=true to install anyway."
-            ),
-        }
+    if not force:
+        if risk_score >= 70:
+            return {
+                "status": "blocked",
+                "risk_score": risk_score,
+                "reason": "Skill blocked by security scanner",
+                "findings": scan_result.get("findings", []) if scan_result else [],
+            }
+        if risk_score >= 20:
+            return {
+                "status": "review_required",
+                "risk_score": risk_score,
+                "findings": scan_result.get("findings", []) if scan_result else [],
+                "skill_name": skill_name,
+                "message": "Admin confirmation required",
+            }
 
-    # Save the skill
+    # 3. Save to workspace skills directory
+    workspace_dir = Path(os.path.expanduser("~/.automatos/skills")) / str(ctx.workspace_id)
     skill_dir = workspace_dir / skill_name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
-    return {
-        "ok": True,
-        "skill_name": skill_name,
+    (skill_dir / "SKILL.md").write_text(skill_content)
+    meta = {
+        "name": skill_name,
+        "source": "skills.sh",
+        "installed_at": datetime.utcnow().isoformat(),
+        "installed_by": ctx.user.id,
+        "version": skill_data.get("version", "1.0.0"),
+        "author": skill_data.get("author", "unknown"),
         "risk_score": risk_score,
-        "risk_details": risk_details,
-        "path": str(skill_dir),
     }
+    (skill_dir / "metadata.json").write_text(json.dumps(meta, indent=2))
 
-
-# ---------------------------------------------------------------------------
-# List installed
-# ---------------------------------------------------------------------------
+    logger.info("Installed skill '%s' for workspace %s (risk_score=%s)", skill_name, ctx.workspace_id, risk_score)
+    return {"status": "installed", "skill_name": skill_name, "risk_score": risk_score}
 
 
 @router.get("/installed")
 async def list_installed_skills(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """List built-in and workspace-installed skills."""
-    skills: List[Dict[str, Any]] = []
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """List all installed skills (workspace + built-in)."""
+    results = []
 
-    # Built-in skills
-    if _BUILTIN_SKILLS_DIR.is_dir():
-        for skill_path in _BUILTIN_SKILLS_DIR.iterdir():
-            if skill_path.is_dir():
-                md_file = skill_path / "SKILL.md"
-                if md_file.exists():
-                    content = md_file.read_text(encoding="utf-8")
-                    skills.append(
-                        {
-                            "name": _extract_frontmatter_field(content, "name") or skill_path.name,
-                            "description": _extract_frontmatter_field(content, "description") or "",
-                            "version": _extract_frontmatter_field(content, "version") or "",
-                            "category": _extract_frontmatter_field(content, "category") or "",
-                            "source": "built-in",
-                            "path": str(skill_path),
-                        }
-                    )
+    # Workspace skills (from skills.sh or manual)
+    workspace_dir = Path(os.path.expanduser("~/.automatos/skills")) / str(ctx.workspace_id)
+    if workspace_dir.exists():
+        for skill_dir in sorted(workspace_dir.iterdir()):
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                meta = _read_meta(skill_dir)
+                results.append({
+                    "name": skill_dir.name,
+                    "source": meta.get("source", "workspace"),
+                    "version": meta.get("version", "unknown"),
+                    "author": meta.get("author", "unknown"),
+                    "installed_at": meta.get("installed_at"),
+                    "risk_score": meta.get("risk_score"),
+                    "removable": True,
+                })
 
-    # Workspace community skills
-    workspace_dir = _safe_workspace_dir(workspace_id)
-    if workspace_dir.is_dir():
-        for skill_path in workspace_dir.iterdir():
-            if skill_path.is_dir():
-                md_file = skill_path / "SKILL.md"
-                if md_file.exists():
-                    content = md_file.read_text(encoding="utf-8")
-                    skills.append(
-                        {
-                            "name": _extract_frontmatter_field(content, "name") or skill_path.name,
-                            "description": _extract_frontmatter_field(content, "description") or "",
-                            "version": _extract_frontmatter_field(content, "version") or "",
-                            "category": _extract_frontmatter_field(content, "category") or "",
-                            "source": "community",
-                            "path": str(skill_path),
-                        }
-                    )
+    # Built-in skills (shipped with Automatos)
+    builtin_dir = Path(__file__).parent.parent / "skills"
+    if builtin_dir.exists():
+        for skill_dir in sorted(builtin_dir.iterdir()):
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
+                results.append({
+                    "name": skill_dir.name,
+                    "source": "built-in",
+                    "version": "1.0.0",
+                    "author": "Automatos",
+                    "installed_at": None,
+                    "risk_score": 0,
+                    "removable": False,
+                })
 
-    return {"ok": True, "skills": skills}
-
-
-# ---------------------------------------------------------------------------
-# Uninstall
-# ---------------------------------------------------------------------------
+    return {"skills": results, "total": len(results)}
 
 
 @router.delete("/{skill_name}")
 async def uninstall_skill(
     skill_name: str,
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """Remove a community-installed skill from the workspace."""
-    workspace_dir = _safe_workspace_dir(workspace_id)
-    safe_name = _validate_skill_name(skill_name)
-    skill_dir = workspace_dir / safe_name
-    if not skill_dir.is_dir():
-        raise HTTPException(status_code=404, detail=f"Skill '{safe_name}' not found")
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Uninstall a workspace skill."""
+    if ctx.user.role not in ("admin", "owner"):
+        raise HTTPException(403, "Only admin users can uninstall skills")
 
+    workspace_dir = Path(os.path.expanduser("~/.automatos/skills")) / str(ctx.workspace_id)
+    skill_dir = workspace_dir / skill_name
+
+    if not skill_dir.exists():
+        raise HTTPException(404, f"Skill '{skill_name}' not found")
+
+    import shutil
     shutil.rmtree(skill_dir)
-    return {"ok": True, "deleted": skill_name}
+    logger.info("Uninstalled skill '%s' from workspace %s", skill_name, ctx.workspace_id)
+    return {"status": "uninstalled", "skill_name": skill_name}
 
 
-# ---------------------------------------------------------------------------
-# Security scanning helpers
-# ---------------------------------------------------------------------------
-
-# Dangerous patterns to detect in skill content.
-# Each tuple: (regex_pattern, risk_weight, human_description)
-_DANGEROUS_PATTERNS: List[tuple] = []
-
-
-def _build_dangerous_patterns() -> List[tuple]:
-    """Build pattern list at module load time to keep literals clean."""
-    # Using string concatenation to avoid false positives from security scanners
-    patterns = [
-        (r"subprocess\.(call|run|Popen)", 30, "subprocess invocation"),
-        (r"os\.(system|popen)", 30, "os command invocation"),
-        ("ev" + r"al\(", 25, "dynamic code evaluation"),
-        ("ex" + r"ec\(", 25, "dynamic code execution"),
-        (r"__import__\(", 20, "dynamic import"),
-        (r"import\s+(ctypes|socket|http|urllib|requests)", 15, "network/system import"),
-        (r"open\(.*(w|a|x)\)", 10, "file write operation"),
-        (r"shutil\.(rmtree|move|copy)", 10, "filesystem mutation"),
-        (r"(password|secret|token|api_key)\s*=\s*['\"]", 15, "hardcoded secret"),
-        (r"base64\.(b64decode|decodebytes)", 10, "base64 decode (potential obfuscation)"),
-    ]
-    return patterns
-
-
-_DANGEROUS_PATTERNS = _build_dangerous_patterns()
-
-
-def _security_scan(content: str) -> tuple:
-    """Run a basic security scan on skill content.
-
-    Returns (risk_score: int, details: list[str]).
-    """
-    # Try PluginScanService first if available
-    try:
-        from core.services.plugin_security_scanner import PluginScanService
-
-        scanner = PluginScanService()
-        result = scanner.scan(content)
-        return result.get("risk_score", 0), result.get("details", [])
-    except ImportError:
-        pass
-    except Exception as exc:
-        logger.warning("PluginScanService failed, falling back to regex: %s", exc)
-
-    # Fallback: basic pattern matching
-    score = 0
-    details: List[str] = []
-
-    for pattern, weight, description in _DANGEROUS_PATTERNS:
-        matches = re.findall(pattern, content, re.IGNORECASE)
-        if matches:
-            score += weight
-            details.append(f"{description} ({len(matches)} occurrence(s), +{weight})")
-
-    return min(score, 100), details
-
-
-def _extract_frontmatter_field(content: str, field: str) -> Optional[str]:
-    """Extract a field value from YAML frontmatter (between --- delimiters)."""
-    match = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
-    if not match:
-        return None
-    frontmatter = match.group(1)
-    field_match = re.search(rf"^{field}:\s*(.+)$", frontmatter, re.MULTILINE)
-    if field_match:
-        return field_match.group(1).strip().strip('"').strip("'")
-    return None
+def _read_meta(skill_dir: Path) -> dict:
+    meta_file = skill_dir / "metadata.json"
+    if meta_file.exists():
+        try:
+            return json.loads(meta_file.read_text())
+        except Exception:
+            pass
+    return {}

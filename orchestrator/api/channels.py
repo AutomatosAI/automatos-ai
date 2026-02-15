@@ -1,345 +1,345 @@
 """
-Channel Connection API endpoints (PRD-55: Autonomous Assistant Platform).
+Channel Management API (PRD-55 US-023)
+=======================================
 
-CRUD for channel connections (Telegram, Slack, Discord) plus adapter
-lifecycle management and messaging analytics.
+CRUD endpoints for managing channel connections (Telegram, Slack, Discord).
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Dict, List
+from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/channels", tags=["Channels"])
+router = APIRouter(prefix="/api/channels", tags=["channels"])
 
+_SUPPORTED_PLATFORMS = {"telegram", "slack", "discord"}
 
-# ---------------------------------------------------------------------------
-# Request / response schemas
-# ---------------------------------------------------------------------------
-
-
-class ChannelConnectionCreate(BaseModel):
-    workspace_id: str
-    platform: str = Field(..., description="telegram | slack | discord | whatsapp | teams | google_chat | signal | imessage | irc | matrix | line")
-    config: Dict[str, Any] = Field(default_factory=dict)
-    default_agent_id: Optional[int] = None
-
-
-class ChannelConnectionUpdate(BaseModel):
-    config: Optional[Dict[str, Any]] = None
-    default_agent_id: Optional[int] = None
-    status: Optional[str] = None
-
-
-class ChannelConnectionResponse(BaseModel):
-    id: str
-    workspace_id: str
-    platform: str
-    config: Dict[str, Any]
-    status: str
-    default_agent_id: Optional[int]
-    message_count: int
-    last_activity_at: Optional[str]
-    created_at: Optional[str]
-    updated_at: Optional[str]
-
-
-def _row_to_response(conn: Any) -> Dict[str, Any]:
-    return {
-        "id": str(conn.id),
-        "workspace_id": str(conn.workspace_id),
-        "platform": conn.platform,
-        "config": _sanitize_config(conn.config or {}),
-        "status": conn.status,
-        "default_agent_id": conn.default_agent_id,
-        "message_count": conn.message_count or 0,
-        "last_activity_at": conn.last_activity_at.isoformat() if conn.last_activity_at else None,
-        "created_at": conn.created_at.isoformat() if conn.created_at else None,
-        "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
-    }
-
-
-def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Mask sensitive tokens in the config for API responses."""
-    _SENSITIVE_KEYS = (
-        "bot_token", "signing_secret", "app_token", "access_token",
-        "app_password", "password", "channel_access_token", "channel_secret",
-        "service_account_json",
-    )
-    masked = dict(config)
-    for key in _SENSITIVE_KEYS:
-        if key in masked and masked[key]:
-            val = str(masked[key])
-            masked[key] = val[:6] + "..." + val[-4:] if len(val) > 10 else "***"
-    return masked
-
-
-# ---------------------------------------------------------------------------
-# Platform-specific config validation
-# ---------------------------------------------------------------------------
-
-_REQUIRED_CONFIG_KEYS = {
+_REQUIRED_CONFIG = {
     "telegram": ["bot_token"],
-    "slack": ["bot_token", "app_token"],
+    "slack": ["bot_token", "signing_secret"],
     "discord": ["bot_token"],
-    "whatsapp": ["access_token", "phone_number_id"],
-    "teams": ["app_id", "app_password"],
-    "google_chat": ["service_account_json"],
-    "signal": ["phone_number"],
-    "imessage": ["server_url", "password"],
-    "irc": ["server", "nickname"],
-    "matrix": ["homeserver", "user_id", "access_token"],
-    "line": ["channel_access_token", "channel_secret"],
 }
 
 
-def _validate_config(platform: str, config: Dict[str, Any]) -> None:
-    required = _REQUIRED_CONFIG_KEYS.get(platform, [])
-    missing = [k for k in required if not config.get(k)]
-    if missing:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Missing required config keys for {platform}: {missing}",
-        )
-
-
-# ---------------------------------------------------------------------------
-# CRUD endpoints
-# ---------------------------------------------------------------------------
-
-
-@router.get("/")
+@router.get("")
 async def list_channels(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """List all channel connections for a workspace."""
-    from core.database.database import SessionLocal
-    from core.models.channels import ChannelConnection
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """List all channel connections for the current workspace."""
+    rows = db.execute(
+        text("""
+            SELECT id, platform, status, metadata, default_agent_id, message_count, last_activity_at, created_at
+            FROM channel_connections
+            WHERE workspace_id = :ws_id
+            ORDER BY created_at DESC
+        """),
+        {"ws_id": str(ctx.workspace_id)},
+    ).fetchall()
 
-    db = SessionLocal()
-    try:
-        connections = (
-            db.query(ChannelConnection)
-            .filter(ChannelConnection.workspace_id == workspace_id)
-            .order_by(ChannelConnection.created_at.desc())
-            .all()
-        )
-        return {
-            "ok": True,
-            "connections": [_row_to_response(c) for c in connections],
+    return [
+        {
+            "id": str(r.id),
+            "platform": r.platform,
+            "status": r.status,
+            "metadata": r.metadata or {},
+            "default_agent_id": r.default_agent_id,
+            "message_count": r.message_count or 0,
+            "last_activity_at": r.last_activity_at.isoformat() if r.last_activity_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
         }
-    finally:
-        db.close()
+        for r in rows
+    ]
 
 
-@router.post("/")
-async def create_channel(body: ChannelConnectionCreate) -> Dict[str, Any]:
+@router.post("")
+async def create_channel(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
     """Create a new channel connection."""
-    platform = body.platform.lower()
-    if platform not in _REQUIRED_CONFIG_KEYS:
-        supported = ", ".join(sorted(_REQUIRED_CONFIG_KEYS.keys()))
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unsupported platform '{body.platform}'. Must be one of: {supported}",
-        )
+    platform = payload.get("platform", "").lower()
+    config = payload.get("config", {})
+    default_agent_id = payload.get("default_agent_id")
 
-    _validate_config(platform, body.config)
+    if platform not in _SUPPORTED_PLATFORMS:
+        raise HTTPException(400, f"Platform must be one of {_SUPPORTED_PLATFORMS}")
 
-    from core.database.database import SessionLocal
-    from core.models.channels import ChannelConnection
+    # Validate required config fields
+    required = _REQUIRED_CONFIG.get(platform, [])
+    missing = [f for f in required if not config.get(f)]
+    if missing:
+        raise HTTPException(400, f"Missing required config fields for {platform}: {missing}")
 
-    db = SessionLocal()
-    try:
-        conn = ChannelConnection(
-            id=uuid4(),
-            workspace_id=body.workspace_id,
-            platform=platform,
-            config=body.config,
-            status="disconnected",
-            default_agent_id=body.default_agent_id,
-        )
-        db.add(conn)
-        db.commit()
-        db.refresh(conn)
-        return {"ok": True, "connection": _row_to_response(conn)}
-    finally:
-        db.close()
+    conn_id = uuid4()
+    db.execute(
+        text("""
+            INSERT INTO channel_connections (id, workspace_id, platform, config, status, default_agent_id, created_at, updated_at)
+            VALUES (:id, :ws_id, :platform, :config, 'inactive', :agent_id, NOW(), NOW())
+        """),
+        {
+            "id": str(conn_id),
+            "ws_id": str(ctx.workspace_id),
+            "platform": platform,
+            "config": __import__('json').dumps(config),
+            "agent_id": default_agent_id,
+        },
+    )
+    db.commit()
+
+    logger.info("Created channel connection %s (%s) for workspace %s", conn_id, platform, ctx.workspace_id)
+    return {"id": str(conn_id), "platform": platform, "status": "inactive"}
 
 
 @router.put("/{channel_id}")
 async def update_channel(
-    channel_id: str, body: ChannelConnectionUpdate
-) -> Dict[str, Any]:
-    """Update a channel connection."""
-    from core.database.database import SessionLocal
-    from core.models.channels import ChannelConnection
+    channel_id: str,
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Update a channel connection's config."""
+    row = db.execute(
+        text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
 
-    db = SessionLocal()
-    try:
-        conn = (
-            db.query(ChannelConnection)
-            .filter(ChannelConnection.id == channel_id)
-            .first()
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
+    updates = []
+    params: Dict[str, Any] = {"id": channel_id}
+
+    if "config" in payload:
+        updates.append("config = :config")
+        params["config"] = __import__('json').dumps(payload["config"])
+    if "default_agent_id" in payload:
+        updates.append("default_agent_id = :agent_id")
+        params["agent_id"] = payload["default_agent_id"]
+
+    if updates:
+        updates.append("updated_at = NOW()")
+        db.execute(
+            text(f"UPDATE channel_connections SET {', '.join(updates)} WHERE id = :id"),
+            params,
         )
-        if not conn:
-            raise HTTPException(status_code=404, detail="Channel connection not found")
-
-        if body.config is not None:
-            _validate_config(conn.platform, body.config)
-            conn.config = body.config
-        if body.default_agent_id is not None:
-            conn.default_agent_id = body.default_agent_id
-        if body.status is not None:
-            conn.status = body.status
-
         db.commit()
-        db.refresh(conn)
-        return {"ok": True, "connection": _row_to_response(conn)}
-    finally:
-        db.close()
+
+    return {"status": "updated"}
 
 
 @router.delete("/{channel_id}")
-async def delete_channel(channel_id: str) -> Dict[str, Any]:
-    """Delete a channel connection (stops adapter first if running)."""
-    from core.database.database import SessionLocal
-    from core.models.channels import ChannelConnection
+async def delete_channel(
+    channel_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Delete a channel connection (stops adapter if running)."""
+    row = db.execute(
+        text("SELECT id, platform FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
 
     # Stop adapter if running
     try:
         from channels.manager import get_channel_manager
+        manager = get_channel_manager()
+        await manager.stop_adapter(channel_id)
+    except Exception as exc:
+        logger.warning("Could not stop adapter for channel %s: %s", channel_id, exc)
 
-        mgr = get_channel_manager()
-        await mgr.stop_adapter(channel_id)
-    except Exception:
-        pass
+    db.execute(
+        text("DELETE FROM channel_connections WHERE id = :id"),
+        {"id": channel_id},
+    )
+    db.commit()
 
-    db = SessionLocal()
-    try:
-        conn = (
-            db.query(ChannelConnection)
-            .filter(ChannelConnection.id == channel_id)
-            .first()
-        )
-        if not conn:
-            raise HTTPException(status_code=404, detail="Channel connection not found")
-
-        db.delete(conn)
-        db.commit()
-        return {"ok": True, "deleted": channel_id}
-    finally:
-        db.close()
-
-
-# ---------------------------------------------------------------------------
-# Adapter lifecycle
-# ---------------------------------------------------------------------------
+    logger.info("Deleted channel connection %s", channel_id)
+    return {"status": "deleted"}
 
 
 @router.post("/{channel_id}/test")
-async def test_channel(channel_id: str) -> Dict[str, Any]:
-    """Test a channel connection without starting the full adapter."""
-    from core.database.database import SessionLocal
-    from core.models.channels import ChannelConnection
-    from channels.manager import ChannelManager
+async def test_channel(
+    channel_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Test a channel connection by pinging the platform API."""
+    row = db.execute(
+        text("SELECT platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
 
-    db = SessionLocal()
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
+    platform = row.platform
+    config = row.config or {}
+
+    import httpx
+
     try:
-        conn = (
-            db.query(ChannelConnection)
-            .filter(ChannelConnection.id == channel_id)
-            .first()
-        )
-        if not conn:
-            raise HTTPException(status_code=404, detail="Channel connection not found")
+        async with httpx.AsyncClient(timeout=10) as client:
+            if platform == "telegram":
+                token = config.get("bot_token", "")
+                resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+                if resp.status_code == 200:
+                    bot_info = resp.json().get("result", {})
+                    return {"status": "connected", "bot_name": bot_info.get("username")}
+                return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
 
-        adapter = ChannelManager._create_adapter(conn)
-        try:
-            info = await adapter.test_connection()
-            return {"ok": True, "connection_info": info}
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
-    finally:
-        db.close()
+            elif platform == "slack":
+                token = config.get("bot_token", "")
+                resp = await client.post(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                data = resp.json()
+                if data.get("ok"):
+                    return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
+                return {"status": "error", "detail": data.get("error", "Unknown error")}
+
+            elif platform == "discord":
+                token = config.get("bot_token", "")
+                resp = await client.get(
+                    "https://discord.com/api/v10/users/@me",
+                    headers={"Authorization": f"Bot {token}"},
+                )
+                if resp.status_code == 200:
+                    user = resp.json()
+                    return {"status": "connected", "bot_name": user.get("username")}
+                return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
+
+        return {"status": "error", "detail": f"Unknown platform: {platform}"}
+
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
 
 
 @router.post("/{channel_id}/start")
-async def start_channel(channel_id: str) -> Dict[str, Any]:
-    """Start the adapter for a channel connection."""
-    from channels.manager import get_channel_manager
+async def start_channel(
+    channel_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Start the adapter for this channel connection."""
+    row = db.execute(
+        text("SELECT id, platform, config FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
 
-    mgr = get_channel_manager()
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
     try:
-        await mgr.start_adapter(channel_id)
-        return {"ok": True, "status": "started"}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        from channels.manager import get_channel_manager
+        manager = get_channel_manager()
+        await manager.start_adapter(channel_id, str(ctx.workspace_id), row.platform, row.config or {})
+
+        db.execute(
+            text("UPDATE channel_connections SET status = 'active', updated_at = NOW() WHERE id = :id"),
+            {"id": channel_id},
+        )
+        db.commit()
+
+        return {"status": "started"}
+    except Exception as e:
+        logger.error("Failed to start channel %s: %s", channel_id, e)
+        raise HTTPException(500, f"Failed to start adapter: {str(e)}")
 
 
 @router.post("/{channel_id}/stop")
-async def stop_channel(channel_id: str) -> Dict[str, Any]:
-    """Stop the adapter for a channel connection."""
-    from channels.manager import get_channel_manager
+async def stop_channel(
+    channel_id: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Stop the adapter for this channel connection."""
+    row = db.execute(
+        text("SELECT id FROM channel_connections WHERE id = :id AND workspace_id = :ws_id"),
+        {"id": channel_id, "ws_id": str(ctx.workspace_id)},
+    ).fetchone()
 
-    mgr = get_channel_manager()
+    if not row:
+        raise HTTPException(404, "Channel connection not found")
+
     try:
-        await mgr.stop_adapter(channel_id)
-        return {"ok": True, "status": "stopped"}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        from channels.manager import get_channel_manager
+        manager = get_channel_manager()
+        await manager.stop_adapter(channel_id)
+
+        db.execute(
+            text("UPDATE channel_connections SET status = 'inactive', updated_at = NOW() WHERE id = :id"),
+            {"id": channel_id},
+        )
+        db.commit()
+
+        return {"status": "stopped"}
+    except Exception as e:
+        logger.error("Failed to stop channel %s: %s", channel_id, e)
+        raise HTTPException(500, f"Failed to stop adapter: {str(e)}")
 
 
-# ---------------------------------------------------------------------------
-# Analytics
-# ---------------------------------------------------------------------------
-
+# ── Channel Analytics ──────────────────────────────────────────────
 
 @router.get("/analytics")
 async def get_channel_analytics(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """Message counts by source from routing_decisions table."""
-    from core.database.database import SessionLocal
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return channel message stats for analytics dashboard (US-026)."""
+    from datetime import datetime, timedelta
 
-    db = SessionLocal()
+    ws_id = str(ctx.workspace_id)
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
     try:
-        rows = db.execute(
-            text(
-                "SELECT source, COUNT(*) as count "
-                "FROM routing_decisions "
-                "WHERE workspace_id = :wid::uuid "
-                "GROUP BY source "
-                "ORDER BY count DESC"
-            ),
-            {"wid": workspace_id},
+        # Messages by source from routing_decisions
+        by_source = db.execute(
+            text("""
+                SELECT source_channel, COUNT(*) as count
+                FROM routing_decisions
+                WHERE workspace_id = :ws_id AND created_at >= :start
+                GROUP BY source_channel
+            """),
+            {"ws_id": ws_id, "start": today_start},
         ).fetchall()
 
-        by_source = {r[0]: r[1] for r in rows}
-
-        # Also get channel_connections stats
-        channel_rows = db.execute(
-            text(
-                "SELECT platform, SUM(message_count) as total "
-                "FROM channel_connections "
-                "WHERE workspace_id = :wid::uuid "
-                "GROUP BY platform"
-            ),
-            {"wid": workspace_id},
+        # Total messages from channel connections
+        channel_stats = db.execute(
+            text("""
+                SELECT platform, SUM(message_count) as total, MAX(last_activity_at) as last_activity
+                FROM channel_connections
+                WHERE workspace_id = :ws_id
+                GROUP BY platform
+            """),
+            {"ws_id": ws_id},
         ).fetchall()
-
-        by_platform = {r[0]: int(r[1] or 0) for r in channel_rows}
 
         return {
-            "ok": True,
-            "by_source": by_source,
-            "by_platform": by_platform,
+            "today_by_source": {r.source_channel: r.count for r in by_source} if by_source else {},
+            "channels": [
+                {
+                    "platform": r.platform,
+                    "total_messages": r.total or 0,
+                    "last_activity": r.last_activity.isoformat() if r.last_activity else None,
+                }
+                for r in channel_stats
+            ] if channel_stats else [],
         }
-    finally:
-        db.close()
+    except Exception as e:
+        logger.error("Failed to get channel analytics: %s", e)
+        return {"today_by_source": {}, "channels": []}

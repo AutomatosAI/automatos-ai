@@ -1,228 +1,159 @@
 """
-Discord Channel Adapter (PRD-55: Autonomous Assistant Platform).
+Discord Channel Adapter (PRD-55 US-022)
+========================================
 
-Bridges Discord guild/DM messages into the universal routing pipeline
-using discord.py v2.0+.
+Uses discord.py v2.0+ for async Discord bot integration.
+Converts Discord messages to RequestEnvelope for routing.
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
-from channels.base import BaseChannelAdapter
+from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
-# Max Discord message length
-_DISCORD_MAX_LEN = 2000
-
 
 class DiscordAdapter(BaseChannelAdapter):
-    """Adapter for Discord bots via discord.py v2.0+."""
+    """Discord bot adapter using discord.py."""
 
-    def __init__(
-        self,
-        connection_id: str,
-        workspace_id: str,
-        config: Dict[str, Any],
-    ) -> None:
+    def __init__(self, connection_id: str, workspace_id: str, config: Dict[str, Any]):
         super().__init__(connection_id, workspace_id, config)
-        self._client = None  # discord.Client
+        self._client = None
         self._task: Optional[asyncio.Task] = None
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    async def start(self):
+        """Start the Discord bot."""
+        try:
+            import discord
 
-    async def start(self) -> None:
-        import discord
+            token = self.config.get("bot_token", "")
+            if not token:
+                raise ValueError("bot_token is required")
 
-        token = self.config.get("bot_token")
-        if not token:
-            raise ValueError("Discord adapter requires 'bot_token' in config")
+            intents = discord.Intents.default()
+            intents.message_content = True
 
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.messages = True
+            self._client = discord.Client(intents=intents)
 
-        self._client = discord.Client(intents=intents)
+            @self._client.event
+            async def on_ready():
+                logger.info("[Discord:%s] Bot connected as %s", self.connection_id, self._client.user)
 
-        adapter_ref = self  # closure reference
+            @self._client.event
+            async def on_message(message):
+                # Ignore own messages
+                if message.author == self._client.user:
+                    return
+                # Ignore bot messages
+                if message.author.bot:
+                    return
+                await self._on_message(message)
 
-        @self._client.event
-        async def on_ready():
-            logger.info(
-                "Discord adapter %s connected as %s",
-                adapter_ref.connection_id,
-                self._client.user,
-            )
+            # Start in background task
+            self._task = asyncio.create_task(self._client.start(token))
+            self.is_running = True
+            logger.info("[Discord:%s] Bot starting", self.connection_id)
 
-        @self._client.event
-        async def on_message(message: discord.Message):
-            await adapter_ref._on_message(message)
+        except ImportError:
+            logger.error("[Discord] discord.py not installed. Run: pip install discord.py")
+            raise
+        except Exception as e:
+            logger.error("[Discord:%s] Failed to start: %s", self.connection_id, e)
+            raise
 
-        # Run the client in a background task
-        self._task = asyncio.create_task(self._client.start(token))
-        self._running = True
-        logger.info("Discord adapter %s starting", self.connection_id)
-
-    async def stop(self) -> None:
+    async def stop(self):
+        """Stop the Discord bot."""
         if self._client:
             try:
                 await self._client.close()
-            except Exception as exc:
-                logger.warning("Error closing Discord client: %s", exc)
-        if self._task and not self._task.done():
+            except Exception as e:
+                logger.warning("[Discord:%s] Error during stop: %s", self.connection_id, e)
+        if self._task:
             self._task.cancel()
-        self._running = False
-        logger.info("Discord adapter %s stopped", self.connection_id)
+        self.is_running = False
+        logger.info("[Discord:%s] Bot stopped", self.connection_id)
 
-    # ------------------------------------------------------------------
-    # Connection test
-    # ------------------------------------------------------------------
+    async def send_message(self, channel_id: str, text: str, **kwargs) -> bool:
+        """Send a message to a Discord channel."""
+        if not self._client:
+            return False
+        try:
+            channel = self._client.get_channel(int(channel_id))
+            if not channel:
+                channel = await self._client.fetch_channel(int(channel_id))
+
+            # Discord limit is 2000 chars
+            chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)]
+            for chunk in chunks:
+                await channel.send(chunk)
+            return True
+        except Exception as e:
+            logger.error("[Discord:%s] Failed to send message: %s", self.connection_id, e)
+            return False
 
     async def test_connection(self) -> Dict[str, Any]:
-        import httpx
-
-        token = self.config.get("bot_token", "")
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+        """Test Discord bot token validity."""
+        try:
+            import requests
+            token = self.config.get("bot_token", "")
+            resp = requests.get(
                 "https://discord.com/api/v10/users/@me",
                 headers={"Authorization": f"Bot {token}"},
+                timeout=10,
             )
-            if resp.status_code != 200:
-                raise ConnectionError(
-                    f"Discord users/@me failed ({resp.status_code}): {resp.text}"
-                )
-            data = resp.json()
-        return {
-            "platform": "discord",
-            "bot_id": data.get("id"),
-            "bot_username": data.get("username"),
-            "bot_discriminator": data.get("discriminator"),
-        }
+            if resp.status_code == 200:
+                user = resp.json()
+                return {"status": "connected", "bot_name": user.get("username")}
+            return {"status": "error", "detail": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
 
-    # ------------------------------------------------------------------
-    # Incoming messages
-    # ------------------------------------------------------------------
-
-    async def _on_message(self, message: Any) -> None:
-        """discord.py on_message handler."""
-        # Ignore own messages
-        if self._client and message.author == self._client.user:
-            return
-        # Ignore other bots
-        if message.author.bot:
-            return
-        if not message.content:
-            return
-
-        # Show typing indicator
-        response_text = None
+    async def _on_message(self, message):
+        """Handle incoming Discord message."""
         try:
+            # Show typing indicator
             async with message.channel.typing():
-                response_text = await self.handle_message(message)
-        except Exception:
-            if response_text is None:
-                response_text = await self.handle_message(message)
+                platform_msg = {
+                    "channel_id": str(message.channel.id),
+                    "reply_channel_id": str(message.channel.id),
+                    "user_id": str(message.author.id),
+                    "user_name": message.author.display_name,
+                    "text": message.content,
+                    "message_id": str(message.id),
+                    "guild_id": str(message.guild.id) if message.guild else None,
+                }
 
-        if response_text:
-            await self.send_message(
-                str(message.channel.id), response_text, _channel=message.channel
-            )
+                await self.handle_message(platform_msg)
 
-        self._increment_message_count()
+        except Exception as e:
+            logger.error("[Discord:%s] Error handling message: %s", self.connection_id, e)
+            try:
+                await message.channel.send("Sorry, I encountered an error processing your message.")
+            except Exception:
+                pass
 
-    # ------------------------------------------------------------------
-    # Outbound
-    # ------------------------------------------------------------------
-
-    async def send_message(
-        self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Send a message to a Discord channel, auto-chunking if needed."""
-        channel = kwargs.get("_channel")
-
-        if channel is None and self._client:
-            channel = self._client.get_channel(int(channel_id))
-            if channel is None:
-                try:
-                    channel = await self._client.fetch_channel(int(channel_id))
-                except Exception as exc:
-                    logger.error("Could not fetch Discord channel %s: %s", channel_id, exc)
-                    return
-
-        if channel is None:
-            logger.error("No Discord channel available for sending")
-            return
-
-        chunks = self._chunk_text(text, _DISCORD_MAX_LEN)
-        for chunk in chunks:
-            await channel.send(chunk)
-
-    # ------------------------------------------------------------------
-    # Envelope conversion
-    # ------------------------------------------------------------------
-
-    def _to_envelope(self, platform_message: Any) -> Any:
-        from core.models.routing import RequestEnvelope, ChannelSource, RequestUser
-
-        msg = platform_message  # discord.Message
+    def _to_envelope(self, platform_message: Dict[str, Any]):
+        """Convert Discord message to RequestEnvelope."""
+        from core.models.routing import RequestEnvelope, RequestUser, ChannelSource
 
         return RequestEnvelope(
+            id=uuid4(),
             source=ChannelSource.DISCORD,
-            content=msg.content or "",
-            raw_payload={
-                "message_id": str(msg.id),
-                "channel_id": str(msg.channel.id),
-                "guild_id": str(msg.guild.id) if msg.guild else None,
-            },
+            content=platform_message.get("text", ""),
+            raw_payload=platform_message,
             user=RequestUser(
-                id=str(msg.author.id),
-                name=str(msg.author),
+                id=platform_message.get("user_id"),
+                name=platform_message.get("user_name"),
+                auth_type="discord",
             ),
-            workspace_id=UUID(self.workspace_id),
+            workspace_id=self.workspace_id,
             metadata={
                 "channel_adapter": "discord",
                 "connection_id": self.connection_id,
+                "channel_id": platform_message.get("channel_id"),
+                "guild_id": platform_message.get("guild_id"),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _chunk_text(text: str, max_len: int) -> List[str]:
-        if len(text) <= max_len:
-            return [text]
-        chunks = []
-        while text:
-            chunks.append(text[:max_len])
-            text = text[max_len:]
-        return chunks
-
-    def _increment_message_count(self) -> None:
-        try:
-            from core.database.database import SessionLocal
-            from sqlalchemy import text as sa_text
-
-            db = SessionLocal()
-            try:
-                db.execute(
-                    sa_text(
-                        "UPDATE channel_connections "
-                        "SET message_count = message_count + 1, "
-                        "last_activity_at = NOW() "
-                        "WHERE id = :cid::uuid"
-                    ),
-                    {"cid": self.connection_id},
-                )
-                db.commit()
-            finally:
-                db.close()
-        except Exception as exc:
-            logger.debug("Failed to increment message count: %s", exc)

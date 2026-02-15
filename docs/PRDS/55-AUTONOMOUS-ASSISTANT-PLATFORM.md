@@ -310,7 +310,7 @@ Build 3 channel adapters using Python-native async libraries, running as backgro
 
 #### Architecture
 
-```
+```text
                     ┌──────────────────────────────┐
                     │     Automatos FastAPI App     │
                     │                              │
@@ -432,7 +432,7 @@ After each chat session interaction (or on a 30-minute timer), a background task
    - Decisions made
    - Tasks completed/started
 2. Writes a 3-5 sentence summary to Mem0 with date metadata:
-   ```
+   ```python
    mem0.add(
        user_id=f"ws_{workspace_id}_daily",
        text=f"[{date}] User worked on auth refactor. Used CodeGraph to find login routes. Discussed switching from JWT to session tokens. SecurityAgent flagged CSRF vulnerability.",
@@ -447,7 +447,7 @@ In `smart_orchestrator.py`, before building the system prompt:
 
 1. Fetch today's + yesterday's daily logs from Mem0
 2. Inject as a "Recent Context" section:
-   ```
+   ```markdown
    ## Recent Activity
    **Today (Feb 15):** Worked on analytics dashboard, fixed Composio app name formatting, deployed to staging.
    **Yesterday (Feb 14):** Implemented OpenRouter sync, built cost projection charts, reviewed PR for webhook system.

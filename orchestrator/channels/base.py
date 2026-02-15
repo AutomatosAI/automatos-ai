@@ -1,111 +1,112 @@
 """
-Base Channel Adapter (PRD-55: Autonomous Assistant Platform).
+Base Channel Adapter (PRD-55 US-019)
+=====================================
+Abstract base class for all channel adapters.
 
-Abstract base class that all platform-specific channel adapters must implement.
-Supports: Telegram, Slack, Discord, WhatsApp, Teams, Google Chat,
-Signal, iMessage, IRC, Matrix, LINE.
+Each platform (Telegram, Slack, Discord, etc.) subclasses
+BaseChannelAdapter and implements the abstract methods to
+translate platform-specific messages into RequestEnvelopes
+and route them through the UniversalRouter.
 """
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
-from uuid import UUID
+import logging
 
 logger = logging.getLogger(__name__)
 
 
 class BaseChannelAdapter(ABC):
-    """Abstract interface for a messaging-platform adapter.
+    """Abstract base for platform channel adapters."""
 
-    Subclasses must implement the abstract methods to connect, send, and
-    translate platform-specific messages into the universal RequestEnvelope.
-    """
-
-    def __init__(
-        self,
-        connection_id: str,
-        workspace_id: str,
-        config: Dict[str, Any],
-    ) -> None:
+    def __init__(self, connection_id: str, workspace_id: str, config: Dict[str, Any]):
         self.connection_id = connection_id
         self.workspace_id = workspace_id
         self.config = config
-        self._running = False
+        self.is_running = False
 
     # ------------------------------------------------------------------
-    # Abstract interface
+    # Lifecycle
     # ------------------------------------------------------------------
 
     @abstractmethod
-    async def start(self) -> None:
-        """Initialise the platform client and start listening for messages."""
+    async def start(self):
+        """Start listening for messages on this channel."""
+        ...
 
     @abstractmethod
-    async def stop(self) -> None:
-        """Gracefully disconnect and clean up resources."""
+    async def stop(self):
+        """Stop the adapter gracefully."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Messaging
+    # ------------------------------------------------------------------
 
     @abstractmethod
-    async def send_message(
-        self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Send a text message to the given platform channel/chat."""
+    async def send_message(self, channel_id: str, text: str, **kwargs) -> bool:
+        """Send a message to a specific channel/conversation."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------------
 
     @abstractmethod
     async def test_connection(self) -> Dict[str, Any]:
-        """Verify the adapter's credentials and return connection info."""
+        """Test if the connection credentials are valid.
 
-    @abstractmethod
-    def _to_envelope(self, platform_message: Any) -> Any:
-        """Convert a platform-native message into a ``RequestEnvelope``."""
+        Returns a dict with at least ``{"ok": bool, "detail": str}``.
+        """
+        ...
 
     # ------------------------------------------------------------------
-    # Concrete routing helper
+    # Ingest pipeline
     # ------------------------------------------------------------------
 
-    async def handle_message(self, platform_message: Any) -> Optional[str]:
-        """Convert *platform_message* to an envelope, route it, and return the response text.
-
-        This is the main entry-point called by each adapter's native event
-        handler.  It:
-        1. Converts the platform message into a :class:`RequestEnvelope`.
-        2. Routes via :class:`UniversalRouter`.
-        3. Returns the response text so the adapter can post it back.
+    async def handle_message(self, platform_message: Dict[str, Any]):
+        """Process an incoming platform message through the
+        ingest -> route -> execute -> respond pipeline.
         """
         try:
-            from core.models.routing import RequestEnvelope, ChannelSource
+            envelope = self._to_envelope(platform_message)
+            if not envelope:
+                return
+
+            # Lazy imports to avoid circular dependency at module load
             from core.routing.engine import UniversalRouter
             from core.database.database import SessionLocal
-
-            envelope = self._to_envelope(platform_message)
 
             db = SessionLocal()
             try:
                 router = UniversalRouter(db=db)
                 decision = await router.route(envelope)
-
-                if decision is None:
-                    return "I'm not sure how to handle that. Let me route you to a human."
-
-                # The router returns a RoutingDecision; the actual execution
-                # of the agent/workflow response is handled upstream.  For
-                # channel adapters we return the routing summary so the caller
-                # can relay it.
-                return (
-                    decision.reasoning
-                    or f"Routed to {decision.route_type} (confidence {decision.confidence:.0%})"
-                )
             finally:
                 db.close()
-        except Exception as exc:
-            logger.error(
-                "Error handling message in adapter %s: %s",
-                self.connection_id,
-                exc,
-            )
-            return "Sorry, something went wrong processing your message."
 
-    @property
-    def is_running(self) -> bool:
-        return self._running
+            # Send the response back to the originating channel
+            if decision and getattr(decision, "response", None):
+                reply_channel = (
+                    platform_message.get("reply_channel_id")
+                    or platform_message.get("channel_id")
+                )
+                if reply_channel:
+                    await self.send_message(reply_channel, decision.response)
+
+        except Exception as e:
+            logger.error(
+                "[Channel:%s] Failed to handle message: %s",
+                self.connection_id,
+                e,
+            )
+
+    @abstractmethod
+    def _to_envelope(self, platform_message: Dict[str, Any]) -> Optional["RequestEnvelope"]:
+        """Convert a platform-specific message dict to a RequestEnvelope.
+
+        Return ``None`` to silently skip messages that should be ignored
+        (e.g. bot's own messages).
+        """
+        ...
