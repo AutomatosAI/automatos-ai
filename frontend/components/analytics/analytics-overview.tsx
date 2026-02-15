@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import { useState, useEffect } from 'react'
 import {
   Bot,
   GitBranch,
@@ -10,6 +11,8 @@ import {
   TrendingDown,
   Brain,
   Sparkles,
+  Activity,
+  MessageSquare,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +35,15 @@ export function AnalyticsOverview({ days }: OverviewProps) {
   const { data: recommendations, isLoading: recsLoading } = useRecommendations()
   const { data: memory, isLoading: memoryLoading } = useWorkspaceMemory()
   const { data: chartPresets } = useChartPresets()
+
+  // PRD-55: Heartbeat and Channel analytics
+  const [heartbeatStats, setHeartbeatStats] = useState<any>({ total_today: 0, findings: 0, actions: 0, tokens_used: 0, recent_events: [] })
+  const [channelStats, setChannelStats] = useState<any>({})
+
+  useEffect(() => {
+    fetch('/api/heartbeat/analytics').then(r => r.json()).then(setHeartbeatStats).catch(() => {})
+    fetch('/api/channels/analytics').then(r => r.json()).then(data => setChannelStats(data.by_source || {})).catch(() => {})
+  }, [days])
 
   const summaryCards = [
     {
@@ -111,6 +123,66 @@ export function AnalyticsOverview({ days }: OverviewProps) {
         transition={{ duration: 0.5, delay: 0.6 }}
       >
         <AnalyticsRecommendations recommendations={recommendations || []} isLoading={recsLoading} />
+      </motion.div>
+
+      {/* PRD-55: Heartbeat Activity */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.65 }}>
+        <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Heartbeat Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-4 gap-4">
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <p className="text-xl font-bold">{heartbeatStats.total_today}</p>
+                <p className="text-xs text-muted-foreground">Today</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <p className="text-xl font-bold">{heartbeatStats.findings}</p>
+                <p className="text-xs text-muted-foreground">Findings</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <p className="text-xl font-bold">{heartbeatStats.actions}</p>
+                <p className="text-xs text-muted-foreground">Actions</p>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-muted/50">
+                <p className="text-xl font-bold">{heartbeatStats.tokens_used}</p>
+                <p className="text-xs text-muted-foreground">Tokens</p>
+              </div>
+            </div>
+            {heartbeatStats.recent_events?.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {heartbeatStats.recent_events.slice(0, 5).map((evt: any, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-sm p-2 rounded bg-muted/30">
+                    <span className={`h-2 w-2 rounded-full ${evt.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <span className="text-muted-foreground">{evt.source_type}</span>
+                    <span className="flex-1 truncate">{evt.source_id}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(evt.created_at).toLocaleTimeString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* PRD-55: Channel Activity */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.7 }}>
+        <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Channel Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-5 gap-3">
+              {['web', 'telegram', 'slack', 'discord', 'webhook'].map(ch => (
+                <div key={ch} className="text-center p-3 rounded-lg bg-muted/50">
+                  <p className="text-lg font-bold">{channelStats[ch] || 0}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{ch}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       </motion.div>
 
       {/* AI-Generated Insights — only render if presets are available */}

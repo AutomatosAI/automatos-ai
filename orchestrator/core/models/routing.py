@@ -34,6 +34,15 @@ class ChannelSource(str, Enum):
     API = "api"
     WORKFLOW = "workflow"
     WEBHOOK = "webhook"
+    TELEGRAM = "telegram"
+    DISCORD = "discord"
+    TEAMS = "teams"
+    GOOGLE_CHAT = "google_chat"
+    SIGNAL = "signal"
+    IMESSAGE = "imessage"
+    IRC = "irc"
+    MATRIX = "matrix"
+    LINE = "line"
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +112,7 @@ class RoutingRule(Base):
     id = Column(Integer, primary_key=True)
     workspace_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     source_pattern = Column(String(100), nullable=True)
+    source_channel = Column(String(50), nullable=True)  # PRD-55: channel-based routing
     intent_keywords = Column(JSONB, default=list)
     target_agent_id = Column(Integer, nullable=True)
     target_workflow_id = Column(Integer, nullable=True)

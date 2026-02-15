@@ -124,6 +124,20 @@ from api.execution_history import router as execution_history_router  # Enhanced
 from api.database_knowledge import router as database_knowledge_router  # PRD-21: Database Knowledge
 from api.database_analytics import router as database_analytics_router  # PRD-21: Real database analytics
 
+# PRD-55: Autonomous Assistant Platform (optional modules)
+try:
+    from api.heartbeat import router as heartbeat_router
+except ImportError:
+    heartbeat_router = None
+try:
+    from api.channels import router as channels_router
+except ImportError:
+    channels_router = None
+try:
+    from api.community_skills import router as community_skills_router
+except ImportError:
+    community_skills_router = None
+
 # Import Dashboard Integration (PRD-06)
 from api.dashboard_integration import (
     register_dashboard_routes,
@@ -177,16 +191,54 @@ async def lifespan(app: FastAPI):
         # Initialize Dashboard Services (PRD-06)
         await startup_dashboard(app)
         logger.info("Dashboard services initialized successfully")
-        
+
+        # PRD-55: Start HeartbeatService
+        if config.HEARTBEAT_ENABLED:
+            try:
+                from services.heartbeat_service import get_heartbeat_service
+                heartbeat_svc = get_heartbeat_service()
+                await heartbeat_svc.start()
+                logger.info("HeartbeatService started successfully")
+            except Exception as e:
+                logger.warning(f"HeartbeatService failed to start (non-fatal): {e}")
+
+        # PRD-55: Start ChannelManager
+        if config.CHANNELS_ENABLED:
+            try:
+                from channels.manager import get_channel_manager
+                channel_mgr = get_channel_manager()
+                await channel_mgr.start_all()
+                logger.info("ChannelManager started successfully")
+            except Exception as e:
+                logger.warning(f"ChannelManager failed to start (non-fatal): {e}")
+
     except Exception as e:
         logger.error(f"Failed to initialize services: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Automotas AI API Server...")
-    
+
+    # PRD-55: Stop HeartbeatService
+    if config.HEARTBEAT_ENABLED:
+        try:
+            from services.heartbeat_service import get_heartbeat_service
+            await get_heartbeat_service().stop()
+            logger.info("HeartbeatService stopped")
+        except Exception:
+            pass
+
+    # PRD-55: Stop ChannelManager
+    if config.CHANNELS_ENABLED:
+        try:
+            from channels.manager import get_channel_manager
+            await get_channel_manager().stop_all()
+            logger.info("ChannelManager stopped")
+        except Exception:
+            pass
+
     # Shutdown Dashboard Services (PRD-06)
     await shutdown_dashboard(app)
     logger.info("Dashboard services shutdown complete")
@@ -493,6 +545,14 @@ app.include_router(agent_plugins_router)  # PRD-42: Agent Plugin Assignment
 app.include_router(personas_router)  # PRD-42: Persona API
 if bug_reports_router is not None:
     app.include_router(bug_reports_router)  # Pilot Helper Widget: Jira bug reports
+
+# PRD-55: Autonomous Assistant Platform
+if heartbeat_router is not None:
+    app.include_router(heartbeat_router)
+if channels_router is not None:
+    app.include_router(channels_router)
+if community_skills_router is not None:
+    app.include_router(community_skills_router)
 
 # Register Dashboard Routes (PRD-06)
 register_dashboard_routes(app)

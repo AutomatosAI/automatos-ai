@@ -6,14 +6,15 @@
  * (orchestrator, workflows, agents, etc.)
  */
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { Save, RotateCcw, Brain, Zap, Settings } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { Save, RotateCcw, Brain, Zap, Settings, Activity, Sparkles, Loader2 } from 'lucide-react'
 import { SystemSetting } from '@/lib/api/system-settings'
 import { useModels } from '@/hooks/use-model-api'
 
@@ -31,6 +32,31 @@ export default function SystemLLMSettingsTab({
   onReset
 }: SystemLLMSettingsTabProps) {
   const [formData, setFormData] = useState<Record<string, string>>({})
+
+  // PRD-55: Soul & Personality state
+  const [soulSettings, setSoulSettings] = useState({
+    personality_mode: 'friendly',
+    custom_soul: '',
+    communication_style: 'balanced',
+    proactive_level: 'notify',
+    thinking_level: 'medium'
+  })
+  const [savingSoul, setSavingSoul] = useState(false)
+
+  // PRD-55: Heartbeat state
+  const [heartbeatSettings, setHeartbeatSettings] = useState({
+    enabled: false,
+    interval_minutes: 30,
+    active_hours_start: '08:00',
+    active_hours_end: '20:00',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    checklist: '- Check pending tasks\n- Review unrouted events\n- Summarize today\'s activity'
+  })
+  const [savingHeartbeat, setSavingHeartbeat] = useState(false)
+
+  // PRD-55: Memory state
+  const [memoryStats, setMemoryStats] = useState<any>({ total: 0, agents: 0, recent24h: 0, recent: [] })
+  const [memoryLoading, setMemoryLoading] = useState(false)
 
   // Load models from API
   const { data: allModels = [], isLoading: modelsLoading } = useModels(undefined, 'active')
@@ -56,6 +82,55 @@ export default function SystemLLMSettingsTab({
     })
     setFormData(initialData)
   }, [settings])
+
+  // PRD-55: Load soul, heartbeat, and memory settings
+  useEffect(() => {
+    // Load soul + heartbeat settings from workspace
+    fetch('/api/workspaces/current/settings')
+      .then(r => r.json())
+      .then(data => {
+        const orch = data?.settings?.orchestrator || {};
+        if (orch.personality_mode) setSoulSettings(s => ({ ...s, ...orch }));
+        if (orch.heartbeat) setHeartbeatSettings(s => ({ ...s, ...orch.heartbeat }));
+      })
+      .catch(() => {});
+
+    // Load memory stats
+    setMemoryLoading(true);
+    fetch('/api/workspaces/current/memory-stats')
+      .then(r => r.json())
+      .then(data => setMemoryStats(data))
+      .catch(() => {})
+      .finally(() => setMemoryLoading(false));
+  }, []);
+
+  // PRD-55: Save soul settings
+  const saveSoulSettings = async () => {
+    setSavingSoul(true);
+    try {
+      await fetch('/api/workspaces/current/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrator: soulSettings })
+      });
+    } finally {
+      setSavingSoul(false);
+    }
+  };
+
+  // PRD-55: Save heartbeat settings
+  const saveHeartbeatSettings = async () => {
+    setSavingHeartbeat(true);
+    try {
+      await fetch('/api/workspaces/current/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrator: { heartbeat: heartbeatSettings } })
+      });
+    } finally {
+      setSavingHeartbeat(false);
+    }
+  };
 
   const handleInputChange = (key: string, value: string) => {
     setFormData(prev => ({ ...prev, [key]: value }))
@@ -352,6 +427,194 @@ export default function SystemLLMSettingsTab({
               </p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* PRD-55: Soul & Personality */}
+      <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5" /> Soul & Personality</CardTitle>
+          <CardDescription>Configure your orchestrator&apos;s personality and communication style</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Personality Mode */}
+          <div className="space-y-2">
+            <Label>Personality Mode</Label>
+            <Select value={soulSettings.personality_mode} onValueChange={(v) => setSoulSettings(s => ({...s, personality_mode: v}))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="friendly">Friendly</SelectItem>
+                <SelectItem value="professional">Professional</SelectItem>
+                <SelectItem value="technical">Technical</SelectItem>
+                <SelectItem value="custom">Custom Soul</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Custom Soul Editor */}
+          {soulSettings.personality_mode === 'custom' && (
+            <div className="space-y-2">
+              <Label>Custom Soul</Label>
+              <textarea className="w-full min-h-[120px] rounded-md border bg-background px-3 py-2 text-sm"
+                value={soulSettings.custom_soul}
+                onChange={(e) => setSoulSettings(s => ({...s, custom_soul: e.target.value}))}
+                placeholder="Describe your AI's personality, tone, and behavior..."
+              />
+              <p className="text-xs text-muted-foreground">{soulSettings.custom_soul?.length || 0} chars (~{Math.ceil((soulSettings.custom_soul?.length || 0) / 4)} tokens)</p>
+            </div>
+          )}
+
+          {/* Communication Style */}
+          <div className="space-y-2">
+            <Label>Communication Style</Label>
+            <Select value={soulSettings.communication_style} onValueChange={(v) => setSoulSettings(s => ({...s, communication_style: v}))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="concise">Concise</SelectItem>
+                <SelectItem value="balanced">Balanced</SelectItem>
+                <SelectItem value="detailed">Detailed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Proactive Level */}
+          <div className="space-y-2">
+            <Label>Proactive Level</Label>
+            <Select value={soulSettings.proactive_level} onValueChange={(v) => setSoulSettings(s => ({...s, proactive_level: v}))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="silent">Silent</SelectItem>
+                <SelectItem value="notify">Notify Only</SelectItem>
+                <SelectItem value="act_notify">Act & Notify</SelectItem>
+                <SelectItem value="autonomous">Fully Autonomous</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Thinking Level */}
+          <div className="space-y-2">
+            <Label>Thinking Level</Label>
+            <Select value={soulSettings.thinking_level} onValueChange={(v) => setSoulSettings(s => ({...s, thinking_level: v}))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                <SelectItem value="minimal">Minimal</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Save Soul button */}
+          <Button onClick={saveSoulSettings} disabled={savingSoul} className="w-full">
+            {savingSoul ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save Soul Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* PRD-55: Orchestrator Heartbeat */}
+      <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Orchestrator Heartbeat</CardTitle>
+          <CardDescription>Configure proactive monitoring for your orchestrator</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Enable toggle */}
+          <div className="flex items-center justify-between">
+            <Label>Enable Heartbeat</Label>
+            <Switch checked={heartbeatSettings.enabled} onCheckedChange={(v) => setHeartbeatSettings(s => ({...s, enabled: v}))} />
+          </div>
+
+          {heartbeatSettings.enabled && (
+            <>
+              {/* Interval */}
+              <div className="space-y-2">
+                <Label>Interval (minutes)</Label>
+                <Select value={String(heartbeatSettings.interval_minutes)} onValueChange={(v) => setHeartbeatSettings(s => ({...s, interval_minutes: Number(v)}))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 minutes</SelectItem>
+                    <SelectItem value="30">30 minutes</SelectItem>
+                    <SelectItem value="60">1 hour</SelectItem>
+                    <SelectItem value="120">2 hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Active Hours */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Active From</Label>
+                  <Input type="time" value={heartbeatSettings.active_hours_start} onChange={(e) => setHeartbeatSettings(s => ({...s, active_hours_start: e.target.value}))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Active Until</Label>
+                  <Input type="time" value={heartbeatSettings.active_hours_end} onChange={(e) => setHeartbeatSettings(s => ({...s, active_hours_end: e.target.value}))} />
+                </div>
+              </div>
+
+              {/* Timezone */}
+              <div className="space-y-2">
+                <Label>Timezone</Label>
+                <Input value={heartbeatSettings.timezone} onChange={(e) => setHeartbeatSettings(s => ({...s, timezone: e.target.value}))} placeholder="UTC" />
+              </div>
+
+              {/* Heartbeat checklist */}
+              <div className="space-y-2">
+                <Label>Heartbeat Checklist</Label>
+                <textarea className="w-full min-h-[100px] rounded-md border bg-background px-3 py-2 text-sm"
+                  value={heartbeatSettings.checklist}
+                  onChange={(e) => setHeartbeatSettings(s => ({...s, checklist: e.target.value}))}
+                  placeholder={'- Check pending tasks\n- Review unrouted events\n- Summarize today\'s activity'} />
+              </div>
+            </>
+          )}
+
+          <Button onClick={saveHeartbeatSettings} disabled={savingHeartbeat} className="w-full">
+            {savingHeartbeat ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save Heartbeat Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* PRD-55: What Automatos Knows */}
+      <Card className="border-border/40 bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Brain className="h-5 w-5" /> What Automatos Knows</CardTitle>
+          <CardDescription>Memories stored about you and your preferences</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {memoryLoading ? (
+            <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading memories...</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <p className="text-2xl font-bold">{memoryStats.total}</p>
+                  <p className="text-xs text-muted-foreground">Total Memories</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <p className="text-2xl font-bold">{memoryStats.agents}</p>
+                  <p className="text-xs text-muted-foreground">Agents with Memory</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <p className="text-2xl font-bold">{memoryStats.recent24h}</p>
+                  <p className="text-xs text-muted-foreground">Last 24h</p>
+                </div>
+              </div>
+
+              {memoryStats.recent?.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Recent Memories</Label>
+                  {memoryStats.recent.map((m: any, i: number) => (
+                    <div key={i} className="p-2 rounded border bg-muted/30 text-sm truncate">{m.preview || m.memory}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

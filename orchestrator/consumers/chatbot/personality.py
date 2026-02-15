@@ -12,8 +12,88 @@ Key traits:
 - Action-oriented but thoughtful
 """
 
-from typing import Dict, List, Optional
+import logging
+import time
+from typing import Any, Dict, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Orchestrator settings cache (workspace_id -> (timestamp, settings))
+# ---------------------------------------------------------------------------
+_orch_cache: Dict[str, Any] = {}
+_CACHE_TTL_SECONDS = 120
+
+_ORCHESTRATOR_DEFAULTS: Dict[str, Any] = {
+    "personality_mode": "friendly",
+    "custom_soul": "",
+    "communication_style": "balanced",
+    "proactive_level": "notify",
+    "thinking_level": "medium",
+}
+
+# Personality presets
+_FRIENDLY_PERSONALITY = (
+    "I'm warm, approachable, and genuinely enthusiastic about helping. "
+    "I use a conversational tone, celebrate wins, and treat every interaction "
+    "as a chance to build a friendly working relationship."
+)
+
+_PROFESSIONAL_PERSONALITY = (
+    "I'm precise, efficient, and business-focused. I keep responses structured "
+    "and concise, prioritize actionable information, and maintain a respectful "
+    "professional tone throughout."
+)
+
+_TECHNICAL_PERSONALITY = (
+    "I'm detail-oriented and technically rigorous. I prefer specifics over "
+    "generalities, include code examples and data points where relevant, "
+    "and communicate with precision."
+)
+
+_PERSONALITY_MAP = {
+    "friendly": _FRIENDLY_PERSONALITY,
+    "professional": _PROFESSIONAL_PERSONALITY,
+    "technical": _TECHNICAL_PERSONALITY,
+}
+
+_STYLE_SUFFIX = {
+    "concise": "\n\nKeep all responses SHORT — 1-3 sentences when possible. No preambles.",
+    "balanced": "",
+    "detailed": "\n\nProvide thorough, detailed responses with context and examples.",
+}
+
+
+def load_orchestrator_settings(workspace_id: str) -> Dict[str, Any]:
+    """Load orchestrator settings from workspace, cached for 2 minutes."""
+    global _orch_cache
+    now = time.time()
+    cached = _orch_cache.get(workspace_id)
+    if cached and (now - cached[0]) < _CACHE_TTL_SECONDS:
+        return cached[1]
+
+    settings = dict(_ORCHESTRATOR_DEFAULTS)
+    try:
+        from core.database.database import SessionLocal
+        db = SessionLocal()
+        try:
+            from core.models.workspaces import Workspace
+            ws = db.query(Workspace).filter(
+                Workspace.id == workspace_id
+            ).first()
+            if ws and hasattr(ws, "settings") and ws.settings:
+                orch = ws.settings.get("orchestrator", {}) if isinstance(ws.settings, dict) else {}
+                for key in _ORCHESTRATOR_DEFAULTS:
+                    if key in orch and orch[key]:
+                        settings[key] = orch[key]
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug(f"[Personality] Could not load orchestrator settings: {e}")
+
+    _orch_cache[workspace_id] = (now, settings)
+    return settings
 
 
 class AutomatosPersonality:
@@ -41,7 +121,8 @@ I celebrate wins and learn from mistakes together with you.
     def get_base_system_prompt(
         user_name: Optional[str] = None,
         agent_name: Optional[str] = None,
-        msg_count: int = 0
+        msg_count: int = 0,
+        orchestrator_settings: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Get the base system prompt with personality.
@@ -50,14 +131,30 @@ I celebrate wins and learn from mistakes together with you.
             user_name: User's name if known from memory
             agent_name: Agent's name if custom agent
             msg_count: Number of messages in conversation
+            orchestrator_settings: Workspace orchestrator settings (personality_mode, custom_soul, etc.)
         """
+        orch = orchestrator_settings or _ORCHESTRATOR_DEFAULTS
         assistant_name = agent_name or "Automatos"
         greeting = f"talking to {user_name}" if user_name else "ready to help"
 
         now = datetime.utcnow()
         time_greeting = "Good morning" if now.hour < 12 else "Good afternoon" if now.hour < 18 else "Good evening"
 
+        # Build personality block from settings
+        mode = orch.get("personality_mode", "friendly")
+        custom_soul = orch.get("custom_soul", "").strip()
+        style = orch.get("communication_style", "balanced")
+
+        if mode == "custom" and custom_soul:
+            personality_block = custom_soul
+        else:
+            personality_block = _PERSONALITY_MAP.get(mode, _FRIENDLY_PERSONALITY)
+
+        style_suffix = _STYLE_SUFFIX.get(style, "")
+
         return f"""You are {assistant_name}, a friendly and capable AI assistant. {time_greeting}! You're {greeting}.
+
+{personality_block}{style_suffix}
 
 ## Who You Are
 
@@ -229,13 +326,17 @@ I avoid:
         agent_name: Optional[str] = None,
         msg_count: int = 0,
         memories: Optional[List[str]] = None,
-        tool_names: Optional[List[str]] = None
+        tool_names: Optional[List[str]] = None,
+        orchestrator_settings: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Build a complete system prompt combining all personality elements.
         """
         parts = [
-            AutomatosPersonality.get_base_system_prompt(user_name, agent_name, msg_count),
+            AutomatosPersonality.get_base_system_prompt(
+                user_name, agent_name, msg_count,
+                orchestrator_settings=orchestrator_settings
+            ),
             AutomatosPersonality.get_memory_context_prompt(memories or []),
             AutomatosPersonality.get_tool_guidance_prompt(
                 has_tools=bool(tool_names),
@@ -253,7 +354,8 @@ def get_happy_system_prompt(
     agent_name: Optional[str] = None,
     msg_count: int = 0,
     memories: Optional[List[str]] = None,
-    tool_names: Optional[List[str]] = None
+    tool_names: Optional[List[str]] = None,
+    orchestrator_settings: Optional[Dict[str, Any]] = None
 ) -> str:
     """
     Get the complete happy Automatos system prompt.
@@ -265,5 +367,6 @@ def get_happy_system_prompt(
         agent_name=agent_name,
         msg_count=msg_count,
         memories=memories,
-        tool_names=tool_names
+        tool_names=tool_names,
+        orchestrator_settings=orchestrator_settings
     )

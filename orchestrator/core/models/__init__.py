@@ -20,6 +20,11 @@ from .routing import *  # PRD-50: Universal Orchestrator Router
 from .marketplace_plugins import *  # PRD-42: Plugin Marketplace
 from .personas import *  # PRD-42: Agent Personas
 
+try:
+    from .channels import *  # PRD-55: Channel Connections
+except ImportError:
+    pass
+
 # Optional model packs (may not exist in all deployments/branches)
 try:
     from .composio import *  # PRD-36: Composio integration

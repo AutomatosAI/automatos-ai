@@ -1,13 +1,14 @@
 'use client'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings, Key, FileText, Shield, Webhook, KeyRound } from 'lucide-react'
+import { Settings, Key, FileText, Shield, Webhook, KeyRound, Radio } from 'lucide-react'
 import { CredentialsTab } from './CredentialsTab'
 import { CredentialTypesTab } from './CredentialTypesTab'
 import { CredentialAuditTab } from './CredentialAuditTab'
 import SystemSettingsTab from './SystemSettingsTab'
 import WebhooksSettingsTab from './WebhooksSettingsTab'
 import { ApiKeysSettingsTab } from './ApiKeysSettingsTab'
+import { ChannelsSettingsTab } from './ChannelsSettingsTab'
 
 export function SettingsPanel() {
 
@@ -21,7 +22,7 @@ export function SettingsPanel() {
       </div>
 
       <Tabs defaultValue="system-settings" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="system-settings">
             <Settings className="w-4 h-4 mr-2" />
             System Settings
@@ -45,6 +46,10 @@ export function SettingsPanel() {
           <TabsTrigger value="audit">
             <Shield className="w-4 h-4 mr-2" />
             Audit Logs
+          </TabsTrigger>
+          <TabsTrigger value="channels">
+            <Radio className="w-4 h-4 mr-2" />
+            Channels
           </TabsTrigger>
         </TabsList>
 
@@ -76,6 +81,11 @@ export function SettingsPanel() {
         {/* PRD-18: Audit Logs Tab */}
         <TabsContent value="audit">
           <CredentialAuditTab />
+        </TabsContent>
+
+        {/* PRD-55: Channels Tab */}
+        <TabsContent value="channels">
+          <ChannelsSettingsTab />
         </TabsContent>
       </Tabs>
     </div>
