@@ -205,13 +205,8 @@ class SmartChatOrchestrator:
             msg_count=len(messages),
             memories=memory_strings,
             tool_names=tool_names,
-            orchestrator_settings=orch_settings
+            orchestrator_settings=orch_settings,
         )
-
-        # PRD-55: Inject available skills as XML metadata
-        skills_xml = self._build_skills_xml()
-        if skills_xml:
-            system_prompt += f"\n\n{skills_xml}"
 
         # 5. Convert messages to LLM format
         llm_messages = self._convert_messages(messages)
@@ -224,18 +219,6 @@ class SmartChatOrchestrator:
             }
             # Insert after main system prompt
             llm_messages.insert(1, memory_msg)
-
-        # Inject daily logs for temporal awareness (PRD-55)
-        try:
-            daily_logs = await self.memory_manager.get_daily_logs(self.workspace_id)
-            if daily_logs:
-                daily_msg = {
-                    "role": "system",
-                    "content": f"## Recent Activity\n\n{daily_logs}"
-                }
-                llm_messages.insert(1, daily_msg)
-        except Exception as e:
-            logger.debug(f"[Orchestrator] Could not load daily logs: {e}")
 
         # Add current datetime context
         now = datetime.utcnow()
@@ -296,43 +279,6 @@ class SmartChatOrchestrator:
 
         return ""
 
-    def _build_skills_xml(self) -> str:
-        """Build XML block of available skills for LLM context (PRD-55)."""
-        try:
-            from core.database.database import SessionLocal
-            from core.models import Skill
-
-            db = SessionLocal()
-            try:
-                skills = (
-                    db.query(Skill)
-                    .filter(Skill.is_active == True)
-                    .filter(
-                        (Skill.workspace_id == self.workspace_id)
-                        | (Skill.workspace_id == None)
-                    )
-                    .limit(20)
-                    .all()
-                )
-                if not skills:
-                    return ""
-
-                lines = ["<available_skills>"]
-                for s in skills:
-                    name = s.name or "unknown"
-                    desc = (s.description or "")[:100]
-                    cat = s.category or ""
-                    lines.append(
-                        f'  <skill name="{name}" category="{cat}">{desc}</skill>'
-                    )
-                lines.append("</available_skills>")
-                return "\n".join(lines)
-            finally:
-                db.close()
-        except Exception as e:
-            logger.debug(f"[Orchestrator] Could not load skills XML: {e}")
-            return ""
-
     def _convert_messages(self, messages: List[Dict]) -> List[Dict[str, str]]:
         """Convert messages to simple role/content format for LLM."""
         converted = []
@@ -375,25 +321,13 @@ class SmartChatOrchestrator:
         Returns:
             Success status
         """
-        result = await self.memory_manager.store_conversation(
+        return await self.memory_manager.store_conversation(
             workspace_id=self.workspace_id,
             agent_id=self.agent_id,
             user_message=user_message,
             assistant_response=assistant_response,
             chat_id=chat_id
         )
-
-        # Store daily log entry (PRD-55: Temporal Memory)
-        try:
-            await self.memory_manager.store_daily_summary(
-                workspace_id=self.workspace_id,
-                user_message=user_message,
-                assistant_response=assistant_response,
-            )
-        except Exception as e:
-            logger.debug(f"[Orchestrator] Daily log storage failed: {e}")
-
-        return result
 
     def get_user_name(self) -> Optional[str]:
         """Get the user's name if known."""

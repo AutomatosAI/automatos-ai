@@ -1,197 +1,176 @@
 """
-Channel Manager (PRD-55: Autonomous Assistant Platform).
+Channel Manager (PRD-55 US-019)
+================================
+Manages the lifecycle of all channel adapters.
 
-Manages the lifecycle of all channel adapters -- loading active
-connections from the database, starting/stopping individual adapters,
-and providing status introspection.
+On startup, ``start_all()`` loads every active ``ChannelConnection``
+from the database and spins up the matching adapter.  Individual
+adapters can be started / stopped at runtime (e.g. when a user
+adds or removes a connection through the UI).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
-from channels.base import BaseChannelAdapter
+from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
 
 class ChannelManager:
-    """Registry and lifecycle manager for channel adapters."""
+    """Manages all active channel adapters."""
 
-    def __init__(self) -> None:
-        self._adapters: Dict[str, BaseChannelAdapter] = {}
+    def __init__(self):
+        self._adapters: Dict[str, BaseChannelAdapter] = {}  # connection_id -> adapter
 
     # ------------------------------------------------------------------
     # Bulk lifecycle
     # ------------------------------------------------------------------
 
-    async def start_all(self) -> None:
-        """Load active ChannelConnection records and start their adapters."""
+    async def start_all(self):
+        """Load all active connections from DB and start their adapters."""
         from core.database.database import SessionLocal
-        from core.models.channels import ChannelConnection
 
         db = SessionLocal()
         try:
+            from core.models.channels import ChannelConnection
+
             connections = (
                 db.query(ChannelConnection)
                 .filter(ChannelConnection.status == "active")
                 .all()
             )
+
             for conn in connections:
-                try:
-                    adapter = self._create_adapter(conn)
-                    await adapter.start()
-                    self._adapters[str(conn.id)] = adapter
-                    logger.info(
-                        "Started %s adapter for connection %s",
-                        conn.platform,
-                        conn.id,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "Failed to start adapter for connection %s: %s",
-                        conn.id,
-                        exc,
-                    )
+                await self.start_adapter(
+                    connection_id=str(conn.id),
+                    workspace_id=str(conn.workspace_id),
+                    platform=conn.platform,
+                    config=conn.config or {},
+                )
+        except Exception as e:
+            logger.error("[ChannelManager] Failed to load connections: %s", e)
         finally:
             db.close()
 
-    async def stop_all(self) -> None:
-        """Stop every running adapter."""
-        for cid, adapter in list(self._adapters.items()):
+    async def stop_all(self):
+        """Stop all running adapters."""
+        for conn_id, adapter in list(self._adapters.items()):
             try:
                 await adapter.stop()
-                logger.info("Stopped adapter %s", cid)
-            except Exception as exc:
-                logger.error("Error stopping adapter %s: %s", cid, exc)
+                logger.info("[ChannelManager] Stopped adapter %s", conn_id)
+            except Exception as e:
+                logger.error("[ChannelManager] Error stopping %s: %s", conn_id, e)
         self._adapters.clear()
 
     # ------------------------------------------------------------------
     # Single-adapter lifecycle
     # ------------------------------------------------------------------
 
-    async def start_adapter(self, connection_id: str) -> None:
-        """Start (or restart) a single adapter by connection ID."""
+    async def start_adapter(
+        self,
+        connection_id: str,
+        workspace_id: str,
+        platform: str,
+        config: dict,
+    ):
+        """Start (or restart) a specific adapter."""
+        # Stop existing instance if already running
         if connection_id in self._adapters:
             await self._adapters[connection_id].stop()
 
-        from core.database.database import SessionLocal
-        from core.models.channels import ChannelConnection
+        adapter = self._create_adapter(connection_id, workspace_id, platform, config)
+        if adapter is None:
+            return
 
-        db = SessionLocal()
         try:
-            conn = (
-                db.query(ChannelConnection)
-                .filter(ChannelConnection.id == connection_id)
-                .first()
-            )
-            if not conn:
-                raise ValueError(f"Connection {connection_id} not found")
-
-            adapter = self._create_adapter(conn)
             await adapter.start()
             self._adapters[connection_id] = adapter
-
-            # Mark active in DB
-            conn.status = "active"
-            db.commit()
-            logger.info("Started adapter for connection %s", connection_id)
-        finally:
-            db.close()
-
-    async def stop_adapter(self, connection_id: str) -> None:
-        """Stop a running adapter."""
-        adapter = self._adapters.get(connection_id)
-        if adapter:
-            try:
-                await adapter.stop()
-            except Exception as exc:
-                logger.error("Error stopping adapter %s: %s", connection_id, exc)
-                raise
-            finally:
-                self._adapters.pop(connection_id, None)
-
-        from core.database.database import SessionLocal
-        from core.models.channels import ChannelConnection
-
-        db = SessionLocal()
-        try:
-            conn = (
-                db.query(ChannelConnection)
-                .filter(ChannelConnection.id == connection_id)
-                .first()
+            logger.info(
+                "[ChannelManager] Started %s adapter for connection %s",
+                platform,
+                connection_id,
             )
-            if conn:
-                conn.status = "disconnected"
-                db.commit()
-        finally:
-            db.close()
+        except Exception as e:
+            logger.error("[ChannelManager] Failed to start %s: %s", platform, e)
 
-        logger.info("Stopped adapter for connection %s", connection_id)
+    async def stop_adapter(self, connection_id: str):
+        """Stop a specific adapter by connection ID."""
+        adapter = self._adapters.pop(connection_id, None)
+        if adapter:
+            await adapter.stop()
 
     # ------------------------------------------------------------------
-    # Adapter factory
+    # Factory
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _create_adapter(connection: Any) -> BaseChannelAdapter:
-        """Instantiate the correct adapter subclass based on *platform*."""
-        platform = connection.platform.lower()
-        conn_id = str(connection.id)
-        ws_id = str(connection.workspace_id)
-        cfg = connection.config or {}
+    def _create_adapter(
+        self,
+        connection_id: str,
+        workspace_id: str,
+        platform: str,
+        config: dict,
+    ) -> Optional[BaseChannelAdapter]:
+        """Create a platform-specific adapter instance.
 
-        _ADAPTER_MAP = {
-            "telegram": ("channels.telegram_adapter", "TelegramAdapter"),
-            "slack": ("channels.slack_adapter", "SlackAdapter"),
-            "discord": ("channels.discord_adapter", "DiscordAdapter"),
-            "whatsapp": ("channels.whatsapp_adapter", "WhatsAppAdapter"),
-            "teams": ("channels.teams_adapter", "TeamsAdapter"),
-            "google_chat": ("channels.google_chat_adapter", "GoogleChatAdapter"),
-            "signal": ("channels.signal_adapter", "SignalAdapter"),
-            "imessage": ("channels.imessage_adapter", "IMessageAdapter"),
-            "irc": ("channels.irc_adapter", "IRCAdapter"),
-            "matrix": ("channels.matrix_adapter", "MatrixAdapter"),
-            "line": ("channels.line_adapter", "LINEAdapter"),
-        }
+        Uses lazy imports so missing optional dependencies (e.g.
+        python-telegram-bot) only surface when the adapter is actually
+        requested.
+        """
+        try:
+            if platform == "telegram":
+                from .telegram_adapter import TelegramAdapter
 
-        entry = _ADAPTER_MAP.get(platform)
-        if not entry:
-            raise ValueError(f"Unsupported channel platform: {platform}")
+                return TelegramAdapter(connection_id, workspace_id, config)
+            elif platform == "slack":
+                from .slack_adapter import SlackAdapter
 
-        module_path, class_name = entry
-        import importlib
-        mod = importlib.import_module(module_path)
-        adapter_cls = getattr(mod, class_name)
-        return adapter_cls(connection_id=conn_id, workspace_id=ws_id, config=cfg)
+                return SlackAdapter(connection_id, workspace_id, config)
+            elif platform == "discord":
+                from .discord_adapter import DiscordAdapter
+
+                return DiscordAdapter(connection_id, workspace_id, config)
+            else:
+                logger.warning("[ChannelManager] Unknown platform: %s", platform)
+                return None
+        except ImportError as e:
+            logger.warning(
+                "[ChannelManager] %s adapter dependencies not installed: %s",
+                platform,
+                e,
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
-    def get_status(self) -> Dict[str, Any]:
-        """Return a dict of adapter statuses keyed by connection ID."""
-        result: Dict[str, Any] = {}
-        for cid, adapter in self._adapters.items():
-            result[cid] = {
-                "platform": adapter.__class__.__name__,
-                "running": adapter.is_running,
-                "workspace_id": adapter.workspace_id,
-            }
-        return result
+    def get_status(self) -> dict:
+        """Return a status snapshot of all managed adapters."""
+        return {
+            "total_adapters": len(self._adapters),
+            "adapters": {
+                conn_id: {
+                    "platform": type(adapter).__name__,
+                    "running": adapter.is_running,
+                }
+                for conn_id, adapter in self._adapters.items()
+            },
+        }
 
 
 # ---------------------------------------------------------------------------
 # Singleton accessor
 # ---------------------------------------------------------------------------
 
-_instance: Optional[ChannelManager] = None
+_channel_manager: Optional[ChannelManager] = None
 
 
 def get_channel_manager() -> ChannelManager:
-    """Return the singleton ChannelManager instance."""
-    global _instance
-    if _instance is None:
-        _instance = ChannelManager()
-    return _instance
+    """Return the global ChannelManager singleton."""
+    global _channel_manager
+    if _channel_manager is None:
+        _channel_manager = ChannelManager()
+    return _channel_manager

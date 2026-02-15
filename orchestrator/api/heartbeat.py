@@ -1,261 +1,201 @@
 """
-Heartbeat API endpoints (PRD-55: Autonomous Assistant Platform).
+Heartbeat API Endpoints (PRD-55 US-008)
+========================================
 
-Provides manual triggers, history queries, and analytics for
-orchestrator and agent heartbeat checks.
+Manage and monitor heartbeat ticks for orchestrator and agents.
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import desc, func, text
+from sqlalchemy.orm import Session
+
+from core.database.database import get_db
+from core.auth.hybrid import get_request_context_hybrid
+from core.auth.dependencies import RequestContext
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/heartbeat", tags=["Heartbeat"])
+router = APIRouter(prefix="/api/heartbeat", tags=["heartbeat"])
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator endpoints
-# ---------------------------------------------------------------------------
-
+# ── Orchestrator Heartbeat ─────────────────────────────────────────
 
 @router.post("/orchestrator/run")
 async def run_orchestrator_heartbeat(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """Trigger an immediate orchestrator heartbeat."""
-    from services.heartbeat_service import get_heartbeat_service
-
-    svc = get_heartbeat_service()
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Trigger an immediate orchestrator heartbeat tick."""
     try:
-        result = await svc.run_orchestrator_heartbeat(workspace_id)
-        return {"ok": True, "result": result}
-    except Exception as exc:
-        logger.error("Orchestrator heartbeat failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        result = await service.run_orchestrator_heartbeat(str(ctx.workspace_id))
+        return result
+    except Exception as e:
+        logger.error("Failed to run orchestrator heartbeat: %s", e)
+        raise HTTPException(500, f"Heartbeat failed: {str(e)}")
 
 
 @router.get("/orchestrator/history")
-async def get_orchestrator_history(
-    workspace_id: str = Query(..., description="Workspace UUID"),
+async def get_orchestrator_heartbeat_history(
     limit: int = Query(20, ge=1, le=100),
-) -> Dict[str, Any]:
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
     """List recent orchestrator heartbeat results."""
-    from core.database.database import SessionLocal
+    rows = db.execute(
+        text("""
+            SELECT id, source_type, source_id, status, findings, actions_taken, tokens_used, cost, created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id AND source_type = 'orchestrator'
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """),
+        {"ws_id": str(ctx.workspace_id), "lim": limit}
+    ).fetchall()
 
-    db = SessionLocal()
-    try:
-        rows = db.execute(
-            text(
-                "SELECT id, status, findings, actions_taken, tokens_used, cost, created_at "
-                "FROM heartbeat_results "
-                "WHERE source_type = 'orchestrator' AND workspace_id = :wid::uuid "
-                "ORDER BY created_at DESC LIMIT :lim"
-            ),
-            {"wid": workspace_id, "lim": limit},
-        ).fetchall()
-
-        results = [
-            {
-                "id": r[0],
-                "status": r[1],
-                "findings": r[2],
-                "actions_taken": r[3],
-                "tokens_used": r[4],
-                "cost": r[5],
-                "created_at": r[6].isoformat() if r[6] else None,
-            }
-            for r in rows
-        ]
-        return {"ok": True, "results": results}
-    finally:
-        db.close()
+    return [
+        {
+            "id": r.id,
+            "status": r.status,
+            "findings": r.findings,
+            "actions_taken": r.actions_taken,
+            "tokens_used": r.tokens_used,
+            "cost": r.cost,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
-# ---------------------------------------------------------------------------
-# Agent endpoints
-# ---------------------------------------------------------------------------
-
+# ── Agent Heartbeat ────────────────────────────────────────────────
 
 @router.post("/agents/{agent_id}/run")
 async def run_agent_heartbeat(
     agent_id: int,
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """Trigger an immediate agent heartbeat."""
-    from services.heartbeat_service import get_heartbeat_service
-
-    svc = get_heartbeat_service()
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Trigger an immediate heartbeat tick for a specific agent."""
     try:
-        result = await svc.run_agent_heartbeat(str(agent_id), workspace_id)
-        return {"ok": True, "result": result}
-    except Exception as exc:
-        logger.error("Agent heartbeat failed for agent %s: %s", agent_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        result = await service.run_agent_heartbeat(agent_id)
+        return result
+    except Exception as e:
+        logger.error("Failed to run agent heartbeat for %s: %s", agent_id, e)
+        raise HTTPException(500, f"Heartbeat failed: {str(e)}")
 
 
 @router.get("/agents/{agent_id}/history")
-async def get_agent_history(
+async def get_agent_heartbeat_history(
     agent_id: int,
-    workspace_id: str = Query(..., description="Workspace UUID"),
     limit: int = Query(20, ge=1, le=100),
-) -> Dict[str, Any]:
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
     """List recent heartbeat results for a specific agent."""
-    from core.database.database import SessionLocal
+    rows = db.execute(
+        text("""
+            SELECT id, status, findings, actions_taken, tokens_used, cost, created_at
+            FROM heartbeat_results
+            WHERE workspace_id = :ws_id AND source_type = 'agent' AND source_id = :agent_id
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """),
+        {"ws_id": str(ctx.workspace_id), "agent_id": str(agent_id), "lim": limit}
+    ).fetchall()
 
-    db = SessionLocal()
-    try:
-        rows = db.execute(
-            text(
-                "SELECT id, status, findings, actions_taken, tokens_used, cost, created_at "
-                "FROM heartbeat_results "
-                "WHERE source_type = 'agent' AND source_id = :aid "
-                "AND workspace_id = :wid::uuid "
-                "ORDER BY created_at DESC LIMIT :lim"
-            ),
-            {"aid": str(agent_id), "wid": workspace_id, "lim": limit},
-        ).fetchall()
-
-        results = [
-            {
-                "id": r[0],
-                "status": r[1],
-                "findings": r[2],
-                "actions_taken": r[3],
-                "tokens_used": r[4],
-                "cost": r[5],
-                "created_at": r[6].isoformat() if r[6] else None,
-            }
-            for r in rows
-        ]
-        return {"ok": True, "results": results}
-    finally:
-        db.close()
+    return [
+        {
+            "id": r.id,
+            "status": r.status,
+            "findings": r.findings,
+            "actions_taken": r.actions_taken,
+            "tokens_used": r.tokens_used,
+            "cost": r.cost,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
 
 
-# ---------------------------------------------------------------------------
-# Status & Analytics
-# ---------------------------------------------------------------------------
-
+# ── Global Status ──────────────────────────────────────────────────
 
 @router.get("/status")
 async def get_heartbeat_status(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """All active heartbeats with next_run_at, last_run_at."""
-    from services.heartbeat_service import get_heartbeat_service
-    from core.database.database import SessionLocal
-
-    svc = get_heartbeat_service()
-    scheduler_status = svc.get_status()
-
-    # Enrich with last_run_at from DB — scoped to workspace
-    db = SessionLocal()
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+):
+    """Return status of all active heartbeat schedules."""
     try:
-        filtered_jobs = []
-        for job in scheduler_status.get("jobs", []):
-            job_id = job.get("id", "")
-            # Determine source_type and source_id from job_id
-            if job_id.startswith("orchestrator_heartbeat_"):
-                source_type = "orchestrator"
-                source_id = job_id.replace("orchestrator_heartbeat_", "")
-                # source_id is the workspace_id for orchestrator jobs
-                if source_id != workspace_id:
-                    continue
-            elif job_id.startswith("agent_heartbeat_"):
-                source_type = "agent"
-                source_id = job_id.replace("agent_heartbeat_", "")
-                # Check agent belongs to this workspace
-                agent_row = db.execute(
-                    text("SELECT workspace_id FROM agents WHERE id = :aid"),
-                    {"aid": source_id},
-                ).fetchone()
-                if not agent_row or str(agent_row[0]) != workspace_id:
-                    continue
-            else:
-                continue
+        from services.heartbeat_service import get_heartbeat_service
+        service = get_heartbeat_service()
+        return service.get_status()
+    except Exception as e:
+        return {"active": False, "jobs": [], "error": str(e)}
 
-            row = db.execute(
-                text(
-                    "SELECT created_at FROM heartbeat_results "
-                    "WHERE source_type = :st AND source_id = :sid "
-                    "AND workspace_id = :wid::uuid "
-                    "ORDER BY created_at DESC LIMIT 1"
-                ),
-                {"st": source_type, "sid": source_id, "wid": workspace_id},
-            ).fetchone()
-            job["last_run_at"] = row[0].isoformat() if row else None
-            filtered_jobs.append(job)
 
-        scheduler_status["jobs"] = filtered_jobs
-    finally:
-        db.close()
-
-    return {"ok": True, **scheduler_status}
-
+# ── Analytics ──────────────────────────────────────────────────────
 
 @router.get("/analytics")
 async def get_heartbeat_analytics(
-    workspace_id: str = Query(..., description="Workspace UUID"),
-) -> Dict[str, Any]:
-    """Today's heartbeat stats: total runs, tokens, successes, errors, recent events."""
-    from core.database.database import SessionLocal
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return heartbeat summary stats for analytics dashboard (US-010)."""
+    from datetime import datetime, timedelta
 
-    db = SessionLocal()
+    ws_id = str(ctx.workspace_id)
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+
     try:
-        # Today's aggregates
-        stats_row = db.execute(
-            text(
-                "SELECT "
-                "  COUNT(*) as total, "
-                "  COALESCE(SUM(tokens_used), 0) as tokens, "
-                "  COUNT(*) FILTER (WHERE status = 'success') as successes, "
-                "  COUNT(*) FILTER (WHERE status = 'error') as errors "
-                "FROM heartbeat_results "
-                "WHERE workspace_id = :wid::uuid "
-                "AND created_at >= CURRENT_DATE"
-            ),
-            {"wid": workspace_id},
+        # Today's stats
+        today_stats = db.execute(
+            text("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors
+                FROM heartbeat_results
+                WHERE workspace_id = :ws_id AND created_at >= :start
+            """),
+            {"ws_id": ws_id, "start": today_start}
         ).fetchone()
 
-        # Recent events (last 10)
-        recent_rows = db.execute(
-            text(
-                "SELECT id, source_type, source_id, status, tokens_used, cost, created_at "
-                "FROM heartbeat_results "
-                "WHERE workspace_id = :wid::uuid "
-                "ORDER BY created_at DESC LIMIT 10"
-            ),
-            {"wid": workspace_id},
+        # Recent events (last 24h)
+        recent = db.execute(
+            text("""
+                SELECT id, source_type, source_id, status, tokens_used, created_at
+                FROM heartbeat_results
+                WHERE workspace_id = :ws_id AND created_at >= :start
+                ORDER BY created_at DESC
+                LIMIT 20
+            """),
+            {"ws_id": ws_id, "start": yesterday_start}
         ).fetchall()
 
-        recent = [
-            {
-                "id": r[0],
-                "source_type": r[1],
-                "source_id": r[2],
-                "status": r[3],
-                "tokens_used": r[4],
-                "cost": r[5],
-                "created_at": r[6].isoformat() if r[6] else None,
-            }
-            for r in recent_rows
-        ]
-
         return {
-            "ok": True,
             "today": {
-                "total": stats_row[0] if stats_row else 0,
-                "tokens": stats_row[1] if stats_row else 0,
-                "successes": stats_row[2] if stats_row else 0,
-                "errors": stats_row[3] if stats_row else 0,
+                "total_heartbeats": today_stats.total or 0,
+                "total_tokens": today_stats.total_tokens or 0,
+                "successes": today_stats.successes or 0,
+                "errors": today_stats.errors or 0,
             },
-            "recent": recent,
+            "recent_events": [
+                {
+                    "id": r.id,
+                    "source_type": r.source_type,
+                    "source_id": r.source_id,
+                    "status": r.status,
+                    "tokens_used": r.tokens_used,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in recent
+            ],
         }
-    finally:
-        db.close()
+    except Exception as e:
+        logger.error("Failed to get heartbeat analytics: %s", e)
+        return {"today": {"total_heartbeats": 0, "total_tokens": 0}, "recent_events": []}

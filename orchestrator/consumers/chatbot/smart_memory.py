@@ -470,6 +470,329 @@ class SmartMemoryManager:
             logger.error(f"[SmartMemory] Storage failed: {e}")
             return False
 
+    # ---------------------------------------------------------------
+    # Daily Log Summary (US-011 / US-012)
+    # ---------------------------------------------------------------
+
+    def _get_daily_user_id(self, workspace_id: str) -> str:
+        """Get user ID for daily log memories. Format: ws_{workspace_id}_daily"""
+        ws = str(workspace_id) if workspace_id else "default"
+        return f"ws_{ws}_daily"
+
+    @staticmethod
+    def _extract_summary_from_exchange(
+        user_message: str,
+        assistant_response: str,
+    ) -> str:
+        """
+        Rule-based extraction of key activities from a single chat exchange.
+
+        Extracts:
+        - Topics discussed (first sentence / main noun phrases)
+        - Tools invoked (Composio action names or common tool keywords)
+        - Decisions made (keywords: decided, approved, confirmed, chose, set up)
+
+        Returns a 1-3 sentence summary of the exchange.
+        """
+        parts: List[str] = []
+
+        # --- Topic: use first meaningful sentence of the user message ---
+        first_sentence = re.split(r'[.!?\n]', user_message.strip(), maxsplit=1)[0].strip()
+        if first_sentence:
+            # Cap at 120 chars
+            topic = first_sentence[:120]
+            parts.append(f"Discussed: {topic}")
+
+        # --- Tools: scan assistant response for action/tool names ---
+        tool_patterns = [
+            r'(?:executed|called|ran|used|invoked|triggered)\s+[`"]?(\w+_\w+)[`"]?',
+            r'(?:SLACK|GMAIL|GITHUB|GOOGLESHEETS|GOOGLEDOCS|HUBSPOT|JIRA|NOTION|TRELLO|ASANA|COMPOSIO)\w*',
+        ]
+        tools_found: set = set()
+        for pattern in tool_patterns:
+            matches = re.findall(pattern, assistant_response, re.IGNORECASE)
+            tools_found.update(m.upper() for m in matches)
+        # Also check user message for explicit tool mentions
+        tool_keywords = [
+            "slack", "gmail", "email", "github", "google sheets",
+            "jira", "notion", "trello", "hubspot", "asana",
+        ]
+        combined_lower = (user_message + " " + assistant_response).lower()
+        for kw in tool_keywords:
+            if kw in combined_lower:
+                tools_found.add(kw.upper().replace(" ", "_"))
+        if tools_found:
+            parts.append(f"Tools: {', '.join(sorted(tools_found)[:5])}")
+
+        # --- Decisions: look for decision language ---
+        decision_patterns = [
+            r'(?:decided|approved|confirmed|chose|selected|set up|configured|created|scheduled|enabled|disabled)\s+(.{10,80}?)(?:[.\n]|$)',
+        ]
+        decisions: List[str] = []
+        for pattern in decision_patterns:
+            matches = re.findall(pattern, assistant_response, re.IGNORECASE)
+            decisions.extend(m.strip() for m in matches[:2])
+        if decisions:
+            parts.append(f"Actions: {'; '.join(decisions[:2])}")
+
+        if not parts:
+            # Fallback: just note the exchange happened
+            return f"User query: {user_message[:80]}"
+
+        return ". ".join(parts)
+
+    async def store_daily_summary(
+        self,
+        workspace_id: str,
+        user_message: str,
+        assistant_response: str,
+        agent_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Generate and store a daily log summary entry from a chat exchange.
+
+        Extracts key activities (topics, tools, decisions) using rule-based
+        extraction (no LLM call) and stores/appends to today's daily log in
+        Mem0.
+
+        Args:
+            workspace_id: Workspace ID for scoping
+            user_message: The user's message
+            assistant_response: The assistant's response
+            agent_id: Optional agent ID (included in metadata)
+
+        Returns:
+            True if stored successfully, False otherwise
+        """
+        if not user_message or not assistant_response:
+            return False
+
+        try:
+            if not self.mem0_client:
+                logger.warning("[SmartMemory] No Mem0 client for daily summary storage")
+                return False
+
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            daily_user_id = self._get_daily_user_id(workspace_id)
+
+            # Extract summary from the exchange
+            summary_line = self._extract_summary_from_exchange(
+                user_message, assistant_response
+            )
+            timestamp = datetime.utcnow().strftime("%H:%M")
+            entry = f"[{timestamp}] {summary_line}"
+
+            # Check if a daily log already exists for today so we can append
+            loop = asyncio.get_event_loop()
+            existing_memories = await loop.run_in_executor(
+                None,
+                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=50),
+            )
+
+            existing_today = None
+            existing_today_id = None
+            for mem in (existing_memories or []):
+                meta = mem.get("metadata") or mem.get("metadata_") or {}
+                content = mem.get("memory") or mem.get("content") or ""
+                if meta.get("type") == "daily_log" and meta.get("date") == today_str:
+                    existing_today = content
+                    existing_today_id = mem.get("id")
+                    break
+
+            if existing_today and existing_today_id:
+                # Append to existing daily log
+                updated_content = f"{existing_today}\n{entry}"
+                # Delete old entry and store updated one
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.mem0_client.delete(existing_today_id),
+                )
+                logger.info(
+                    "[SmartMemory] Appending to existing daily log for %s", today_str
+                )
+            else:
+                updated_content = entry
+                logger.info(
+                    "[SmartMemory] Creating new daily log for %s", today_str
+                )
+
+            metadata = {
+                "type": "daily_log",
+                "date": today_str,
+                "workspace_id": workspace_id,
+            }
+            if agent_id is not None:
+                metadata["last_agent_id"] = agent_id
+
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.mem0_client.add(
+                    messages=[{"role": "system", "content": updated_content}],
+                    user_id=daily_user_id,
+                    metadata=metadata,
+                ),
+            )
+
+            success = bool(result and not result.get("error"))
+            if success:
+                logger.info("[SmartMemory] Daily summary stored for %s", today_str)
+            else:
+                logger.warning(
+                    "[SmartMemory] Daily summary storage failed: %s",
+                    result.get("error") if result else "no result",
+                )
+            return success
+
+        except Exception as e:
+            logger.error("[SmartMemory] store_daily_summary failed: %s", e)
+            return False
+
+    async def get_daily_logs(
+        self,
+        workspace_id: str,
+        max_chars: int = 2000,
+    ) -> str:
+        """
+        Fetch today and yesterday's daily logs for injection into the system
+        prompt.
+
+        Args:
+            workspace_id: Workspace ID for scoping
+            max_chars: Maximum character length (~500 tokens at ~4 chars/token)
+
+        Returns:
+            Formatted string of daily logs, or empty string if none exist
+        """
+        try:
+            if not self.mem0_client:
+                return ""
+
+            daily_user_id = self._get_daily_user_id(workspace_id)
+            today = datetime.utcnow()
+            today_str = today.strftime("%Y-%m-%d")
+            yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            target_dates = {today_str, yesterday_str}
+
+            loop = asyncio.get_event_loop()
+            all_memories = await loop.run_in_executor(
+                None,
+                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=50),
+            )
+
+            if not all_memories:
+                return ""
+
+            # Filter to today + yesterday daily_log entries
+            daily_entries: Dict[str, str] = {}
+            for mem in all_memories:
+                meta = mem.get("metadata") or mem.get("metadata_") or {}
+                if meta.get("type") != "daily_log":
+                    continue
+                date_val = meta.get("date", "")
+                if date_val not in target_dates:
+                    continue
+                content = mem.get("memory") or mem.get("content") or ""
+                if content:
+                    daily_entries[date_val] = content
+
+            if not daily_entries:
+                return ""
+
+            # Build formatted output (today first, then yesterday)
+            lines: List[str] = ["Recent activity log:"]
+            for date_key in [today_str, yesterday_str]:
+                if date_key not in daily_entries:
+                    continue
+                label = "Today" if date_key == today_str else "Yesterday"
+                lines.append(f"\n[{label} - {date_key}]")
+                lines.append(daily_entries[date_key])
+
+            result = "\n".join(lines)
+
+            # Trim to max_chars, cutting oldest entries first
+            if len(result) > max_chars:
+                # If we have both days and it's too long, drop yesterday
+                if yesterday_str in daily_entries and today_str in daily_entries:
+                    lines_today = [
+                        "Recent activity log:",
+                        f"\n[Today - {today_str}]",
+                        daily_entries[today_str],
+                    ]
+                    result = "\n".join(lines_today)
+
+                # If still too long, truncate from the beginning of entries
+                if len(result) > max_chars:
+                    result = result[:max_chars].rsplit("\n", 1)[0] + "\n..."
+
+            return result
+
+        except Exception as e:
+            logger.error("[SmartMemory] get_daily_logs failed: %s", e)
+            return ""
+
+    async def cleanup_old_daily_logs(
+        self,
+        workspace_id: str,
+        retention_days: int = 7,
+    ) -> int:
+        """
+        Delete daily logs older than retention_days.
+
+        Intended to be called by the heartbeat service cleanup job.
+
+        Args:
+            workspace_id: Workspace ID for scoping
+            retention_days: Number of days to retain (default 7)
+
+        Returns:
+            Number of deleted log entries
+        """
+        try:
+            if not self.mem0_client:
+                return 0
+
+            daily_user_id = self._get_daily_user_id(workspace_id)
+            cutoff = datetime.utcnow() - timedelta(days=retention_days)
+            cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+            loop = asyncio.get_event_loop()
+            all_memories = await loop.run_in_executor(
+                None,
+                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=100),
+            )
+
+            if not all_memories:
+                return 0
+
+            deleted = 0
+            for mem in all_memories:
+                meta = mem.get("metadata") or mem.get("metadata_") or {}
+                if meta.get("type") != "daily_log":
+                    continue
+                date_val = meta.get("date", "")
+                mem_id = mem.get("id")
+                if date_val and date_val < cutoff_str and mem_id:
+                    success = await loop.run_in_executor(
+                        None,
+                        lambda mid=mem_id: self.mem0_client.delete(mid),
+                    )
+                    if success:
+                        deleted += 1
+                        logger.info(
+                            "[SmartMemory] Deleted old daily log: date=%s id=%s",
+                            date_val, mem_id,
+                        )
+
+            logger.info(
+                "[SmartMemory] Daily log cleanup: deleted %d entries older than %s",
+                deleted, cutoff_str,
+            )
+            return deleted
+
+        except Exception as e:
+            logger.error("[SmartMemory] cleanup_old_daily_logs failed: %s", e)
+            return 0
+
     def _invalidate_cache(self, workspace_id: str, agent_id: Optional[int]):
         """Invalidate cached memories for a user."""
         prefix = f"{workspace_id}:{agent_id}:"

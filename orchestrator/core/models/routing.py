@@ -31,6 +31,8 @@ class ChannelSource(str, Enum):
     JIRA_TRIGGER = "jira_trigger"
     SLACK = "slack"
     WHATSAPP = "whatsapp"
+    TELEGRAM = "telegram"
+    DISCORD = "discord"
     API = "api"
     WORKFLOW = "workflow"
     WEBHOOK = "webhook"

@@ -1,219 +1,151 @@
 """
-Telegram Channel Adapter (PRD-55: Autonomous Assistant Platform).
+Telegram Channel Adapter (PRD-55 US-020)
+=========================================
 
-Bridges Telegram Bot API messages into the universal routing pipeline
-using the python-telegram-bot v22+ async Application.
+Uses python-telegram-bot v22+ for async Telegram bot integration.
+Converts Telegram messages to RequestEnvelope for routing.
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
-from channels.base import BaseChannelAdapter
+from .base import BaseChannelAdapter
 
 logger = logging.getLogger(__name__)
 
-# Max Telegram message length
-_TG_MAX_LEN = 4096
-
 
 class TelegramAdapter(BaseChannelAdapter):
-    """Adapter for Telegram bots via python-telegram-bot v22+."""
+    """Telegram bot adapter using python-telegram-bot."""
 
-    def __init__(
-        self,
-        connection_id: str,
-        workspace_id: str,
-        config: Dict[str, Any],
-    ) -> None:
+    def __init__(self, connection_id: str, workspace_id: str, config: Dict[str, Any]):
         super().__init__(connection_id, workspace_id, config)
-        self._app = None  # telegram.ext.Application
+        self._app = None
         self._task: Optional[asyncio.Task] = None
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    async def start(self):
+        """Start the Telegram bot."""
+        try:
+            from telegram.ext import ApplicationBuilder, MessageHandler, filters
 
-    async def start(self) -> None:
-        from telegram.ext import Application, MessageHandler, filters
+            token = self.config.get("bot_token", "")
+            if not token:
+                raise ValueError("bot_token is required")
 
-        token = self.config.get("bot_token")
-        if not token:
-            raise ValueError("Telegram adapter requires 'bot_token' in config")
+            self._app = ApplicationBuilder().token(token).build()
 
-        self._app = (
-            Application.builder()
-            .token(token)
-            .build()
-        )
+            # Register message handler
+            self._app.add_handler(
+                MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message)
+            )
 
-        # Register handler for text messages
-        self._app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_update)
-        )
+            # Start polling in background
+            await self._app.initialize()
+            await self._app.start()
+            self._task = asyncio.create_task(self._app.updater.start_polling())
+            self.is_running = True
+            logger.info("[Telegram:%s] Bot started", self.connection_id)
 
-        await self._app.initialize()
-        await self._app.start()
-        # Start polling in a background task
-        self._task = asyncio.create_task(self._app.updater.start_polling())
-        self._running = True
-        logger.info("Telegram adapter %s started", self.connection_id)
+        except ImportError:
+            logger.error("[Telegram] python-telegram-bot not installed. Run: pip install python-telegram-bot")
+            raise
+        except Exception as e:
+            logger.error("[Telegram:%s] Failed to start: %s", self.connection_id, e)
+            raise
 
-    async def stop(self) -> None:
+    async def stop(self):
+        """Stop the Telegram bot."""
         if self._app:
             try:
-                await self._app.updater.stop()
+                if self._app.updater and self._app.updater.running:
+                    await self._app.updater.stop()
                 await self._app.stop()
                 await self._app.shutdown()
-            except Exception as exc:
-                logger.warning("Error stopping Telegram app: %s", exc)
-        if self._task and not self._task.done():
+            except Exception as e:
+                logger.warning("[Telegram:%s] Error during stop: %s", self.connection_id, e)
+        if self._task:
             self._task.cancel()
-        self._running = False
-        logger.info("Telegram adapter %s stopped", self.connection_id)
+        self.is_running = False
+        logger.info("[Telegram:%s] Bot stopped", self.connection_id)
 
-    # ------------------------------------------------------------------
-    # Connection test
-    # ------------------------------------------------------------------
+    async def send_message(self, channel_id: str, text: str, **kwargs) -> bool:
+        """Send a message to a Telegram chat."""
+        if not self._app or not self._app.bot:
+            return False
+        try:
+            # Auto-chunk messages over 4096 chars
+            chunks = [text[i:i + 4096] for i in range(0, len(text), 4096)]
+            for chunk in chunks:
+                await self._app.bot.send_message(chat_id=int(channel_id), text=chunk)
+            return True
+        except Exception as e:
+            logger.error("[Telegram:%s] Failed to send message: %s", self.connection_id, e)
+            return False
 
     async def test_connection(self) -> Dict[str, Any]:
-        import httpx
-
-        token = self.config.get("bot_token", "")
-        url = f"https://api.telegram.org/bot{token}/getMe"
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
-            data = resp.json()
-        if not data.get("ok"):
-            raise ConnectionError(
-                f"Telegram getMe failed: {data.get('description', 'unknown error')}"
-            )
-        bot = data["result"]
-        return {
-            "platform": "telegram",
-            "bot_id": bot.get("id"),
-            "bot_username": bot.get("username"),
-            "bot_name": bot.get("first_name"),
-        }
-
-    # ------------------------------------------------------------------
-    # Incoming messages
-    # ------------------------------------------------------------------
-
-    async def _handle_update(self, update: Any, context: Any) -> None:
-        """python-telegram-bot handler callback."""
-        message = update.effective_message
-        if not message or not message.text:
-            return
-
-        chat_id = str(message.chat_id)
-
-        # Show typing indicator
+        """Test Telegram bot token validity."""
         try:
-            await context.bot.send_chat_action(
-                chat_id=message.chat_id, action="typing"
-            )
-        except Exception:
-            pass
+            import requests
+            token = self.config.get("bot_token", "")
+            resp = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
+            if resp.status_code == 200:
+                bot = resp.json().get("result", {})
+                return {"status": "connected", "bot_name": bot.get("username")}
+            return {"status": "error", "detail": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
 
-        # Route through the universal pipeline
-        response_text = await self.handle_message(message)
-
-        # Send response back
-        if response_text:
-            await self.send_message(chat_id, response_text, _context=context)
-
-        # Update message count
-        self._increment_message_count()
-
-    # ------------------------------------------------------------------
-    # Outbound
-    # ------------------------------------------------------------------
-
-    async def send_message(
-        self, channel_id: str, text: str, **kwargs: Any
-    ) -> None:
-        """Send a message to a Telegram chat, auto-chunking if needed."""
-        ctx = kwargs.get("_context")
-        bot = ctx.bot if ctx else (self._app.bot if self._app else None)
-        if not bot:
-            logger.error("No bot instance available for sending")
+    async def _on_message(self, update, context):
+        """Handle incoming Telegram message."""
+        if not update.message or not update.message.text:
             return
 
-        chunks = self._chunk_text(text, _TG_MAX_LEN)
-        for chunk in chunks:
-            await bot.send_message(chat_id=int(channel_id), text=chunk)
+        try:
+            # Send typing indicator
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id, action="typing"
+            )
 
-    # ------------------------------------------------------------------
-    # Envelope conversion
-    # ------------------------------------------------------------------
+            platform_msg = {
+                "channel_id": str(update.effective_chat.id),
+                "reply_channel_id": str(update.effective_chat.id),
+                "user_id": str(update.effective_user.id) if update.effective_user else None,
+                "user_name": update.effective_user.first_name if update.effective_user else None,
+                "text": update.message.text,
+                "message_id": str(update.message.message_id),
+            }
 
-    def _to_envelope(self, platform_message: Any) -> Any:
-        from core.models.routing import RequestEnvelope, ChannelSource, RequestUser
+            await self.handle_message(platform_msg)
 
-        msg = platform_message
-        user = msg.from_user
+        except Exception as e:
+            logger.error("[Telegram:%s] Error handling message: %s", self.connection_id, e)
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Sorry, I encountered an error processing your message.",
+                )
+            except Exception:
+                pass
+
+    def _to_envelope(self, platform_message: Dict[str, Any]):
+        """Convert Telegram message to RequestEnvelope."""
+        from core.models.routing import RequestEnvelope, RequestUser, ChannelSource
 
         return RequestEnvelope(
+            id=uuid4(),
             source=ChannelSource.TELEGRAM,
-            content=msg.text or "",
-            raw_payload={
-                "message_id": msg.message_id,
-                "chat_id": msg.chat_id,
-                "date": msg.date.isoformat() if msg.date else None,
-            },
+            content=platform_message.get("text", ""),
+            raw_payload=platform_message,
             user=RequestUser(
-                id=str(user.id) if user else None,
-                name=(
-                    f"{user.first_name or ''} {user.last_name or ''}".strip()
-                    if user
-                    else None
-                ),
+                id=platform_message.get("user_id"),
+                name=platform_message.get("user_name"),
+                auth_type="telegram",
             ),
-            workspace_id=UUID(self.workspace_id),
+            workspace_id=self.workspace_id,
             metadata={
                 "channel_adapter": "telegram",
                 "connection_id": self.connection_id,
+                "chat_id": platform_message.get("channel_id"),
             },
         )
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _chunk_text(text: str, max_len: int) -> List[str]:
-        if len(text) <= max_len:
-            return [text]
-        chunks = []
-        while text:
-            chunks.append(text[:max_len])
-            text = text[max_len:]
-        return chunks
-
-    def _increment_message_count(self) -> None:
-        try:
-            from core.database.database import SessionLocal
-            from core.models.channels import ChannelConnection
-            from sqlalchemy import text as sa_text
-            from datetime import datetime, timezone
-
-            db = SessionLocal()
-            try:
-                db.execute(
-                    sa_text(
-                        "UPDATE channel_connections "
-                        "SET message_count = message_count + 1, "
-                        "last_activity_at = NOW() "
-                        "WHERE id = :cid::uuid"
-                    ),
-                    {"cid": self.connection_id},
-                )
-                db.commit()
-            finally:
-                db.close()
-        except Exception as exc:
-            logger.debug("Failed to increment message count: %s", exc)
