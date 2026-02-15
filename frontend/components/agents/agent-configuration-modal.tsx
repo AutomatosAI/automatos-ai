@@ -25,6 +25,9 @@ import {
   PenLine,
   ChevronDown,
   ChevronUp,
+  Activity,
+  Loader2,
+  Play,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -130,6 +133,20 @@ export function AgentConfigurationModal({
   const [expandedPersonaId, setExpandedPersonaId] = useState<string | null>(null)
   const [personaSaving, setPersonaSaving] = useState(false)
   const [personaLoaded, setPersonaLoaded] = useState(false)
+
+  // PRD-55: Heartbeat configuration state
+  const [heartbeatConfig, setHeartbeatConfig] = useState({
+    enabled: false,
+    interval_minutes: 60,
+    inherit_active_hours: true,
+    active_hours_start: '08:00',
+    active_hours_end: '20:00',
+    prompt: '',
+    auto_act: false,
+    report_to: 'orchestrator'
+  })
+  const [heartbeatRunning, setHeartbeatRunning] = useState(false)
+  const [lastHeartbeatResult, setLastHeartbeatResult] = useState<any>(null)
 
   const saving = updateConfigMutation.isLoading || updateModelConfigMutation.isLoading
   const error = (agentError as any)?.message || null
@@ -242,6 +259,28 @@ export function AgentConfigurationModal({
         }
       })
 
+    return () => { mounted = false }
+  }, [open, agentId])
+
+  // PRD-55: Load heartbeat config when modal opens
+  useEffect(() => {
+    if (!open || !agentId) return
+    let mounted = true
+    apiClient.request<any>(`/api/heartbeat/agents/${agentId}/config`)
+      .then((data) => {
+        if (!mounted) return
+        if (data) {
+          setHeartbeatConfig(prev => ({ ...prev, ...data }))
+        }
+      })
+      .catch(() => {})
+    // Load last heartbeat result
+    apiClient.request<any>(`/api/heartbeat/agents/${agentId}/last`)
+      .then((data) => {
+        if (!mounted) return
+        if (data) setLastHeartbeatResult(data)
+      })
+      .catch(() => {})
     return () => { mounted = false }
   }, [open, agentId])
 
@@ -407,6 +446,39 @@ export function AgentConfigurationModal({
     }
   }
 
+  // PRD-55: Save heartbeat config
+  const saveHeartbeatConfig = async () => {
+    if (!agentId) return
+    try {
+      await apiClient.request(`/api/heartbeat/agents/${agentId}/config`, {
+        method: 'PUT',
+        body: heartbeatConfig as any,
+      })
+      toast.success('Heartbeat config saved')
+    } catch (err) {
+      console.error('Failed to save heartbeat config:', err)
+      toast.error('Failed to save heartbeat config')
+    }
+  }
+
+  // PRD-55: Run heartbeat now
+  const runHeartbeatNow = async () => {
+    if (!agentId) return
+    setHeartbeatRunning(true)
+    try {
+      const result = await apiClient.request<any>(`/api/heartbeat/agents/${agentId}/run`, {
+        method: 'POST',
+      })
+      setLastHeartbeatResult(result)
+      toast.success('Heartbeat executed')
+    } catch (err) {
+      console.error('Failed to run heartbeat:', err)
+      toast.error('Failed to run heartbeat')
+    } finally {
+      setHeartbeatRunning(false)
+    }
+  }
+
   const handleSave = async () => {
     if (!agentId) {
       console.error('No agent ID provided')
@@ -563,7 +635,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-6 bg-secondary/50">
+                <TabsList className="grid w-full grid-cols-7 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-1">
                     <Info className="w-4 h-4" />
                     <span>General</span>
@@ -587,6 +659,10 @@ export function AgentConfigurationModal({
                   <TabsTrigger value="tools" className="flex items-center space-x-1">
                     <Wrench className="w-4 h-4" />
                     <span>Tools</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="heartbeat" className="flex items-center space-x-1">
+                    <Activity className="w-3 h-3" />
+                    <span>Heartbeat</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -1335,6 +1411,170 @@ export function AgentConfigurationModal({
                           Model to use if primary model fails or is unavailable
                         </p>
                       </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* PRD-55: Heartbeat Configuration Tab */}
+                <TabsContent value="heartbeat" className="space-y-6 mt-6 max-h-[60vh] overflow-y-auto pr-2">
+                  <Card className="bg-secondary/30 border-border/30">
+                    <CardHeader>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Activity className="h-5 w-5 text-[hsl(var(--info))]" />
+                        Agent Heartbeat
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        Configure periodic autonomous check-ins for this agent
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                      {/* Enable Heartbeat */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Enable Heartbeat</Label>
+                          <p className="text-xs text-muted-foreground">Agent will periodically wake up and check its environment</p>
+                        </div>
+                        <Switch
+                          checked={heartbeatConfig.enabled}
+                          onCheckedChange={(v) => setHeartbeatConfig(prev => ({ ...prev, enabled: v }))}
+                        />
+                      </div>
+
+                      {heartbeatConfig.enabled && (
+                        <>
+                          {/* Interval */}
+                          <div className="space-y-2">
+                            <Label>Interval</Label>
+                            <Select
+                              value={String(heartbeatConfig.interval_minutes)}
+                              onValueChange={(v) => setHeartbeatConfig(prev => ({ ...prev, interval_minutes: Number(v) }))}
+                            >
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="15">Every 15 minutes</SelectItem>
+                                <SelectItem value="30">Every 30 minutes</SelectItem>
+                                <SelectItem value="60">Every hour</SelectItem>
+                                <SelectItem value="120">Every 2 hours</SelectItem>
+                                <SelectItem value="240">Every 4 hours</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Active Hours */}
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <Label>Active Hours</Label>
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="inherit-hours"
+                                  checked={heartbeatConfig.inherit_active_hours}
+                                  onCheckedChange={(v) => setHeartbeatConfig(prev => ({ ...prev, inherit_active_hours: !!v }))}
+                                />
+                                <Label htmlFor="inherit-hours" className="text-xs cursor-pointer">Inherit from orchestrator</Label>
+                              </div>
+                            </div>
+                            {!heartbeatConfig.inherit_active_hours && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                  <Label className="text-xs">From</Label>
+                                  <Input
+                                    type="time"
+                                    value={heartbeatConfig.active_hours_start}
+                                    onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, active_hours_start: e.target.value }))}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs">Until</Label>
+                                  <Input
+                                    type="time"
+                                    value={heartbeatConfig.active_hours_end}
+                                    onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, active_hours_end: e.target.value }))}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Heartbeat Prompt */}
+                          <div className="space-y-2">
+                            <Label>Heartbeat Prompt</Label>
+                            <Textarea
+                              value={heartbeatConfig.prompt}
+                              onChange={(e) => setHeartbeatConfig(prev => ({ ...prev, prompt: e.target.value }))}
+                              placeholder="What should this agent check during heartbeat? e.g. Check for new emails, review pending tasks..."
+                              className="bg-secondary/50 min-h-[100px]"
+                            />
+                          </div>
+
+                          {/* Auto-Act */}
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label>Auto-Act on Findings</Label>
+                              <p className="text-xs text-muted-foreground">Agent can take action based on heartbeat results</p>
+                            </div>
+                            <Switch
+                              checked={heartbeatConfig.auto_act}
+                              onCheckedChange={(v) => setHeartbeatConfig(prev => ({ ...prev, auto_act: v }))}
+                            />
+                          </div>
+
+                          {/* Report To */}
+                          <div className="space-y-2">
+                            <Label>Report To</Label>
+                            <Select
+                              value={heartbeatConfig.report_to}
+                              onValueChange={(v) => setHeartbeatConfig(prev => ({ ...prev, report_to: v }))}
+                            >
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="orchestrator">Orchestrator</SelectItem>
+                                <SelectItem value="direct">Direct (Chat)</SelectItem>
+                                <SelectItem value="webhook">Webhook</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-4 border-t border-border/30">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={saveHeartbeatConfig}
+                          className="flex-1"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Heartbeat Config
+                        </Button>
+                        {heartbeatConfig.enabled && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={runHeartbeatNow}
+                            disabled={heartbeatRunning}
+                          >
+                            {heartbeatRunning ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+                            Run Now
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Last Heartbeat Result */}
+                      {lastHeartbeatResult && (
+                        <div className="space-y-2 pt-4 border-t border-border/30">
+                          <Label className="text-xs">Last Heartbeat Result</Label>
+                          <div className="p-3 rounded-lg bg-secondary/30 text-sm">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className={`h-2 w-2 rounded-full ${lastHeartbeatResult.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`} />
+                              <span className="text-xs text-muted-foreground">
+                                {lastHeartbeatResult.created_at ? new Date(lastHeartbeatResult.created_at).toLocaleString() : 'Unknown time'}
+                              </span>
+                            </div>
+                            <p className="text-xs whitespace-pre-wrap">{lastHeartbeatResult.summary || lastHeartbeatResult.result || 'No details available'}</p>
+                          </div>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>

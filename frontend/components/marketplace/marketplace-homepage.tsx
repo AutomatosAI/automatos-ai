@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, Download, TrendingUp, Grid3X3, Store } from 'lucide-react'
+import { Search, Download, TrendingUp, Grid3X3, Store, Code } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -14,7 +14,9 @@ import { MarketplaceAgentsTab } from './marketplace-agents-tab'
 import { MarketplaceLlmsTab } from './marketplace-llms-tab'
 import { MarketplaceRecipesTab } from './marketplace-recipes-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
+import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { apiClient } from '@/lib/api-client'
+import { useWorkspace } from '@/hooks/use-workspace'
 
 export interface MarketplaceItem {
   id: number
@@ -34,6 +36,7 @@ export interface MarketplaceItem {
 }
 
 export function MarketplaceHomepage() {
+  const { workspaceId } = useWorkspace()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState('tools')
   const [stats, setStats] = useState({
@@ -117,6 +120,7 @@ export function MarketplaceHomepage() {
             <TabsTrigger value="recipes">Recipes</TabsTrigger>
             <TabsTrigger value="llms">LLMs</TabsTrigger>
             <TabsTrigger value="plugins">Capabilities</TabsTrigger>
+            <TabsTrigger value="skills"><Code className="h-4 w-4 mr-1" /> Skills</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -148,6 +152,10 @@ export function MarketplaceHomepage() {
 
         <TabsContent value="plugins" className="mt-0">
           <MarketplacePluginsTab searchQuery={searchQuery} />
+        </TabsContent>
+
+        <TabsContent value="skills" className="mt-0">
+          <MarketplaceSkillsTab searchQuery={searchQuery} workspaceId={workspaceId || ''} />
         </TabsContent>
       </Tabs>
     </div>

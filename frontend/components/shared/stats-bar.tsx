@@ -39,25 +39,25 @@ export function StatsBar({ stats, loading = false, glow = true, className }: Sta
         >
           <Card className={cn('glass-card hover:border-primary/20 transition-all duration-300', glow && 'card-glow')}>
             <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-2xl bg-black/20 border border-primary/10 flex items-center justify-center shrink-0">
-                    <stat.icon
-                      className={cn('w-5 h-5', stat.iconColor || iconColors[index % iconColors.length])}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-2xl font-bold leading-none">
-                      {loading ? '...' : stat.value}
-                    </div>
-                    <div className="text-sm text-muted-foreground truncate">{stat.label}</div>
-                  </div>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-black/20 border border-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                  <stat.icon
+                    className={cn('w-5 h-5', stat.iconColor || iconColors[index % iconColors.length])}
+                  />
                 </div>
-                {stat.change && (
-                  <div className="shrink-0 text-xs text-muted-foreground">
-                    {stat.change}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-2xl font-bold leading-none truncate">
+                      {loading ? '...' : stat.value}
+                    </span>
+                    {stat.change && (
+                      <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                        {stat.change}
+                      </span>
+                    )}
                   </div>
-                )}
+                  <div className="text-sm text-muted-foreground truncate mt-1">{stat.label}</div>
+                </div>
               </div>
             </CardContent>
           </Card>

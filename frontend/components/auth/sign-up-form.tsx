@@ -19,6 +19,7 @@ export function SignUpForm() {
     const [password, setPassword] = useState('')
     const [showPassword, setShowPassword] = useState(false)
     const [pendingVerification, setPendingVerification] = useState(false)
+    const [onWaitlist, setOnWaitlist] = useState(false)
     const [code, setCode] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -44,17 +45,26 @@ export function SignUpForm() {
         setError(null)
 
         try {
-            await signUp.create({
+            const result = await signUp.create({
                 emailAddress: email,
                 password,
             })
 
-            // Send email verification code
+            // Normal flow: send email verification code
             await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
             setPendingVerification(true)
         } catch (err: any) {
-            console.error('Sign Up Error:', err.errors?.[0]?.longMessage)
-            setError(err.errors?.[0]?.longMessage || 'Failed to create account. Please try again.')
+            const errorCode = err.errors?.[0]?.code || ''
+            const errorMessage = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || ''
+
+            // Clerk returns this error code when waitlist is active
+            if (errorCode === 'sign_up_restricted_waitlist') {
+                setOnWaitlist(true)
+                return
+            }
+
+            console.error('Sign Up Error:', errorMessage)
+            setError(errorMessage || 'Failed to create account. Please try again.')
         } finally {
             setIsLoading(false)
         }
@@ -113,12 +123,14 @@ export function SignUpForm() {
                         />
                     </motion.div>
                     <CardTitle className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-                        {pendingVerification ? 'Verify Email' : 'Create Account'}
+                        {onWaitlist ? "You're on the list!" : pendingVerification ? 'Verify Email' : 'Join the Waitlist'}
                     </CardTitle>
                     <CardDescription className="text-slate-400">
-                        {pendingVerification
-                            ? 'We sent a verification code to ' + email
-                            : 'Join Automatos and build your autonomous workforce'}
+                        {onWaitlist
+                            ? "We'll notify you at " + email + " when your spot is ready"
+                            : pendingVerification
+                                ? 'We sent a verification code to ' + email
+                                : 'Sign up to join the Automatos waitlist'}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -130,7 +142,26 @@ export function SignUpForm() {
                     )}
 
                     <AnimatePresence mode="wait">
-                        {!pendingVerification ? (
+                        {onWaitlist ? (
+                            <motion.div
+                                key="waitlist-success"
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="text-center py-6 space-y-4"
+                            >
+                                <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto">
+                                    <CheckCircle2 className="w-8 h-8 text-primary" />
+                                </div>
+                                <p className="text-sm text-slate-400">
+                                    We're onboarding users in waves. You'll receive an invite email when it's your turn.
+                                </p>
+                                <Link href="/sign-in">
+                                    <Button variant="outline" className="mt-2 border-border/40 hover:bg-secondary/40">
+                                        Already have an invite? Sign in
+                                    </Button>
+                                </Link>
+                            </motion.div>
+                        ) : !pendingVerification ? (
                             <motion.div
                                 key="signup-form"
                                 initial={{ opacity: 0, x: -20 }}
@@ -247,7 +278,7 @@ export function SignUpForm() {
                                             </>
                                         ) : (
                                             <>
-                                                Create Account
+                                                Join Waitlist
                                                 <ArrowRight className="ml-2 h-4 w-4" />
                                             </>
                                         )}
@@ -307,7 +338,7 @@ export function SignUpForm() {
                 </CardContent>
                 <CardFooter className="flex justify-center border-t border-border/30 pt-6">
                     <p className="text-sm text-muted-foreground">
-                        Already have an account?{' '}
+                        Already have an invite?{' '}
                         <Link href="/sign-in" className="text-primary hover:text-primary/90 font-medium hover:underline transition-all">
                             Sign in
                         </Link>

@@ -188,7 +188,7 @@ export default function SystemSettingsTab({ className }: SystemSettingsTabProps)
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="orchestrator_llm">Orchestrator LLM</TabsTrigger>
+          <TabsTrigger value="orchestrator_llm">Orchestrator</TabsTrigger>
           <TabsTrigger value="codegraph">CodeGraph</TabsTrigger>
           <TabsTrigger value="system_logging">Logging</TabsTrigger>
           <TabsTrigger value="api_rate_limiting">Rate Limiting</TabsTrigger>

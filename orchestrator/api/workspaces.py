@@ -8,10 +8,12 @@ dependency (`get_request_context_hybrid`) provides a request-scoped workspace UU
 
 import logging
 import os
-from typing import Any, Dict
+from datetime import datetime, timedelta
+from typing import Any, Dict, List
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
 from core.database.database import get_db
@@ -208,4 +210,143 @@ async def save_byok_preferences(
 
     logger.info("Updated BYOK preferences for workspace %s: %s", workspace.id, overrides)
     return {"status": "saved", "byok_overrides": overrides}
+
+
+# ── PRD-55: Orchestrator Settings ──────────────────────────────────────
+
+@router.put("/current/settings")
+async def save_workspace_settings(
+    payload: Dict[str, Any] = Body(...),
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Save workspace settings (orchestrator soul, heartbeat, etc.).
+
+    Body: { "orchestrator": { "personality_mode": "friendly", ... } }
+    Merges into existing workspace.settings.
+    """
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    settings = dict(workspace.settings or {})
+
+    # Deep merge orchestrator settings
+    if "orchestrator" in payload:
+        orch = dict(settings.get("orchestrator", {}))
+        incoming_orch = payload["orchestrator"]
+        if isinstance(incoming_orch, dict):
+            # Handle nested heartbeat merge
+            if "heartbeat" in incoming_orch and isinstance(incoming_orch["heartbeat"], dict):
+                hb = dict(orch.get("heartbeat", {}))
+                hb.update(incoming_orch["heartbeat"])
+                orch["heartbeat"] = hb
+                incoming_orch = {k: v for k, v in incoming_orch.items() if k != "heartbeat"}
+            orch.update(incoming_orch)
+        settings["orchestrator"] = orch
+
+    workspace.settings = settings
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(workspace, "settings")
+    db.commit()
+
+    logger.info("Updated settings for workspace %s", workspace.id)
+    return {"status": "saved", "settings": settings}
+
+
+@router.get("/current/settings")
+async def get_workspace_settings(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return full workspace settings with orchestrator defaults."""
+    workspace = db.query(Workspace).get(ctx.workspace_id)
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    settings = dict(workspace.settings or {})
+
+    # Inject orchestrator defaults for missing fields
+    orch_defaults = {
+        "personality_mode": "friendly",
+        "custom_soul": "",
+        "communication_style": "balanced",
+        "proactive_level": "notify",
+        "thinking_level": "medium",
+        "heartbeat": {
+            "enabled": False,
+            "interval_minutes": 30,
+            "active_hours_start": "08:00",
+            "active_hours_end": "20:00",
+            "timezone": "UTC",
+            "checklist": "- Check pending tasks\n- Review unrouted events\n- Summarize today's activity",
+        },
+    }
+    orch = settings.get("orchestrator", {})
+    if not isinstance(orch, dict):
+        orch = {}
+    for k, v in orch_defaults.items():
+        if k not in orch:
+            orch[k] = v
+    settings["orchestrator"] = orch
+
+    return {"settings": settings}
+
+
+# ── PRD-55: Memory Stats ──────────────────────────────────────────────
+
+@router.get("/current/memory-stats")
+async def get_memory_stats(
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Return memory statistics for the workspace."""
+    try:
+        from modules.memory.integrations.mem0_client import Mem0Client
+        import asyncio
+
+        client = Mem0Client()
+        ws_id = str(ctx.workspace_id)
+        global_user_id = f"ws_{ws_id}"
+
+        loop = asyncio.get_event_loop()
+        memories = await loop.run_in_executor(
+            None,
+            lambda: client.get_all(user_id=global_user_id),
+        )
+        memories = memories or []
+
+        now = datetime.utcnow()
+        day_ago = now - timedelta(hours=24)
+
+        recent_24h = 0
+        recent = []
+        for m in memories:
+            meta = m.get("metadata", {}) or {}
+            ts_str = meta.get("timestamp", "")
+            if ts_str:
+                try:
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00").replace("+00:00", ""))
+                    if ts > day_ago:
+                        recent_24h += 1
+                except (ValueError, TypeError):
+                    pass
+            recent.append({
+                "memory": (m.get("memory", "") or "")[:120],
+                "preview": (m.get("memory", "") or "")[:80],
+            })
+
+        return {
+            "total": len(memories),
+            "agents": len(set(
+                (m.get("metadata", {}) or {}).get("agent_id", "")
+                for m in memories if (m.get("metadata", {}) or {}).get("agent_id")
+            )),
+            "recent24h": recent_24h,
+            "recent": recent[:5],
+        }
+    except Exception as e:
+        logger.warning(f"Memory stats failed: {e}")
+        return {"total": 0, "agents": 0, "recent24h": 0, "recent": []}
 
