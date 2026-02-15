@@ -645,13 +645,6 @@ export function Chat({
   const isTyping = status === 'streaming'
   const hasSentMessage = messages.length > 0
 
-  const suggestedActions = [
-    "Using the workflow_executions table, break down workflow completions and failures by day over the last 14 days and plot the trend",
-    "From the document_usage table, summarize daily document search volume and average response time for the past 7 days with a chart",
-    "Plot hourly CPU and memory utilization over the last 24 hours using the system_metrics table",
-    "Highlight the most frequent CodeGraph queries this week by counting entries in codegraph_query_logs and visualize their counts",
-  ]
-
   const quickLinks = [
     { label: 'Create an Agent', href: '/agents', icon: Bot },
     { label: 'Knowledge Base', href: '/documents', icon: Database },
@@ -814,128 +807,66 @@ export function Chat({
       {/* Normal chat view - NO widgets */}
       {!hasWidgets && !isArtifactViewerVisible && (
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
-          {/* Incredible-style centered welcome card (empty state) */}
+          {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
-            <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
-              {/* Hero header (dark-mode version of marketing header) */}
-              <div className="w-full max-w-5xl text-center mb-8 md:mb-10">
-                <div className="text-xs uppercase tracking-[0.35em] text-muted-foreground dark:text-orange-200/70">
-                  Future-Ready AI Agency
-                </div>
-                <h1 className="mt-3 text-4xl md:text-6xl font-semibold tracking-tight text-foreground dark:text-white leading-[1.05]">
-                  <span className="block">AI Services That</span>
-                  <span className="block mt-2">
-                    <span className="gradient-text">[Elevate]</span>{' '}
-                    <span className="inline-flex align-middle px-1">
-                      <span
-                        className={[
-                          'inline-flex h-10 w-10 md:h-14 md:w-14 items-center justify-center',
-                          'rounded-2xl bg-white/95 ring-2 ring-orange-500/60',
-                          'shadow-[0_0_0_1px_rgba(249,115,22,0.25),0_18px_45px_rgba(0,0,0,0.35),0_0_40px_rgba(249,115,22,0.25)]',
-                          '-rotate-12',
-                        ].join(' ')}
-                        aria-hidden="true"
-                      >
-                        <img
-                          src="/brand/automatos-mark-hi.png"
-                          alt=""
-                          className="h-6 w-6 md:h-8 md:w-8 object-contain drop-shadow-[0_0_10px_rgba(249,115,22,0.35)]"
-                          draggable={false}
-                        />
-                      </span>
-                    </span>
-                    <span className="whitespace-nowrap">Your Workflow</span>
-                  </span>
-                </h1>
-                <p className="mt-4 text-base md:text-lg text-muted-foreground max-w-3xl mx-auto">
-                  Transforming ideas into intelligent solutions—explore documents, databases, workflows, and tools in one place.
-                </p>
-              </div>
-              <div
-                className={[
-                  'relative w-full max-w-3xl md:max-w-4xl overflow-hidden rounded-3xl',
-                  'border border-orange-500/12 bg-background/40 backdrop-blur-xl',
-                  'shadow-[0_0_64px_rgba(249,115,22,0.10)]',
-                ].join(' ')}
+            <div className="flex flex-1 flex-col items-center justify-end px-4 pb-8 md:pb-12">
+              {/* Personal greeting */}
+              <motion.div
+                className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
               >
-                {/* soft glow layer */}
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-orange-500/10 via-transparent to-transparent" />
+                <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground/90">
+                  Hey{user?.firstName ? <> <span className="gradient-text">{user.firstName}</span></> : ''}, what can I do for you today?
+                </h1>
+              </motion.div>
 
-                <div className="relative space-y-6 p-6 md:p-8">
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {suggestedActions.map((suggestion, index) => (
-                      <motion.div
-                        key={suggestion}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.12 + 0.03 * index }}
+              {/* Chat input + quick links — no outer box */}
+              <div className="w-full max-w-3xl md:max-w-4xl space-y-3">
+                {/* PRD-40: Tool Suggestion Bar */}
+                <ToolSuggestionBar
+                  suggestions={toolSuggestions}
+                  activeTool={activeTool}
+                  onSuggestionClick={handleSuggestionClick}
+                  onClose={() => {
+                    setActiveTool(null)
+                    setToolSuggestions([])
+                  }}
+                  isLoading={isLoadingSuggestions}
+                />
+                <MultimodalInput
+                  chatId={id}
+                  status={status}
+                  stop={stop}
+                  sendMessage={sendMessage}
+                  selectedModelId={currentModelId}
+                  onModelChange={setCurrentModelId}
+                  selectedAgentId={selectedAgentId}
+                  onAgentChange={handleAgentChange}
+                  selectedVisibilityType={visibilityType}
+                  usage={usage}
+                  onToolIconClick={handleToolIconClick}
+                />
+                <div className="flex flex-wrap justify-center gap-2 pt-1">
+                  {quickLinks.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={[
+                          'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium',
+                          'bg-black/10 backdrop-blur text-foreground/90',
+                          'hover:bg-orange-500/10 transition-colors',
+                          'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
+                        ].join(' ')}
                       >
-                        <Button
-                          variant="outline"
-                          className={[
-                            'w-full rounded-2xl border-orange-500/25 bg-transparent',
-                            'px-4 py-3 text-left text-sm font-medium leading-snug',
-                            'hover:border-orange-500/45 hover:bg-orange-500/5',
-                            'shadow-[0_0_0_1px_rgba(249,115,22,0.10)]',
-                          ].join(' ')}
-                          onClick={() => sendMessage(suggestion)}
-                          title={suggestion}
-                        >
-                          <span className="block line-clamp-2 text-left text-sm text-foreground/90">
-                            {suggestion}
-                          </span>
-                        </Button>
-                      </motion.div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-3">
-                    {/* PRD-40: Tool Suggestion Bar */}
-                    <ToolSuggestionBar
-                      suggestions={toolSuggestions}
-                      activeTool={activeTool}
-                      onSuggestionClick={handleSuggestionClick}
-                      onClose={() => {
-                        setActiveTool(null)
-                        setToolSuggestions([])
-                      }}
-                      isLoading={isLoadingSuggestions}
-                    />
-                    <MultimodalInput
-                      chatId={id}
-                      status={status}
-                      stop={stop}
-                      sendMessage={sendMessage}
-                      selectedModelId={currentModelId}
-                      onModelChange={setCurrentModelId}
-                      selectedAgentId={selectedAgentId}
-                      onAgentChange={handleAgentChange}
-                      selectedVisibilityType={visibilityType}
-                      usage={usage}
-                      onToolIconClick={handleToolIconClick}
-                    />
-                    <div className="flex flex-wrap justify-center gap-2 pt-1">
-                      {quickLinks.map((item) => {
-                        const Icon = item.icon
-                        return (
-                          <Link
-                            key={item.href}
-                            href={item.href}
-                            className={[
-                              'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium',
-                              'bg-black/10 backdrop-blur text-foreground/90',
-                              'hover:bg-orange-500/10 transition-colors',
-                              'shadow-[0_0_18px_rgba(249,115,22,0.10)]',
-                            ].join(' ')}
-                          >
-                            <Icon className="h-3.5 w-3.5 text-orange-400" />
-                            <span>{item.label}</span>
-                          </Link>
-                        )
-                      })}
-                    </div>
-                  </div>
+                        <Icon className="h-3.5 w-3.5 text-orange-400" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )
+                  })}
                 </div>
               </div>
             </div>

@@ -36,8 +36,6 @@ class ChannelSource(str, Enum):
     API = "api"
     WORKFLOW = "workflow"
     WEBHOOK = "webhook"
-    TELEGRAM = "telegram"
-    DISCORD = "discord"
     TEAMS = "teams"
     GOOGLE_CHAT = "google_chat"
     SIGNAL = "signal"

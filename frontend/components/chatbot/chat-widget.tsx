@@ -4,7 +4,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Bug,
   X,
   HelpCircle,
   BookOpen,
@@ -255,8 +254,10 @@ export function PilotHelperWidget({
             {/* Header */}
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
-                  <Bug className="w-4 h-4 text-white" />
+                <div className="w-8 h-8 rounded-full bg-[#0052CC] flex items-center justify-center">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <path d="M11.53 2c0 4.97 3.5 8.97 8.47 8.97V13c-5.13 0-8.47 3.63-8.47 9h-2.06c0-5.13-3.63-9-9.47-9v-2.03C5.13 10.97 9.47 6.97 9.47 2h2.06z" fill="white" />
+                  </svg>
                 </div>
                 <h3 className="font-semibold text-foreground">Pilot Helper</h3>
               </div>
@@ -454,7 +455,7 @@ export function PilotHelperWidget({
         )}
       </AnimatePresence>
 
-      {/* Floating button */}
+      {/* Floating Jira button */}
       <motion.div
         initial={{ scale: 0, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -462,15 +463,13 @@ export function PilotHelperWidget({
       >
         <Button
           onClick={() => setIsOpen((v) => !v)}
-          className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 shadow-xl hover:shadow-2xl transition-all duration-300 group relative"
+          className="w-14 h-14 rounded-full bg-[#0052CC] hover:bg-[#0065FF] shadow-lg hover:shadow-xl transition-all duration-300 group p-0"
           size="lg"
+          title="Report an issue"
         >
-          <HelpCircle className="w-8 h-8 text-white group-hover:scale-110 transition-transform" />
-          <motion.div
-            className="absolute inset-0 rounded-full bg-gradient-to-br from-orange-400/50 to-red-400/50"
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ repeat: Infinity, duration: 3 }}
-          />
+          <svg className="w-7 h-7 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none">
+            <path d="M11.53 2c0 4.97 3.5 8.97 8.47 8.97V13c-5.13 0-8.47 3.63-8.47 9h-2.06c0-5.13-3.63-9-9.47-9v-2.03C5.13 10.97 9.47 6.97 9.47 2h2.06z" fill="white" />
+          </svg>
         </Button>
       </motion.div>
     </div>
