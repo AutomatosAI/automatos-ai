@@ -60,10 +60,11 @@ def load_orchestrator_settings(workspace_id: str) -> Dict[str, Any]:
                         settings[key] = orch[key]
         finally:
             db.close()
+        # Only cache on successful DB load
+        _orch_cache[workspace_id] = (now, settings)
     except Exception as e:
-        logger.warning("Failed to load orchestrator settings for %s: %s", workspace_id, e)
+        logger.warning("Failed to load orchestrator settings for workspace %s: %s", workspace_id, e)
 
-    _orch_cache[workspace_id] = (now, settings)
     return settings
 
 

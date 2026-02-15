@@ -178,35 +178,39 @@ class HeartbeatService:
         start_str = hb_config.get("active_hours_start", "08:00")
         end_str = hb_config.get("active_hours_end", "20:00")
 
-        start_h, start_m = map(int, start_str.split(":"))
-        end_h, end_m = map(int, end_str.split(":"))
+        def _to_minutes(s: str) -> int:
+            h, m = map(int, s.split(":"))
+            return h * 60 + m
 
-        current_minutes = now.hour * 60 + now.minute
-        start_minutes = start_h * 60 + start_m
-        end_minutes = end_h * 60 + end_m
+        current = now.hour * 60 + now.minute
+        start = _to_minutes(start_str)
+        end = _to_minutes(end_str)
 
-        return start_minutes <= current_minutes <= end_minutes
+        # Handle overnight windows (e.g. 22:00 → 06:00)
+        if start <= end:
+            return start <= current <= end
+        return current >= start or current <= end
 
     # ------------------------------------------------------------------
     # Tick implementations
     # ------------------------------------------------------------------
 
-    async def _orchestrator_tick(self, workspace_id: str, hb_config: dict):
-        """Execute an orchestrator heartbeat tick."""
+    async def _orchestrator_tick(self, workspace_id: str, hb_config: dict) -> Dict[str, Any]:
+        """Execute an orchestrator heartbeat tick. Returns result dict."""
         tick_key = f"orch_{workspace_id}"
         if self._running_ticks.get(tick_key):
             logger.debug(
                 "[Heartbeat] Orchestrator tick already running for ws=%s, skipping",
                 workspace_id,
             )
-            return
+            return {"status": "skipped", "reason": "already_running"}
 
         if not await self._is_within_active_hours(hb_config):
             logger.debug(
                 "[Heartbeat] Outside active hours for ws=%s, skipping",
                 workspace_id,
             )
-            return
+            return {"status": "skipped", "reason": "outside_active_hours"}
 
         self._running_ticks[tick_key] = True
         result: Dict[str, Any] = {
@@ -284,20 +288,22 @@ class HeartbeatService:
         finally:
             self._running_ticks.pop(tick_key, None)
 
+        return result
+
     async def _agent_tick(
         self, agent_id: int, workspace_id: str, hb_config: dict
-    ):
-        """Execute an agent heartbeat tick."""
+    ) -> Dict[str, Any]:
+        """Execute an agent heartbeat tick. Returns result dict."""
         tick_key = f"agent_{agent_id}"
         if self._running_ticks.get(tick_key):
             logger.debug(
                 "[Heartbeat] Agent tick already running for agent=%s, skipping",
                 agent_id,
             )
-            return
+            return {"status": "skipped", "reason": "already_running"}
 
         if not await self._is_within_active_hours(hb_config):
-            return
+            return {"status": "skipped", "reason": "outside_active_hours"}
 
         self._running_ticks[tick_key] = True
         result: Dict[str, Any] = {
@@ -418,6 +424,8 @@ class HeartbeatService:
         finally:
             self._running_ticks.pop(tick_key, None)
 
+        return result
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
@@ -485,8 +493,7 @@ class HeartbeatService:
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
         }
-        await self._orchestrator_tick(workspace_id, hb_config_override)
-        return {"status": "triggered", "workspace_id": workspace_id}
+        return await self._orchestrator_tick(workspace_id, hb_config_override)
 
     async def run_agent_heartbeat(self, agent_id: int) -> dict:
         """Manually trigger an agent heartbeat and return the result."""
@@ -508,8 +515,7 @@ class HeartbeatService:
             "active_hours_start": "00:00",
             "active_hours_end": "23:59",
         }
-        await self._agent_tick(agent_id, workspace_id, hb_config_override)
-        return {"status": "triggered", "agent_id": agent_id}
+        return await self._agent_tick(agent_id, workspace_id, hb_config_override)
 
     def get_status(self) -> dict:
         """Return status of all scheduled heartbeat jobs."""

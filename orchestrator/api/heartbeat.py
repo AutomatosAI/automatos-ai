@@ -76,8 +76,23 @@ async def get_orchestrator_heartbeat_history(
 async def run_agent_heartbeat(
     agent_id: int,
     ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
 ):
     """Trigger an immediate heartbeat tick for a specific agent."""
+    # Verify agent belongs to the requesting workspace
+    row = db.execute(
+        text("SELECT workspace_id FROM agents WHERE id = :aid"),
+        {"aid": agent_id},
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Agent {agent_id} not found")
+    if str(row.workspace_id) != str(ctx.workspace_id):
+        logger.warning(
+            "Unauthorized heartbeat attempt: agent %s belongs to %s, not %s",
+            agent_id, row.workspace_id, ctx.workspace_id,
+        )
+        raise HTTPException(403, "Agent does not belong to this workspace")
+
     try:
         from services.heartbeat_service import get_heartbeat_service
         service = get_heartbeat_service()

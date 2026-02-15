@@ -23,9 +23,9 @@ class ChannelConnection(Base):
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     workspace_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     platform = Column(String(50), nullable=False)  # telegram, slack, discord
-    config = Column(JSON)  # encrypted credentials
-    status = Column(String(20), default="inactive")  # active, inactive, error
-    metadata_ = Column("metadata", JSON, default={})
+    config = Column(JSON, server_default="{}")  # encrypted credentials
+    status = Column(String(20), server_default="'inactive'")  # active, inactive, error
+    metadata_ = Column("metadata", JSON, server_default="{}")
     default_agent_id = Column(Integer, nullable=True)  # US-027: default routing
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

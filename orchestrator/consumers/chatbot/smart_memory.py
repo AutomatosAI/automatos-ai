@@ -582,52 +582,22 @@ class SmartMemoryManager:
             timestamp = datetime.utcnow().strftime("%H:%M")
             entry = f"[{timestamp}] {summary_line}"
 
-            # Check if a daily log already exists for today so we can append
+            # Atomic per-entry storage — each exchange gets its own memory
+            # record. No read-delete-add race condition.
             loop = asyncio.get_event_loop()
-            existing_memories = await loop.run_in_executor(
-                None,
-                lambda: self.mem0_client.get_all(user_id=daily_user_id, limit=50),
-            )
-
-            existing_today = None
-            existing_today_id = None
-            for mem in (existing_memories or []):
-                meta = mem.get("metadata") or mem.get("metadata_") or {}
-                content = mem.get("memory") or mem.get("content") or ""
-                if meta.get("type") == "daily_log" and meta.get("date") == today_str:
-                    existing_today = content
-                    existing_today_id = mem.get("id")
-                    break
-
-            if existing_today and existing_today_id:
-                # Append to existing daily log
-                updated_content = f"{existing_today}\n{entry}"
-                # Delete old entry and store updated one
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.mem0_client.delete(existing_today_id),
-                )
-                logger.info(
-                    "[SmartMemory] Appending to existing daily log for %s", today_str
-                )
-            else:
-                updated_content = entry
-                logger.info(
-                    "[SmartMemory] Creating new daily log for %s", today_str
-                )
 
             metadata = {
-                "type": "daily_log",
+                "type": "daily_log_entry",
                 "date": today_str,
                 "workspace_id": workspace_id,
             }
             if agent_id is not None:
-                metadata["last_agent_id"] = agent_id
+                metadata["agent_id"] = agent_id
 
             result = await loop.run_in_executor(
                 None,
                 lambda: self.mem0_client.add(
-                    messages=[{"role": "system", "content": updated_content}],
+                    messages=[{"role": "system", "content": entry}],
                     user_id=daily_user_id,
                     metadata=metadata,
                 ),
@@ -682,18 +652,23 @@ class SmartMemoryManager:
             if not all_memories:
                 return ""
 
-            # Filter to today + yesterday daily_log entries
+            # Filter to today + yesterday entries (supports both old
+            # "daily_log" bulk records and new "daily_log_entry" per-exchange)
             daily_entries: Dict[str, str] = {}
             for mem in all_memories:
                 meta = mem.get("metadata") or mem.get("metadata_") or {}
-                if meta.get("type") != "daily_log":
+                mem_type = meta.get("type", "")
+                if mem_type not in ("daily_log", "daily_log_entry"):
                     continue
                 date_val = meta.get("date", "")
                 if date_val not in target_dates:
                     continue
                 content = mem.get("memory") or mem.get("content") or ""
                 if content:
-                    daily_entries[date_val] = content
+                    existing = daily_entries.get(date_val, "")
+                    daily_entries[date_val] = (
+                        f"{existing}\n{content}" if existing else content
+                    )
 
             if not daily_entries:
                 return ""

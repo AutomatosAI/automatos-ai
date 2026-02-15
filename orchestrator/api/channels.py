@@ -158,8 +158,8 @@ async def delete_channel(
         from channels.manager import get_channel_manager
         manager = get_channel_manager()
         await manager.stop_adapter(channel_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Could not stop adapter for channel %s: %s", channel_id, exc)
 
     db.execute(
         text("DELETE FROM channel_connections WHERE id = :id"),
@@ -189,41 +189,39 @@ async def test_channel(
     platform = row.platform
     config = row.config or {}
 
+    import httpx
+
     try:
-        if platform == "telegram":
-            import requests
-            token = config.get("bot_token", "")
-            resp = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
-            if resp.status_code == 200:
-                bot_info = resp.json().get("result", {})
-                return {"status": "connected", "bot_name": bot_info.get("username")}
-            return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
+        async with httpx.AsyncClient(timeout=10) as client:
+            if platform == "telegram":
+                token = config.get("bot_token", "")
+                resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
+                if resp.status_code == 200:
+                    bot_info = resp.json().get("result", {})
+                    return {"status": "connected", "bot_name": bot_info.get("username")}
+                return {"status": "error", "detail": f"Telegram API returned {resp.status_code}"}
 
-        elif platform == "slack":
-            import requests
-            token = config.get("bot_token", "")
-            resp = requests.post(
-                "https://slack.com/api/auth.test",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10,
-            )
-            data = resp.json()
-            if data.get("ok"):
-                return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
-            return {"status": "error", "detail": data.get("error", "Unknown error")}
+            elif platform == "slack":
+                token = config.get("bot_token", "")
+                resp = await client.post(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                data = resp.json()
+                if data.get("ok"):
+                    return {"status": "connected", "team": data.get("team"), "bot_user": data.get("user")}
+                return {"status": "error", "detail": data.get("error", "Unknown error")}
 
-        elif platform == "discord":
-            import requests
-            token = config.get("bot_token", "")
-            resp = requests.get(
-                "https://discord.com/api/v10/users/@me",
-                headers={"Authorization": f"Bot {token}"},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                user = resp.json()
-                return {"status": "connected", "bot_name": user.get("username")}
-            return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
+            elif platform == "discord":
+                token = config.get("bot_token", "")
+                resp = await client.get(
+                    "https://discord.com/api/v10/users/@me",
+                    headers={"Authorization": f"Bot {token}"},
+                )
+                if resp.status_code == 200:
+                    user = resp.json()
+                    return {"status": "connected", "bot_name": user.get("username")}
+                return {"status": "error", "detail": f"Discord API returned {resp.status_code}"}
 
         return {"status": "error", "detail": f"Unknown platform: {platform}"}
 
