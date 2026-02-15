@@ -33,10 +33,11 @@ export function useAnalyticsOverview(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.overview(days),
     queryFn: async () => {
-      // Aggregate from existing endpoints
-      const [agents, costData, workflowStats, docStats] = await Promise.all([
+      const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+
+      const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
         apiClient.getAgents().catch(() => []),
-        apiClient.getCostAnalysis().catch(() => null),
+        apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`).catch(() => null),
         apiClient.getWorkflowStatsDashboard().catch(() => null),
         apiClient.getAnalyticsOverview().catch(() => null),
       ])
@@ -58,8 +59,8 @@ export function useAnalyticsOverview(days: number = 30) {
           storageMb: (docStats as any)?.storage_mb || 0,
         },
         cost: {
-          currentPeriod: (costData as any)?.total_cost || 0,
-          previousPeriod: (costData as any)?.previous_cost || 0,
+          currentPeriod: llmSummary?.total_cost || 0,
+          previousPeriod: 0,
         },
         system: {},
       }
@@ -73,10 +74,9 @@ export function useAgentAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.agents(days),
     queryFn: async () => {
-      const [agents, stats, ranking] = await Promise.all([
+      const [agents, stats] = await Promise.all([
         apiClient.getAgents().catch(() => []),
         apiClient.getSystemAgentStatistics().catch(() => null),
-        apiClient.getAgentRanking().catch(() => null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
@@ -98,11 +98,11 @@ export function useAgentAnalytics(days: number = 30) {
         summary: {
           totalAgents: agentList.length,
           activeAgents: agentList.filter((a: any) => a.status === 'active').length,
-          avgSuccessRate: stats?.average_performance || 0,
+          avgSuccessRate: (stats as any)?.average_performance || 0,
           totalTokens: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0),
           totalCost: agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0),
         },
-        ranking: ranking || [],
+        ranking: [],
       }
     },
     staleTime: 60000,
@@ -194,33 +194,24 @@ export function useCostAnalyticsUnified(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.costs(days),
     queryFn: async () => {
-      const [costData, agents] = await Promise.all([
-        apiClient.getCostAnalysis().catch(() => null),
+      const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
+
+      // Fetch from real backend LLM analytics endpoints
+      const [summary, usageByModel, agents] = await Promise.all([
+        apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`).catch(() => null),
+        apiClient.request<any[]>(`/api/analytics/llm/usage?period=${period}&group_by=model`).catch(() => []),
         apiClient.getAgents().catch(() => []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
+      const modelRows = Array.isArray(usageByModel) ? usageByModel : []
 
-      // Group costs by LLM model
-      const modelCosts: Record<string, { requests: number; inputTokens: number; outputTokens: number; cost: number; agents: Set<string> }> = {}
+      // Use real totals from llm_usage table
+      const totalTokens = summary?.total_tokens || 0
+      const totalCost = summary?.total_cost || 0
+      const totalRequests = summary?.total_requests || 0
 
-      agentList.forEach((agent: any) => {
-        const model = agent.model_config?.model_id || 'unknown'
-        if (!modelCosts[model]) {
-          modelCosts[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
-        }
-        modelCosts[model].requests += agent.model_usage_stats?.total_requests || 0
-        modelCosts[model].inputTokens += agent.model_usage_stats?.input_tokens || agent.model_usage_stats?.total_tokens || 0
-        modelCosts[model].outputTokens += agent.model_usage_stats?.output_tokens || 0
-        modelCosts[model].cost += agent.model_usage_stats?.total_cost || 0
-        modelCosts[model].agents.add(agent.name)
-      })
-
-      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
-      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
-      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
-
-      // Find most expensive agent
+      // Most expensive agent (from agent model_usage_stats — still useful for naming)
       const sortedByCost = [...agentList].sort((a: any, b: any) =>
         (b.model_usage_stats?.total_cost || 0) - (a.model_usage_stats?.total_cost || 0)
       )
@@ -232,20 +223,20 @@ export function useCostAnalyticsUnified(days: number = 30) {
           totalCost,
           totalRequests,
           costPerTask: totalRequests > 0 ? totalCost / totalRequests : 0,
-          mostExpensiveAgent: mostExpensive ? {
+          mostExpensiveAgent: mostExpensive?.model_usage_stats?.total_cost > 0 ? {
             name: mostExpensive.name,
-            cost: mostExpensive.model_usage_stats?.total_cost || 0,
+            cost: mostExpensive.model_usage_stats.total_cost,
             model: mostExpensive.model_config?.model_id || 'unknown',
           } : null,
         },
-        byModel: Object.entries(modelCosts).map(([model, data]) => ({
-          model,
-          requests: data.requests,
-          inputTokens: Math.round(data.inputTokens),
-          outputTokens: Math.round(data.outputTokens),
-          totalCost: data.cost,
-          avgCostPerRequest: data.requests > 0 ? data.cost / data.requests : 0,
-          agentCount: data.agents.size,
+        byModel: modelRows.map((row: any) => ({
+          model: row.key || 'unknown',
+          requests: row.request_count || 0,
+          inputTokens: row.input_tokens || 0,
+          outputTokens: row.output_tokens || 0,
+          totalCost: row.total_cost || 0,
+          avgCostPerRequest: row.request_count > 0 ? (row.total_cost || 0) / row.request_count : 0,
+          agentCount: 0,
         })),
         byAgent: agentList.map((agent: any) => ({
           id: agent.id,
@@ -255,7 +246,10 @@ export function useCostAnalyticsUnified(days: number = 30) {
           cost: agent.model_usage_stats?.total_cost || 0,
           requests: agent.model_usage_stats?.total_requests || 0,
         })).sort((a: any, b: any) => b.cost - a.cost),
-        costTrend: (costData as any)?.monthly_data || [],
+        costTrend: (summary?.cost_trend || []).map((t: any) => ({
+          date: t.date,
+          total_cost: t.cost,
+        })),
       }
     },
     staleTime: 60000,
