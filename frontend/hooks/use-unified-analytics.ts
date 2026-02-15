@@ -35,14 +35,23 @@ export function useAnalyticsOverview(days: number = 30) {
     queryFn: async () => {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
+      // Each call wrapped in try/catch to prevent synchronous TypeError from breaking Promise.all
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
       const [agents, llmSummary, workflowStats, docStats] = await Promise.all([
-        apiClient.getAgents().catch(() => []),
-        apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`).catch(() => null),
-        apiClient.getWorkflowStatsDashboard().catch(() => null),
-        apiClient.getAnalyticsOverview().catch(() => null),
+        safeRequest(() => apiClient.getAgents(), []),
+        safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
+        safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
+        safeRequest(() => apiClient.getAnalyticsOverview(), null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
+
+      // Cost: prefer llm_usage table, fallback to agent model_usage_stats
+      const llmCost = llmSummary?.total_cost || 0
+      const agentCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
+      const totalCost = llmCost > 0 ? llmCost : agentCost
 
       return {
         agents: {
@@ -59,7 +68,7 @@ export function useAnalyticsOverview(days: number = 30) {
           storageMb: (docStats as any)?.storage_mb || 0,
         },
         cost: {
-          currentPeriod: llmSummary?.total_cost || 0,
+          currentPeriod: totalCost,
           previousPeriod: 0,
         },
         system: {},
@@ -74,9 +83,12 @@ export function useAgentAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.agents(days),
     queryFn: async () => {
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
       const [agents, stats] = await Promise.all([
-        apiClient.getAgents().catch(() => []),
-        apiClient.getSystemAgentStatistics().catch(() => null),
+        safeRequest(() => apiClient.getAgents(), []),
+        safeRequest(() => apiClient.getSystemAgentStatistics(), null),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
@@ -114,9 +126,12 @@ export function useWorkflowAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.workflows(days),
     queryFn: async () => {
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
       const [workflows, stats] = await Promise.all([
-        apiClient.getWorkflows().catch(() => []),
-        apiClient.getWorkflowStatsDashboard().catch(() => null),
+        safeRequest(() => apiClient.getWorkflows(), []),
+        safeRequest(() => apiClient.getWorkflowStatsDashboard(), null),
       ])
 
       const workflowList = Array.isArray(workflows) ? workflows : []
@@ -153,11 +168,13 @@ export function useDocumentAnalyticsUnified(days: number = 30) {
     queryFn: async () => {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
       const [documents, usage] = await Promise.all([
-        apiClient.getDocuments().catch(() => []),
-        fetch(`/api/documents/analytics/usage?period=${period}`)
-          .then(r => r.ok ? r.json() : null)
-          .catch(() => null),
+        safeRequest(() => apiClient.getDocuments(), []),
+        safeRequest(() => fetch(`/api/documents/analytics/usage?period=${period}`)
+          .then(r => r.ok ? r.json() : null), null),
       ])
 
       const docList = Array.isArray(documents) ? documents : []
@@ -196,22 +213,71 @@ export function useCostAnalyticsUnified(days: number = 30) {
     queryFn: async () => {
       const period = days <= 1 ? '24h' : days <= 7 ? '7d' : days <= 30 ? '30d' : '90d'
 
-      // Fetch from real backend LLM analytics endpoints
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
+      // Fetch from backend LLM analytics + agent data as fallback
       const [summary, usageByModel, agents] = await Promise.all([
-        apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`).catch(() => null),
-        apiClient.request<any[]>(`/api/analytics/llm/usage?period=${period}&group_by=model`).catch(() => []),
-        apiClient.getAgents().catch(() => []),
+        safeRequest(() => apiClient.request<any>(`/api/analytics/llm/summary?period=${period}`), null),
+        safeRequest(() => apiClient.request<any[]>(`/api/analytics/llm/usage?period=${period}&group_by=model`), []),
+        safeRequest(() => apiClient.getAgents(), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
       const modelRows = Array.isArray(usageByModel) ? usageByModel : []
 
-      // Use real totals from llm_usage table
-      const totalTokens = summary?.total_tokens || 0
-      const totalCost = summary?.total_cost || 0
-      const totalRequests = summary?.total_requests || 0
+      // llm_usage totals
+      const llmTokens = summary?.total_tokens || 0
+      const llmCost = summary?.total_cost || 0
+      const llmRequests = summary?.total_requests || 0
 
-      // Most expensive agent (from agent model_usage_stats — still useful for naming)
+      // agent model_usage_stats totals (fallback)
+      const agentTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
+      const agentCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
+      const agentRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+
+      // Use llm_usage data when available, fallback to agent stats
+      const hasLlmData = llmTokens > 0 || llmCost > 0
+      const totalTokens = hasLlmData ? llmTokens : agentTokens
+      const totalCost = hasLlmData ? llmCost : agentCost
+      const totalRequests = hasLlmData ? llmRequests : agentRequests
+
+      // Build byModel: prefer backend breakdown, fallback to agent-derived grouping
+      let byModel: any[]
+      if (modelRows.length > 0) {
+        byModel = modelRows.map((row: any) => ({
+          model: row.key || 'unknown',
+          requests: row.request_count || 0,
+          inputTokens: row.input_tokens || 0,
+          outputTokens: row.output_tokens || 0,
+          totalCost: row.total_cost || 0,
+          avgCostPerRequest: row.request_count > 0 ? (row.total_cost || 0) / row.request_count : 0,
+          agentCount: 0,
+        }))
+      } else {
+        // Derive from agent model_usage_stats
+        const modelMap: Record<string, { requests: number; inputTokens: number; outputTokens: number; cost: number; agents: Set<string> }> = {}
+        agentList.forEach((agent: any) => {
+          const model = agent.model_config?.model_id || 'unknown'
+          if (!modelMap[model]) modelMap[model] = { requests: 0, inputTokens: 0, outputTokens: 0, cost: 0, agents: new Set() }
+          modelMap[model].requests += agent.model_usage_stats?.total_requests || 0
+          modelMap[model].inputTokens += agent.model_usage_stats?.input_tokens || 0
+          modelMap[model].outputTokens += agent.model_usage_stats?.output_tokens || 0
+          modelMap[model].cost += agent.model_usage_stats?.total_cost || 0
+          modelMap[model].agents.add(agent.name)
+        })
+        byModel = Object.entries(modelMap).map(([model, data]) => ({
+          model,
+          requests: data.requests,
+          inputTokens: data.inputTokens,
+          outputTokens: data.outputTokens,
+          totalCost: data.cost,
+          avgCostPerRequest: data.requests > 0 ? data.cost / data.requests : 0,
+          agentCount: data.agents.size,
+        })).filter(m => m.requests > 0 || m.totalCost > 0)
+      }
+
+      // Most expensive agent
       const sortedByCost = [...agentList].sort((a: any, b: any) =>
         (b.model_usage_stats?.total_cost || 0) - (a.model_usage_stats?.total_cost || 0)
       )
@@ -229,15 +295,7 @@ export function useCostAnalyticsUnified(days: number = 30) {
             model: mostExpensive.model_config?.model_id || 'unknown',
           } : null,
         },
-        byModel: modelRows.map((row: any) => ({
-          model: row.key || 'unknown',
-          requests: row.request_count || 0,
-          inputTokens: row.input_tokens || 0,
-          outputTokens: row.output_tokens || 0,
-          totalCost: row.total_cost || 0,
-          avgCostPerRequest: row.request_count > 0 ? (row.total_cost || 0) / row.request_count : 0,
-          agentCount: 0,
-        })),
+        byModel,
         byAgent: agentList.map((agent: any) => ({
           id: agent.id,
           name: agent.name,
@@ -655,14 +713,53 @@ export function useAdminCostAnalytics(period: string = '30d') {
   return useQuery<AdminCostAnalyticsData | null>({
     queryKey: ['unified-analytics', 'admin', 'costs', period],
     queryFn: async () => {
-      const data = await apiClient.request<AdminCostAnalyticsData>(
-        `/api/admin/analytics/costs?period=${period}`
-      ).catch((err: any) => {
-        // 403 = not admin, 401 = unauthenticated
-        if (err?.message?.includes('403') || err?.message?.includes('401')) return null
-        throw err
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
+      // Fetch from backend + agent data as fallback
+      const [backendData, agents] = await Promise.all([
+        safeRequest(() => apiClient.request<AdminCostAnalyticsData>(
+          `/api/admin/analytics/costs?period=${period}`
+        ), null),
+        safeRequest(() => apiClient.getAgents(), []),
+      ])
+
+      // If backend returned real data with actual costs, use it
+      if (backendData && backendData.total_platform_cost > 0) {
+        return backendData
+      }
+
+      // Fallback: build from agent model_usage_stats
+      const agentList = Array.isArray(agents) ? agents : []
+      const totalCost = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_cost || 0), 0)
+      const totalTokens = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_tokens || 0), 0)
+      const totalRequests = agentList.reduce((sum: number, a: any) => sum + (a.model_usage_stats?.total_requests || 0), 0)
+
+      // Build provider breakdown from agent model configs
+      const providerMap: Record<string, { cost: number; requests: number }> = {}
+      agentList.forEach((a: any) => {
+        const provider = a.model_config?.provider || 'unknown'
+        if (!providerMap[provider]) providerMap[provider] = { cost: 0, requests: 0 }
+        providerMap[provider].cost += a.model_usage_stats?.total_cost || 0
+        providerMap[provider].requests += a.model_usage_stats?.total_requests || 0
       })
-      return data
+
+      return {
+        total_platform_cost: totalCost,
+        total_tokens: totalTokens,
+        total_requests: totalRequests,
+        cost_by_workspace: [],
+        cost_by_provider: Object.entries(providerMap)
+          .filter(([, d]) => d.cost > 0)
+          .map(([key, d]) => ({
+            key,
+            input_cost: 0,
+            output_cost: 0,
+            total_cost: d.cost,
+            request_count: d.requests,
+          })),
+        daily_cost_trend: [],
+      } as AdminCostAnalyticsData
     },
     staleTime: 120000, // 2 minutes
   })
@@ -673,10 +770,11 @@ export function useAdminWorkspaceAnalytics(days: number = 30) {
   return useQuery({
     queryKey: unifiedAnalyticsKeys.adminWorkspaces(days),
     queryFn: async () => {
-      // Admin-only endpoint — will need backend support
-      // For now, return current workspace data as placeholder
+      const safeRequest = <T,>(fn: () => Promise<T>, fallback: T): Promise<T> =>
+        Promise.resolve().then(fn).catch(() => fallback)
+
       const [agents] = await Promise.all([
-        apiClient.getAgents().catch(() => []),
+        safeRequest(() => apiClient.getAgents(), []),
       ])
 
       const agentList = Array.isArray(agents) ? agents : []
