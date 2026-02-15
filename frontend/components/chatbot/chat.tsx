@@ -809,7 +809,7 @@ export function Chat({
         <div className="relative flex flex-col bg-transparent" style={{ height: '100%', width: '100%', minHeight: 0 }}>
           {/* Clean welcome state — greeting + chat input */}
           {showWelcomeCard && (
-            <div className="flex flex-1 flex-col items-center justify-end px-4 pb-8 md:pb-12">
+            <div className="flex flex-1 flex-col items-center justify-center px-4 py-10 md:py-16">
               {/* Personal greeting */}
               <motion.div
                 className="w-full max-w-3xl md:max-w-4xl text-center mb-8"
