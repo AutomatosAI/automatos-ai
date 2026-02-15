@@ -17,7 +17,7 @@ interface Skill {
   source?: string
 }
 
-export function MarketplaceSkillsTab({ searchQuery }: { searchQuery: string }) {
+export function MarketplaceSkillsTab({ searchQuery, workspaceId }: { searchQuery: string; workspaceId: string }) {
   const [skills, setSkills] = useState<Skill[]>([])
   const [installed, setInstalled] = useState<Skill[]>([])
   const [loading, setLoading] = useState(false)
@@ -25,12 +25,13 @@ export function MarketplaceSkillsTab({ searchQuery }: { searchQuery: string }) {
   const [localSearch, setLocalSearch] = useState(searchQuery || '')
 
   useEffect(() => {
+    if (!workspaceId) return
     // Load installed skills
-    fetch('/api/skills/community/installed')
+    fetch(`/api/skills/community/installed?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then(r => r.json())
       .then(data => setInstalled(data.skills || []))
       .catch(() => {})
-  }, [])
+  }, [workspaceId])
 
   const searchSkills = async () => {
     if (!localSearch.trim()) return
@@ -50,11 +51,12 @@ export function MarketplaceSkillsTab({ searchQuery }: { searchQuery: string }) {
       const res = await fetch('/api/skills/community/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skill_name: skillName })
+        body: JSON.stringify({ skill_url: skillName, workspace_id: workspaceId })
       })
       const data = await res.json()
-      if (data.status === 'installed' || data.status === 'success') {
-        setInstalled(prev => [...prev, { name: skillName, description: '', author: '', category: '', installs: 0, source: 'workspace' }])
+      if (data.ok || data.status === 'installed' || data.status === 'success') {
+        const installedName = data.skill_name || skillName
+        setInstalled(prev => [...prev, { name: installedName, description: '', author: '', category: '', installs: 0, source: 'community' }])
       } else if (data.status === 'blocked') {
         alert(`Skill blocked: ${data.reason || 'Security risk too high'}`)
       } else if (data.status === 'review_required') {
@@ -63,9 +65,10 @@ export function MarketplaceSkillsTab({ searchQuery }: { searchQuery: string }) {
           await fetch('/api/skills/community/install', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ skill_name: skillName, force: true })
+            body: JSON.stringify({ skill_url: skillName, workspace_id: workspaceId, force: true })
           })
-          setInstalled(prev => [...prev, { name: skillName, description: '', author: '', category: '', installs: 0, source: 'workspace' }])
+          const installedName = data.skill_name || skillName
+          setInstalled(prev => [...prev, { name: installedName, description: '', author: '', category: '', installs: 0, source: 'community' }])
         }
       }
     } finally {
@@ -75,7 +78,7 @@ export function MarketplaceSkillsTab({ searchQuery }: { searchQuery: string }) {
 
   const uninstallSkill = async (skillName: string) => {
     if (!confirm(`Uninstall ${skillName}?`)) return
-    await fetch(`/api/skills/community/${skillName}`, { method: 'DELETE' })
+    await fetch(`/api/skills/community/${encodeURIComponent(skillName)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: 'DELETE' })
     setInstalled(prev => prev.filter(s => s.name !== skillName))
   }
 

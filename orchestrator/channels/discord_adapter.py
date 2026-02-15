@@ -121,11 +121,13 @@ class DiscordAdapter(BaseChannelAdapter):
             return
 
         # Show typing indicator
+        response_text = None
         try:
             async with message.channel.typing():
                 response_text = await self.handle_message(message)
         except Exception:
-            response_text = await self.handle_message(message)
+            if response_text is None:
+                response_text = await self.handle_message(message)
 
         if response_text:
             await self.send_message(

@@ -32,6 +32,26 @@ _RISK_AUTO_INSTALL = 20
 _RISK_REVIEW = 69
 # >= 70 is blocked
 
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _validate_skill_name(name: str) -> str:
+    """Validate a skill name to prevent path traversal."""
+    if not name or not _SAFE_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail=f"Invalid skill name: {name!r}")
+    return name
+
+
+def _safe_workspace_dir(workspace_id: str) -> Path:
+    """Build and validate workspace directory, rejecting path traversal."""
+    _validate_skill_name(workspace_id)  # workspace_id must also be safe
+    workspace_dir = (_USER_SKILLS_BASE / workspace_id).resolve()
+    try:
+        workspace_dir.relative_to(_USER_SKILLS_BASE.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace ID")
+    return workspace_dir
+
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas
@@ -91,7 +111,7 @@ async def install_skill(body: InstallRequest) -> Dict[str, Any]:
     """Download a skill from skills.sh, run a security scan, and save locally."""
     import httpx
 
-    workspace_dir = _USER_SKILLS_BASE / body.workspace_id
+    workspace_dir = _safe_workspace_dir(body.workspace_id)
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve the skill content
@@ -116,6 +136,7 @@ async def install_skill(body: InstallRequest) -> Dict[str, Any]:
     skill_name = _extract_frontmatter_field(content, "name")
     if not skill_name:
         skill_name = body.skill_url.rstrip("/").split("/")[-1]
+    skill_name = _validate_skill_name(skill_name)
 
     # Security scan
     risk_score, risk_details = _security_scan(content)
@@ -187,7 +208,7 @@ async def list_installed_skills(
                     )
 
     # Workspace community skills
-    workspace_dir = _USER_SKILLS_BASE / workspace_id
+    workspace_dir = _safe_workspace_dir(workspace_id)
     if workspace_dir.is_dir():
         for skill_path in workspace_dir.iterdir():
             if skill_path.is_dir():
@@ -219,15 +240,11 @@ async def uninstall_skill(
     workspace_id: str = Query(..., description="Workspace UUID"),
 ) -> Dict[str, Any]:
     """Remove a community-installed skill from the workspace."""
-    skill_dir = _USER_SKILLS_BASE / workspace_id / skill_name
+    workspace_dir = _safe_workspace_dir(workspace_id)
+    safe_name = _validate_skill_name(skill_name)
+    skill_dir = workspace_dir / safe_name
     if not skill_dir.is_dir():
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
-
-    # Safety: prevent path traversal
-    try:
-        skill_dir.resolve().relative_to((_USER_SKILLS_BASE / workspace_id).resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid skill name")
+        raise HTTPException(status_code=404, detail=f"Skill '{safe_name}' not found")
 
     shutil.rmtree(skill_dir)
     return {"ok": True, "deleted": skill_name}
@@ -270,13 +287,15 @@ def _security_scan(content: str) -> tuple:
     """
     # Try PluginScanService first if available
     try:
-        from services.plugin_scan_service import PluginScanService
+        from core.services.plugin_security_scanner import PluginScanService
 
         scanner = PluginScanService()
         result = scanner.scan(content)
         return result.get("risk_score", 0), result.get("details", [])
-    except (ImportError, Exception):
+    except ImportError:
         pass
+    except Exception as exc:
+        logger.warning("PluginScanService failed, falling back to regex: %s", exc)
 
     # Fallback: basic pattern matching
     score = 0

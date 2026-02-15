@@ -151,7 +151,18 @@ class SignalAdapter(BaseChannelAdapter):
                 else:
                     payload["recipients"] = [channel_id]
 
-                await client.post(url, json=payload)
+                try:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code >= 400:
+                        logger.error(
+                            "Signal send failed (channel=%s, status=%s): %s",
+                            channel_id, resp.status_code, resp.text,
+                        )
+                except httpx.RequestError as exc:
+                    logger.error(
+                        "Signal send request error (channel=%s): %s",
+                        channel_id, exc,
+                    )
 
     # ------------------------------------------------------------------
     # Envelope conversion

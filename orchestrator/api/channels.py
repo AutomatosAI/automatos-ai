@@ -96,7 +96,7 @@ _REQUIRED_CONFIG_KEYS = {
     "imessage": ["server_url", "password"],
     "irc": ["server", "nickname"],
     "matrix": ["homeserver", "user_id", "access_token"],
-    "line": ["channel_access_token"],
+    "line": ["channel_access_token", "channel_secret"],
 }
 
 

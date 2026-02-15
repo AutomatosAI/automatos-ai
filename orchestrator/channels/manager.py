@@ -102,9 +102,15 @@ class ChannelManager:
 
     async def stop_adapter(self, connection_id: str) -> None:
         """Stop a running adapter."""
-        adapter = self._adapters.pop(connection_id, None)
+        adapter = self._adapters.get(connection_id)
         if adapter:
-            await adapter.stop()
+            try:
+                await adapter.stop()
+            except Exception as exc:
+                logger.error("Error stopping adapter %s: %s", connection_id, exc)
+                raise
+            finally:
+                self._adapters.pop(connection_id, None)
 
         from core.database.database import SessionLocal
         from core.models.channels import ChannelConnection

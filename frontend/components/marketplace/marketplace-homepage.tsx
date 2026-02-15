@@ -16,6 +16,7 @@ import { MarketplaceRecipesTab } from './marketplace-recipes-tab'
 import { MarketplacePluginsTab } from './marketplace-plugins-tab'
 import { MarketplaceSkillsTab } from './marketplace-skills-tab'
 import { apiClient } from '@/lib/api-client'
+import { useWorkspace } from '@/hooks/use-workspace'
 
 export interface MarketplaceItem {
   id: number
@@ -35,6 +36,7 @@ export interface MarketplaceItem {
 }
 
 export function MarketplaceHomepage() {
+  const { workspaceId } = useWorkspace()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState('tools')
   const [stats, setStats] = useState({
@@ -153,7 +155,7 @@ export function MarketplaceHomepage() {
         </TabsContent>
 
         <TabsContent value="skills" className="mt-0">
-          <MarketplaceSkillsTab searchQuery={searchQuery} />
+          <MarketplaceSkillsTab searchQuery={searchQuery} workspaceId={workspaceId || ''} />
         </TabsContent>
       </Tabs>
     </div>

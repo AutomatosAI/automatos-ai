@@ -123,14 +123,19 @@ class SlackAdapter(BaseChannelAdapter):
         # Route through the universal pipeline
         response_text = await self.handle_message(event)
 
-        # Reply in thread if the original message was in a thread
-        thread_ts = event.get("thread_ts") or event.get("ts")
+        # Reply in thread only if the original message was in a thread
+        thread_ts = event.get("thread_ts")
         channel = event.get("channel", "")
 
         if response_text:
-            await self.send_message(
-                channel, response_text, thread_ts=thread_ts, _client=client
-            )
+            if thread_ts:
+                await self.send_message(
+                    channel, response_text, thread_ts=thread_ts, _client=client
+                )
+            else:
+                await self.send_message(
+                    channel, response_text, _client=client
+                )
 
         self._increment_message_count()
 

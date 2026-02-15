@@ -50,21 +50,15 @@ export function SignUpForm() {
                 password,
             })
 
-            // Check if user was placed on waitlist
-            if (result.status === 'missing_requirements' &&
-                result.unverifiedFields?.includes('email_address') === false) {
-                setOnWaitlist(true)
-                return
-            }
-
             // Normal flow: send email verification code
             await signUp.prepareEmailAddressVerification({ strategy: 'email_code' })
             setPendingVerification(true)
         } catch (err: any) {
+            const errorCode = err.errors?.[0]?.code || ''
             const errorMessage = err.errors?.[0]?.longMessage || err.errors?.[0]?.message || ''
 
-            // Clerk returns specific errors when waitlist is active
-            if (errorMessage.toLowerCase().includes('waitlist')) {
+            // Clerk returns this error code when waitlist is active
+            if (errorCode === 'sign_up_restricted_waitlist') {
                 setOnWaitlist(true)
                 return
             }

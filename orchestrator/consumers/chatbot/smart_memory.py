@@ -566,13 +566,19 @@ class SmartMemoryManager:
 
             today_entry = None
             for mem in existing:
-                meta = mem.get("metadata", {}) or {}
+                meta = mem.get("metadata") or mem.get("metadata_") or {}
                 if meta.get("date") == today_str and meta.get("type") == "daily_log":
                     today_entry = mem
                     break
 
             if today_entry:
-                # Append to existing log
+                # Delete existing entry and re-add with combined text
+                old_id = today_entry.get("id")
+                if old_id:
+                    await loop.run_in_executor(
+                        None,
+                        lambda mid=old_id: self.mem0_client.delete(mid),
+                    )
                 old_text = today_entry.get("memory", "")
                 new_text = f"{old_text}\n{entry}"
                 await loop.run_in_executor(
@@ -621,7 +627,7 @@ class SmartMemoryManager:
             lines: List[str] = []
             for target_date in [today_str, yesterday_str]:
                 for mem in entries:
-                    meta = mem.get("metadata", {}) or {}
+                    meta = mem.get("metadata") or mem.get("metadata_") or {}
                     if meta.get("date") == target_date and meta.get("type") == "daily_log":
                         text = mem.get("memory", "")
                         lines.append(f"### {target_date}")
@@ -659,7 +665,7 @@ class SmartMemoryManager:
 
             deleted = 0
             for mem in entries:
-                meta = mem.get("metadata", {}) or {}
+                meta = mem.get("metadata") or mem.get("metadata_") or {}
                 if meta.get("type") == "daily_log" and meta.get("date", "9999") < cutoff:
                     mem_id = mem.get("id")
                     if mem_id:

@@ -186,7 +186,7 @@ class LINEAdapter(BaseChannelAdapter):
         import base64
 
         if not self._channel_secret:
-            return True
+            return False
 
         expected = hmac.new(
             self._channel_secret.encode("utf-8"),
@@ -194,7 +194,8 @@ class LINEAdapter(BaseChannelAdapter):
             hashlib.sha256,
         ).digest()
 
-        return base64.b64encode(expected).decode("utf-8") == signature
+        expected_b64 = base64.b64encode(expected).decode("utf-8")
+        return hmac.compare_digest(expected_b64, signature)
 
     # ------------------------------------------------------------------
     # Helpers

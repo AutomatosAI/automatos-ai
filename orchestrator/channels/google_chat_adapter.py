@@ -94,22 +94,49 @@ class GoogleChatAdapter(BaseChannelAdapter):
         self, channel_id: str, text: str, **kwargs: Any
     ) -> None:
         import httpx
+        import asyncio
 
         if not self._credentials:
             logger.error("No credentials for Google Chat send")
             return
 
         url = f"https://chat.googleapis.com/v1/{channel_id}/messages"
-        headers = {
-            "Authorization": f"Bearer {self._credentials.token}",
-            "Content-Type": "application/json",
-        }
 
         chunks = self._chunk_text(text, _GCHAT_MAX_LEN)
         async with httpx.AsyncClient(timeout=30) as client:
             for chunk in chunks:
                 payload = {"text": chunk}
-                await client.post(url, json=payload, headers=headers)
+                for attempt in range(3):
+                    headers = {
+                        "Authorization": f"Bearer {self._credentials.token}",
+                        "Content-Type": "application/json",
+                    }
+                    try:
+                        resp = await client.post(url, json=payload, headers=headers)
+                        if resp.status_code == 401:
+                            logger.warning("Google Chat 401 — refreshing credentials")
+                            await self._authenticate()
+                            continue
+                        if resp.status_code == 429 or resp.status_code >= 500:
+                            wait = (attempt + 1) * 2
+                            logger.warning(
+                                "Google Chat %s for %s — retrying in %ds",
+                                resp.status_code, channel_id, wait,
+                            )
+                            await asyncio.sleep(wait)
+                            continue
+                        if resp.status_code >= 400:
+                            logger.error(
+                                "Google Chat send failed (channel=%s, status=%s): %s",
+                                channel_id, resp.status_code, resp.text,
+                            )
+                        break  # success or non-retryable error
+                    except httpx.RequestError as exc:
+                        logger.error(
+                            "Google Chat request error (channel=%s): %s",
+                            channel_id, exc,
+                        )
+                        break
 
     # ------------------------------------------------------------------
     # Envelope conversion

@@ -154,18 +154,29 @@ async def get_heartbeat_status(
     svc = get_heartbeat_service()
     scheduler_status = svc.get_status()
 
-    # Enrich with last_run_at from DB
+    # Enrich with last_run_at from DB — scoped to workspace
     db = SessionLocal()
     try:
+        filtered_jobs = []
         for job in scheduler_status.get("jobs", []):
             job_id = job.get("id", "")
             # Determine source_type and source_id from job_id
             if job_id.startswith("orchestrator_heartbeat_"):
                 source_type = "orchestrator"
                 source_id = job_id.replace("orchestrator_heartbeat_", "")
+                # source_id is the workspace_id for orchestrator jobs
+                if source_id != workspace_id:
+                    continue
             elif job_id.startswith("agent_heartbeat_"):
                 source_type = "agent"
                 source_id = job_id.replace("agent_heartbeat_", "")
+                # Check agent belongs to this workspace
+                agent_row = db.execute(
+                    text("SELECT workspace_id FROM agents WHERE id = :aid"),
+                    {"aid": source_id},
+                ).fetchone()
+                if not agent_row or str(agent_row[0]) != workspace_id:
+                    continue
             else:
                 continue
 
@@ -173,11 +184,15 @@ async def get_heartbeat_status(
                 text(
                     "SELECT created_at FROM heartbeat_results "
                     "WHERE source_type = :st AND source_id = :sid "
+                    "AND workspace_id = :wid::uuid "
                     "ORDER BY created_at DESC LIMIT 1"
                 ),
-                {"st": source_type, "sid": source_id},
+                {"st": source_type, "sid": source_id, "wid": workspace_id},
             ).fetchone()
             job["last_run_at"] = row[0].isoformat() if row else None
+            filtered_jobs.append(job)
+
+        scheduler_status["jobs"] = filtered_jobs
     finally:
         db.close()
 
