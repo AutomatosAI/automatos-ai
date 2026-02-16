@@ -56,6 +56,7 @@ export interface LLMModelCardProps {
   onCompareToggle?: (modelId: string) => void
   isComparing?: boolean
   onClick?: () => void
+  viewMode?: 'grid' | 'list'
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,7 @@ export function LLMModelCard({
   onCompareToggle,
   isComparing = false,
   onClick,
+  viewMode = 'grid',
 }: LLMModelCardProps) {
   const queryClient = useQueryClient()
   const [installing, setInstalling] = useState(false)
@@ -151,6 +153,53 @@ export function LLMModelCard({
 
   // Top 3 capabilities to show on card
   const capEntries = Object.entries(model.capabilities || {}).slice(0, 3)
+
+  if (viewMode === 'list') {
+    return (
+      <Card
+        className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+        onClick={onClick}
+      >
+        <CardContent className="p-3">
+          <div className="flex items-center gap-3">
+            <Badge
+              variant="outline"
+              className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(model.provider)}`}
+            >
+              {model.provider}
+            </Badge>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-sm truncate block">{model.display_name}</span>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                <span>{formatTokenCount(model.context_window)} ctx</span>
+                <span>&middot;</span>
+                <span>In: {formatCostPer1M(model.input_cost_per_1k)}/1M</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant={model.is_installed ? 'secondary' : 'outline'}
+              className={
+                model.is_installed
+                  ? 'h-7 text-xs bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border-[hsl(var(--success))]/30 shrink-0'
+                  : 'h-7 text-xs shrink-0'
+              }
+              disabled={installing}
+              onClick={handleInstallToggle}
+            >
+              {installing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : model.is_installed ? (
+                <CheckCircle className="w-3 h-3" />
+              ) : (
+                <Download className="w-3 h-3" />
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card

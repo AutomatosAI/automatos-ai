@@ -8,6 +8,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,6 +83,7 @@ interface MarketplaceAgentsTabProps {
 
 export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps) {
   const { user } = useUser()
+  const [viewMode, setViewMode] = useViewMode('mp-agents')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null)
   const [approvingId, setApprovingId] = useState<number | null>(null)
@@ -148,35 +151,88 @@ export function MarketplaceAgentsTab({ searchQuery }: MarketplaceAgentsTabProps)
   return (
     <div className="space-y-6">
       {/* Category Filter Buttons */}
-      <div className="flex flex-wrap gap-2">
-        {AGENT_CATEGORIES.map((category) => (
-          <Button
-            key={category.id}
-            variant={selectedCategory === category.id ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedCategory(category.id)}
-            className={
-              selectedCategory === category.id
-                ? 'bg-secondary border-primary/50 text-foreground font-semibold'
-                : 'border-secondary text-muted-foreground hover:bg-secondary'
-            }
-          >
-            {category.name}
-          </Button>
-        ))}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-secondary scrollbar-track-transparent flex-1">
+          {AGENT_CATEGORIES.map((category) => (
+            <Button
+              key={category.id}
+              variant={selectedCategory === category.id ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSelectedCategory(category.id)}
+              className={`whitespace-nowrap flex-shrink-0 ${
+                selectedCategory === category.id
+                  ? 'bg-secondary border-primary/50 text-foreground font-semibold'
+                  : 'border-secondary text-muted-foreground hover:bg-secondary'
+              }`}
+            >
+              {category.name}
+            </Button>
+          ))}
+        </div>
+        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
       {/* Agents Grid - 4 columns like Agent Management page */}
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-64 glass-card animate-pulse" />
-          ))}
-        </div>
+        viewMode === 'list' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-16 glass-card animate-pulse rounded-xl" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="h-64 glass-card animate-pulse" />
+            ))}
+          </div>
+        )
       ) : agents.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <Bot className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No agents found. Try adjusting your search or filters.</p>
+        </div>
+      ) : viewMode === 'list' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {agents.map((agent: MarketplaceAgent) => {
+            const IconComponent = getCategoryIcon(agent.category)
+            return (
+              <Card
+                key={agent.id}
+                className="glass-card hover:border-primary/20 transition-all cursor-pointer"
+                onClick={() => handleAgentClick(agent)}
+              >
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-3">
+                    <IconComponent className="w-9 h-9 text-primary shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm truncate">{agent.name}</span>
+                        {isAdmin && !agent.is_approved && (
+                          <Badge variant="outline" className="text-[10px] border-[hsl(var(--warning))]/30 text-[hsl(var(--warning))] shrink-0">
+                            Pending
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        <span>{agent.category}</span>
+                        <span>&middot;</span>
+                        <span>{formatInstallCount(agent.install_count)} installs</span>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 shrink-0"
+                      onClick={(e) => { e.stopPropagation(); handleAgentClick(agent) }}
+                    >
+                      <Download className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
