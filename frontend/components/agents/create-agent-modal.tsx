@@ -391,7 +391,7 @@ export function CreateAgentModal({ open, onClose, onSuccess }: CreateAgentModalP
 
               <CardContent className="overflow-y-auto p-6">
                 <Tabs value={`step-${step}`} className="space-y-6">
-                  <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
+                  <TabsList className="w-full justify-start gap-1 bg-secondary/50">
                     <TabsTrigger value="step-1" disabled={step < 1}>
                       1. Config
                     </TabsTrigger>

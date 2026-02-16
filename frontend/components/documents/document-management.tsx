@@ -343,7 +343,7 @@ export function DocumentManagement() {
         className="flex items-center justify-between"
       >
         <div>
-          <h1 className="text-3xl font-bold mb-2">
+          <h1 data-testid="page-title" className="text-3xl font-bold mb-2">
             Knowledge <span className="gradient-text">Bases</span>
           </h1>
           <p className="text-muted-foreground text-lg">
@@ -364,7 +364,7 @@ export function DocumentManagement() {
       {/* Stats Overview */}
       <motion.div
         ref={ref}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+        className="hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6"
         initial={{ opacity: 0, y: 20 }}
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.8, delay: 0.2 }}
@@ -402,7 +402,7 @@ export function DocumentManagement() {
         transition={{ duration: 0.8, delay: 0.4 }}
       >
         <Tabs defaultValue="documents" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+          <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
             <TabsTrigger value="documents" className="flex items-center space-x-2">
               <FileText className="w-4 h-4" />
               <span>Documents</span>
@@ -718,7 +718,7 @@ export function DocumentManagement() {
 
             {/* Sub-tabs for Database Features */}
             <Tabs defaultValue="explorer" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid bg-secondary/30">
+              <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/30">
                 <TabsTrigger value="explorer">SQL Explorer</TabsTrigger>
                 <TabsTrigger value="semantic">Semantic Layer</TabsTrigger>
                 <TabsTrigger value="templates">Query Templates</TabsTrigger>

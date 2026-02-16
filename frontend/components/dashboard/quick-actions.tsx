@@ -184,7 +184,7 @@ export function QuickActions() {
           </DialogHeader>
 
           <Tabs defaultValue="system" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5 bg-secondary/50">
+            <TabsList className="w-full justify-start gap-1 bg-secondary/50">
               <TabsTrigger value="system">System</TabsTrigger>
               <TabsTrigger value="performance">Performance</TabsTrigger>
               <TabsTrigger value="security">Security</TabsTrigger>

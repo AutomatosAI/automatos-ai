@@ -635,7 +635,7 @@ export function AgentConfigurationModal({
 
             {agent && (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-7 bg-secondary/50">
+                <TabsList className="w-full justify-start gap-1 bg-secondary/50">
                   <TabsTrigger value="general" className="flex items-center space-x-1">
                     <Info className="w-4 h-4" />
                     <span>General</span>

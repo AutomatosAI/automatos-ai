@@ -199,7 +199,7 @@ export function AnalyticsTab() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid bg-secondary/50">
+        <TabsList className="w-full lg:w-auto justify-start gap-1 bg-secondary/50">
           <TabsTrigger value="overview" className="flex items-center space-x-2">
             <BarChart3 className="w-4 h-4" />
             <span className="hidden sm:inline">Overview</span>
