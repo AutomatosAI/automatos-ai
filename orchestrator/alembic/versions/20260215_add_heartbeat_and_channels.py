@@ -36,6 +36,9 @@ def upgrade() -> None:
     op.create_index('ix_heartbeat_results_source', 'heartbeat_results', ['source_type', 'source_id'])
     op.create_index('ix_heartbeat_results_created_at', 'heartbeat_results', ['created_at'])
 
+    # Add source_channel to routing_rules (PRD-55: channel-based routing)
+    op.add_column('routing_rules', sa.Column('source_channel', sa.String(50), nullable=True))
+
     # Channel connections table (US-019)
     op.create_table(
         'channel_connections',
@@ -60,6 +63,8 @@ def downgrade() -> None:
     op.drop_index('ix_channel_connections_platform', table_name='channel_connections')
     op.drop_index('ix_channel_connections_workspace_id', table_name='channel_connections')
     op.drop_table('channel_connections')
+
+    op.drop_column('routing_rules', 'source_channel')
 
     op.drop_index('ix_heartbeat_results_created_at', table_name='heartbeat_results')
     op.drop_index('ix_heartbeat_results_source', table_name='heartbeat_results')

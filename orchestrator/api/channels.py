@@ -21,12 +21,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
-_SUPPORTED_PLATFORMS = {"telegram", "slack", "discord"}
+_SUPPORTED_PLATFORMS = {
+    "telegram", "slack", "discord", "teams", "google_chat",
+    "signal", "imessage", "irc", "matrix", "line", "whatsapp",
+}
 
 _REQUIRED_CONFIG = {
     "telegram": ["bot_token"],
     "slack": ["bot_token", "signing_secret"],
     "discord": ["bot_token"],
+    "teams": ["app_id", "app_password"],
+    "google_chat": ["service_account_key"],
+    "signal": ["phone_number"],
+    "imessage": ["apple_id"],
+    "irc": ["server", "channel", "nickname"],
+    "matrix": ["homeserver_url", "access_token"],
+    "line": ["channel_access_token", "channel_secret"],
+    "whatsapp": ["phone_number_id", "access_token"],
 }
 
 

@@ -59,7 +59,18 @@ class HeartbeatService:
 
         # Load and schedule all active heartbeats
         await self._load_heartbeat_configs()
-        logger.info("[Heartbeat] Service started")
+
+        # Schedule daily summary at 1 AM UTC
+        self._scheduler.add_job(
+            self._daily_summary_tick,
+            "cron",
+            hour=1,
+            minute=0,
+            id="daily_summary",
+            replace_existing=True,
+            max_instances=1,
+        )
+        logger.info("[Heartbeat] Service started (daily summary at 01:00 UTC)")
 
     async def stop(self):
         """Gracefully stop scheduler, waiting for running ticks."""
@@ -425,6 +436,86 @@ class HeartbeatService:
             self._running_ticks.pop(tick_key, None)
 
         return result
+
+    # ------------------------------------------------------------------
+    # Daily summary
+    # ------------------------------------------------------------------
+
+    async def _daily_summary_tick(self):
+        """Fetch last 24h of heartbeat_results, build summary, store in SmartMemoryManager."""
+        from datetime import timedelta
+
+        logger.info("[Heartbeat] Running daily summary")
+
+        try:
+            from core.database.database import SessionLocal
+            from sqlalchemy import text
+
+            db = SessionLocal()
+            try:
+                cutoff = datetime.utcnow() - timedelta(hours=24)
+                rows = db.execute(
+                    text(
+                        "SELECT source_type, source_id, workspace_id, status, findings, tokens_used, created_at "
+                        "FROM heartbeat_results WHERE created_at >= :cutoff ORDER BY created_at DESC"
+                    ),
+                    {"cutoff": cutoff},
+                ).fetchall()
+
+                if not rows:
+                    logger.info("[Heartbeat] No results in last 24h, skipping summary")
+                    return
+
+                # Group by workspace
+                ws_summaries: Dict[str, list] = {}
+                for r in rows:
+                    ws_id = str(r.workspace_id) if r.workspace_id else "unknown"
+                    ws_summaries.setdefault(ws_id, []).append(r)
+
+                for ws_id, ws_rows in ws_summaries.items():
+                    success_count = sum(1 for r in ws_rows if r.status == "success")
+                    error_count = sum(1 for r in ws_rows if r.status == "error")
+                    total_tokens = sum(r.tokens_used or 0 for r in ws_rows)
+
+                    summary_text = (
+                        f"Heartbeat Daily Summary ({cutoff.strftime('%Y-%m-%d')} to {datetime.utcnow().strftime('%Y-%m-%d')}):\n"
+                        f"- Total ticks: {len(ws_rows)}\n"
+                        f"- Successful: {success_count}\n"
+                        f"- Errors: {error_count}\n"
+                        f"- Tokens used: {total_tokens}\n"
+                    )
+
+                    # Add notable findings
+                    notable = []
+                    for r in ws_rows:
+                        findings = r.findings if isinstance(r.findings, list) else json.loads(r.findings or "[]")
+                        for f in findings:
+                            if f.get("check") in ("error", "llm_error"):
+                                notable.append(f"[{r.source_type}/{r.source_id}] {f.get('detail', '')[:120]}")
+                    if notable:
+                        summary_text += "\nNotable issues:\n" + "\n".join(f"- {n}" for n in notable[:10])
+
+                    # Store in SmartMemoryManager as long-term memory
+                    try:
+                        from consumers.chatbot.smart_memory import get_smart_memory_manager
+
+                        mem_mgr = get_smart_memory_manager()
+                        await mem_mgr.store_conversation(
+                            workspace_id=ws_id,
+                            agent_id=None,
+                            user_message="Daily heartbeat summary request",
+                            assistant_response=summary_text,
+                            chat_id=None,
+                        )
+                        logger.info("[Heartbeat] Stored daily summary for ws=%s (%d ticks)", ws_id, len(ws_rows))
+                    except Exception as mem_err:
+                        logger.warning("[Heartbeat] Failed to store summary in memory for ws=%s: %s", ws_id, mem_err)
+
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.error("[Heartbeat] Daily summary failed: %s", e)
 
     # ------------------------------------------------------------------
     # Persistence

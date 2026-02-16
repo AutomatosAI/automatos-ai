@@ -1209,44 +1209,25 @@ class StreamingChatService:
                 except Exception as exc:
                     logger.warning(f"Failed to resolve workspace_id for agent {agent_id}: {exc}")
 
-            # Start parallel tasks
-            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
-            
-            # Start memory retrieval concurrently - NOW with correct scoping
+            # Start agent activation
             latest_text = self.prompt_analyzer.extract_latest_user_text(messages)
             fresh_start = self.prompt_analyzer.is_fresh_start_request(latest_text)
             if fresh_start:
                 messages = [m for m in messages if m.get("role") == "user"][-1:]
-                memory_task = None
-            else:
-                memory_task = asyncio.create_task(
-                    self.memory_injector.retrieve_relevant_memories(
-                        chat_id, 
-                        latest_text,
-                        workspace_id=str(self.workspace_id) if self.workspace_id else None,
-                        agent_id=agent_id
-                    )
-                )
-            
+
+            agent_task = asyncio.create_task(self.agent_factory.activate_agent(agent_id))
+
             # Send chat_id to frontend
             yield self.streaming_handler.format_aisdk_chat_id(chat_id)
             await asyncio.sleep(0)
-            
+
             # Await agent activation
-            try:
-                agent_runtime = await agent_task
-                logger.info(f"Activating agent {agent_id} for chat {chat_id}")
-            except Exception as e:
-                # Cancel memory task if agent fails
-                if memory_task:
-                    memory_task.cancel()
-                raise e
-            
+            agent_runtime = await agent_task
             if not agent_runtime:
-                if memory_task:
-                    memory_task.cancel()
                 raise Exception(f"Failed to activate agent {agent_id}")
-            
+
+            logger.info(f"Activating agent {agent_id} for chat {chat_id}")
+
             # Send agent info to frontend
             yield self.streaming_handler.format_aisdk_data({
                 "type": "agent-info",
@@ -1258,61 +1239,44 @@ class StreamingChatService:
                 }
             })
             await asyncio.sleep(0)
-            
-            # Build system prompt from agent's skills and extract tool schemas
-            system_prompt, skill_tools = await self._build_agent_system_prompt(agent_runtime)
-            
-            # Determine tool usage
-            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-            
-            # CRITICAL: Use tool_router to get properly formatted function schemas
-            # agent_runtime.tools contains METADATA, not OpenAI function schemas!
-            # get_chat_tools returns proper OpenAI function schemas based on agent permissions
+
+            # ── SmartChatIntegration (personality + memory + tool filtering) ──
+            from consumers.chatbot.integration import SmartChatIntegration, apply_orchestration_to_messages
+            smart_chat = SmartChatIntegration(
+                workspace_id=str(self.workspace_id) if self.workspace_id else self.workspace_id,
+                agent_id=agent_id,
+                agent_name=agent_runtime.metadata.name
+            )
+
+            # Build tools: get_chat_tools + skill_tools from agent
+            _sys_prompt_base, skill_tools = await self._build_agent_system_prompt(agent_runtime)
             from consumers.chatbot.tool_router import get_chat_tools
-            # IMPORTANT: pass workspace_id so tool availability can be gated
-            # (e.g., only expose Composio execution when apps are assigned+connected).
-            use_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
-            
-            # Add skill tools if available
+            is_simple = self.prompt_analyzer.is_simple_message(latest_text)
+            all_tools = None if is_simple else get_chat_tools(agent_id=agent_id, workspace_id=self.workspace_id)
             if not is_simple and skill_tools:
-                if use_tools is None:
-                    use_tools = skill_tools
-                else:
-                    use_tools = use_tools + skill_tools
-            
-            # Convert messages to LLM format and inject system prompt
+                all_tools = (all_tools or []) + skill_tools
+
+            # Convert messages to LLM format
             llm_messages = self.prompt_analyzer.convert_to_llm_messages(
                 messages,
-                available_tools=use_tools
+                available_tools=all_tools
             )
-            
-            # Replace or prepend system message with agent's system prompt
-            if llm_messages and llm_messages[0].get('role') == 'system':
-                llm_messages[0]['content'] = system_prompt
-            else:
-                llm_messages.insert(0, {'role': 'system', 'content': system_prompt})
 
-            # Always give the model the current date/time to prevent "2023" hallucinations
-            # in queries like "this week", "last month", etc.
-            now_utc = datetime.utcnow().strftime("%Y-%m-%d")
+            # Orchestrate: memory + personality + tool filtering in one call
+            orchestrated = await smart_chat.prepare(llm_messages, all_tools or [], chat_id)
+            llm_messages = apply_orchestration_to_messages(orchestrated)
+            use_tools = orchestrated.tools if orchestrated.requires_tools else None
+
+            logger.info(
+                f"[SmartChat] intent={orchestrated.intent.value} "
+                f"tools={len(use_tools) if use_tools else 0} "
+                f"memory={'yes' if orchestrated.memory_context else 'no'} "
+                f"prep={orchestrated.preparation_time_ms:.0f}ms"
+            )
+
+            # Multi-step execution policy
             llm_messages.insert(
                 1,
-                {
-                    "role": "system",
-                    "content": (
-                        f"Current date (UTC): {now_utc}. "
-                        "When interpreting relative date ranges (e.g., 'this week'), base them on this date."
-                    ),
-                },
-            )
-
-            # Multi-step execution policy:
-            # - Users often ask for multiple tasks in one message (e.g., "summarize emails AND post to Slack").
-            # - The model is allowed to call tools multiple times in sequence.
-            # - Prefer read-only/data gathering actions first, then any write/post side-effects after
-            #   the content is ready (prevents "post before summarizing" failures).
-            llm_messages.insert(
-                2,
                 {
                     "role": "system",
                     "content": (
@@ -1325,7 +1289,6 @@ class StreamingChatService:
             )
 
             # Provide Composio app/action hints based on agent assignments.
-            # Delegates to unified ComposioHintService (3-tier resolution).
             try:
                 if latest_text and agent_id:
                     from modules.tools.services.composio_hint_service import ComposioHintService
@@ -1337,56 +1300,10 @@ class StreamingChatService:
                         workspace_id=self.workspace_id,
                     )
                     if hint_result.hint_lines:
-                        llm_messages.insert(3, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
+                        llm_messages.insert(2, {"role": "system", "content": "\n".join(hint_result.hint_lines)})
                         logger.info(f"[Composio Hints] Agent {agent_id}: strategy={hint_result.strategy_used} apps={hint_result.allowed_apps} matches={len(hint_result.matched_actions)} param_hints={hint_result.param_hint_count}")
             except Exception as exc:
                 logger.warning(f"Composio hint injection failed for agent {agent_id}: {exc}")
-
-            # Await memory result
-            memory_context = None
-            if memory_task:
-                memory_context = await memory_task
-                if memory_context:
-                    logger.info(f"[Memory] Injecting {len(memory_context)} chars of shared memory")
-                    # Keep "Current date (UTC)" at index 1 (highest-priority system context)
-                    llm_messages.insert(3, self.memory_injector.build_memory_injection_message(memory_context))
-
-            # Add dynamic tool candidates (no hardcoded app mapping)
-            # NOTE: Only suggest tools for high-confidence matches, don't force for conversation
-            if use_tools and latest_text:
-                candidates = self.prompt_analyzer.rank_tools_for_query(latest_text, use_tools)
-                # Only consider high-confidence matches (score > 2)
-                high_confidence = [c for c in candidates if c.get("score", 0) > 2]
-                if high_confidence:
-                    candidate_names = [c["name"] for c in high_confidence if c.get("name")]
-                    if candidate_names:
-                        # Narrow tool list to top candidates to reduce overload
-                        candidate_set = set(candidate_names)
-                        filtered_tools = [
-                            tool for tool in use_tools
-                            if tool.get("function", {}).get("name") in candidate_set
-                        ]
-                        if filtered_tools:
-                            logger.info(
-                                f"🔍 Narrowing tools from {len(use_tools)} to {len(filtered_tools)} "
-                                f"based on ranked candidates"
-                            )
-                            use_tools = filtered_tools
-
-                        # Insert after: system prompt (0) + current date (1) + optional memory (2)
-                        insert_at = 4 if memory_context else 3
-                        llm_messages.insert(
-                            insert_at,
-                            {
-                                "role": "system",
-                                "content": (
-                                    f"Available tools if needed: {', '.join(candidate_names[:5])}. "
-                                    "Only use tools when the user explicitly requests data lookup, "
-                                    "search, or external actions. For conversation, memory questions, "
-                                    "or general chat - respond naturally without tools."
-                                )
-                            }
-                        )
             
             # Generate response using agent's LLM manager
             logger.info(f"Generating response with agent {agent_runtime.metadata.name}")
@@ -1491,15 +1408,12 @@ class StreamingChatService:
                 workspace_id=self.workspace_id
             )
 
-            # Store memory (shared user-level)
+            # Store memory via SmartChatIntegration (two-tier Mem0)
             if latest_text and full_response:
-                await self.memory_injector.store_conversation_memory(
-                    chat_id,
-                    latest_text,
-                    full_response,
-                    workspace_id=str(self.workspace_id) if self.workspace_id else None,
-                    agent_id=agent_id
-                )
+                try:
+                    await smart_chat.store(latest_text, full_response, chat_id)
+                except Exception as mem_err:
+                    logger.warning(f"Failed to store memory exchange: {mem_err}")
 
             # Update agent metrics
             if hasattr(agent_runtime, 'update_metrics'):
@@ -1850,7 +1764,6 @@ YOUR SPECIALIZED SKILLS:
             # Execute tools
             tool_results = []
             followup_system_messages: List[Dict[str, Any]] = []
-            executed_any_success = False
             executed_call_key_repeat = False
             for tool_id, tool_name, tool_call in tool_calls_prepared:
                 try:
@@ -1951,9 +1864,6 @@ YOUR SPECIALIZED SKILLS:
                         'name': tool_name,
                         'content': llm_context
                     })
-                    if result.get("success"):
-                        executed_any_success = True
-
                     # CRITICAL: Yield tool-data for frontend widgets (documents, code, etc.)
                     # This was missing for selected agents - widgets only worked with default agent
                     frontend_data = result.get("frontend_data", {})

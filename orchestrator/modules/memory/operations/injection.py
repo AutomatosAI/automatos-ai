@@ -215,7 +215,19 @@ _memory_system = None
 
 
 def get_memory_injector() -> MemoryInjector:
-    """Get or create the global MemoryInjector instance."""
+    """Get or create the global MemoryInjector instance.
+
+    .. deprecated::
+        Use ``consumers.chatbot.integration.SmartChatIntegration`` instead.
+        This legacy injector will be removed in a future release.
+    """
+    import warnings
+    warnings.warn(
+        "get_memory_injector() is deprecated. Use SmartChatIntegration from "
+        "consumers.chatbot.integration instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     global _memory_injector
     if _memory_injector is None:
         _memory_injector = MemoryInjector()

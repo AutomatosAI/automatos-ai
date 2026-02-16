@@ -23,7 +23,10 @@ from core.credentials.encryption import get_encryption_service
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/keys", tags=["API Keys"])
 
-SUPPORTED_PROVIDERS = ["openai", "anthropic", "google", "openrouter", "azure", "grok"]
+SUPPORTED_PROVIDERS = [
+    "openai", "anthropic", "google", "openrouter", "deepseek",
+    "azure", "bedrock", "grok", "cohere", "huggingface",
+]
 
 
 # ── Pydantic schemas ─────────────────────────────────────────────────
@@ -52,6 +55,11 @@ class ApiKeyTestResult(BaseModel):
     valid: bool
     message: str
     provider: str
+
+
+class PlatformKeyCreate(BaseModel):
+    provider: str = Field(..., description="LLM provider name")
+    api_key: str = Field(..., min_length=8, description="The raw API key")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -255,3 +263,124 @@ async def get_platform_key_status(
         result[provider] = {"configured": configured}
 
     return {"platform_keys": result}
+
+
+@router.put("/platform")
+async def set_platform_key(
+    body: PlatformKeyCreate,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """
+    Create or update a platform-level API key for a provider.
+
+    Stores an encrypted credential named ``{provider}_api`` in the
+    credentials table so the CredentialResolver picks it up for all
+    workspaces.
+    """
+    from core.models.credentials import Credential
+    from sqlalchemy import and_
+
+    provider = body.provider.lower()
+    if provider not in SUPPORTED_PROVIDERS:
+        raise HTTPException(400, f"Unsupported provider. Supported: {SUPPORTED_PROVIDERS}")
+
+    if not ctx.workspace_id:
+        raise HTTPException(400, "Workspace context required")
+
+    encryption = get_encryption_service()
+    cred_name = f"{provider}_api"
+    encrypted_data = encryption.encrypt_dict({"api_key": body.api_key})
+
+    # Look for existing credential with this name (any workspace — platform scope)
+    existing = (
+        db.query(Credential)
+        .filter(and_(Credential.name == cred_name, Credential.is_active == True))
+        .first()
+    )
+
+    if existing:
+        existing.encrypted_data = encrypted_data
+        existing.test_status = "not_tested"
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"Platform key updated for provider={provider}")
+        # Clear resolver cache so change takes effect immediately
+        try:
+            from core.credentials.resolver import get_credential_resolver
+            get_credential_resolver().clear_cache(cred_name)
+        except Exception:
+            pass
+        return {"status": "updated", "provider": provider}
+
+    # Resolve credential_type_id — prefer provider-specific type, fall back to generic_api
+    from core.models.credentials import CredentialType
+
+    cred_type = (
+        db.query(CredentialType)
+        .filter(CredentialType.name == cred_name)
+        .first()
+    )
+    if not cred_type:
+        cred_type = (
+            db.query(CredentialType)
+            .filter(CredentialType.name == "generic_api")
+            .first()
+        )
+    if not cred_type:
+        raise HTTPException(500, "No suitable credential type found — run seed data")
+
+    new_cred = Credential(
+        name=cred_name,
+        credential_type_id=cred_type.id,
+        workspace_id=ctx.workspace_id,
+        encrypted_data=encrypted_data,
+        environment="development",
+        description=f"Platform API key for {provider}",
+        is_active=True,
+        test_status="not_tested",
+        created_by=str(ctx.user_id) if ctx.user_id else None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(new_cred)
+    db.commit()
+    logger.info(f"Platform key created for provider={provider}")
+
+    return {"status": "created", "provider": provider}
+
+
+@router.delete("/platform/{provider}", status_code=200)
+async def remove_platform_key(
+    provider: str,
+    ctx: RequestContext = Depends(get_request_context_hybrid),
+    db: Session = Depends(get_db),
+):
+    """Remove (deactivate) a platform-level API key for a provider."""
+    from core.models.credentials import Credential
+    from sqlalchemy import and_
+
+    provider = provider.lower()
+    cred_name = f"{provider}_api"
+
+    cred = (
+        db.query(Credential)
+        .filter(and_(Credential.name == cred_name, Credential.is_active == True))
+        .first()
+    )
+    if not cred:
+        raise HTTPException(404, f"No platform key found for {provider}")
+
+    cred.is_active = False
+    cred.updated_at = datetime.utcnow()
+    db.commit()
+
+    # Clear resolver cache
+    try:
+        from core.credentials.resolver import get_credential_resolver
+        get_credential_resolver().clear_cache(cred_name)
+    except Exception:
+        pass
+
+    logger.info(f"Platform key deactivated for provider={provider}")
+    return {"status": "removed", "provider": provider}

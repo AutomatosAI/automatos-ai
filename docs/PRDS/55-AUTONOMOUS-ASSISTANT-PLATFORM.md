@@ -81,7 +81,8 @@ Expand the existing `SystemLLMSettingsTab` into a comprehensive **Orchestrator S
 - **Notification Channel**: In-app / Email / Webhook URL / Channel adapter (when available)
 - Stored in workspace settings (database, not Mem0)
 
-#### Section 4: What Automatos Knows (read-only)
+#### 
+
 - Display Mem0 memories for this workspace (global tier)
 - Show count of memories per category
 - Link to full analytics page "What Automatos Knows" section
