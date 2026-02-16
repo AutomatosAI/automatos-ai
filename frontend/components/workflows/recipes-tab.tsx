@@ -56,6 +56,7 @@ interface RecipeExecutionInfo {
 
 interface RecipesTabProps {
   searchTerm?: string
+  viewMode?: 'grid' | 'list'
   externalCreateOpen?: boolean
   onCreateModalClosed?: () => void
   onUseRecipe: (recipe: any) => void
@@ -79,12 +80,14 @@ function agentColor(id: number): string {
 
 export function RecipesTab({
   searchTerm: externalSearchTerm,
+  viewMode: viewModeProp,
   externalCreateOpen,
   onCreateModalClosed,
   onUseRecipe,
   onExecuteRecipe,
 }: RecipesTabProps) {
-  const [viewMode, setViewMode] = useViewMode('wf-recipes')
+  const [viewModeLocal] = useViewMode('wf-recipes')
+  const viewMode = viewModeProp || viewModeLocal
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -286,11 +289,6 @@ export function RecipesTab({
 
   return (
     <div className="space-y-6">
-      {/* View toggle */}
-      <div className="flex items-center justify-end">
-        <ViewToggle value={viewMode} onChange={setViewMode} />
-      </div>
-
       {/* Recipes Grid — 4 per row */}
       {recipes.length === 0 ? (
         <div className="text-center py-12">

@@ -186,6 +186,7 @@ interface AgentRosterProps {
   selectedAgentId: string | null
   onRefresh: () => void
   setSearchTerm?: ((term: string) => void) | undefined
+  viewMode?: 'grid' | 'list'
 }
 
 export function AgentRoster({
@@ -197,9 +198,11 @@ export function AgentRoster({
   onViewDetails,
   selectedAgentId,
   onRefresh,
-  setSearchTerm
+  setSearchTerm,
+  viewMode: viewModeProp
 }: AgentRosterProps) {
-  const [viewMode, setViewMode] = useViewMode('agents')
+  const [viewModeLocal, setViewModeLocal] = useViewMode('agents')
+  const viewMode = viewModeProp || viewModeLocal
 
   // Modal states
   const [configModalAgentId, setConfigModalAgentId] = useState<number | null>(null)
@@ -258,9 +261,6 @@ export function AgentRoster({
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-end">
-          <ViewToggle value={viewMode} onChange={setViewMode} />
-        </div>
         {viewMode === 'list' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[...Array(6)].map((_, i) => (
@@ -281,11 +281,6 @@ export function AgentRoster({
 
   return (
     <div className="space-y-6">
-      {/* View toggle */}
-      <div className="flex items-center justify-end">
-        <ViewToggle value={viewMode} onChange={setViewMode} />
-      </div>
-
       {/* Agent Grid / List */}
       {viewMode === 'list' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

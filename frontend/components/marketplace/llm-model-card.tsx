@@ -162,14 +162,16 @@ export function LLMModelCard({
       >
         <CardContent className="p-3">
           <div className="flex items-center gap-3">
-            <Badge
-              variant="outline"
-              className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(model.provider)}`}
-            >
-              {model.provider}
-            </Badge>
             <div className="flex-1 min-w-0">
-              <span className="font-semibold text-sm truncate block">{model.display_name}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-sm truncate">{model.display_name}</span>
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] uppercase font-bold tracking-wider shrink-0 ${providerBadgeClass(model.provider)}`}
+                >
+                  {model.provider}
+                </Badge>
+              </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
                 <span>{formatTokenCount(model.context_window)} ctx</span>
                 <span>&middot;</span>
