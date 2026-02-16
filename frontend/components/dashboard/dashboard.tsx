@@ -93,14 +93,14 @@ export function Dashboard() {
         animate={inView ? { opacity: 1, y: 0 } : {}}
         transition={{ duration: 0.5 }}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold gradient-text">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-2xl md:text-3xl font-bold gradient-text">Dashboard</h1>
+            <p className="text-sm md:text-base text-muted-foreground mt-1">
               Monitor your multi-agent orchestration platform in real-time
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Badge variant="outline" className="text-brand-primary border-brand-primary/30">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2" />
               System Online

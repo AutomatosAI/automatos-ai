@@ -25,6 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ViewToggle } from '@/components/shared/view-toggle'
+import { useViewMode } from '@/hooks/use-view-mode'
 
 interface LocalDocument {
   id: number
@@ -64,6 +66,7 @@ export function LocalStorageBrowser({
   onDownload,
   onDelete
 }: LocalStorageBrowserProps) {
+  const [viewMode, setViewMode] = useViewMode('documents')
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
 
@@ -111,15 +114,18 @@ export function LocalStorageBrowser({
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Search files..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 bg-secondary/50"
-        />
+      {/* Search + View Toggle */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search files..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 bg-secondary/50"
+          />
+        </div>
+        <ViewToggle value={viewMode} onChange={setViewMode} />
       </div>
 
       {/* Files List */}
@@ -144,7 +150,7 @@ export function LocalStorageBrowser({
                 </Button>
               )}
             </div>
-          ) : (
+          ) : viewMode === 'list' ? (
             <div className="space-y-2">
               <AnimatePresence>
                 {filteredDocuments.map((doc, index) => {
@@ -215,6 +221,88 @@ export function LocalStorageBrowser({
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
+                      </div>
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <AnimatePresence>
+                {filteredDocuments.map((doc, index) => {
+                  const fileType = (doc.file_type || 'unknown').toLowerCase()
+                  const TypeIcon = typeIcons[fileType] || File
+                  const status = (doc.status || 'completed').toLowerCase()
+
+                  return (
+                    <motion.div
+                      key={doc.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                      className="glass-card p-4 card-glow hover:border-primary/20 transition-all duration-300 cursor-pointer"
+                      onClick={() => onViewDetails(doc.id)}
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <TypeIcon className="w-8 h-8 text-orange-400" />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                              <MoreVertical className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => onViewDetails(doc.id)}>
+                              <Eye className="w-4 h-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => onDownload(doc.id, doc.filename)}>
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-400"
+                              onClick={() => onDelete(doc.id, doc.filename)}
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      <p className="font-semibold text-sm truncate mb-1">{doc.filename}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                        <span>{doc.file_type?.toUpperCase()}</span>
+                        {doc.file_size && (
+                          <>
+                            <span>&middot;</span>
+                            <span>{formatSize(doc.file_size)}</span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Badge
+                          variant={status === 'completed' ? 'outline' : 'secondary'}
+                          className={`text-[10px] ${
+                            status === 'completed'
+                              ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                              : ''
+                          }`}
+                        >
+                          {status === 'completed' ? (
+                            <CheckCircle className="w-2.5 h-2.5 mr-0.5" />
+                          ) : (
+                            <Clock className="w-2.5 h-2.5 mr-0.5" />
+                          )}
+                          {doc.chunk_count || 0} chunks
+                        </Badge>
+                        {doc.upload_date && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(doc.upload_date).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
                     </motion.div>
                   )
