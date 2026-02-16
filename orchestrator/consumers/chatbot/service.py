@@ -505,7 +505,7 @@ class StreamingChatService:
 
             # Determine tool usage
             is_simple = self.prompt_analyzer.is_simple_message(latest_text)
-            supports_native_tools = provider in ['openai', 'anthropic', 'grok'] if provider else False
+            supports_native_tools = provider in ['openai', 'anthropic', 'grok', 'openrouter', 'google'] if provider else False
             
             # --- TOOL FILTERING (PRD Refinement) ---
             # To prevent context overload (600+ tools), we filter to the top N relevant tools.
@@ -1533,16 +1533,19 @@ class StreamingChatService:
             yield self.streaming_handler.format_sse_error(str(e))
     
     def _parse_model_selection(self, selected_model: Optional[str]) -> tuple:
-        """Parse model string to get provider and model."""
+        """Parse model string to get provider and model.
+
+        Models with vendor/model format (e.g. qwen/qwen3-coder-next) are
+        OpenRouter marketplace models and route through the OpenRouter API.
+        """
         if not selected_model:
             return None, None
-        
+
         model = selected_model
         model_lower = selected_model.lower()
-        
-        if '/' in selected_model:
-            provider = 'huggingface'
-        elif model_lower.startswith('gpt-') or 'openai' in model_lower:
+
+        # Check direct provider models first (no slash in model ID)
+        if model_lower.startswith('gpt-') or model_lower.startswith('o1') or model_lower.startswith('o3') or model_lower.startswith('o4'):
             provider = 'openai'
         elif model_lower.startswith('claude') or 'anthropic' in model_lower:
             provider = 'anthropic'
@@ -1550,11 +1553,13 @@ class StreamingChatService:
             provider = 'grok'
         elif model_lower.startswith('gemini') or 'google' in model_lower:
             provider = 'google'
-        elif any(x in model_lower for x in ['llama', 'mistral', 'qwen', 'mixtral', 'phi']):
-            provider = 'huggingface'
+        elif '/' in selected_model:
+            # Slash format = OpenRouter marketplace model (e.g. qwen/qwen3-coder-next,
+            # meta-llama/llama-3.1-70b, mistralai/mistral-large)
+            provider = 'openrouter'
         else:
             provider = None
-        
+
         return provider, model
     
     async def _build_agent_system_prompt(self, agent_runtime) -> tuple[str, list]:
