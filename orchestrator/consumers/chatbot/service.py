@@ -595,10 +595,10 @@ class StreamingChatService:
                             {
                                 "role": "system",
                                 "content": (
-                                    f"Available tools if needed: {candidate_names}. "
-                                    "Only use tools when the user explicitly requests data lookup, "
-                                    "file operations, or external actions. For conversation, memory questions, "
-                                    "or general chat - just respond naturally without tools."
+                                    f"Available tools: {candidate_names}. "
+                                    "When the user asks you to perform an action (fetch data, send messages, "
+                                    "list items, etc.), call the appropriate tool immediately. "
+                                    "For pure conversation or memory questions, respond naturally."
                                 )
                             }
                         )
